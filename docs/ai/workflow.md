@@ -8,7 +8,7 @@
  │
  ├─1. ANALYST — главная сессия (нужен диалог)            → docs/PRD.md + docs/specs/NNN-slug.md
  │     ⏸ пользователь подтверждает ТЗ
- ├─2. DEVELOPER — субагент `developer`, свой worktree     → ветка feat|fix/NNN-slug, код + тесты, push
+ ├─2. DEVELOPER — субагент `developer`                    → ветка feat|fix/NNN-slug, код + тесты, push
  ├─3. TESTER — субагент `tester`                           → скриншоты + отчёт PASS/FAIL по критериям
  │     FAIL → 2 (до 3 кругов, дальше — к пользователю)
  │     ⏸ пользователь смотрит скриншоты: «ок» / «не то: …» (→ 2)
@@ -42,6 +42,11 @@ CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger �
 - pre-push хук `scripts/hooks/pre-push` (ставится `pnpm hooks:install`) блокирует push в `main` и гоняет `pnpm check`;
 - `/merge` мержит только при зелёном CI и label `ai-approved`.
 Если перейти на GitHub Pro или сделать репо публичным — включить required status check `CI` для `main`.
+
+## Worktree — временно не используются
+Решение пользователя 2026-10-10 (до отдельного указания, проект пока небольшой): новые worktree не создаём.
+Конвейер работает в основном checkout, в ветке задачи; одна задача за раз, перед сменой ветки — чистое
+дерево. Старые worktree удаляет `/merge`, когда их ветки смержены. Вернуть worktree — снять запрет в `CLAUDE.md`.
 
 ## Мелочи без конвейера
 Опечатки, тексты, правки документации можно делать напрямую в ветке `chore/…`/`docs/…` + PR, без spec.

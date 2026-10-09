@@ -23,11 +23,11 @@ PR: $ARGUMENTS (если пусто — `gh pr list` и спроси, какой
    Если забыли — сообщи пользователю, предложи `docs/`-PR; сам в `main` не пушь.
 
 ## Уборка
-- Worktree ветки PR: найди в `git worktree list` путь с `headRefName` и удали `git worktree remove <путь>`
-  (незакоммиченные изменения внутри → не удаляй, спроси пользователя). Затем `git worktree prune`
-  и `git branch -D <ветка>`, если локальная ветка осталась.
-- Остальные worktree в `.claude/worktrees/`, чьи ветки уже смержены в `main`
-  (`git branch --merged main`) или удалены на remote, — тоже удали. Ветки активных задач не трогай.
+- Локальная ветка PR: `git branch -D <headRefName>`, если осталась; `git fetch --prune`.
+- Старые worktree (новые сейчас не создаём — `CLAUDE.md`): для каждого из `git worktree list`, кроме
+  основного, чья ветка смержена в `main` (`git branch --merged main`) или удалена на remote, —
+  `git worktree remove <путь>` (незакоммиченные изменения внутри → не удаляй, спроси пользователя),
+  затем `git worktree prune`. Worktree с несмерженными ветками не трогай.
 
 ## Отчёт пользователю
 Что смержено (заголовок, коммит в main), что убрано (ветки, worktree), что обновлено в PRD/spec.

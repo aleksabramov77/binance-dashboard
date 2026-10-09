@@ -241,8 +241,10 @@ bStocks, но публичного торгового API для них не н�
 ## 7. Процесс разработки (решения пользователя 2026-10-10)
 Подробно — `docs/ai/workflow.md`. Новое требование → `/feature`, баг → `/bug`:
 Analyst (главная сессия: вопросы, PRD, ТЗ в `docs/specs/NNN-slug.md`) → ⏸ ТЗ → Developer (субагент,
-ветка `feat|fix/NNN-slug` в своём worktree, код + тесты) → Tester (субагент, Playwright, скриншоты,
+ветка `feat|fix/NNN-slug`, код + тесты) → Tester (субагент, Playwright, скриншоты,
 PASS/FAIL по критериям) → ⏸ пользователь по скриншотам → PR → Reviewer (субагент, ревью в PR,
 label `ai-approved`) → ⏸ **мержит пользователь** командой `/merge`. Круги тестов и ревью — до 3, дальше
 к пользователю. CI (GitHub Actions): Biome · Steiger · typecheck · Vitest · build — на каждый PR и push в
-`main`. Ветка по умолчанию — `main` (без develop). Отработанные worktree удаляются.
+`main`. Ветка по умолчанию — `main` (без develop).
+**Worktree временно не используем** (2026-10-10, до отдельного указания — проект пока небольшой):
+работа в основном checkout в ветке задачи, одна задача за раз; старые worktree удаляются после мержа их веток.
