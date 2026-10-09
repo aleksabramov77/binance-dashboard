@@ -1,36 +1,34 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Binance Dashboard
 
-## Getting Started
+Личный локальный дашборд по Binance. Первый раздел — **Earn**: свежие предложения Simple Earn
+(Flexible + Locked), реальная ставка для вашей суммы с учётом бонусных ступеней
+(«+2% до 10 000 USDC, дальше базовая») и лента изменений между снимками.
 
-First, run the development server:
+## Запуск
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm snapshot   # скачать свежие предложения с Binance (без API-ключа)
+pnpm dev        # http://localhost:3000/earn
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Обновление 2 раза в день
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm schedule:install   # launchd: снимки в 09:00 и 21:00, лог в data/snapshot.log
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Снимки лежат в `data/snapshots/*.json` (не в git). Кнопка «Обновить сейчас» на странице делает то же самое.
 
-## Learn More
+## Стек и структура
 
-To learn more about Next.js, take a look at the following resources:
+Next.js (App Router) · TypeScript strict · TanStack Query · nuqs · Zod · Tailwind + shadcn/ui · Biome · Vitest.
+Архитектура — Feature-Sliced Design: роутинг в корневой `app/`, слои в `src/`
+(`app` → `pages` → `widgets` → `features` → `entities` → `shared`). Новый раздел = страница в `src/pages`,
+роут в `app/<раздел>/page.tsx` и пункт в `src/shared/config/navigation.ts`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Проверки
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+pnpm lint && pnpm typecheck && pnpm test
+```
