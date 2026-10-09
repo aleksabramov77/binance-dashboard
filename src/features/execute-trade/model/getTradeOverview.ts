@@ -1,35 +1,39 @@
 import type { TradeOverview } from "@/entities/trade";
-import { fetchDemoUsdtBalances } from "@/shared/api/binance/demo.server";
+import {
+  fetchDemoOpenSymbols,
+  fetchDemoUsdtBalances,
+} from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
-import { readRecentTrades } from "../api/tradeLog";
+import { log } from "@/shared/lib/logger.server";
+
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 
 export async function getTradeOverview(): Promise<TradeOverview> {
   const config = getDemoTradingConfig();
-  const trades = await readRecentTrades();
   if (!config)
     return {
       configured: false,
       maxNotionalUsd: 0,
       balances: null,
+      openSymbols: null,
       error: null,
-      trades,
     };
-  try {
-    const balances = await fetchDemoUsdtBalances(config.credentials);
-    return {
-      configured: true,
-      maxNotionalUsd: config.maxNotionalUsd,
-      balances,
-      error: null,
-      trades,
-    };
-  } catch (error) {
-    return {
-      configured: true,
-      maxNotionalUsd: config.maxNotionalUsd,
-      balances: null,
-      error: error instanceof Error ? error.message : String(error),
-      trades,
-    };
-  }
+  const [balances, openSymbols] = await Promise.allSettled([
+    fetchDemoUsdtBalances(config.credentials),
+    fetchDemoOpenSymbols(config.credentials),
+  ]);
+  // Без списка открытых сделок дашборд работает, просто не помечает сетапы.
+  if (openSymbols.status === "rejected")
+    log.warn(
+      "trade.overview",
+      `open symbols: ${errorText(openSymbols.reason)}`,
+    );
+  return {
+    configured: true,
+    maxNotionalUsd: config.maxNotionalUsd,
+    balances: balances.status === "fulfilled" ? balances.value : null,
+    openSymbols: openSymbols.status === "fulfilled" ? openSymbols.value : null,
+    error: balances.status === "rejected" ? errorText(balances.reason) : null,
+  };
 }

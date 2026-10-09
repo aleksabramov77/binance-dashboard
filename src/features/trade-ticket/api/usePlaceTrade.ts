@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   type TradeRequest,
   type TradeResult,
+  tradeHistoryQueryKey,
   tradeOverviewQueryKey,
   tradeResultSchema,
 } from "@/entities/trade";
@@ -27,6 +28,9 @@ export function usePlaceTrade() {
   return useMutation({
     mutationFn: postTrade,
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: tradeOverviewQueryKey }),
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: tradeOverviewQueryKey }),
+        queryClient.invalidateQueries({ queryKey: tradeHistoryQueryKey }),
+      ]),
   });
 }

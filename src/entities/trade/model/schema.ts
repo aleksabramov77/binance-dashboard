@@ -38,11 +38,39 @@ export const tradeOverviewSchema = z.object({
   configured: z.boolean(),
   maxNotionalUsd: z.number(),
   balances: z.object({ spot: z.number(), futures: z.number() }).nullable(),
+  /** Символы с открытой позицией или ордерами на демо — в эти сетапы мы уже зашли. */
+  openSymbols: z
+    .object({ spot: z.array(z.string()), futures: z.array(z.string()) })
+    .nullable(),
   error: z.string().nullable(),
-  trades: z.array(tradeResultSchema),
+});
+
+/** Исполненный ордер с демо-счёта Binance: все его fills сложены в одну строку. */
+export const executedOrderSchema = z.object({
+  id: z.string(),
+  market: z.enum(["spot", "futures"]),
+  symbol: z.string(),
+  side: z.enum(["BUY", "SELL"]),
+  /** Время последнего исполнения, ISO. */
+  at: z.string(),
+  quantity: z.number(),
+  avgPrice: z.number(),
+  quoteQty: z.number(),
+  commissions: z.array(z.object({ asset: z.string(), amount: z.number() })),
+  /** Только фьючерсы: зафиксированный PnL (у входа — 0). */
+  realizedPnl: z.number().nullable(),
+});
+
+export const tradeHistorySchema = z.object({
+  configured: z.boolean(),
+  /** История могла загрузиться частично — тогда здесь текст ошибки. */
+  error: z.string().nullable(),
+  orders: z.array(executedOrderSchema),
 });
 
 export type TradeRequest = z.infer<typeof tradeRequestSchema>;
 export type TradeStep = z.infer<typeof tradeStepSchema>;
 export type TradeResult = z.infer<typeof tradeResultSchema>;
 export type TradeOverview = z.infer<typeof tradeOverviewSchema>;
+export type ExecutedOrder = z.infer<typeof executedOrderSchema>;
+export type TradeHistory = z.infer<typeof tradeHistorySchema>;

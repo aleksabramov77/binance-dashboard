@@ -26,28 +26,31 @@
   --ring: oklch(0.82 0.16 85);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.16 0.008 260);
-    --foreground: oklch(0.95 0.005 260);
-    --card: oklch(0.2 0.01 260);
-    --card-foreground: oklch(0.95 0.005 260);
-    --popover: oklch(0.2 0.01 260);
-    --popover-foreground: oklch(0.95 0.005 260);
-    --primary: oklch(0.84 0.16 85);
-    --primary-foreground: oklch(0.18 0.01 260);
-    --secondary: oklch(0.26 0.01 260);
-    --secondary-foreground: oklch(0.95 0.005 260);
-    --muted: oklch(0.26 0.01 260);
-    --muted-foreground: oklch(0.7 0.01 260);
-    --accent: oklch(0.3 0.04 85);
-    --accent-foreground: oklch(0.95 0.005 260);
-    --destructive: oklch(0.68 0.19 25);
-    --positive: oklch(0.75 0.15 155);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.84 0.16 85);
-  }
+/*
+ * Тёмная тема включена всегда: класс `dark` стоит на <html> в app/layout.tsx.
+ * Светлая палитра в :root сейчас не используется — оставлена под будущий переключатель.
+ */
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.16 0.008 260);
+  --foreground: oklch(0.95 0.005 260);
+  --card: oklch(0.2 0.01 260);
+  --card-foreground: oklch(0.95 0.005 260);
+  --popover: oklch(0.2 0.01 260);
+  --popover-foreground: oklch(0.95 0.005 260);
+  --primary: oklch(0.84 0.16 85);
+  --primary-foreground: oklch(0.18 0.01 260);
+  --secondary: oklch(0.26 0.01 260);
+  --secondary-foreground: oklch(0.95 0.005 260);
+  --muted: oklch(0.26 0.01 260);
+  --muted-foreground: oklch(0.7 0.01 260);
+  --accent: oklch(0.3 0.04 85);
+  --accent-foreground: oklch(0.95 0.005 260);
+  --destructive: oklch(0.68 0.19 25);
+  --positive: oklch(0.75 0.15 155);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.84 0.16 85);
 }
 
 @theme inline {

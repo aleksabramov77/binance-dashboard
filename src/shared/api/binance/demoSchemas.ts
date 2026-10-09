@@ -92,5 +92,43 @@ export const futuresBalancesSchema = z.array(
     .loose(),
 );
 
+/** Любой список, где у строк есть символ: OCO-история, ордера, income, позиции. */
+export const symbolRowsSchema = z.array(
+  z.object({ symbol: z.string() }).loose(),
+);
+
+export const spotMyTradesSchema = z.array(
+  z
+    .object({
+      symbol: z.string(),
+      orderId: z.number(),
+      price: decimal,
+      qty: decimal,
+      quoteQty: decimal,
+      commission: decimal,
+      commissionAsset: z.string(),
+      time: z.number(),
+      isBuyer: z.boolean(),
+    })
+    .loose(),
+);
+
+export const futuresUserTradesSchema = z.array(
+  z
+    .object({
+      symbol: z.string(),
+      orderId: z.number(),
+      side: z.enum(["BUY", "SELL"]),
+      price: decimal,
+      qty: decimal,
+      quoteQty: decimal,
+      realizedPnl: decimal,
+      commission: decimal,
+      commissionAsset: z.string(),
+      time: z.number(),
+    })
+    .loose(),
+);
+
 export type SpotOrder = z.infer<typeof spotOrderSchema>;
 export type FuturesOrder = z.infer<typeof futuresOrderSchema>;
