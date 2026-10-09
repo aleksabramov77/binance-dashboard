@@ -22,7 +22,10 @@
 - `market.ts`, `client.ts` — публичные запросы через `getJsonWithRetry` (`shared/lib/fetchRetry.ts`).
 - `accountClient.ts` — Spot, Funding, Simple Earn (read-only).
 - `demoTrading.ts` — справочник символов, цены, балансы, ордера Spot/OCO, Futures + algo TP/SL, позиции,
-  `fetchDemoOpenSymbols` — символы с открытой позицией или ордерами.
+  `fetchDemoOpenSymbols` — символы с открытой позицией или ордерами. История: `fetchDemoTradedSymbols`,
+  `fetchDemoFills` (myTrades / userTrades), `fetchDemoSymbolOrders` (чем исполнился выход: algo TP/SL у
+  futures — по `actualOrderId`, ликвидация — `clientOrderId` `autoclose-…`; тип ордера OCO у spot; активные
+  стопы), `fetchDemoFuturesPositions`, `fetchDemoSpotHoldings`.
 - `*Schemas.ts` — Zod-схемы ответов. Числа Binance приходят строками → `z.coerce.number()`.
 
 ## Подводные камни

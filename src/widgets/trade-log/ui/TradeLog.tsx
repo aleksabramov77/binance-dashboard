@@ -1,23 +1,37 @@
 import {
   type ExecutedOrder,
+  TRADE_STATUS_LABELS,
+  TRADE_STATUSES,
   type TradeOverview,
+  TradeStatusDot,
   useTradeHistory,
 } from "@/entities/trade";
+import { demoChartUrl } from "@/shared/config";
 import {
   cn,
   formatAmount,
   formatDateTime,
+  formatPair,
   formatPrice,
   formatUsd,
 } from "@/shared/lib";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import { Table, TableBody, TableCell, TableRow } from "@/shared/ui/table";
 
-/** BATUSDT → BAT-USDT. */
-const formatPair = (symbol: string) => {
-  const quote = symbol.match(/(USDT|USDC|FDUSD)$/)?.[1];
-  return quote ? `${symbol.slice(0, -quote.length)}-${quote}` : symbol;
-};
+/** Подсказка индикатора: статус сделки, роль ордера, у открытых — стоп и uPnL. */
+function statusTitle({ trade }: ExecutedOrder): string {
+  const parts = [
+    TRADE_STATUS_LABELS[trade.status],
+    trade.role === "entry" ? "вход" : "выход",
+  ];
+  if (trade.stopPrice !== null)
+    parts.push(`SL ${formatPrice(trade.stopPrice)}`);
+  if (trade.unrealizedPnl !== null)
+    parts.push(
+      `сейчас PnL ${trade.unrealizedPnl > 0 ? "+" : ""}${formatUsd(trade.unrealizedPnl)}`,
+    );
+  return parts.join(" · ");
+}
 
 function OrderRow({ order }: { order: ExecutedOrder }) {
   const pnl = order.realizedPnl;
@@ -30,6 +44,12 @@ function OrderRow({ order }: { order: ExecutedOrder }) {
     .join(" + ");
   return (
     <TableRow>
+      <TableCell className="w-6 pr-0">
+        <TradeStatusDot
+          status={order.trade.status}
+          title={statusTitle(order)}
+        />
+      </TableCell>
       <TableCell className="text-muted-foreground">
         {formatDateTime(order.at)}
       </TableCell>
@@ -42,7 +62,15 @@ function OrderRow({ order }: { order: ExecutedOrder }) {
         {order.side}
       </TableCell>
       <TableCell className="font-semibold">
-        {formatPair(order.symbol)}
+        <a
+          href={demoChartUrl(order.market, order.symbol)}
+          target="_blank"
+          rel="noreferrer"
+          title="График на Binance Demo"
+          className="underline-offset-4 hover:underline"
+        >
+          {formatPair(order.symbol)}
+        </a>
       </TableCell>
       <TableCell className="text-muted-foreground">
         {order.market === "spot" ? "Spot" : "Futures"}
@@ -115,9 +143,19 @@ export function TradeLog({ overview }: { overview: TradeOverview }) {
                 </TableBody>
               </Table>
             )}
+            <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+              {TRADE_STATUSES.map((s) => (
+                <li key={s} className="flex items-center gap-1.5">
+                  <TradeStatusDot status={s} />
+                  {TRADE_STATUS_LABELS[s]}
+                </li>
+              ))}
+            </ul>
             <p className="text-xs text-muted-foreground">
               Исполненные ордера с демо-счёта Binance (вход, срабатывание TP/SL,
-              ручные закрытия). Отклонённые попытки — в «Логах».
+              ручные закрытия); у входа и выхода одной сделки — один индикатор.
+              Пара — ссылка на график Binance Demo. Отклонённые попытки — в
+              «Логах».
             </p>
           </>
         )}

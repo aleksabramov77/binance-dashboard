@@ -1,6 +1,10 @@
 // Торговля в Binance Demo Trading: только для сервера (секрет API).
 export {
+  type DemoCloseKind,
   type DemoFill,
+  type DemoPosition,
+  type DemoProtectiveStop,
+  type DemoSymbolOrders,
   demoFuturesCloseAt,
   demoFuturesMarketOrder,
   demoFuturesPosition,
@@ -8,8 +12,11 @@ export {
   demoSpotMarketOrder,
   demoSpotOcoSell,
   fetchDemoFills,
+  fetchDemoFuturesPositions,
   fetchDemoOpenSymbols,
   fetchDemoPrice,
+  fetchDemoSpotHoldings,
+  fetchDemoSymbolOrders,
   fetchDemoSymbolRules,
   fetchDemoTradedSymbols,
   fetchDemoUsdtBalances,

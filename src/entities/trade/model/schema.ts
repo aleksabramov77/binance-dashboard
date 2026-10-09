@@ -45,6 +45,21 @@ export const tradeOverviewSchema = z.object({
   error: z.string().nullable(),
 });
 
+export const TRADE_STATUSES = [
+  "open",
+  "open-trailing",
+  "open-unprotected",
+  "tp",
+  "stop-profit",
+  "sl",
+  "manual-profit",
+  "manual-loss",
+  "liquidation",
+  "unknown",
+] as const;
+
+export const tradeStatusSchema = z.enum(TRADE_STATUSES);
+
 /** Исполненный ордер с демо-счёта Binance: все его fills сложены в одну строку. */
 export const executedOrderSchema = z.object({
   id: z.string(),
@@ -57,8 +72,17 @@ export const executedOrderSchema = z.object({
   avgPrice: z.number(),
   quoteQty: z.number(),
   commissions: z.array(z.object({ asset: z.string(), amount: z.number() })),
-  /** Только фьючерсы: зафиксированный PnL (у входа — 0). */
+  /** PnL выхода: futures — от Binance, spot — от средней цены входа. У входа — 0/null. */
   realizedPnl: z.number().nullable(),
+  /** Сделка, к которой относится ордер: один статус у входа и выхода. */
+  trade: z.object({
+    status: tradeStatusSchema,
+    role: z.enum(["entry", "exit"]),
+    /** Открытая сделка: текущий защитный стоп на бирже. */
+    stopPrice: z.number().nullable(),
+    /** Открытая сделка на фьючерсах: нереализованный PnL позиции. */
+    unrealizedPnl: z.number().nullable(),
+  }),
 });
 
 export const tradeHistorySchema = z.object({
@@ -73,4 +97,6 @@ export type TradeStep = z.infer<typeof tradeStepSchema>;
 export type TradeResult = z.infer<typeof tradeResultSchema>;
 export type TradeOverview = z.infer<typeof tradeOverviewSchema>;
 export type ExecutedOrder = z.infer<typeof executedOrderSchema>;
+export type TradeStatus = z.infer<typeof tradeStatusSchema>;
+export type TradeMark = ExecutedOrder["trade"];
 export type TradeHistory = z.infer<typeof tradeHistorySchema>;
