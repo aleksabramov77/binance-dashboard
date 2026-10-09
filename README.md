@@ -1,5 +1,7 @@
 # Binance Dashboard
 
+> Концепция, требования и этапы — в [docs/PRD.md](docs/PRD.md).
+
 Личный локальный дашборд по Binance.
 
 - **Портфель** (`/portfolio`) — где лежат ваши деньги (Spot, Funding, Earn Flexible/Locked), сколько они

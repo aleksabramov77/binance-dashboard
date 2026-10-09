@@ -43,3 +43,6 @@ next-env.d.ts
 # локальные снимки Binance Earn
 /data
 !.env.example
+
+# worktrees Claude Code
+/.claude/worktrees
