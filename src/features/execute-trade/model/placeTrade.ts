@@ -13,6 +13,7 @@ import {
   demoFuturesPrepare,
   demoSpotMarketOrder,
   demoSpotOcoSell,
+  fetchDemoOpenSymbols,
   fetchDemoPrice,
   fetchDemoSymbolRules,
   fetchDemoUsdtBalances,
@@ -186,6 +187,22 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
         filled,
       );
     }
+  }
+
+  // Binance не меняет маржу, пока по символу висят ордера (-4067), а второй вход
+  // перезаписал бы TP/SL первого (closePosition). Поэтому повторный вход не пускаем.
+  try {
+    const open = await fetchDemoOpenSymbols(creds, req.symbol);
+    if (open.futures.includes(req.symbol))
+      return finish(
+        "rejected",
+        `По ${req.symbol} уже есть позиция или ордера на демо-фьючерсах — сначала закройте их на demo.binance.com.`,
+      );
+  } catch (error) {
+    return finish(
+      "rejected",
+      `Не удалось проверить открытые позиции — сделка не отправлена, попробуйте ещё раз. ${errorText(error)}`,
+    );
   }
 
   try {

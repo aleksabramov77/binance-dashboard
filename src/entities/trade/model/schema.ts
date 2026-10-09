@@ -38,6 +38,10 @@ export const tradeOverviewSchema = z.object({
   configured: z.boolean(),
   maxNotionalUsd: z.number(),
   balances: z.object({ spot: z.number(), futures: z.number() }).nullable(),
+  /** Символы с открытой позицией или ордерами на демо — в эти сетапы мы уже зашли. */
+  openSymbols: z
+    .object({ spot: z.array(z.string()), futures: z.array(z.string()) })
+    .nullable(),
   error: z.string().nullable(),
 });
 

@@ -21,7 +21,8 @@
   `ResponseFormatError` (для ордеров значит «скорее всего исполнен»).
 - `market.ts`, `client.ts` — публичные запросы через `getJsonWithRetry` (`shared/lib/fetchRetry.ts`).
 - `accountClient.ts` — Spot, Funding, Simple Earn (read-only).
-- `demoTrading.ts` — справочник символов, цены, балансы, ордера Spot/OCO, Futures + algo TP/SL, позиции.
+- `demoTrading.ts` — справочник символов, цены, балансы, ордера Spot/OCO, Futures + algo TP/SL, позиции,
+  `fetchDemoOpenSymbols` — символы с открытой позицией или ордерами.
 - `*Schemas.ts` — Zod-схемы ответов. Числа Binance приходят строками → `z.coerce.number()`.
 
 ## Подводные камни
@@ -30,4 +31,6 @@
 - `exchangeInfo` демо-фьючерсов ~900 КБ — кэшируется на 10 минут, при сбое используется старая копия.
 - Лимиты веса Binance: не делать запросов в цикле по сотням символов; кэшировать справочники.
 - Ошибки `-1121` (Invalid symbol) и `-4046` (margin type уже установлен) — ожидаемые, обрабатываются явно.
+- `-4067` на `/fapi/v1/marginType` — по символу есть открытые ордера (даже если маржа уже изолированная);
+  `placeTrade` не доходит до этого вызова, если символ уже в сделке.
 - Тесты схем — `demoSchemas.test.ts`; сетевые функции не тестируются (нет моков сети).

@@ -360,6 +360,57 @@ export async function fetchDemoTradedSymbols(
   };
 }
 
+/**
+ * Символы, по которым сделка ещё «живая»: открыта позиция или висят ордера (TP/SL, OCO).
+ * С `symbol` проверяет только его (фьючерсы) — так дешевле по весу запросов.
+ */
+export async function fetchDemoOpenSymbols(
+  creds: BinanceCredentials,
+  symbol?: string,
+): Promise<Record<Market, string[]>> {
+  const params: Record<string, string> = symbol ? { symbol } : {};
+  const futures = (path: string) =>
+    signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      path,
+      symbolRowsSchema,
+      params,
+    );
+  const [spotOpen, positions, futOpen, algoOpen] = await Promise.all([
+    symbol
+      ? []
+      : signedRequest(
+          DEMO_URL.spot,
+          creds,
+          "GET",
+          "/api/v3/openOrders",
+          symbolRowsSchema,
+        ),
+    signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v3/positionRisk",
+      positionRiskSchema,
+      params,
+    ),
+    futures("/fapi/v1/openOrders"),
+    futures("/fapi/v1/openAlgoOrders"),
+  ]);
+  return {
+    spot: [...new Set(symbolsOf(spotOpen))],
+    futures: [
+      ...new Set([
+        ...symbolsOf(positions.filter((p) => p.positionAmt !== 0)),
+        ...symbolsOf(futOpen),
+        ...symbolsOf(algoOpen),
+      ]),
+    ],
+  };
+}
+
 /** Последние исполнения по символу (Binance отдаёт старые сверху). Нет пары — пусто. */
 export async function fetchDemoFills(
   creds: BinanceCredentials,
