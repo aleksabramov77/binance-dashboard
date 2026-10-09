@@ -2,6 +2,7 @@
 export {
   demoFuturesCloseAt,
   demoFuturesMarketOrder,
+  demoFuturesPosition,
   demoFuturesPrepare,
   demoSpotMarketOrder,
   demoSpotOcoSell,
@@ -10,4 +11,4 @@ export {
   fetchDemoUsdtBalances,
   type SymbolRules,
 } from "./demoTrading";
-export { BinanceApiError } from "./signed";
+export { BinanceApiError, ResponseFormatError } from "./signed";

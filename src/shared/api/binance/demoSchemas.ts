@@ -56,10 +56,17 @@ export const futuresOrderSchema = z
     symbol: z.string(),
     orderId: z.number(),
     status: z.string(),
-    executedQty: decimal,
-    avgPrice: decimal,
+    // Демо-фьючерсы иногда не присылают avgPrice/executedQty — это не ошибка ордера.
+    executedQty: decimal.catch(0),
+    avgPrice: decimal.catch(0),
   })
   .loose();
+
+export const positionRiskSchema = z.array(
+  z
+    .object({ symbol: z.string(), positionAmt: decimal, entryPrice: decimal })
+    .loose(),
+);
 
 export const algoOrderSchema = z
   .object({ algoId: z.number(), algoStatus: z.string().optional() })

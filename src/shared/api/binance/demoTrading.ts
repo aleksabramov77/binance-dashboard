@@ -8,6 +8,7 @@ import {
   futuresBalancesSchema,
   futuresOrderSchema,
   orderListSchema,
+  positionRiskSchema,
   priceSchema,
   type SpotOrder,
   spotAccountBalancesSchema,
@@ -252,4 +253,24 @@ export async function demoFuturesCloseAt(
       priceProtect: true,
     },
   );
+}
+
+/** Текущая позиция по символу на демо-фьючерсах (размер со знаком: минус — шорт). */
+export async function demoFuturesPosition(
+  creds: BinanceCredentials,
+  symbol: string,
+): Promise<{ amount: number; entryPrice: number }> {
+  const rows = await signedRequest(
+    DEMO_URL.futures,
+    creds,
+    "GET",
+    "/fapi/v3/positionRisk",
+    positionRiskSchema,
+    { symbol },
+  );
+  const amount = rows.reduce((s, r) => s + r.positionAmt, 0);
+  return {
+    amount,
+    entryPrice: rows.find((r) => r.positionAmt !== 0)?.entryPrice ?? 0,
+  };
 }

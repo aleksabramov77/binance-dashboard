@@ -21,6 +21,12 @@ export class BinanceApiError extends HttpError {
   }
 }
 
+/**
+ * Биржа ответила 2xx, но ответ не совпал со схемой. Для ордеров это значит
+ * «скорее всего исполнен» — нельзя считать его отклонённым.
+ */
+export class ResponseFormatError extends HttpError {}
+
 export type SignedParams = Record<string, string | number | boolean>;
 
 /** Подписанный запрос (HMAC SHA256) к указанному хосту Binance. Секрет не покидает сервер. */
@@ -95,7 +101,12 @@ export async function signedRequest<T extends z.ZodType>(
           issues: parsed.error.issues.slice(0, 5),
         },
       );
-      throw new Error(`Binance ${path}: неожиданный формат ответа`);
+      // HttpError — не повторяем: биржа ответила успешно, повтор ордера опасен.
+      throw new ResponseFormatError(
+        `Binance ${path}: ответ ${res.status} не распознан — операция, вероятно, выполнена`,
+        res.status,
+        body,
+      );
     }
     return parsed.data as z.infer<T>;
   };
@@ -105,7 +116,11 @@ export async function signedRequest<T extends z.ZodType>(
   try {
     return await attempt();
   } catch (error) {
-    if (error instanceof BinanceApiError) throw error;
+    if (
+      error instanceof BinanceApiError ||
+      error instanceof ResponseFormatError
+    )
+      throw error;
     const failure = new NetworkError(
       `Binance ${path}: сеть оборвалась — ${describeNetworkError(error)}. Проверьте ордера на бирже.`,
     );

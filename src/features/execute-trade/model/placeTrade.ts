@@ -6,8 +6,10 @@ import {
   type TradeStep,
 } from "@/entities/trade";
 import {
+  BinanceApiError,
   demoFuturesCloseAt,
   demoFuturesMarketOrder,
+  demoFuturesPosition,
   demoFuturesPrepare,
   demoSpotMarketOrder,
   demoSpotOcoSell,
@@ -154,7 +156,13 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
         ok: false,
         detail: errorText(error),
       });
-      return finish("rejected", "Биржа отклонила вход — позиция не открыта.");
+      if (error instanceof BinanceApiError)
+        return finish("rejected", "Биржа отклонила вход — позиция не открыта.");
+      // Ответ не распознан / сеть: покупка могла пройти — не называем её отклонённой.
+      return finish(
+        "unprotected",
+        "Неизвестно, исполнилась ли покупка, — проверьте баланс и ордера на demo.binance.com.",
+      );
     }
     try {
       const oco = await demoSpotOcoSell(
@@ -190,8 +198,6 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     }
   }
 
-  let entryPrice: number;
-  let filled: number;
   try {
     await demoFuturesPrepare(creds, req.symbol, req.leverage);
     steps.push({
@@ -199,22 +205,71 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
       ok: true,
       detail: `Изолированная, ×${req.leverage}`,
     });
+  } catch (error) {
+    steps.push({ label: "Маржа и плечо", ok: false, detail: errorText(error) });
+    return finish(
+      "rejected",
+      "Не удалось настроить маржу/плечо — вход не отправлялся.",
+    );
+  }
+
+  const entryLabel = `${req.direction === "long" ? "Лонг" : "Шорт"} по рынку`;
+  let entryPrice: number;
+  let filled: number;
+  try {
     const order = await demoFuturesMarketOrder(
       creds,
       req.symbol,
       entrySide,
       v.quantity,
     );
-    filled = order.executedQty;
+    filled = order.executedQty || Number(v.quantity);
     entryPrice = order.avgPrice || price;
     steps.push({
-      label: `${req.direction === "long" ? "Лонг" : "Шорт"} по рынку`,
+      label: entryLabel,
       ok: true,
       detail: `${filled} по ~${entryPrice}, ордер #${order.orderId}`,
     });
   } catch (error) {
-    steps.push({ label: "Вход", ok: false, detail: errorText(error) });
-    return finish("rejected", "Биржа отклонила вход — позиция не открыта.");
+    // Биржа явно отказала — позиции точно нет.
+    if (error instanceof BinanceApiError) {
+      steps.push({ label: entryLabel, ok: false, detail: errorText(error) });
+      return finish("rejected", "Биржа отклонила вход — позиция не открыта.");
+    }
+    // Ответ не распознан или оборвалась сеть: проверяем позицию на бирже, а не гадаем.
+    steps.push({
+      label: entryLabel,
+      ok: false,
+      detail: `${errorText(error)} — проверяю позицию на бирже`,
+    });
+    try {
+      const position = await demoFuturesPosition(creds, req.symbol);
+      if (position.amount === 0) {
+        steps.push({
+          label: "Проверка позиции",
+          ok: true,
+          detail: "Позиции нет",
+        });
+        return finish("rejected", "Вход не исполнился — позиции на бирже нет.");
+      }
+      filled = Math.abs(position.amount);
+      entryPrice = position.entryPrice || price;
+      steps.push({
+        label: "Проверка позиции",
+        ok: true,
+        detail: `Позиция открыта: ${position.amount} по ${entryPrice} — ставлю защиту`,
+      });
+    } catch (checkError) {
+      steps.push({
+        label: "Проверка позиции",
+        ok: false,
+        detail: errorText(checkError),
+      });
+      return finish(
+        "unprotected",
+        "Неизвестно, открылась ли позиция, — проверьте на demo.binance.com и при необходимости поставьте стоп вручную.",
+      );
+    }
   }
 
   let isProtected = true;
