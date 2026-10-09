@@ -9,7 +9,7 @@
 ```bash
 pnpm install
 pnpm snapshot   # скачать свежие предложения с Binance (без API-ключа)
-pnpm dev        # http://localhost:3000/earn
+pnpm dev        # http://localhost:5000/earn (если занят — 5001, 5002…; точный адрес в консоли)
 ```
 
 ## Обновление 2 раза в день

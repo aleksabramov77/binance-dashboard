@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "tsx scripts/run-on-free-port.ts dev",
     "build": "next build",
-    "start": "next start",
+    "start": "tsx scripts/run-on-free-port.ts start",
     "lint": "biome check",
     "format": "biome format --write",
     "snapshot": "tsx scripts/snapshot.ts",
