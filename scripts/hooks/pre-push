@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Локальная страховка вместо branch protection (на Free-плане для приватного репо она не работает):
+# 1) прямой push в main запрещён — изменения попадают в main только через PR и `/merge`;
+# 2) перед push ветки прогоняются те же проверки, что и в CI (кроме сборки).
+# Установка: `pnpm hooks:install`. Обойти в экстренном случае: ALLOW_PUSH_MAIN=1 / git push --no-verify.
+set -euo pipefail
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  if [[ "$remote_ref" == "refs/heads/main" && "${ALLOW_PUSH_MAIN:-}" != "1" ]]; then
+    echo "✖ Прямой push в main запрещён. Откройте PR и смержите его через /merge." >&2
+    exit 1
+  fi
+done
+
+echo "▶ pre-push: pnpm check (Biome, Steiger, typecheck, Vitest)"
+pnpm -s check

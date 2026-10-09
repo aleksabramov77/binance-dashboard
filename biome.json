@@ -22,7 +22,25 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "patterns": [
+              {
+                "group": [
+                  "@/pages/*/**",
+                  "@/widgets/*/**",
+                  "@/features/*/**",
+                  "@/entities/*/**"
+                ],
+                "message": "FSD: импортируйте слайс только через его public API (index.ts), без deep imports."
+              }
+            ]
+          }
+        }
+      }
     },
     "domains": {
       "next": "recommended",
