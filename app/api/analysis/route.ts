@@ -3,8 +3,9 @@ import {
   AnalysisNotConfiguredError,
   analyzeSetup,
 } from "@/features/analyze-setup";
+import { withLogging } from "@/shared/lib/route.server";
 
-export async function POST(request: Request) {
+export const POST = withLogging("analysis", async (request) => {
   const parsed = setupSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return Response.json({ error: "Некорректный сетап" }, { status: 400 });
@@ -18,7 +19,6 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
-    const message = error instanceof Error ? error.message : String(error);
-    return Response.json({ error: message }, { status: 502 });
+    throw error;
   }
-}
+});

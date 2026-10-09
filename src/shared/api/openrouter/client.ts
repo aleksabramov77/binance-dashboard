@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { LlmConfig } from "@/shared/config/env.server";
 import { withRetry } from "@/shared/lib/fetchRetry";
+import { log } from "@/shared/lib/logger.server";
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -65,12 +66,15 @@ async function post(config: LlmConfig, body: Record<string, unknown>) {
   const json: unknown = await res.json().catch(() => null);
   if (!res.ok) {
     const parsed = errorSchema.safeParse(json);
-    throw new OpenRouterError(
-      parsed.success
-        ? `OpenRouter: ${parsed.data.error.message}`
-        : `OpenRouter ответил ${res.status}`,
-      res.status,
-    );
+    const message = parsed.success
+      ? `OpenRouter: ${parsed.data.error.message}`
+      : `OpenRouter ответил ${res.status}`;
+    log.warn("openrouter.error", message, {
+      model: body.model,
+      status: res.status,
+      withReasoning: "reasoning" in body,
+    });
+    throw new OpenRouterError(message, res.status);
   }
   return completionSchema.parse(json);
 }
@@ -100,6 +104,7 @@ export async function completeJson<T extends z.ZodType>(
     usage: { include: true },
   };
 
+  const started = Date.now();
   let completion: z.infer<typeof completionSchema>;
   try {
     // Короткое рассуждение — дешевле, для разбора по цифрам достаточно.
@@ -114,12 +119,29 @@ export async function completeJson<T extends z.ZodType>(
     completion = await post(config, body);
   }
 
-  const content = completion.choices[0].message.content;
-  if (!content) throw new Error("Модель вернула пустой ответ.");
-  const data = req.schema.parse(JSON.parse(content));
-  return {
-    data,
+  const meta = {
     model: completion.model,
+    ms: Date.now() - started,
     costUsd: completion.usage?.cost ?? null,
+    finishReason: completion.choices[0].finish_reason ?? null,
   };
+  const content = completion.choices[0].message.content;
+  if (!content) {
+    log.error("openrouter.empty", "Модель вернула пустой ответ", meta);
+    throw new Error("Модель вернула пустой ответ.");
+  }
+  let data: z.infer<T>;
+  try {
+    data = req.schema.parse(JSON.parse(content));
+  } catch (error) {
+    log.error(
+      "openrouter.parse",
+      "Ответ модели не соответствует схеме",
+      { ...meta, content: content.slice(0, 500) },
+      error,
+    );
+    throw new Error("Модель ответила не по схеме — попробуйте ещё раз.");
+  }
+  log.info("openrouter.ok", `${meta.model} за ${meta.ms} мс`, meta);
+  return { data, model: completion.model, costUsd: meta.costUsd };
 }

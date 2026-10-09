@@ -1,14 +1,10 @@
 import { collectSnapshot } from "@/features/collect-snapshot";
+import { withLogging } from "@/shared/lib/route.server";
 
-export async function POST() {
-  try {
-    const { snapshot } = await collectSnapshot();
-    return Response.json({
-      fetchedAt: snapshot.fetchedAt,
-      offers: snapshot.offers.length,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return Response.json({ error: message }, { status: 502 });
-  }
-}
+export const POST = withLogging("earn.refresh", async () => {
+  const { snapshot } = await collectSnapshot();
+  return Response.json({
+    fetchedAt: snapshot.fetchedAt,
+    offers: snapshot.offers.length,
+  });
+});

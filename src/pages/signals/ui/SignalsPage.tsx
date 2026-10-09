@@ -12,6 +12,7 @@ import { formatDateTime } from "@/shared/lib";
 import { Button } from "@/shared/ui/button";
 import { MarketMovers } from "@/widgets/market-movers";
 import { SetupCards } from "@/widgets/setup-cards";
+import { SignalsHelp } from "@/widgets/signals-help";
 import { TradeLog } from "@/widgets/trade-log";
 
 function Signals() {
@@ -46,6 +47,7 @@ function Signals() {
       </header>
 
       <RiskSettingsBar autoCapital={autoCapital} />
+      <SignalsHelp />
 
       {scan.isPending && (
         <p className="text-muted-foreground">Сканирую рынок…</p>

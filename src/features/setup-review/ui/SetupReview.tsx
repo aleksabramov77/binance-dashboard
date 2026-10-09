@@ -38,6 +38,7 @@ export function SetupReview({ setup }: { setup: Setup }) {
       <div className="space-y-2">
         <Button
           variant="ghost"
+          title="Второе мнение ИИ по цифрам сетапа: вердикт, аргументы и условие отмены (~$0,0004)"
           className="w-full"
           onClick={() => review.mutate(setup)}
           disabled={review.isPending}

@@ -268,6 +268,11 @@ export function TradeTicketDialog({
         <Button
           className="w-full"
           variant={setup.status === "ready" ? "default" : "outline"}
+          title={
+            setup.status === "ready"
+              ? "Можно входить: разворотная свеча уже есть"
+              : "Ждём разворота: войти можно, но риск выше — разумнее дождаться разворотной свечи"
+          }
         >
           <Zap />
           Сделка в 1 клик (демо)

@@ -1,5 +1,9 @@
 import type { Mover, Setup, SetupRecheck } from "@/entities/market-signal";
-import { fetch24hTicker, fetchKlines } from "@/shared/api/binance";
+import {
+  fetch24hTicker,
+  fetchKlines,
+} from "@/shared/api/binance/public.server";
+import { log } from "@/shared/lib/logger.server";
 import { computeIndicators } from "../lib/computeIndicators";
 import { detectSetup, ruleChecks } from "../lib/detectSetup";
 import { evaluateRecheck } from "../lib/evaluateRecheck";
@@ -24,11 +28,19 @@ export async function recheckSetup(setup: Setup): Promise<SetupRecheck> {
     indicators: computeIndicators(h1, h4),
   };
   const fresh = detectSetup(mover, h1);
-  return evaluateRecheck(
+  const result = evaluateRecheck(
     setup,
     mover.price,
     fresh ? { ...fresh, market } : null,
     ruleChecks(mover, setup.direction),
     new Date().toISOString(),
   );
+  log.info("recheck", `${setup.symbol} ${setup.direction}: ${result.status}`, {
+    symbol: setup.symbol,
+    direction: setup.direction,
+    status: result.status,
+    price: result.price,
+    notes: result.notes,
+  });
+  return result;
 }

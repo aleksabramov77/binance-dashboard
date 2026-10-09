@@ -1,5 +1,5 @@
 import type { Holding, Portfolio } from "@/entities/holding";
-import { fetchTickerPrices, resolveUsdPrice } from "@/shared/api/binance";
+import { resolveUsdPrice } from "@/shared/api/binance";
 import {
   fetchFlexiblePositions,
   fetchFundingAssets,
@@ -7,6 +7,7 @@ import {
   fetchSpotAccount,
   fetchWalletBalances,
 } from "@/shared/api/binance/account.server";
+import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import { getBinanceCredentials } from "@/shared/config/env.server";
 import { aprWithTiers } from "./tierApr";
 

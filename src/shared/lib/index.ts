@@ -1,11 +1,5 @@
-export {
-  describeNetworkError,
-  getJsonWithRetry,
-  HttpError,
-  NetworkError,
-  RETRY_DELAYS_MS,
-  withRetry,
-} from "./fetchRetry";
+// Клиент-безопасный публичный API. Серверные модули (fetchRetry, logger.server, route.server)
+// импортируются по прямому пути.
 export {
   formatAmount,
   formatDateTime,
@@ -15,4 +9,5 @@ export {
   formatUsd,
 } from "./format";
 export { atr, ema, rsi } from "./indicators";
+export { reportClientError } from "./reportClientError";
 export { cn } from "./utils";

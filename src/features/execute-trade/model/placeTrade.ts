@@ -16,6 +16,7 @@ import {
   fetchDemoUsdtBalances,
 } from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
+import { log } from "@/shared/lib/logger.server";
 import { appendTrade } from "../api/tradeLog";
 import { floorToStep, validateTrade } from "../lib/validateTrade";
 
@@ -48,7 +49,34 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
       filledQuantity,
       steps,
     };
-    await appendTrade(result);
+    const logData = {
+      tradeId: base.id,
+      symbol: req.symbol,
+      market: req.market,
+      direction: req.direction,
+      quantity: req.quantity,
+      stopLoss: req.stopLoss,
+      takeProfit: req.takeProfit,
+      leverage: req.leverage,
+      entryPrice,
+      filledQuantity,
+      steps,
+    };
+    if (status === "protected")
+      log.info("trade.done", `${req.symbol}: ${message}`, logData);
+    else if (status === "unprotected")
+      log.error("trade.unprotected", `${req.symbol}: ${message}`, logData);
+    else log.warn("trade.rejected", `${req.symbol}: ${message}`, logData);
+    try {
+      await appendTrade(result);
+    } catch (error) {
+      log.error(
+        "trade.log",
+        "Не удалось записать журнал сделок",
+        logData,
+        error,
+      );
+    }
     return result;
   };
 

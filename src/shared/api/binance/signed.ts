@@ -7,6 +7,7 @@ import {
   NetworkError,
   withRetry,
 } from "@/shared/lib/fetchRetry";
+import { log } from "@/shared/lib/logger.server";
 import { binanceErrorSchema } from "./accountSchemas";
 
 /** Binance ответил ошибкой (не сетевой сбой) — повторять бессмысленно. */
@@ -47,14 +48,28 @@ export async function signedRequest<T extends z.ZodType>(
         .digest("hex"),
     );
 
+    const started = Date.now();
     const res = await fetch(`${baseUrl}${path}?${query}`, {
       method,
       headers: { "X-MBX-APIKEY": creds.apiKey },
       cache: "no-store",
     });
     const body: unknown = await res.json();
+    // Параметры запроса — без подписи и ключа (они не в params).
+    const meta = {
+      host: new URL(baseUrl).host,
+      method,
+      path,
+      status: res.status,
+      ms: Date.now() - started,
+      params,
+    };
     if (!res.ok) {
       const error = binanceErrorSchema.safeParse(body);
+      log.warn("binance.error", `${method} ${path} → ${res.status}`, {
+        ...meta,
+        body,
+      });
       throw error.success
         ? new BinanceApiError(
             `Binance: ${error.data.msg} (${error.data.code})`,
@@ -67,7 +82,22 @@ export async function signedRequest<T extends z.ZodType>(
             res.status,
           );
     }
-    return schema.parse(body) as z.infer<T>;
+    if (method === "GET")
+      log.debug("binance.request", `${method} ${path} → ${res.status}`, meta);
+    else log.info("binance.write", `${method} ${path} → ${res.status}`, meta);
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      log.error(
+        "binance.schema",
+        `${method} ${path}: неожиданный формат ответа`,
+        {
+          ...meta,
+          issues: parsed.error.issues.slice(0, 5),
+        },
+      );
+      throw new Error(`Binance ${path}: неожиданный формат ответа`);
+    }
+    return parsed.data as z.infer<T>;
   };
 
   // Чтение повторяем при сбоях сети; ордера — нет, чтобы не открыть позицию дважды.
@@ -76,8 +106,16 @@ export async function signedRequest<T extends z.ZodType>(
     return await attempt();
   } catch (error) {
     if (error instanceof BinanceApiError) throw error;
-    throw new NetworkError(
+    const failure = new NetworkError(
       `Binance ${path}: сеть оборвалась — ${describeNetworkError(error)}. Проверьте ордера на бирже.`,
     );
+    // Ордер мог дойти до биржи — это важно видеть в журнале.
+    log.error(
+      "binance.order.network",
+      failure.message,
+      { method, path, params },
+      error,
+    );
+    throw failure;
   }
 }

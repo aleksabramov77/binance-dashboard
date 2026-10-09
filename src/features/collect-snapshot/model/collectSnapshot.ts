@@ -1,5 +1,8 @@
 import { normalizeProducts, type Snapshot } from "@/entities/earn-offer";
-import { fetchEarnProducts, fetchTickerPrices } from "@/shared/api/binance";
+import {
+  fetchEarnProducts,
+  fetchTickerPrices,
+} from "@/shared/api/binance/public.server";
 import { saveSnapshot } from "../api/snapshotStore";
 
 /** Скачивает свежие предложения Binance Earn и сохраняет снимок на диск. */

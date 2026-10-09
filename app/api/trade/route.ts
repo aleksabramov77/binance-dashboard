@@ -1,13 +1,14 @@
 import { connection } from "next/server";
 import { tradeRequestSchema } from "@/entities/trade";
 import { getTradeOverview, placeTrade } from "@/features/execute-trade";
+import { withLogging } from "@/shared/lib/route.server";
 
-export async function GET() {
+export const GET = withLogging("trade.overview", async () => {
   await connection();
   return Response.json(await getTradeOverview());
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withLogging("trade", async (request) => {
   const parsed = tradeRequestSchema.safeParse(
     await request.json().catch(() => null),
   );
@@ -17,10 +18,5 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  try {
-    return Response.json(await placeTrade(parsed.data));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return Response.json({ error: message }, { status: 502 });
-  }
-}
+  return Response.json(await placeTrade(parsed.data));
+});

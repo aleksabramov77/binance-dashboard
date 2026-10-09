@@ -1,13 +1,13 @@
 import type { Mover, ScanResult, Setup } from "@/entities/market-signal";
+import type { Candle, Ticker24h } from "@/shared/api/binance";
+import { fetchDemoSymbolRules } from "@/shared/api/binance/demo.server";
 import {
-  type Candle,
   fetch24hTickers,
   fetchKlines,
   fetchPerpetualSymbols,
-  type Ticker24h,
-} from "@/shared/api/binance";
-import { fetchDemoSymbolRules } from "@/shared/api/binance/demo.server";
+} from "@/shared/api/binance/public.server";
 import { isStablecoin } from "@/shared/config";
+import { log } from "@/shared/lib/logger.server";
 import { SCAN_CONFIG } from "../config/rules";
 import { computeIndicators } from "../lib/computeIndicators";
 import { detectSetup } from "../lib/detectSetup";
@@ -74,7 +74,14 @@ async function analyze(
     ]);
     const withIndicators = { ...mover, indicators: computeIndicators(h1, h4) };
     return { mover: withIndicators, setup: detectSetup(withIndicators, h1) };
-  } catch {
+  } catch (error) {
+    // Монета выпадает из анализа, но скан продолжается.
+    log.warn(
+      "scan.symbol",
+      `${mover.symbol}: не удалось загрузить свечи — монета пропущена`,
+      { symbol: mover.symbol, market },
+      error,
+    );
     return { mover, setup: null };
   }
 }
@@ -83,6 +90,7 @@ async function analyze(
 export async function scanMarket(force = false): Promise<ScanResult> {
   if (!force && cache && Date.now() - cache.at < SCAN_CONFIG.cacheTtlMs)
     return cache.result;
+  const started = Date.now();
 
   const [spotTickers, futuresTickers, perps] = await Promise.all([
     fetch24hTickers("spot"),
@@ -114,7 +122,15 @@ export async function scanMarket(force = false): Promise<ScanResult> {
         ...s,
         demoTradable: await fetchDemoSymbolRules(s.market, s.symbol)
           .then((rules) => rules !== null)
-          .catch(() => null),
+          .catch((error) => {
+            log.warn(
+              "scan.demo",
+              `${s.symbol}: не удалось проверить наличие в демо`,
+              { symbol: s.symbol, market: s.market },
+              error,
+            );
+            return null;
+          }),
       })),
     )
   ).sort(
@@ -131,5 +147,19 @@ export async function scanMarket(force = false): Promise<ScanResult> {
     setups,
   };
   cache = { at: Date.now(), result };
+  log.info(
+    "scan.done",
+    `Скан: ${universe.length} рынков, сетапов ${setups.length} за ${Date.now() - started} мс`,
+    {
+      universe: universe.length,
+      setups: setups.map((s) => ({
+        symbol: s.symbol,
+        direction: s.direction,
+        status: s.status,
+        demoTradable: s.demoTradable,
+      })),
+      ms: Date.now() - started,
+    },
+  );
   return result;
 }

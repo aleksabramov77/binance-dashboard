@@ -1,3 +1,6 @@
+// Только для сервера (пишет в журнал). Не экспортируется из клиентского @/shared/lib.
+import { log } from "./logger.server";
+
 /** Паузы перед повторами при сетевом сбое. */
 export const RETRY_DELAYS_MS = [400, 1200, 3000] as const;
 
@@ -23,19 +26,34 @@ export async function withRetry<T>(
   delays: readonly number[] = RETRY_DELAYS_MS,
 ): Promise<T> {
   let lastError: unknown;
-  for (const delay of [0, ...delays]) {
+  const attempts = delays.length + 1;
+  for (const [i, delay] of [0, ...delays].entries()) {
     if (delay) await sleep(delay);
     try {
-      return await run();
+      const result = await run();
+      if (i > 0)
+        log.info("net.recovered", `${label}: успех с попытки ${i + 1}`, {
+          label,
+          attempt: i + 1,
+        });
+      return result;
     } catch (error) {
       // HTTP-ошибки с ответом сервера не повторяем — повтор их не исправит.
       if (error instanceof HttpError) throw error;
       lastError = error;
+      log.warn(
+        "net.retry",
+        `${label}: сбой сети, попытка ${i + 1}/${attempts}`,
+        { label, attempt: i + 1, attempts },
+        error,
+      );
     }
   }
-  throw new NetworkError(
+  const failure = new NetworkError(
     `${label}: сеть не ответила — ${describeNetworkError(lastError)}`,
   );
+  log.error("net.failed", failure.message, { label, attempts }, lastError);
+  throw failure;
 }
 
 /** Сервер ответил, но с ошибкой (4xx/5xx). */
@@ -55,6 +73,11 @@ export function getJsonWithRetry(url: string, label: string): Promise<unknown> {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) {
       const body: unknown = await res.json().catch(() => null);
+      log.warn("http.upstream", `${label}: ответ ${res.status}`, {
+        url,
+        status: res.status,
+        body,
+      });
       throw new HttpError(`${label}: ответ ${res.status}`, res.status, body);
     }
     return res.json();
