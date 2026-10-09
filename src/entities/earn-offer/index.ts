@@ -2,7 +2,7 @@ export { getEarnOverview } from "./api/getEarnOverview";
 export { earnOverviewQueryKey, useEarnOverview } from "./api/useEarnOverview";
 export { evaluateOffer, type OfferYield, yearlyIncome } from "./lib/yield";
 export { APR_CHANGE_THRESHOLD, diffSnapshots } from "./model/diff";
-export { normalizeProducts, resolveUsdPrice } from "./model/normalize";
+export { normalizeProducts } from "./model/normalize";
 export {
   type EarnOverview,
   earnOverviewSchema,

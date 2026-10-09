@@ -1,6 +1,10 @@
 # Binance Dashboard
 
-Личный локальный дашборд по Binance. Первый раздел — **Earn**: свежие предложения Simple Earn
+Личный локальный дашборд по Binance.
+
+- **Портфель** (`/portfolio`) — где лежат ваши деньги (Spot, Funding, Earn Flexible/Locked), сколько они
+  приносят и оптимальный план «куда переложить» с учётом бонусных ступеней (+ Locked-альтернатива).
+- **Earn** (`/earn`): свежие предложения Simple Earn
 (Flexible + Locked), реальная ставка для вашей суммы с учётом бонусных ступеней
 («+2% до 10 000 USDC, дальше базовая») и лента изменений между снимками.
 
@@ -11,6 +15,15 @@ pnpm install
 pnpm snapshot   # скачать свежие предложения с Binance (без API-ключа)
 pnpm dev        # http://localhost:5000/earn (если занят — 5001, 5002…; точный адрес в консоли)
 ```
+
+## Подключение аккаунта (только чтение)
+
+1. binance.com → API Management → Create API → System generated.
+2. Включить только **Enable Reading** (без торговли и вывода).
+3. Скопировать `.env.example` в `.env.local` и вписать `BINANCE_API_KEY` / `BINANCE_API_SECRET`.
+4. Перезапустить `pnpm dev`.
+
+Ключ используется только сервером дашборда и в git не попадает (`.env*` в `.gitignore`).
 
 ## Обновление 2 раза в день
 
