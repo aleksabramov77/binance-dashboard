@@ -1,3 +1,4 @@
+export { useRecheck } from "./api/useRecheck";
 export { scanQueryKey, useScan } from "./api/useScan";
 export {
   type Indicators,
@@ -8,9 +9,11 @@ export {
   type Setup,
   type SetupAnalysis,
   type SetupAnalysisResult,
+  type SetupRecheck,
   scanResultSchema,
   setupAnalysisResultSchema,
   setupAnalysisSchema,
+  setupRecheckSchema,
   setupSchema,
 } from "./model/schema";
 export { DirectionBadge } from "./ui/DirectionBadge";

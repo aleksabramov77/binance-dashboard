@@ -1,8 +1,12 @@
 "use client";
 
-import { Zap } from "lucide-react";
-import { useId, useState } from "react";
-import type { Setup } from "@/entities/market-signal";
+import { RefreshCw, Zap } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import {
+  type Setup,
+  type SetupRecheck,
+  useRecheck,
+} from "@/entities/market-signal";
 import {
   MAX_LEVERAGE,
   type TradeOverview,
@@ -22,6 +26,72 @@ import {
 } from "@/shared/ui/dialog";
 import { Input } from "@/shared/ui/input";
 import { usePlaceTrade } from "../api/usePlaceTrade";
+import { rescaleQuantity } from "../lib/rescaleQuantity";
+
+const RECHECK_VIEW: Record<
+  SetupRecheck["status"],
+  { title: string; tone: string }
+> = {
+  actual: {
+    title: "Сетап актуален — уровни подтверждены",
+    tone: "border-positive/40 bg-positive/10",
+  },
+  changed: {
+    title: "Сетап актуален, но уровни обновлены по свежим данным",
+    tone: "border-primary/50 bg-primary/10",
+  },
+  stale: {
+    title: "Входить уже не стоит",
+    tone: "border-destructive/50 bg-destructive/10",
+  },
+};
+
+function RecheckBanner(props: {
+  recheck: SetupRecheck | undefined;
+  isPending: boolean;
+  error: Error | null;
+  onRetry: () => void;
+}) {
+  if (props.isPending) {
+    return (
+      <p className="rounded-lg border p-3 text-sm text-muted-foreground">
+        Проверяю актуальность входа по свежим свечам и цене…
+      </p>
+    );
+  }
+  if (props.error) {
+    return (
+      <div className="rounded-lg border border-destructive/50 p-3 text-sm">
+        <p className="text-destructive">
+          Не удалось перепроверить сетап: {props.error.message}
+        </p>
+        <Button size="sm" variant="ghost" onClick={props.onRetry}>
+          <RefreshCw /> Проверить ещё раз
+        </Button>
+      </div>
+    );
+  }
+  if (!props.recheck) return null;
+  const view = RECHECK_VIEW[props.recheck.status];
+  const time = new Date(props.recheck.checkedAt).toLocaleTimeString("ru-RU");
+  return (
+    <div className={cn("space-y-1 rounded-lg border p-3 text-sm", view.tone)}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-medium">{view.title}</p>
+        <Button size="sm" variant="ghost" onClick={props.onRetry}>
+          <RefreshCw /> {time}
+        </Button>
+      </div>
+      {props.recheck.notes.length > 0 && (
+        <ul className="space-y-0.5 text-muted-foreground">
+          {props.recheck.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 interface TradeTicketDialogProps {
   setup: Setup;
@@ -121,11 +191,23 @@ export function TradeTicketDialog({
   const [takeProfit, setTakeProfit] = useState(setup.takeProfit1);
   const [leverage, setLeverage] = useState(initialLeverage);
   const trade = usePlaceTrade();
+  const recheck = useRecheck(setup, open && Boolean(overview?.configured));
 
+  // Свежие уровни после предпроверки — подставляем в заявку, риск в $ сохраняем.
+  const fresh = recheck.data?.fresh ?? null;
+  useEffect(() => {
+    if (!fresh) return;
+    setStopLoss(fresh.stopLoss);
+    setTakeProfit(fresh.takeProfit1);
+    setQuantity(rescaleQuantity(initialQuantity, setup, fresh));
+  }, [fresh, initialQuantity, setup]);
+
+  const active = fresh ?? setup;
+  const isStale = recheck.data?.status === "stale";
   const isFutures = setup.market === "futures";
-  const notional = quantity * setup.entry;
-  const loss = quantity * Math.abs(setup.entry - stopLoss);
-  const profit = quantity * Math.abs(takeProfit - setup.entry);
+  const notional = quantity * active.entry;
+  const loss = quantity * Math.abs(active.entry - stopLoss);
+  const profit = quantity * Math.abs(takeProfit - active.entry);
   const balance = isFutures
     ? overview?.balances?.futures
     : overview?.balances?.spot;
@@ -188,6 +270,12 @@ export function TradeTicketDialog({
           <ResultView result={trade.data} />
         ) : (
           <div className="space-y-4">
+            <RecheckBanner
+              recheck={recheck.data}
+              isPending={recheck.isFetching}
+              error={recheck.error}
+              onRetry={() => recheck.refetch()}
+            />
             <div className="grid grid-cols-2 gap-3">
               <Field
                 label={`Количество, ${setup.base}`}
@@ -220,18 +308,18 @@ export function TradeTicketDialog({
               <Button
                 size="sm"
                 variant={
-                  takeProfit === setup.takeProfit1 ? "secondary" : "ghost"
+                  takeProfit === active.takeProfit1 ? "secondary" : "ghost"
                 }
-                onClick={() => setTakeProfit(setup.takeProfit1)}
+                onClick={() => setTakeProfit(active.takeProfit1)}
               >
                 TP1 (EMA20)
               </Button>
               <Button
                 size="sm"
                 variant={
-                  takeProfit === setup.takeProfit2 ? "secondary" : "ghost"
+                  takeProfit === active.takeProfit2 ? "secondary" : "ghost"
                 }
-                onClick={() => setTakeProfit(setup.takeProfit2)}
+                onClick={() => setTakeProfit(active.takeProfit2)}
               >
                 TP2 (EMA50)
               </Button>
@@ -272,8 +360,17 @@ export function TradeTicketDialog({
 
         <DialogFooter>
           {overview?.configured && !trade.data && (
-            <Button onClick={submit} disabled={trade.isPending}>
-              {trade.isPending ? "Отправляю…" : "Подтвердить сделку на демо"}
+            <Button
+              onClick={submit}
+              disabled={trade.isPending || recheck.isFetching || isStale}
+            >
+              {trade.isPending
+                ? "Отправляю…"
+                : recheck.isFetching
+                  ? "Проверяю сетап…"
+                  : isStale
+                    ? "Вход уже не актуален"
+                    : "Подтвердить сделку на демо"}
             </Button>
           )}
           {trade.data && (

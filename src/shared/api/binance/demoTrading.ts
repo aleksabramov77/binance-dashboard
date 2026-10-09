@@ -1,4 +1,5 @@
 import type { BinanceCredentials } from "@/shared/config/env.server";
+import { getJsonWithRetry, HttpError } from "@/shared/lib/fetchRetry";
 import {
   algoOrderSchema,
   anySchema,
@@ -30,16 +31,16 @@ export interface SymbolRules {
   minNotional: number;
 }
 
-const rulesCache = new Map<
-  Market,
-  { at: number; bySymbol: Map<string, SymbolRules> }
->();
+/** Справочник демо-фьючерсов (~900 КБ) — грузим редко, держим последнюю удачную копию. */
+let futuresRules: { at: number; bySymbol: Map<string, SymbolRules> } | null =
+  null;
 
-async function getJson(url: string): Promise<unknown> {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Binance Demo ответил ${res.status} на ${url}`);
-  return res.json();
-}
+const getJson = (url: string) => getJsonWithRetry(url, "Binance Demo");
+
+/** Binance: -1121 Invalid symbol. */
+const isInvalidSymbol = (error: unknown) =>
+  error instanceof HttpError &&
+  (error.body as { code?: number } | null)?.code === -1121;
 
 function toRules(
   filters: { filterType: string; [k: string]: unknown }[],
@@ -57,24 +58,48 @@ function toRules(
   };
 }
 
-/** Правила округления символа на демо; null — символа нет в Demo Trading. */
+function indexRules(raw: unknown): Map<string, SymbolRules> {
+  const info = exchangeInfoSchema.parse(raw);
+  const bySymbol = new Map<string, SymbolRules>();
+  for (const s of info.symbols) {
+    const rules = s.status === "TRADING" ? toRules(s.filters) : null;
+    if (rules) bySymbol.set(s.symbol, rules);
+  }
+  return bySymbol;
+}
+
+/**
+ * Правила округления символа на демо; null — символа точно нет в Demo Trading.
+ * Сетевой сбой — исключение NetworkError, а не null.
+ */
 export async function fetchDemoSymbolRules(
   market: Market,
   symbol: string,
 ): Promise<SymbolRules | null> {
-  const cached = rulesCache.get(market);
-  if (!cached || Date.now() - cached.at > RULES_TTL_MS) {
-    const info = exchangeInfoSchema.parse(
-      await getJson(`${DEMO_URL[market]}${PREFIX[market]}/exchangeInfo`),
-    );
-    const bySymbol = new Map<string, SymbolRules>();
-    for (const s of info.symbols) {
-      const rules = s.status === "TRADING" ? toRules(s.filters) : null;
-      if (rules) bySymbol.set(s.symbol, rules);
+  if (market === "spot") {
+    try {
+      const raw = await getJson(
+        `${DEMO_URL.spot}${PREFIX.spot}/exchangeInfo?symbol=${symbol}`,
+      );
+      return indexRules(raw).get(symbol) ?? null;
+    } catch (error) {
+      if (isInvalidSymbol(error)) return null;
+      throw error;
     }
-    rulesCache.set(market, { at: Date.now(), bySymbol });
   }
-  return rulesCache.get(market)?.bySymbol.get(symbol) ?? null;
+
+  if (!futuresRules || Date.now() - futuresRules.at > RULES_TTL_MS) {
+    try {
+      const raw = await getJson(
+        `${DEMO_URL.futures}${PREFIX.futures}/exchangeInfo`,
+      );
+      futuresRules = { at: Date.now(), bySymbol: indexRules(raw) };
+    } catch (error) {
+      // Устаревший справочник лучше, чем никакого: шаги цены меняются редко.
+      if (!futuresRules) throw error;
+    }
+  }
+  return futuresRules?.bySymbol.get(symbol) ?? null;
 }
 
 export async function fetchDemoPrice(

@@ -54,15 +54,23 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     );
   const creds = config.credentials;
 
-  const [rules, price] = await Promise.all([
-    fetchDemoSymbolRules(req.market, req.symbol),
-    fetchDemoPrice(req.market, req.symbol).catch(() => null),
-  ]);
-  if (!rules || price === null)
+  let rules: Awaited<ReturnType<typeof fetchDemoSymbolRules>>;
+  let price: number;
+  try {
+    rules = await fetchDemoSymbolRules(req.market, req.symbol);
+    if (!rules)
+      return finish(
+        "rejected",
+        `${req.symbol} нет в Binance Demo Trading (${req.market === "spot" ? "Spot" : "Futures"}).`,
+      );
+    price = await fetchDemoPrice(req.market, req.symbol);
+  } catch (error) {
+    // Сеть, а не отсутствие символа: ничего не отправлено, можно повторить.
     return finish(
       "rejected",
-      `${req.symbol} нет в Binance Demo Trading (${req.market === "spot" ? "Spot" : "Futures"}).`,
+      `Не удалось получить данные Binance Demo — сделка не отправлена, попробуйте ещё раз. ${errorText(error)}`,
     );
+  }
 
   const checked = validateTrade(req, price, rules, config.maxNotionalUsd);
   if (!checked.ok) return finish("rejected", checked.errors.join(" "));

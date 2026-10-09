@@ -1,3 +1,4 @@
+import { getJsonWithRetry } from "@/shared/lib/fetchRetry";
 import {
   futuresExchangeInfoSchema,
   klinesSchema,
@@ -21,14 +22,19 @@ export interface Candle {
   volume: number;
 }
 
-async function getJson(url: string): Promise<unknown> {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Binance ответил ${res.status} на ${url}`);
-  return res.json();
-}
+const getJson = (url: string) => getJsonWithRetry(url, "Binance");
 
 export async function fetch24hTickers(market: Market): Promise<Ticker24h[]> {
   return ticker24hSchema.parse(await getJson(`${BASE[market]}/ticker/24hr`));
+}
+
+/** Статистика за 24 ч по одному символу. */
+export async function fetch24hTicker(
+  market: Market,
+  symbol: string,
+): Promise<Ticker24h> {
+  const raw = await getJson(`${BASE[market]}/ticker/24hr?symbol=${symbol}`);
+  return ticker24hSchema.element.parse(raw);
 }
 
 export async function fetchKlines(

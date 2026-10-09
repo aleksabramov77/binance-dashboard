@@ -67,6 +67,17 @@ export const setupAnalysisResultSchema = z.object({
   costUsd: z.number().nullable(),
 });
 
+/** Предпроверка перед сделкой по свежим данным. */
+export const setupRecheckSchema = z.object({
+  checkedAt: z.string(),
+  /** actual — всё как было; changed — актуален, но уровни сдвинулись; stale — входить уже не стоит. */
+  status: z.enum(["actual", "changed", "stale"]),
+  price: z.number(),
+  /** Пересчитанный сетап (null, если правила больше не выполняются). */
+  fresh: setupSchema.nullable(),
+  notes: z.array(z.string()),
+});
+
 export const scanResultSchema = z.object({
   scannedAt: z.string(),
   universeSize: z.number(),
@@ -81,3 +92,4 @@ export type Setup = z.infer<typeof setupSchema>;
 export type ScanResult = z.infer<typeof scanResultSchema>;
 export type SetupAnalysis = z.infer<typeof setupAnalysisSchema>;
 export type SetupAnalysisResult = z.infer<typeof setupAnalysisResultSchema>;
+export type SetupRecheck = z.infer<typeof setupRecheckSchema>;

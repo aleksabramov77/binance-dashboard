@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { LlmConfig } from "@/shared/config/env.server";
+import { withRetry } from "@/shared/lib/fetchRetry";
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -46,22 +47,10 @@ interface JsonRequest<T extends z.ZodType> {
   maxTokens?: number;
 }
 
-/** Паузы перед повторами при сетевом сбое (соединение оборвано до ответа). */
-const RETRY_DELAYS_MS = [400, 1200, 3000];
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** «fetch failed» → «fetch failed (UND_ERR_SOCKET: other side closed)». */
-function describeNetworkError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const cause = error.cause as { code?: string; message?: string } | undefined;
-  const detail = [cause?.code, cause?.message].filter(Boolean).join(": ");
-  return detail ? `${error.message} (${detail})` : error.message;
-}
-
 async function post(config: LlmConfig, body: Record<string, unknown>) {
   const payload = JSON.stringify(body);
-  const send = () =>
+  // Сетевой сбой (OpenRouter не ответил вовсе) повторяем — это безопасно.
+  const res = await withRetry("OpenRouter", () =>
     fetch(API_URL, {
       method: "POST",
       headers: {
@@ -71,25 +60,8 @@ async function post(config: LlmConfig, body: Record<string, unknown>) {
       },
       body: payload,
       cache: "no-store",
-    });
-
-  let res: Response | undefined;
-  let lastError: unknown;
-  for (const delay of [0, ...RETRY_DELAYS_MS]) {
-    if (delay) await sleep(delay);
-    try {
-      res = await send();
-      break;
-    } catch (error) {
-      // Сетевой сбой: OpenRouter не ответил вовсе — повторять безопасно.
-      lastError = error;
-    }
-  }
-  if (!res) {
-    throw new Error(
-      `Не удалось связаться с OpenRouter: ${describeNetworkError(lastError)}`,
-    );
-  }
+    }),
+  );
   const json: unknown = await res.json().catch(() => null);
   if (!res.ok) {
     const parsed = errorSchema.safeParse(json);

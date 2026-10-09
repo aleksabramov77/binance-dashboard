@@ -6,6 +6,52 @@ const clamp = (v: number, min: number, max: number) =>
   Math.min(max, Math.max(min, v));
 const pct = (v: number) => `${(v * 100).toFixed(1).replace(".", ",")}%`;
 
+export interface RuleCheck {
+  ok: boolean;
+  label: string;
+}
+
+/** Условия правила для направления: какие выполняются сейчас, какие нет. */
+export function ruleChecks(
+  mover: Mover,
+  direction: Setup["direction"],
+): RuleCheck[] {
+  const ind = mover.indicators;
+  if (!ind) return [{ ok: false, label: "Нет свежих индикаторов" }];
+  const fmt = (v: number) => v.toFixed(1).replace(".", ",");
+  if (direction === "long") {
+    return [
+      {
+        ok: mover.change24h <= REBOUND_LONG.maxChange24h,
+        label: `Изменение за 24 ч ${pct(mover.change24h)} (нужно ≤ ${pct(REBOUND_LONG.maxChange24h)})`,
+      },
+      {
+        ok: ind.rsi1h <= REBOUND_LONG.maxRsi1h,
+        label: `RSI 1h ${fmt(ind.rsi1h)} (нужно ≤ ${REBOUND_LONG.maxRsi1h})`,
+      },
+      {
+        ok: ind.distanceAtr <= REBOUND_LONG.maxDistanceAtr,
+        label: `Цена от EMA50 ${fmt(ind.distanceAtr)} ATR (нужно ≤ ${REBOUND_LONG.maxDistanceAtr})`,
+      },
+    ];
+  }
+  return [
+    { ok: mover.futures, label: "Есть бессрочный фьючерс" },
+    {
+      ok: mover.change24h >= OVERHEAT_SHORT.minChange24h,
+      label: `Изменение за 24 ч ${pct(mover.change24h)} (нужно ≥ ${pct(OVERHEAT_SHORT.minChange24h)})`,
+    },
+    {
+      ok: ind.rsi1h >= OVERHEAT_SHORT.minRsi1h,
+      label: `RSI 1h ${fmt(ind.rsi1h)} (нужно ≥ ${OVERHEAT_SHORT.minRsi1h})`,
+    },
+    {
+      ok: ind.distanceAtr >= OVERHEAT_SHORT.minDistanceAtr,
+      label: `Цена от EMA50 ${fmt(ind.distanceAtr)} ATR (нужно ≥ ${OVERHEAT_SHORT.minDistanceAtr})`,
+    },
+  ];
+}
+
 /**
  * Ищет сетап по правилам:
  * - отскок после падения → LONG (Spot, если есть пара, иначе фьючерс);

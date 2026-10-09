@@ -1,4 +1,12 @@
 export {
+  describeNetworkError,
+  getJsonWithRetry,
+  HttpError,
+  NetworkError,
+  RETRY_DELAYS_MS,
+  withRetry,
+} from "./fetchRetry";
+export {
   formatAmount,
   formatDateTime,
   formatPercent,

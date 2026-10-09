@@ -1,3 +1,4 @@
+import { getJsonWithRetry } from "@/shared/lib/fetchRetry";
 import {
   type EarnProduct,
   earnProductsResponseSchema,
@@ -10,14 +11,7 @@ const EARN_PRODUCTS_URL =
 const TICKER_PRICE_URL = "https://api.binance.com/api/v3/ticker/price";
 const PAGE_SIZE = 500;
 
-async function getJson(url: string): Promise<unknown> {
-  const res = await fetch(url, {
-    headers: { "user-agent": "binance-dashboard/0.1 (personal)" },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`Binance ответил ${res.status} на ${url}`);
-  return res.json();
-}
+const getJson = (url: string) => getJsonWithRetry(url, "Binance");
 
 /** Все продукты Simple Earn (Flexible + Locked). */
 export async function fetchEarnProducts(): Promise<EarnProduct[]> {

@@ -1,6 +1,7 @@
 export { fetchEarnProducts, fetchTickerPrices } from "./client";
 export {
   type Candle,
+  fetch24hTicker,
   fetch24hTickers,
   fetchKlines,
   fetchPerpetualSymbols,
