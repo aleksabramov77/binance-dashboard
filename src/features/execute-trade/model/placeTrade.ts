@@ -19,7 +19,6 @@ import {
 } from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
-import { appendTrade } from "../api/tradeLog";
 import { floorToStep, validateTrade } from "../lib/validateTrade";
 
 const errorText = (error: unknown) =>
@@ -37,7 +36,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     environment: "demo" as const,
     request: req,
   };
-  const finish = async (
+  const finish = (
     status: TradeResult["status"],
     message: string,
     entryPrice: number | null = null,
@@ -69,16 +68,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     else if (status === "unprotected")
       log.error("trade.unprotected", `${req.symbol}: ${message}`, logData);
     else log.warn("trade.rejected", `${req.symbol}: ${message}`, logData);
-    try {
-      await appendTrade(result);
-    } catch (error) {
-      log.error(
-        "trade.log",
-        "Не удалось записать журнал сделок",
-        logData,
-        error,
-      );
-    }
+    // История сделок читается с демо-счёта Binance, локально ничего не пишем.
     return result;
   };
 

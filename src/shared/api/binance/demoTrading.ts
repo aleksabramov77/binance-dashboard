@@ -1,3 +1,4 @@
+import { isStablecoin } from "@/shared/config";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getJsonWithRetry, HttpError } from "@/shared/lib/fetchRetry";
 import {
@@ -7,12 +8,15 @@ import {
   type FuturesOrder,
   futuresBalancesSchema,
   futuresOrderSchema,
+  futuresUserTradesSchema,
   orderListSchema,
   positionRiskSchema,
   priceSchema,
   type SpotOrder,
   spotAccountBalancesSchema,
+  spotMyTradesSchema,
   spotOrderSchema,
+  symbolRowsSchema,
 } from "./demoSchemas";
 import type { Market } from "./market";
 import { BinanceApiError, signedRequest } from "./signed";
@@ -273,4 +277,144 @@ export async function demoFuturesPosition(
     amount,
     entryPrice: rows.find((r) => r.positionAmt !== 0)?.entryPrice ?? 0,
   };
+}
+
+/** Одно исполнение (fill) ордера на демо-счёте. */
+export interface DemoFill {
+  market: Market;
+  symbol: string;
+  orderId: number;
+  /** Unix ms. */
+  time: number;
+  side: "BUY" | "SELL";
+  price: number;
+  qty: number;
+  quoteQty: number;
+  commission: number;
+  commissionAsset: string;
+  /** Только фьючерсы: зафиксированный PnL исполнения. */
+  realizedPnl: number | null;
+}
+
+const symbolsOf = (rows: { symbol: string }[]) =>
+  rows.map((r) => r.symbol).filter(Boolean);
+
+/**
+ * Символы, по которым на демо-счёте могли быть сделки. История сделок Binance
+ * требует symbol, поэтому собираем их из запросов без символа. Spot: OCO-история
+ * (каждая spot-сделка из дашборда ставит OCO), открытые ордера, монеты на балансе.
+ * Futures: income-история (комиссии и PnL), позиции, открытые и algo-ордера.
+ */
+export async function fetchDemoTradedSymbols(
+  creds: BinanceCredentials,
+): Promise<Record<Market, string[]>> {
+  const spot = (path: string, params = {}) =>
+    signedRequest(DEMO_URL.spot, creds, "GET", path, symbolRowsSchema, params);
+  const futures = (path: string, params = {}) =>
+    signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      path,
+      symbolRowsSchema,
+      params,
+    );
+  const [orderLists, spotOpen, account, income, positions, futOpen, algoOpen] =
+    await Promise.all([
+      spot("/api/v3/allOrderList", { limit: 1000 }),
+      spot("/api/v3/openOrders"),
+      signedRequest(
+        DEMO_URL.spot,
+        creds,
+        "GET",
+        "/api/v3/account",
+        spotAccountBalancesSchema,
+        { omitZeroBalances: true },
+      ),
+      futures("/fapi/v1/income", { limit: 1000 }),
+      signedRequest(
+        DEMO_URL.futures,
+        creds,
+        "GET",
+        "/fapi/v3/positionRisk",
+        positionRiskSchema,
+      ),
+      futures("/fapi/v1/openOrders"),
+      futures("/fapi/v1/openAlgoOrders"),
+    ]);
+  const held = account.balances
+    .filter((b) => b.free + b.locked > 0 && !isStablecoin(b.asset))
+    .map((b) => `${b.asset}USDT`);
+  return {
+    spot: [
+      ...new Set([...symbolsOf(orderLists), ...symbolsOf(spotOpen), ...held]),
+    ],
+    futures: [
+      ...new Set([
+        ...symbolsOf(income),
+        ...symbolsOf(positions.filter((p) => p.positionAmt !== 0)),
+        ...symbolsOf(futOpen),
+        ...symbolsOf(algoOpen),
+      ]),
+    ],
+  };
+}
+
+/** Последние исполнения по символу (Binance отдаёт старые сверху). Нет пары — пусто. */
+export async function fetchDemoFills(
+  creds: BinanceCredentials,
+  market: Market,
+  symbol: string,
+  limit = 100,
+): Promise<DemoFill[]> {
+  try {
+    if (market === "spot") {
+      const rows = await signedRequest(
+        DEMO_URL.spot,
+        creds,
+        "GET",
+        "/api/v3/myTrades",
+        spotMyTradesSchema,
+        { symbol, limit },
+      );
+      return rows.map((r) => ({
+        market,
+        symbol: r.symbol,
+        orderId: r.orderId,
+        time: r.time,
+        side: r.isBuyer ? "BUY" : "SELL",
+        price: r.price,
+        qty: r.qty,
+        quoteQty: r.quoteQty,
+        commission: r.commission,
+        commissionAsset: r.commissionAsset,
+        realizedPnl: null,
+      }));
+    }
+    const rows = await signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v1/userTrades",
+      futuresUserTradesSchema,
+      { symbol, limit },
+    );
+    return rows.map((r) => ({
+      market,
+      symbol: r.symbol,
+      orderId: r.orderId,
+      time: r.time,
+      side: r.side,
+      price: r.price,
+      qty: r.qty,
+      quoteQty: r.quoteQty,
+      commission: r.commission,
+      commissionAsset: r.commissionAsset,
+      realizedPnl: r.realizedPnl,
+    }));
+  } catch (error) {
+    // -1121 Invalid symbol: монета на балансе без пары к USDT.
+    if (error instanceof BinanceApiError && error.code === -1121) return [];
+    throw error;
+  }
 }
