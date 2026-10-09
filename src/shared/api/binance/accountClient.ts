@@ -1,8 +1,6 @@
-import { createHmac } from "node:crypto";
 import type { z } from "zod";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import {
-  binanceErrorSchema,
   type FlexiblePosition,
   type FundingAsset,
   flexiblePositionsSchema,
@@ -14,57 +12,20 @@ import {
   type WalletBalance,
   walletBalancesSchema,
 } from "./accountSchemas";
+import { type SignedParams, signedRequest as signed } from "./signed";
 
 const API_URL = "https://api.binance.com";
 const PAGE_SIZE = 100;
 
-export class BinanceApiError extends Error {
-  constructor(
-    message: string,
-    readonly code?: number,
-  ) {
-    super(message);
-  }
-}
-
-/** Подписанный запрос (HMAC SHA256). Секрет не покидает сервер. */
-async function signedRequest<T extends z.ZodType>(
+/** Чтение боевого аккаунта (read-only ключ). */
+function signedRequest<T extends z.ZodType>(
   creds: BinanceCredentials,
   method: "GET" | "POST",
   path: string,
   schema: T,
-  params: Record<string, string | number> = {},
+  params: SignedParams = {},
 ): Promise<z.infer<T>> {
-  const query = new URLSearchParams({
-    ...Object.fromEntries(
-      Object.entries(params).map(([k, v]) => [k, String(v)]),
-    ),
-    recvWindow: "10000",
-    timestamp: String(Date.now()),
-  });
-  query.set(
-    "signature",
-    createHmac("sha256", creds.apiSecret)
-      .update(query.toString())
-      .digest("hex"),
-  );
-
-  const res = await fetch(`${API_URL}${path}?${query}`, {
-    method,
-    headers: { "X-MBX-APIKEY": creds.apiKey },
-    cache: "no-store",
-  });
-  const body: unknown = await res.json();
-  if (!res.ok) {
-    const error = binanceErrorSchema.safeParse(body);
-    throw error.success
-      ? new BinanceApiError(
-          `Binance: ${error.data.msg} (${error.data.code})`,
-          error.data.code,
-        )
-      : new BinanceApiError(`Binance ответил ${res.status} на ${path}`);
-  }
-  return schema.parse(body);
+  return signed(API_URL, creds, method, path, schema, params);
 }
 
 export async function fetchSpotAccount(

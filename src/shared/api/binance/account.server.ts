@@ -1,6 +1,5 @@
 // Подписанные запросы к аккаунту: только для сервера (node:crypto, секрет API).
 export {
-  BinanceApiError,
   fetchFlexiblePositions,
   fetchFundingAssets,
   fetchLockedPositions,
@@ -14,3 +13,4 @@ export type {
   SpotAccount,
   WalletBalance,
 } from "./accountSchemas";
+export { BinanceApiError } from "./signed";

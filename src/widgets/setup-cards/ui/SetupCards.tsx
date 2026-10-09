@@ -1,8 +1,9 @@
 import { DirectionBadge, type Setup } from "@/entities/market-signal";
+import type { TradeOverview } from "@/entities/trade";
 import { type RiskSettings, sizePosition } from "@/features/position-sizing";
+import { TradeTicketDialog } from "@/features/trade-ticket";
 import { cn, formatAmount, formatPrice, formatUsd } from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
-import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 
 const KIND_LABELS: Record<Setup["kind"], string> = {
@@ -39,9 +40,11 @@ function Level({
 function SetupCard({
   setup,
   settings,
+  overview,
 }: {
   setup: Setup;
   settings: RiskSettings;
+  overview: TradeOverview | undefined;
 }) {
   const size = sizePosition(setup, settings);
   return (
@@ -125,14 +128,12 @@ function SetupCard({
           ))}
         </ul>
 
-        <Button
-          className="w-full"
-          variant="outline"
-          disabled
-          title="Появится на шаге 5: сделка в один клик на тестнете"
-        >
-          Сделка в 1 клик — скоро (тестнет)
-        </Button>
+        <TradeTicketDialog
+          setup={setup}
+          quantity={size.quantity}
+          leverage={size.leverage}
+          overview={overview}
+        />
       </CardContent>
     </Card>
   );
@@ -141,9 +142,11 @@ function SetupCard({
 export function SetupCards({
   setups,
   settings,
+  overview,
 }: {
   setups: Setup[];
   settings: RiskSettings;
+  overview: TradeOverview | undefined;
 }) {
   if (setups.length === 0) {
     return (
@@ -156,7 +159,12 @@ export function SetupCards({
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {setups.map((s) => (
-        <SetupCard key={s.id} setup={s} settings={settings} />
+        <SetupCard
+          key={s.id}
+          setup={s}
+          settings={settings}
+          overview={overview}
+        />
       ))}
     </div>
   );

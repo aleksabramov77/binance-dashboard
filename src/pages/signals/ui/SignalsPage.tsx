@@ -3,14 +3,17 @@
 import { RefreshCw } from "lucide-react";
 import { Suspense } from "react";
 import { useScan } from "@/entities/market-signal";
+import { useTradeOverview } from "@/entities/trade";
 import { RiskSettingsBar, useRiskSettings } from "@/features/position-sizing";
 import { formatDateTime } from "@/shared/lib";
 import { Button } from "@/shared/ui/button";
 import { MarketMovers } from "@/widgets/market-movers";
 import { SetupCards } from "@/widgets/setup-cards";
+import { TradeLog } from "@/widgets/trade-log";
 
 function Signals() {
   const scan = useScan();
+  const tradeOverview = useTradeOverview();
   const [settings] = useRiskSettings();
   const data = scan.data;
 
@@ -52,13 +55,19 @@ function Signals() {
                 · {data.setups.length}
               </span>
             </h2>
-            <SetupCards setups={data.setups} settings={settings} />
+            <SetupCards
+              setups={data.setups}
+              settings={settings}
+              overview={tradeOverview.data}
+            />
           </section>
+          {tradeOverview.data && <TradeLog overview={tradeOverview.data} />}
           <MarketMovers gainers={data.gainers} losers={data.losers} />
           <p className="text-xs text-muted-foreground">
             Сетапы — гипотезы по простым правилам (сильное движение за 24 ч +
             экстремальный RSI + отрыв от EMA50), а не гарантия. Их точность ещё
-            не проверена журналом. Шорт — только фьючерсы, плечо не выше 3x. Это
+            не проверена журналом. Шорт — только фьючерсы, плечо не выше 3x.
+            Сделки идут только в Binance Demo Trading (виртуальные деньги). Это
             не финансовый совет.
           </p>
         </>
