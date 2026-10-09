@@ -48,20 +48,30 @@ interface JsonRequest<T extends z.ZodType> {
   maxTokens?: number;
 }
 
+/**
+ * С этого Mac соединения к OpenRouter иногда рвутся пачками по несколько секунд
+ * (UND_ERR_SOCKET: other side closed, наблюдалось 2026-10-09: 3 обрыва подряд, успех на 4-й
+ * попытке через ~6 с). Разбор запускает сам пользователь, поэтому ждём дольше: ~11 с повторов.
+ */
+const OPENROUTER_RETRY_DELAYS_MS = [500, 1500, 3000, 6000];
+
 async function post(config: LlmConfig, body: Record<string, unknown>) {
   const payload = JSON.stringify(body);
   // Сетевой сбой (OpenRouter не ответил вовсе) повторяем — это безопасно.
-  const res = await withRetry("OpenRouter", () =>
-    fetch(API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-        "X-Title": "Binance Dashboard (personal)",
-      },
-      body: payload,
-      cache: "no-store",
-    }),
+  const res = await withRetry(
+    "OpenRouter",
+    () =>
+      fetch(API_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json",
+          "X-Title": "Binance Dashboard (personal)",
+        },
+        body: payload,
+        cache: "no-store",
+      }),
+    OPENROUTER_RETRY_DELAYS_MS,
   );
   const json: unknown = await res.json().catch(() => null);
   if (!res.ok) {
