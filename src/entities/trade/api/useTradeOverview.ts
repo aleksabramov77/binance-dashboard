@@ -14,5 +14,7 @@ export function useTradeOverview() {
   return useQuery({
     queryKey: tradeOverviewQueryKey,
     queryFn: getTradeOverview,
+    // Открытые позиции закрываются на бирже сами (TP/SL) — пометки сетапов обновляем.
+    refetchInterval: 60_000,
   });
 }

@@ -8,6 +8,7 @@ export {
   demoSpotMarketOrder,
   demoSpotOcoSell,
   fetchDemoFills,
+  fetchDemoOpenSymbols,
   fetchDemoPrice,
   fetchDemoSymbolRules,
   fetchDemoTradedSymbols,

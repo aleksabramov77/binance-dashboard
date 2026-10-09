@@ -48,9 +48,15 @@ function SetupCard({
   overview: TradeOverview | undefined;
 }) {
   const size = sizePosition(setup, settings);
+  // Позиция или TP/SL по символу ещё открыты на демо — в этот сетап уже зашли.
+  const entered =
+    overview?.openSymbols?.[setup.market].includes(setup.symbol) ?? false;
   return (
     <Card
-      className={setup.status === "ready" ? "border-primary/50" : undefined}
+      className={cn(
+        setup.status === "ready" && !entered && "border-primary/50",
+        entered && "border-positive/50",
+      )}
     >
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
@@ -59,12 +65,21 @@ function SetupCard({
           <span className="text-xs font-normal text-muted-foreground">
             {setup.market === "spot" ? "Spot" : `Фьючерс ×${size.leverage}`}
           </span>
-          <Badge
-            variant={setup.status === "ready" ? "default" : "outline"}
-            className="ml-auto"
-          >
-            {setup.status === "ready" ? "можно входить" : "ждём разворота"}
-          </Badge>
+          {entered ? (
+            <Badge
+              variant="outline"
+              className="ml-auto border-positive/50 text-positive"
+            >
+              ✓ уже в сделке
+            </Badge>
+          ) : (
+            <Badge
+              variant={setup.status === "ready" ? "default" : "outline"}
+              className="ml-auto"
+            >
+              {setup.status === "ready" ? "можно входить" : "ждём разворота"}
+            </Badge>
+          )}
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           {KIND_LABELS[setup.kind]} · R:R{" "}
@@ -130,7 +145,12 @@ function SetupCard({
         </ul>
 
         <SetupReview setup={setup} />
-        {setup.demoTradable === false ? (
+        {entered ? (
+          <p className="rounded-md border border-dashed border-positive/50 px-3 py-2 text-center text-sm text-muted-foreground">
+            Вы уже зашли в {setup.base}: на демо открыта позиция или висят
+            TP/SL. Повторный вход — после их закрытия.
+          </p>
+        ) : setup.demoTradable === false ? (
           <p className="rounded-md border border-dashed px-3 py-2 text-center text-sm text-muted-foreground">
             {setup.base} нет в Binance Demo Trading (
             {setup.market === "spot" ? "Spot" : "Futures"}) — сделку в демо
