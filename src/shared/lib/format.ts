@@ -27,6 +27,10 @@ export const formatUsd = (value: number) =>
 export const formatAmount = (value: number) => amount.format(value);
 export const formatDateTime = (iso: string) => dateTime.format(new Date(iso));
 
+const price = new Intl.NumberFormat("ru-RU", { maximumSignificantDigits: 5 });
+/** Цена с 5 значащими цифрами: 82 520, 1,2345, 0,000012345. */
+export const formatPrice = (value: number) => price.format(value);
+
 /** Изменение в процентных пунктах: +0,52 п.п. */
 export function formatPpDelta(delta: number): string {
   const pp = (delta * 100).toFixed(2).replace(".", ",");
