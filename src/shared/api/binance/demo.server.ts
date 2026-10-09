@@ -1,10 +1,14 @@
 // Торговля в Binance Demo Trading: только для сервера (секрет API).
+
+export type {
+  DemoCloseKind,
+  DemoProtectiveStop,
+  DemoSymbolOrders,
+} from "./demoOrders";
 export {
-  type DemoCloseKind,
   type DemoFill,
   type DemoPosition,
-  type DemoProtectiveStop,
-  type DemoSymbolOrders,
+  type DemoTradeSnapshot,
   demoFuturesCloseAt,
   demoFuturesMarketOrder,
   demoFuturesPosition,

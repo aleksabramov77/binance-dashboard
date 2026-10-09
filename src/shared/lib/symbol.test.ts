@@ -8,8 +8,13 @@ describe("splitSymbol / formatPair", () => {
     expect(formatPair("MAGICUSDT")).toBe("MAGIC-USDT");
   });
 
+  it("кросс-пары к BTC/ETH/BNB", () => {
+    expect(splitSymbol("ETHBTC")).toEqual({ base: "ETH", quote: "BTC" });
+    expect(formatPair("SOLBNB")).toBe("SOL-BNB");
+  });
+
   it("неизвестная котируемая — символ как есть", () => {
-    expect(splitSymbol("ETHBTC")).toEqual({ base: "ETHBTC", quote: "" });
-    expect(formatPair("ETHBTC")).toBe("ETHBTC");
+    expect(splitSymbol("ABCXYZ")).toEqual({ base: "ABCXYZ", quote: "" });
+    expect(formatPair("ABCXYZ")).toBe("ABCXYZ");
   });
 });

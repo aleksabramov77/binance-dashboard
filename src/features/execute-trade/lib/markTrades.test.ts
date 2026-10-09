@@ -84,7 +84,7 @@ describe("markTrades — futures", () => {
       [entry],
       state({
         position: { amount: -100, entryPrice: 0.0139, unrealizedPnl: 2.4 },
-        openStops: [{ triggerPrice: 0.0147, trailing: false }],
+        openStops: [{ side: "BUY", triggerPrice: 0.0147, trailing: false }],
       }),
     );
     expect(marks.get(entry.orderId)).toMatchObject({
@@ -102,12 +102,18 @@ describe("markTrades — futures", () => {
     );
     const trailing = markTrades(
       [entry],
-      state({ position, openStops: [{ triggerPrice: 0.95, trailing: false }] }),
+      state({
+        position,
+        openStops: [{ side: "BUY", triggerPrice: 0.95, trailing: false }],
+      }),
     );
     expect(statusOf(trailing, entry)).toBe("open-trailing");
     const trailingOrder = markTrades(
       [entry],
-      state({ position, openStops: [{ triggerPrice: 1.2, trailing: true }] }),
+      state({
+        position,
+        openStops: [{ side: "BUY", triggerPrice: 1.2, trailing: true }],
+      }),
     );
     expect(statusOf(trailingOrder, entry)).toBe("open-trailing");
   });
@@ -125,6 +131,111 @@ describe("markTrades — futures", () => {
     );
     expect(statusOf(marks, exit)).toBe("sl");
     expect(marks.get(exit.orderId)?.role).toBe("exit");
+  });
+
+  it("стоп противоположной стороны (забытый от прошлого шорта) не защищает лонг", () => {
+    const entry = order({ side: "BUY", time: 1, avgPrice: 1 });
+    const marks = markTrades(
+      [entry],
+      state({
+        position: { amount: 100, entryPrice: 1, unrealizedPnl: 0 },
+        openStops: [{ side: "BUY", triggerPrice: 1.3, trailing: false }],
+      }),
+    );
+    expect(marks.get(entry.orderId)).toMatchObject({
+      status: "open-unprotected",
+      stopPrice: null,
+    });
+  });
+
+  it("лонг: берётся самый высокий из своих стопов; ниже входа — «open»", () => {
+    const entry = order({ side: "BUY", time: 1, avgPrice: 1 });
+    const marks = markTrades(
+      [entry],
+      state({
+        position: { amount: 100, entryPrice: 1, unrealizedPnl: 0 },
+        openStops: [
+          { side: "SELL", triggerPrice: 0.9, trailing: false },
+          { side: "SELL", triggerPrice: 0.95, trailing: false },
+        ],
+      }),
+    );
+    expect(marks.get(entry.orderId)).toMatchObject({
+      status: "open",
+      stopPrice: 0.95,
+    });
+  });
+
+  it("trailing до активации (триггер 0): защищена, но цену SL не показываем", () => {
+    const entry = order({ time: 1 });
+    const marks = markTrades(
+      [entry],
+      state({
+        position: { amount: -100, entryPrice: 1, unrealizedPnl: 0 },
+        openStops: [{ side: "BUY", triggerPrice: 0, trailing: true }],
+      }),
+    );
+    expect(marks.get(entry.orderId)).toMatchObject({
+      status: "open-trailing",
+      stopPrice: null,
+    });
+  });
+
+  it("закрытая и следом открытая сделка по одному символу — разные статусы", () => {
+    const e1 = order({ time: 1 });
+    const x1 = order({ side: "BUY", time: 2, realizedPnl: -1 });
+    const e2 = order({ time: 3 });
+    const marks = markTrades(
+      [e2, x1, e1],
+      state({
+        closeKinds: new Map([[x1.orderId, "sl"]]),
+        position: { amount: -100, entryPrice: 1, unrealizedPnl: 0 },
+        openStops: [{ side: "BUY", triggerPrice: 1.1, trailing: false }],
+      }),
+    );
+    expect(statusOf(marks, e1)).toBe("sl");
+    expect(statusOf(marks, x1)).toBe("sl");
+    expect(statusOf(marks, e2)).toBe("open");
+  });
+
+  it("частичный выход при открытой позиции — сделка ещё открыта, выход с ролью exit", () => {
+    const entry = order({ time: 1, quantity: 100 });
+    const part = order({ side: "BUY", time: 2, quantity: 40, realizedPnl: 2 });
+    const marks = markTrades(
+      [entry, part],
+      state({
+        position: { amount: -60, entryPrice: 1, unrealizedPnl: 1 },
+        openStops: [{ side: "BUY", triggerPrice: 1.1, trailing: false }],
+      }),
+    );
+    expect(marks.get(part.orderId)).toMatchObject({
+      status: "open",
+      role: "exit",
+    });
+    expect(statusOf(marks, entry)).toBe("open");
+  });
+
+  it("разворот одним ордером: шорт закрыт, остаток — новая сделка (лонг)", () => {
+    const short = order({ side: "SELL", time: 1, quantity: 10 });
+    const flip = order({
+      side: "BUY",
+      time: 2,
+      quantity: 15,
+      avgPrice: 1,
+      realizedPnl: -0.5,
+    });
+    const marks = markTrades(
+      [short, flip],
+      state({
+        position: { amount: 5, entryPrice: 1, unrealizedPnl: 0 },
+        openStops: [{ side: "SELL", triggerPrice: 0.9, trailing: false }],
+      }),
+    );
+    expect(statusOf(marks, short)).toBe("manual-loss");
+    expect(marks.get(flip.orderId)).toMatchObject({
+      status: "open",
+      role: "entry",
+    });
   });
 
   it("данные для статуса не загрузились → «unknown»", () => {
@@ -176,7 +287,7 @@ describe("markTrades — spot", () => {
       [buy],
       state({
         position: { amount: 0.999, entryPrice: null, unrealizedPnl: null },
-        openStops: [{ triggerPrice: 95, trailing: false }],
+        openStops: [{ side: "SELL", triggerPrice: 95, trailing: false }],
       }),
     );
     expect(statusOf(marks, buy)).toBe("open");

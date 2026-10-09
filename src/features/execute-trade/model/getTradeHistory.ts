@@ -1,11 +1,9 @@
 import type { ExecutedOrder, TradeHistory } from "@/entities/trade";
 import type { Market } from "@/shared/api/binance";
 import {
-  type DemoPosition,
   type DemoSymbolOrders,
+  type DemoTradeSnapshot,
   fetchDemoFills,
-  fetchDemoFuturesPositions,
-  fetchDemoSpotHoldings,
   fetchDemoSymbolOrders,
   fetchDemoTradedSymbols,
 } from "@/shared/api/binance/demo.server";
@@ -20,7 +18,7 @@ import {
 } from "../lib/markTrades";
 
 const ORDERS_LIMIT = 30;
-/** Защита от лавины запросов: на символ уходит 2–3 запроса по 5–20 веса. */
+/** Защита от лавины запросов: на символ уходит 2–3 запроса по 5–20 веса (≤ ~800 веса всего). */
 const SYMBOLS_LIMIT = 40;
 
 const errorText = (error: unknown) =>
@@ -29,17 +27,15 @@ const errorText = (error: unknown) =>
 const settledValue = <T>(r: PromiseSettledResult<T>): T | null =>
   r.status === "fulfilled" ? r.value : null;
 
-/** Состояние символа на бирже; не загрузилось что-то нужное — null («статус неизвестен»). */
+/** Состояние символа на бирже; ордера не загрузились — null («статус неизвестен»). */
 function symbolState(
   market: Market,
   symbol: string,
   orders: DemoSymbolOrders | null,
-  positions: Map<string, DemoPosition> | null,
-  holdings: Map<string, number> | null,
+  { positions, holdings }: DemoTradeSnapshot,
 ): SymbolState | null {
   if (!orders) return null;
   if (market === "futures") {
-    if (!positions) return null;
     const p = positions.get(symbol);
     return {
       ...orders,
@@ -52,7 +48,6 @@ function symbolState(
         : null,
     };
   }
-  if (!holdings) return null;
   const amount = holdings.get(splitSymbol(symbol).base) ?? 0;
   return {
     ...orders,
@@ -70,32 +65,27 @@ export async function getTradeHistory(): Promise<TradeHistory> {
   if (!config) return { configured: false, error: null, orders: [] };
   const creds = config.credentials;
 
-  let symbols: Record<Market, string[]>;
+  // Символы + позиции и баланс одним снимком: они же нужны для статусов открытых сделок.
+  let snapshot: DemoTradeSnapshot;
   try {
-    symbols = await fetchDemoTradedSymbols(creds);
+    snapshot = await fetchDemoTradedSymbols(creds);
   } catch (error) {
     return { configured: true, error: errorText(error), orders: [] };
   }
 
   const pairs = (["spot", "futures"] as const)
-    .flatMap((market) => symbols[market].map((symbol) => ({ market, symbol })))
+    .flatMap((market) =>
+      snapshot.symbols[market].map((symbol) => ({ market, symbol })),
+    )
     .slice(0, SYMBOLS_LIMIT);
-  const [fillResults, orderResults, positionsResult, holdingsResult] =
-    await Promise.all([
-      Promise.allSettled(
-        pairs.map((p) => fetchDemoFills(creds, p.market, p.symbol)),
-      ),
-      Promise.allSettled(
-        pairs.map((p) => fetchDemoSymbolOrders(creds, p.market, p.symbol)),
-      ),
-      Promise.allSettled([fetchDemoFuturesPositions(creds)]),
-      Promise.allSettled([fetchDemoSpotHoldings(creds)]),
-    ]);
-  const positions = settledValue(positionsResult[0]);
-  const holdings = settledValue(holdingsResult[0]);
-  for (const r of [...positionsResult, ...holdingsResult])
-    if (r.status === "rejected")
-      log.warn("trade.history", `позиции/баланс: ${errorText(r.reason)}`);
+  const [fillResults, orderResults] = await Promise.all([
+    Promise.allSettled(
+      pairs.map((p) => fetchDemoFills(creds, p.market, p.symbol)),
+    ),
+    Promise.allSettled(
+      pairs.map((p) => fetchDemoSymbolOrders(creds, p.market, p.symbol)),
+    ),
+  ]);
 
   const failed: string[] = [];
   const orders: ExecutedOrder[] = [];
@@ -115,13 +105,7 @@ export async function getTradeHistory(): Promise<TradeHistory> {
     const aggregates = groupFills(fills.value);
     const marks = markTrades(
       aggregates,
-      symbolState(
-        market,
-        symbol,
-        settledValue(symbolOrders),
-        positions,
-        holdings,
-      ),
+      symbolState(market, symbol, settledValue(symbolOrders), snapshot),
     );
     for (const o of aggregates)
       orders.push(toExecutedOrder(o, marks.get(o.orderId)));

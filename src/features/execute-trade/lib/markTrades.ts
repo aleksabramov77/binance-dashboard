@@ -50,6 +50,12 @@ const DUST: Record<OrderAggregate["market"], number> = {
   futures: 1e-6,
 };
 
+/**
+ * Spot: сделка считается открытой, если на балансе осталось не меньше этой доли купленного.
+ * Меньше — монету продали/перевели мимо истории (или это пыль).
+ */
+const SPOT_HELD_SHARE = 0.5;
+
 const signOf = (o: OrderAggregate): 1 | -1 => (o.side === "BUY" ? 1 : -1);
 
 /** Разбивает ордера символа на сделки: рост |позиции| — вход, уменьшение — выход. */
@@ -66,9 +72,24 @@ function splitTrades(orders: OrderAggregate[]): Trade[] {
           ? (o.realizedPnl ?? 0)
           : (o.avgPrice - cur.entryCost / cur.entryQty) * closeQty * cur.dir;
       cur.pnl = cur.pnl === null ? null : cur.pnl + pnl;
-      cur.remaining -= o.quantity;
+      const reversal: number = o.quantity - cur.remaining;
+      cur.remaining = Math.max(0, cur.remaining - o.quantity);
       cur.lastExit = o;
       cur.orders.push({ order: o, role: "exit", pnl });
+      // Разворот одним ордером (шорт 10 закрыт покупкой 15): остаток — вход новой сделки.
+      // Строка ордера получит статус новой сделки (она обрабатывается позже).
+      if (reversal > cur.entryQty * DUST[o.market]) {
+        cur = {
+          dir,
+          remaining: reversal,
+          entryQty: reversal,
+          entryCost: reversal * o.avgPrice,
+          pnl: 0,
+          lastExit: null,
+          orders: [{ order: o, role: "entry", pnl: null }],
+        };
+        trades.push(cur);
+      }
       continue;
     }
     if (cur && !isClosed) {
@@ -153,16 +174,22 @@ export function markTrades(
       const stillOpen =
         market === "futures"
           ? Math.sign(amount) === trade.dir
-          : amount >= trade.remaining * 0.5;
+          : amount >= trade.remaining * SPOT_HELD_SHARE;
       if (stillOpen) {
         const entry =
           state.position.entryPrice || trade.entryCost / trade.entryQty;
-        const stops = state.openStops;
+        // Позицию защищают только стопы закрывающей стороны: SELL у лонга, BUY у шорта.
+        // Стоп другой стороны — забытый ордер от прошлой сделки (closePosition висит).
+        const stops = state.openStops.filter(
+          (s) => s.side === (trade.dir === 1 ? "SELL" : "BUY"),
+        );
+        // Trailing до активации может прийти с триггером 0 — цену SL из него не берём.
+        const triggers = stops.map((s) => s.triggerPrice).filter((p) => p > 0);
         // Ближайший к цене стоп: у лонга — самый высокий, у шорта — самый низкий.
-        stopPrice = stops.length
+        stopPrice = triggers.length
           ? trade.dir === 1
-            ? Math.max(...stops.map((s) => s.triggerPrice))
-            : Math.min(...stops.map((s) => s.triggerPrice))
+            ? Math.max(...triggers)
+            : Math.min(...triggers)
           : null;
         unrealizedPnl = state.position.unrealizedPnl;
         const lockedProfit =
@@ -170,7 +197,7 @@ export function markTrades(
           (stopPrice !== null &&
             (trade.dir === 1 ? stopPrice >= entry : stopPrice <= entry));
         status =
-          stopPrice === null
+          stops.length === 0
             ? "open-unprotected"
             : lockedProfit
               ? "open-trailing"

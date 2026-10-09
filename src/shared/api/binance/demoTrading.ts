@@ -2,6 +2,11 @@ import { isStablecoin } from "@/shared/config";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getJsonWithRetry, HttpError } from "@/shared/lib/fetchRetry";
 import {
+  type DemoSymbolOrders,
+  toFuturesSymbolOrders,
+  toSpotSymbolOrders,
+} from "./demoOrders";
+import {
   algoHistorySchema,
   algoOrderSchema,
   anySchema,
@@ -302,6 +307,15 @@ export interface DemoFill {
 const symbolsOf = (rows: { symbol: string }[]) =>
   rows.map((r) => r.symbol).filter(Boolean);
 
+/** Символы с возможной историей сделок + текущие позиции и баланс (нужны и для статусов). */
+export interface DemoTradeSnapshot {
+  symbols: Record<Market, string[]>;
+  /** Открытые позиции демо-фьючерсов по символам. */
+  positions: Map<string, DemoPosition>;
+  /** Монеты на демо-споте: актив → free + locked. */
+  holdings: Map<string, number>;
+}
+
 /**
  * Символы, по которым на демо-счёте могли быть сделки. История сделок Binance
  * требует symbol, поэтому собираем их из запросов без символа. Spot: OCO-история
@@ -310,7 +324,7 @@ const symbolsOf = (rows: { symbol: string }[]) =>
  */
 export async function fetchDemoTradedSymbols(
   creds: BinanceCredentials,
-): Promise<Record<Market, string[]>> {
+): Promise<DemoTradeSnapshot> {
   const spot = (path: string, params = {}) =>
     signedRequest(DEMO_URL.spot, creds, "GET", path, symbolRowsSchema, params);
   const futures = (path: string, params = {}) =>
@@ -322,44 +336,35 @@ export async function fetchDemoTradedSymbols(
       symbolRowsSchema,
       params,
     );
-  const [orderLists, spotOpen, account, income, positions, futOpen, algoOpen] =
+  const [orderLists, spotOpen, holdings, income, positions, futOpen, algoOpen] =
     await Promise.all([
       spot("/api/v3/allOrderList", { limit: 1000 }),
       spot("/api/v3/openOrders"),
-      signedRequest(
-        DEMO_URL.spot,
-        creds,
-        "GET",
-        "/api/v3/account",
-        spotAccountBalancesSchema,
-        { omitZeroBalances: true },
-      ),
+      fetchDemoSpotHoldings(creds),
       futures("/fapi/v1/income", { limit: 1000 }),
-      signedRequest(
-        DEMO_URL.futures,
-        creds,
-        "GET",
-        "/fapi/v3/positionRisk",
-        positionRiskSchema,
-      ),
+      fetchDemoFuturesPositions(creds),
       futures("/fapi/v1/openOrders"),
       futures("/fapi/v1/openAlgoOrders"),
     ]);
-  const held = account.balances
-    .filter((b) => b.free + b.locked > 0 && !isStablecoin(b.asset))
-    .map((b) => `${b.asset}USDT`);
+  const held = [...holdings]
+    .filter(([asset, amount]) => amount > 0 && !isStablecoin(asset))
+    .map(([asset]) => `${asset}USDT`);
   return {
-    spot: [
-      ...new Set([...symbolsOf(orderLists), ...symbolsOf(spotOpen), ...held]),
-    ],
-    futures: [
-      ...new Set([
-        ...symbolsOf(income),
-        ...symbolsOf(positions.filter((p) => p.positionAmt !== 0)),
-        ...symbolsOf(futOpen),
-        ...symbolsOf(algoOpen),
-      ]),
-    ],
+    symbols: {
+      spot: [
+        ...new Set([...symbolsOf(orderLists), ...symbolsOf(spotOpen), ...held]),
+      ],
+      futures: [
+        ...new Set([
+          ...symbolsOf(income),
+          ...positions.keys(),
+          ...symbolsOf(futOpen),
+          ...symbolsOf(algoOpen),
+        ]),
+      ],
+    },
+    positions,
+    holdings,
   };
 }
 
@@ -473,81 +478,27 @@ export async function fetchDemoFills(
   }
 }
 
-/** Чем исполнился ордер выхода: тейк, стоп, trailing-стоп или ликвидация. */
-export type DemoCloseKind = "tp" | "sl" | "trailing" | "liquidation";
-
-export interface DemoProtectiveStop {
-  triggerPrice: number;
-  trailing: boolean;
-}
-
-/** Ордера символа, нужные для статусов сделок. */
-export interface DemoSymbolOrders {
-  /** orderId исполненного ордера → чем он был (обычный ручной ордер в карте отсутствует). */
-  closeKinds: Map<number, DemoCloseKind>;
-  /** Активные защитные стопы (SL / trailing) по символу. */
-  openStops: DemoProtectiveStop[];
-}
-
-const FUTURES_KIND: Record<string, DemoCloseKind> = {
-  TAKE_PROFIT_MARKET: "tp",
-  TAKE_PROFIT: "tp",
-  STOP_MARKET: "sl",
-  STOP: "sl",
-  TRAILING_STOP_MARKET: "trailing",
-  LIQUIDATION: "liquidation",
-};
-
-const SPOT_KIND: Record<string, DemoCloseKind> = {
-  // В OCO лимитный тейк выставляется как LIMIT_MAKER.
-  LIMIT_MAKER: "tp",
-  TAKE_PROFIT: "tp",
-  TAKE_PROFIT_LIMIT: "tp",
-  STOP_LOSS: "sl",
-  STOP_LOSS_LIMIT: "sl",
-};
-
-/** Ликвидация и ADL на фьючерсах приходят ордерами с такими clientOrderId. */
-const isLiquidationId = (clientOrderId: string) =>
-  clientOrderId.startsWith("autoclose-") ||
-  clientOrderId.startsWith("adl_autoclose");
-
 /**
- * История ордеров символа для статусов сделок. Futures: TP/SL ставятся algo-ордерами —
- * у сработавшего `actualOrderId` = id рыночного ордера выхода; ликвидации — из allOrders.
- * Spot: тип ордера из OCO. Символа нет на демо — пустой результат.
+ * История ордеров символа для статусов сделок (маппинг — `demoOrders.ts`).
+ * Символа нет на демо — пустой результат.
  */
 export async function fetchDemoSymbolOrders(
   creds: BinanceCredentials,
   market: Market,
   symbol: string,
 ): Promise<DemoSymbolOrders> {
-  const closeKinds = new Map<number, DemoCloseKind>();
-  const openStops: DemoProtectiveStop[] = [];
-  const addStop = (type: string, triggerPrice: number) => {
-    if (type.startsWith("STOP") || type === "TRAILING_STOP_MARKET")
-      openStops.push({
-        triggerPrice,
-        trailing: type === "TRAILING_STOP_MARKET",
-      });
-  };
   try {
-    if (market === "spot") {
-      const orders = await signedRequest(
-        DEMO_URL.spot,
-        creds,
-        "GET",
-        "/api/v3/allOrders",
-        spotAllOrdersSchema,
-        { symbol, limit: 500 },
+    if (market === "spot")
+      return toSpotSymbolOrders(
+        await signedRequest(
+          DEMO_URL.spot,
+          creds,
+          "GET",
+          "/api/v3/allOrders",
+          spotAllOrdersSchema,
+          { symbol, limit: 500 },
+        ),
       );
-      for (const o of orders) {
-        const kind = SPOT_KIND[o.type];
-        if (o.status === "FILLED" && kind) closeKinds.set(o.orderId, kind);
-        if (o.status === "NEW") addStop(o.type, o.stopPrice);
-      }
-      return { closeKinds, openStops };
-    }
     const [algos, orders] = await Promise.all([
       signedRequest(
         DEMO_URL.futures,
@@ -566,27 +517,10 @@ export async function fetchDemoSymbolOrders(
         { symbol, limit: 500 },
       ),
     ]);
-    for (const a of algos) {
-      const kind = FUTURES_KIND[a.orderType];
-      if (kind && a.actualOrderId)
-        closeKinds.set(Number(a.actualOrderId), kind);
-      if (a.algoStatus === "NEW") addStop(a.orderType, a.triggerPrice);
-    }
-    for (const o of orders) {
-      if (o.status !== "FILLED" && o.status !== "NEW") continue;
-      if (o.status === "NEW") {
-        addStop(o.type, o.stopPrice);
-        continue;
-      }
-      if (isLiquidationId(o.clientOrderId))
-        closeKinds.set(o.orderId, "liquidation");
-      else if (FUTURES_KIND[o.type] && !closeKinds.has(o.orderId))
-        closeKinds.set(o.orderId, FUTURES_KIND[o.type]);
-    }
-    return { closeKinds, openStops };
+    return toFuturesSymbolOrders(algos, orders);
   } catch (error) {
     if (error instanceof BinanceApiError && error.code === -1121)
-      return { closeKinds, openStops };
+      return { closeKinds: new Map(), openStops: [] };
     throw error;
   }
 }

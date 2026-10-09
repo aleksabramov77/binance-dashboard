@@ -79,10 +79,15 @@ export const algoHistorySchema = z.array(
     .object({
       symbol: z.string(),
       orderType: z.string(),
+      side: z.enum(["BUY", "SELL"]),
       algoStatus: z.string(),
-      triggerPrice: decimal,
-      // id рыночного ордера, которым исполнился TP/SL; "" — ещё не срабатывал.
-      actualOrderId: z.coerce.string().catch(""),
+      triggerPrice: decimal.catch(0),
+      // id рыночного ордера, которым исполнился TP/SL; "" или нет поля — ещё не срабатывал.
+      actualOrderId: z
+        .union([z.string(), z.number()])
+        .optional()
+        .transform((v) => (v === undefined || v === "" ? null : Number(v)))
+        .catch(null),
     })
     .loose(),
 );
@@ -92,6 +97,7 @@ export const futuresAllOrdersSchema = z.array(
     .object({
       orderId: z.number(),
       type: z.string(),
+      side: z.enum(["BUY", "SELL"]),
       status: z.string(),
       clientOrderId: z.string(),
       stopPrice: decimal.catch(0),
@@ -104,6 +110,7 @@ export const spotAllOrdersSchema = z.array(
     .object({
       orderId: z.number(),
       type: z.string(),
+      side: z.enum(["BUY", "SELL"]),
       status: z.string(),
       stopPrice: decimal.catch(0),
     })

@@ -10,5 +10,8 @@ export function demoChartUrl(
 ): string {
   if (market === "futures") return `${DEMO_WEB_URL}/futures/${symbol}`;
   const { base, quote } = splitSymbol(symbol);
-  return `${DEMO_WEB_URL}/trade/${base}_${quote}?type=spot`;
+  // Неизвестная котируемая валюта — страница рынков вместо битой ссылки «ABC_».
+  return quote
+    ? `${DEMO_WEB_URL}/trade/${base}_${quote}?type=spot`
+    : `${DEMO_WEB_URL}/markets/overview`;
 }

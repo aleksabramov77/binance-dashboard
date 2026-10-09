@@ -1,4 +1,16 @@
-const QUOTES = ["USDT", "USDC", "FDUSD", "BUSD"];
+/** Котируемые валюты Binance; стейблкоины раньше BTC/ETH, чтобы BTCUSDT не делился как …/BTC. */
+const QUOTES = [
+  "USDT",
+  "USDC",
+  "FDUSD",
+  "TUSD",
+  "BUSD",
+  "BTC",
+  "ETH",
+  "BNB",
+  "EUR",
+  "TRY",
+];
 
 /** BATUSDT → { base: "BAT", quote: "USDT" }; неизвестная котируемая — весь символ в base. */
 export function splitSymbol(symbol: string): { base: string; quote: string } {
