@@ -73,6 +73,7 @@ describe("runAutoTradeCycle", () => {
         place,
         recheck: async () => ({ ...recheckOf(fresh), status: "changed" }),
       }),
+      undefined,
       Date.parse("2026-10-10T12:00:00Z"),
     );
     expect(place).toHaveBeenCalledOnce();
@@ -85,7 +86,8 @@ describe("runAutoTradeCycle", () => {
       leverage: 2,
       setupId: "auto:BATUSDT:short",
     });
-    expect(state.entries["BATUSDT:short"]).toBeDefined();
+    // Пауза 2 ч после входа.
+    expect(state.holds["BATUSDT:short"]).toBe("2026-10-10T14:00:00.000Z");
     expect(state.actions[0]).toMatchObject({
       outcome: "opened",
       symbol: "BATUSDT",
@@ -120,7 +122,55 @@ describe("runAutoTradeCycle", () => {
       }),
     );
     expect(state.actions.map((x) => x.outcome)).toEqual(["error", "rejected"]);
-    expect(state.entries).toEqual({});
+    // Сбой предпроверки — без паузы; отказ — короткая пауза (30 мин).
+    expect(Object.keys(state.holds)).toEqual(["BUSDT:short"]);
+  });
+
+  it("выключили посреди цикла — следующие сделки не отправляются", async () => {
+    const place = vi.fn(async (req: TradeRequest) =>
+      resultOf(req, "protected"),
+    );
+    let enabled = true;
+    const setups = ["A", "B", "C"].map((x) =>
+      makeSetup({ symbol: `${x}USDT` }),
+    );
+    await runAutoTradeCycle(
+      emptyState(),
+      deps(setups, {
+        place: async (req) => {
+          enabled = false;
+          return place(req);
+        },
+      }),
+      async () => enabled,
+    );
+    expect(place).toHaveBeenCalledOnce();
+  });
+
+  it("лимит входов за цикл считается по отправленным сделкам, а не по кандидатам", async () => {
+    const place = vi.fn(async (req: TradeRequest) =>
+      resultOf(req, "protected"),
+    );
+    const setups = ["A", "B", "C", "D", "E", "F", "G"].map((x) =>
+      makeSetup({ symbol: `${x}USDT` }),
+    );
+    const state = await runAutoTradeCycle(
+      emptyState(),
+      deps(setups, {
+        place,
+        recheck: async (s) =>
+          recheckOf(s, s.symbol === "AUSDT" ? "stale" : "actual"),
+      }),
+    );
+    // A неактуален и слот не занял: входы B–F (5), G — «лимит».
+    expect(place.mock.calls.map((c) => c[0].symbol)).toEqual([
+      "BUSDT",
+      "CUSDT",
+      "DUSDT",
+      "EUSDT",
+      "FUSDT",
+    ]);
+    expect(state.actions.at(-1)?.reason).toMatch(/лимит входов/);
   });
 
   it("демо не настроено — цикл падает целиком", async () => {

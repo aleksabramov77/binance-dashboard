@@ -9,6 +9,7 @@ const OPEN: ReadonlySet<TradeStatus> = new Set([
 export interface TradeSummary {
   /** Выходы закрытых сделок (TP, SL, вручную…). */
   closed: number;
+  /** PnL > 0; в минусе — PnL < 0; ровно 0 не идёт ни туда, ни туда. */
   wins: number;
   losses: number;
   realizedPnl: number;
@@ -32,8 +33,9 @@ export function summarizeTrades(orders: ExecutedOrder[]): TradeSummary {
     if (o.trade.role === "exit" && o.realizedPnl !== null) {
       summary.closed += 1;
       summary.realizedPnl += o.realizedPnl;
+      // Ровно 0 — ни плюс, ни минус (безубыток).
       if (o.realizedPnl > 0) summary.wins += 1;
-      else summary.losses += 1;
+      else if (o.realizedPnl < 0) summary.losses += 1;
     }
     const key = `${o.market}:${o.symbol}`;
     if (OPEN.has(o.trade.status) && !openPositions.has(key)) {

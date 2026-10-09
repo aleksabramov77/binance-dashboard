@@ -10,14 +10,34 @@ interface Trader {
   running: Promise<void> | null;
 }
 
-// Один цикл на процесс: в dev instrumentation и роуты собираются разными бандлами,
-// поэтому таймер живёт в globalThis, а не в переменной модуля.
-const globalKey = Symbol.for("binance-dashboard.autoTrader");
-type GlobalWithTrader = typeof globalThis & { [globalKey]?: Trader };
+// Один цикл и одна очередь записи на процесс: в dev instrumentation и роуты собираются
+// разными бандлами, поэтому таймер и блокировка живут в globalThis, а не в переменных модуля.
+const traderKey = Symbol.for("binance-dashboard.autoTrader");
+const lockKey = Symbol.for("binance-dashboard.autoTrader.stateLock");
+type GlobalWithTrader = typeof globalThis & {
+  [traderKey]?: Trader;
+  [lockKey]?: Promise<unknown>;
+};
 const g = globalThis as GlobalWithTrader;
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
+
+/**
+ * Чтение→изменение→запись файла состояния без гонок: тоггл из роута и конец цикла
+ * не перетирают друг друга (иначе «выкл» мог бы вернуться в «вкл»).
+ */
+function updateState(
+  change: (state: AutoTradeState) => AutoTradeState,
+): Promise<AutoTradeState> {
+  const run = (g[lockKey] ?? Promise.resolve()).then(async () => {
+    const next = change(await loadState());
+    await saveState(next);
+    return next;
+  });
+  g[lockKey] = run.catch(() => {});
+  return run;
+}
 
 function schedule(trader: Trader, delayMs: number) {
   if (trader.timer) clearTimeout(trader.timer);
@@ -31,25 +51,22 @@ async function tick(trader: Trader): Promise<void> {
   trader.running = (async () => {
     // Состояние читаем каждый раз: переключатель могли изменить из роута.
     const state = await loadState();
-    if (state.enabled) {
-      try {
-        const next = await runAutoTradeCycle(state, trader.deps);
-        // Пока шёл цикл, торговлю могли выключить — флаг берём свежий.
-        const current = await loadState();
-        await saveState({
-          ...next,
-          enabled: current.enabled,
-          enabledAt: current.enabledAt,
-        });
-      } catch (error) {
-        log.error("auto.cycle", "Автоцикл не выполнен", undefined, error);
-        const current = await loadState();
-        await saveState({
-          ...current,
-          lastCycleAt: new Date().toISOString(),
-          lastError: errorText(error),
-        });
-      }
+    if (!state.enabled) return;
+    try {
+      const result = await runAutoTradeCycle(state, trader.deps, async () => {
+        // Перед каждой сделкой: выключили посреди цикла — больше не входим.
+        await g[lockKey];
+        return (await loadState()).enabled;
+      });
+      // enabled/enabledAt не трогаем — их меняет только переключатель.
+      await updateState((current) => ({ ...current, ...result }));
+    } catch (error) {
+      log.error("auto.cycle", "Автоцикл не выполнен", undefined, error);
+      await updateState((current) => ({
+        ...current,
+        lastCycleAt: new Date().toISOString(),
+        lastError: errorText(error),
+      }));
     }
   })()
     .catch((error) =>
@@ -64,13 +81,13 @@ async function tick(trader: Trader): Promise<void> {
 
 /** Запускает фоновый цикл (один раз на процесс). Повторный вызов обновляет зависимости. */
 export function startAutoTrader(deps: AutoTradeDeps): void {
-  const existing = g[globalKey];
+  const existing = g[traderKey];
   if (existing) {
     existing.deps = deps;
     return;
   }
   const trader: Trader = { deps, timer: null, running: null };
-  g[globalKey] = trader;
+  g[traderKey] = trader;
   schedule(trader, AUTO_TRADE.firstRunDelayMs);
   log.info("auto.start", "Фоновый цикл автоторговли запущен", {
     intervalMs: AUTO_TRADE.intervalMs,
@@ -85,8 +102,7 @@ export async function setAutoTradeEnabled(
   deps: AutoTradeDeps,
 ): Promise<AutoTradeState> {
   startAutoTrader(deps);
-  const state = await loadState();
-  const next: AutoTradeState = {
+  const next = await updateState((state) => ({
     ...state,
     enabled,
     enabledAt: enabled
@@ -94,13 +110,12 @@ export async function setAutoTradeEnabled(
         ? state.enabledAt
         : new Date().toISOString()
       : null,
-  };
-  await saveState(next);
+  }));
   log.info(
     "auto.toggle",
     enabled ? "Автоторговля включена" : "Автоторговля выключена",
   );
-  const trader = g[globalKey];
+  const trader = g[traderKey];
   if (enabled && trader && !trader.running) schedule(trader, 0);
   return next;
 }

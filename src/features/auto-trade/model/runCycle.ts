@@ -30,17 +30,24 @@ const OUTCOME_BY_STATUS: Record<TradeResult["status"], AutoTradeOutcome> = {
 };
 
 /**
- * Один цикл: скан → отбор → для каждого сетапа предпроверка по свежим свечам →
- * размер → сделка через placeTrade (там вся серверная валидация). Возвращает новое
- * состояние; сам ничего не сохраняет.
+ * Один цикл: скан → отбор → для каждого кандидата предпроверка по свежим свечам →
+ * размер → сделка через placeTrade (там вся серверная валидация). Перед каждой сделкой
+ * спрашивает isEnabled: выключили посреди цикла — новых входов нет. Возвращает
+ * изменения состояния; сам ничего не сохраняет.
  */
 export async function runAutoTradeCycle(
   state: AutoTradeState,
   deps: AutoTradeDeps,
+  isEnabled: () => Promise<boolean> = async () => true,
   now = Date.now(),
-): Promise<AutoTradeState> {
+): Promise<
+  Pick<AutoTradeState, "lastCycleAt" | "lastError" | "actions" | "holds">
+> {
   const actions: AutoTradeAction[] = [];
-  const entries = { ...state.entries };
+  const holds = { ...state.holds };
+  const hold = (setup: Setup, ms: number) => {
+    holds[entryKey(setup)] = new Date(now + ms).toISOString();
+  };
   const record = (setup: Setup, outcome: AutoTradeOutcome, reason: string) =>
     actions.push({
       at: new Date().toISOString(),
@@ -63,16 +70,31 @@ export async function runAutoTradeCycle(
   const plan = planEntries(scan.setups, {
     now,
     openSymbols: overview.openSymbols,
-    entries,
-    limits: AUTO_TRADE,
+    holds,
+    setupStatuses: AUTO_TRADE.setupStatuses,
   });
   for (const { setup, reason } of plan.skipped)
     record(setup, "skipped", reason);
 
-  for (const setup of plan.take) {
+  let openCount =
+    overview.openSymbols.spot.length + overview.openSymbols.futures.length;
+  let placed = 0;
+  let stopped = false;
+  for (const setup of plan.candidates) {
+    // Лимиты — по фактическим сделкам: отказы и неактуальные сетапы слоты не занимают.
+    if (placed >= AUTO_TRADE.maxEntriesPerCycle) {
+      record(setup, "skipped", "лимит входов за цикл — в следующем цикле");
+      continue;
+    }
+    if (openCount >= AUTO_TRADE.maxOpenPositions) {
+      record(setup, "skipped", `уже ${openCount} символов в сделке — лимит`);
+      continue;
+    }
+    let fresh: Setup;
     try {
       const recheck = await deps.recheck(setup);
       if (recheck.status === "stale" || !recheck.fresh) {
+        hold(setup, AUTO_TRADE.retryMs);
         record(
           setup,
           "skipped",
@@ -80,16 +102,28 @@ export async function runAutoTradeCycle(
         );
         continue;
       }
-      const fresh = recheck.fresh;
-      const size = sizeAutoTrade(
-        fresh,
-        overview.balances[fresh.market],
-        AUTO_TRADE,
-      );
-      if (!size) {
-        record(setup, "skipped", "на демо-кошельке нет USDT или стоп нулевой");
-        continue;
-      }
+      fresh = recheck.fresh;
+    } catch (error) {
+      // Ничего не отправлено — можно повторить в следующем цикле.
+      record(setup, "error", `предпроверка: ${errorText(error)}`);
+      continue;
+    }
+    const size = sizeAutoTrade(
+      fresh,
+      overview.balances[fresh.market],
+      AUTO_TRADE,
+    );
+    if (!size) {
+      hold(setup, AUTO_TRADE.retryMs);
+      record(setup, "skipped", "на демо-кошельке нет USDT или стоп нулевой");
+      continue;
+    }
+    if (!(await isEnabled())) {
+      stopped = true;
+      break;
+    }
+    placed += 1;
+    try {
       const result = await deps.place({
         symbol: fresh.symbol,
         market: fresh.market,
@@ -101,10 +135,16 @@ export async function runAutoTradeCycle(
         setupId: `auto:${fresh.id}`,
       });
       const outcome = OUTCOME_BY_STATUS[result.status];
-      // Позиция могла открыться и без защиты — повторно в ту же пару не лезем.
-      if (outcome !== "rejected") entries[entryKey(setup)] = result.at;
+      if (outcome === "rejected") hold(setup, AUTO_TRADE.retryMs);
+      else {
+        // Позиция открыта (возможно, без защиты) — в ту же пару долго не лезем.
+        hold(setup, AUTO_TRADE.cooldownMs);
+        openCount += 1;
+      }
       record(setup, outcome, result.message);
     } catch (error) {
+      // Сбой посреди сделки: позиция могла открыться — длинная пауза, как после входа.
+      hold(setup, AUTO_TRADE.cooldownMs);
       record(setup, "error", errorText(error));
     }
   }
@@ -118,19 +158,19 @@ export async function runAutoTradeCycle(
     );
   log.info(
     "auto.cycle",
-    `Автоцикл: сетапов ${scan.setups.length}, входов ${plan.take.length}`,
+    `Автоцикл: сетапов ${scan.setups.length}, сделок отправлено ${placed}${stopped ? " (выключено посреди цикла)" : ""}`,
     {
       setups: scan.setups.length,
-      take: plan.take.map((s) => s.symbol),
+      placed,
+      stopped,
       results: actions.filter((a) => a.outcome !== "skipped"),
     },
   );
   return {
-    ...state,
     lastCycleAt: new Date().toISOString(),
     lastError: null,
     actions: [...fresh, ...state.actions].slice(0, AUTO_TRADE.actionsKept),
-    entries: pruneEntries(entries, now),
+    holds: pruneHolds(holds, now),
   };
 }
 
@@ -155,14 +195,12 @@ export function dedupeSkips(
   });
 }
 
-/** Старые отметки входов больше не влияют на паузу — выбрасываем. */
-function pruneEntries(
-  entries: Record<string, string>,
+/** Истёкшие паузы больше ни на что не влияют — выбрасываем. */
+function pruneHolds(
+  holds: Record<string, string>,
   now: number,
 ): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(entries).filter(
-      ([, at]) => now - Date.parse(at) < AUTO_TRADE.cooldownMs,
-    ),
+    Object.entries(holds).filter(([, until]) => Date.parse(until) > now),
   );
 }

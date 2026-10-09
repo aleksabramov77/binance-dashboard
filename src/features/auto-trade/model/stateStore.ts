@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { type AutoTradeState, autoTradeStateSchema } from "@/entities/trade";
@@ -16,7 +17,7 @@ export const emptyState = (): AutoTradeState => ({
   lastError: null,
   intervalMs: AUTO_TRADE.intervalMs,
   actions: [],
-  entries: {},
+  holds: {},
 });
 
 export async function loadState(): Promise<AutoTradeState> {
@@ -41,7 +42,8 @@ export async function loadState(): Promise<AutoTradeState> {
 
 export async function saveState(state: AutoTradeState): Promise<void> {
   await mkdir(path.dirname(STATE_FILE), { recursive: true });
-  const tmp = `${STATE_FILE}.tmp`;
+  // Своё имя tmp на каждую запись: параллельные записи не портят один и тот же файл.
+  const tmp = `${STATE_FILE}.${randomUUID()}.tmp`;
   await writeFile(tmp, `${JSON.stringify(state, null, 2)}\n`);
   await rename(tmp, STATE_FILE);
 }

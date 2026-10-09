@@ -32,8 +32,11 @@ export const autoTradeStateSchema = z.object({
   intervalMs: z.number(),
   /** Последние решения, новые сверху. */
   actions: z.array(autoTradeActionSchema),
-  /** «SYMBOL:direction» → время последнего автовхода (ISO) — для паузы перед повторным входом. */
-  entries: z.record(z.string(), z.string()),
+  /**
+   * «SYMBOL:direction» → до какого времени (ISO) не входить: после входа — длинная пауза,
+   * после отказа или неактуальной предпроверки — короткая.
+   */
+  holds: z.record(z.string(), z.string()).default({}),
 });
 
 export const autoTradeToggleSchema = z.object({ enabled: z.boolean() });
