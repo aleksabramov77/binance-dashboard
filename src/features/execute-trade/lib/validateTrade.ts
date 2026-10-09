@@ -27,13 +27,25 @@ export interface ValidatedTrade {
   notionalUsd: number;
 }
 
-/** Проверяет заявку перед отправкой: направление, стороны TP/SL, шаги и лимиты. */
+export interface TradeContext {
+  /** Текущая цена на демо. */
+  price: number;
+  rules: SymbolRules;
+  maxNotionalUsd: number;
+  /** Свободные USDT на кошельке, которым торгуем (Spot или USDⓈ-M Futures). */
+  availableUsd: number;
+  /** Максимальная потеря на стопе, доля баланса кошелька. */
+  maxRiskPct: number;
+}
+
+const usd = (v: number) => `$${v.toFixed(2)}`;
+
+/** Проверяет заявку перед отправкой: направление, стороны TP/SL, шаги, лимиты, деньги и риск. */
 export function validateTrade(
   req: TradeRequest,
-  price: number,
-  rules: SymbolRules,
-  maxNotionalUsd: number,
+  ctx: TradeContext,
 ): { ok: true; value: ValidatedTrade } | { ok: false; errors: string[] } {
+  const { price, rules, maxNotionalUsd, availableUsd, maxRiskPct } = ctx;
   const errors: string[] = [];
   if (req.direction === "short" && req.market !== "futures")
     errors.push("Шорт возможен только на фьючерсах.");
@@ -63,6 +75,26 @@ export function validateTrade(
     errors.push(
       `Объём $${notionalUsd.toFixed(2)} больше лимита на демо-сделку ($${maxNotionalUsd}).`,
     );
+
+  const wallet = req.market === "spot" ? "Spot" : "USDⓈ-M Futures";
+  const requiredUsd =
+    req.market === "spot" ? notionalUsd : notionalUsd / req.leverage;
+  if (availableUsd <= 0) {
+    errors.push(
+      `На демо-кошельке ${wallet} 0 USDT — пополните его на demo.binance.com.`,
+    );
+  } else {
+    if (requiredUsd > availableUsd)
+      errors.push(
+        `Нужно ${usd(requiredUsd)} ${req.market === "spot" ? "USDT" : "маржи"}, а на ${wallet} свободно ${usd(availableUsd)}.`,
+      );
+    const lossAtStop = qty * Math.abs(price - req.stopLoss);
+    const maxLoss = availableUsd * maxRiskPct;
+    if (lossAtStop > maxLoss)
+      errors.push(
+        `Потеря на стопе ${usd(lossAtStop)} больше ${Math.round(maxRiskPct * 100)}% баланса ${wallet} (${usd(maxLoss)}) — уменьшите количество.`,
+      );
+  }
 
   if (errors.length > 0) return { ok: false, errors };
   return {

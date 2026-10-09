@@ -9,6 +9,7 @@ import {
 } from "@/entities/market-signal";
 import {
   MAX_LEVERAGE,
+  MAX_RISK_PCT,
   type TradeOverview,
   type TradeResult,
 } from "@/entities/trade";
@@ -212,6 +213,31 @@ export function TradeTicketDialog({
     ? overview?.balances?.futures
     : overview?.balances?.spot;
 
+  // Проверка денег и риска до отправки (сервер повторит её сам).
+  const wallet = isFutures ? "USDⓈ-M Futures" : "Spot";
+  const required = isFutures ? notional / leverage : notional;
+  const maxLoss = (balance ?? 0) * MAX_RISK_PCT;
+  const riskPerUnit = Math.abs(active.entry - stopLoss);
+  const blockers: string[] = [];
+  if (balance !== undefined) {
+    if (balance <= 0) {
+      blockers.push(
+        `На демо-кошельке ${wallet} 0 USDT. Пополните его на demo.binance.com (раздел фьючерсов демо-счёта: Faucet / пополнение или перевод со Spot) и обновите страницу.`,
+      );
+    } else {
+      if (required > balance)
+        blockers.push(
+          `Нужно ${formatUsd(required)} ${isFutures ? "маржи" : "USDT"}, а на ${wallet} свободно ${formatUsd(balance)}.`,
+        );
+      if (loss > maxLoss)
+        blockers.push(
+          `Потеря на стопе ${formatUsd(loss)} больше ${MAX_RISK_PCT * 100}% баланса ${wallet} (${formatUsd(maxLoss)}).`,
+        );
+    }
+  }
+  const canShrinkToRisk =
+    balance !== undefined && balance > 0 && loss > maxLoss && riskPerUnit > 0;
+
   const onOpenChange = (next: boolean) => {
     setOpen(next);
     if (next) {
@@ -348,9 +374,26 @@ export function TradeTicketDialog({
             {overview.error && (
               <p className="text-xs text-destructive">{overview.error}</p>
             )}
+            {blockers.length > 0 && (
+              <div className="space-y-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm">
+                {blockers.map((b) => (
+                  <p key={b}>{b}</p>
+                ))}
+                {canShrinkToRisk && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setQuantity((maxLoss / riskPerUnit) * 0.99)}
+                  >
+                    Уменьшить количество до риска {MAX_RISK_PCT * 100}%
+                  </Button>
+                )}
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
-              Лимит на демо-сделку: {formatUsd(overview.maxNotionalUsd)}. Сервер
-              ещё раз проверит уровни по текущей цене демо.
+              Риск на сделку — не больше {MAX_RISK_PCT * 100}% баланса кошелька,
+              объём — не больше {formatUsd(overview.maxNotionalUsd)}. Сервер ещё
+              раз проверит уровни, деньги и риск по текущей цене демо.
             </p>
             {trade.error && (
               <p className="text-sm text-destructive">{trade.error.message}</p>
@@ -362,7 +405,12 @@ export function TradeTicketDialog({
           {overview?.configured && !trade.data && (
             <Button
               onClick={submit}
-              disabled={trade.isPending || recheck.isFetching || isStale}
+              disabled={
+                trade.isPending ||
+                recheck.isFetching ||
+                isStale ||
+                blockers.length > 0
+              }
             >
               {trade.isPending
                 ? "Отправляю…"
@@ -370,7 +418,9 @@ export function TradeTicketDialog({
                   ? "Проверяю сетап…"
                   : isStale
                     ? "Вход уже не актуален"
-                    : "Подтвердить сделку на демо"}
+                    : blockers.length > 0
+                      ? "Исправьте ограничения выше"
+                      : "Подтвердить сделку на демо"}
             </Button>
           )}
           {trade.data && (

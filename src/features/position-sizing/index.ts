@@ -4,5 +4,9 @@ export {
   type RiskSettings,
   sizePosition,
 } from "./lib/sizePosition";
-export { useRiskSettings } from "./model/useRiskSettings";
+export {
+  MAX_RISK_PCT,
+  useEffectiveRiskSettings,
+  useRiskSettings,
+} from "./model/useRiskSettings";
 export { RiskSettingsBar } from "./ui/RiskSettingsBar";

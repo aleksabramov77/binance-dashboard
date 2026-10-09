@@ -4,6 +4,7 @@ export {
 } from "./api/useTradeOverview";
 export {
   MAX_LEVERAGE,
+  MAX_RISK_PCT,
   type TradeOverview,
   type TradeRequest,
   type TradeResult,

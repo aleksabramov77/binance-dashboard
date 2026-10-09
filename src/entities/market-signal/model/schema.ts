@@ -45,6 +45,8 @@ export const setupSchema = z.object({
   change24h: z.number(),
   quoteVolumeUsd: z.number(),
   indicators: indicatorsSchema,
+  /** Торгуется ли символ в Binance Demo Trading; null — не удалось проверить. */
+  demoTradable: z.boolean().nullable().optional(),
 });
 
 /** Разбор сетапа языковой моделью: аргументы, риски и вердикт. */

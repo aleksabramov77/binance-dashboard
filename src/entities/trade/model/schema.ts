@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const MAX_LEVERAGE = 3;
+/** Максимальная потеря на стопе — доля баланса кошелька (2%). Проверяется и в UI, и на сервере. */
+export const MAX_RISK_PCT = 0.02;
 
 export const tradeRequestSchema = z.object({
   symbol: z.string().regex(/^[A-Z0-9]+USDT$/),

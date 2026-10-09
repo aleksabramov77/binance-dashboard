@@ -4,7 +4,10 @@ import { RefreshCw } from "lucide-react";
 import { Suspense } from "react";
 import { useScan } from "@/entities/market-signal";
 import { useTradeOverview } from "@/entities/trade";
-import { RiskSettingsBar, useRiskSettings } from "@/features/position-sizing";
+import {
+  RiskSettingsBar,
+  useEffectiveRiskSettings,
+} from "@/features/position-sizing";
 import { formatDateTime } from "@/shared/lib";
 import { Button } from "@/shared/ui/button";
 import { MarketMovers } from "@/widgets/market-movers";
@@ -14,7 +17,10 @@ import { TradeLog } from "@/widgets/trade-log";
 function Signals() {
   const scan = useScan();
   const tradeOverview = useTradeOverview();
-  const [settings] = useRiskSettings();
+  const balances = tradeOverview.data?.balances;
+  // Капитал «авто» — всё, что лежит в USDT на демо (Spot + Futures).
+  const autoCapital = balances ? balances.spot + balances.futures : null;
+  const settings = useEffectiveRiskSettings(autoCapital);
   const data = scan.data;
 
   return (
@@ -39,7 +45,7 @@ function Signals() {
         </Button>
       </header>
 
-      <RiskSettingsBar />
+      <RiskSettingsBar autoCapital={autoCapital} />
 
       {scan.isPending && (
         <p className="text-muted-foreground">Сканирую рынок…</p>

@@ -4,6 +4,7 @@ import {
   floorToStep,
   roundToTick,
   stepDecimals,
+  type TradeContext,
   validateTrade,
 } from "./validateTrade";
 
@@ -38,9 +39,18 @@ describe("округление по правилам биржи", () => {
   });
 });
 
+const ctx = (patch: Partial<TradeContext> = {}): TradeContext => ({
+  price: 2000,
+  rules,
+  maxNotionalUsd: 1000,
+  availableUsd: 5000,
+  maxRiskPct: 0.02,
+  ...patch,
+});
+
 describe("validateTrade", () => {
   it("пропускает корректный лонг и округляет уровни", () => {
-    const result = validateTrade(long, 2000, rules, 1000);
+    const result = validateTrade(long, ctx());
     expect(result).toEqual({
       ok: true,
       value: {
@@ -61,24 +71,54 @@ describe("validateTrade", () => {
         stopLoss: 2100,
         takeProfit: 1900,
       },
-      2000,
-      rules,
-      1000,
+      ctx(),
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors).toHaveLength(2);
   });
 
   it("отклоняет устаревшие уровни, если цена ушла за стоп", () => {
-    expect(validateTrade(long, 1850, rules, 1000).ok).toBe(false);
+    expect(validateTrade(long, ctx({ price: 1850 })).ok).toBe(false);
   });
 
   it("держит объём между минимумом символа и лимитом на сделку", () => {
-    expect(
-      validateTrade({ ...long, quantity: 0.001 }, 2000, rules, 1000).ok,
-    ).toBe(false);
-    expect(validateTrade({ ...long, quantity: 1 }, 2000, rules, 1000).ok).toBe(
-      false,
-    );
+    expect(validateTrade({ ...long, quantity: 0.001 }, ctx()).ok).toBe(false);
+    expect(validateTrade({ ...long, quantity: 1 }, ctx()).ok).toBe(false);
+  });
+
+  it("сразу говорит, что кошелёк пуст, не дожидаясь отказа биржи", () => {
+    const futures = { ...long, market: "futures" as const, leverage: 2 };
+    const result = validateTrade(futures, ctx({ availableUsd: 0 }));
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        "На демо-кошельке USDⓈ-M Futures 0 USDT — пополните его на demo.binance.com.",
+      ],
+    });
+  });
+
+  it("не даёт потерять на стопе больше 2% баланса кошелька", () => {
+    // 0.025 ETH × ~$100 до стопа ≈ $2,50 потери; 2% от $100 = $2
+    const result = validateTrade(long, ctx({ availableUsd: 100 }));
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors[0]).toContain("больше 2% баланса Spot ($2.00)");
+  });
+
+  it("проверяет, хватает ли маржи с учётом плеча", () => {
+    const futures = {
+      ...long,
+      market: "futures" as const,
+      leverage: 2,
+      quantity: 0.4,
+      stopLoss: 1990,
+    };
+    // объём $800 / ×2 = $400 маржи, свободно $300
+    const result = validateTrade(futures, ctx({ availableUsd: 300 }));
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors).toContain(
+        "Нужно $400.00 маржи, а на USDⓈ-M Futures свободно $300.00.",
+      );
   });
 });

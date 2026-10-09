@@ -6,6 +6,7 @@ import {
   fetchPerpetualSymbols,
   type Ticker24h,
 } from "@/shared/api/binance";
+import { fetchDemoSymbolRules } from "@/shared/api/binance/demo.server";
 import { isStablecoin } from "@/shared/config";
 import { SCAN_CONFIG } from "../config/rules";
 import { computeIndicators } from "../lib/computeIndicators";
@@ -103,14 +104,24 @@ export async function scanMarket(force = false): Promise<ScanResult> {
     Promise.all(losers.map(analyze)),
     Promise.all(gainers.map(analyze)),
   ]);
-  const setups = [...analyzedLosers, ...analyzedGainers]
+  const found = [...analyzedLosers, ...analyzedGainers]
     .map((a) => a.setup)
-    .filter((s): s is Setup => s !== null)
-    .sort(
-      (a, b) =>
-        Number(b.status === "ready") - Number(a.status === "ready") ||
-        b.strength - a.strength,
-    );
+    .filter((s): s is Setup => s !== null);
+  // Сразу помечаем, можно ли открыть сделку в демо, чтобы не узнавать это по отказу.
+  const setups = (
+    await Promise.all(
+      found.map(async (s) => ({
+        ...s,
+        demoTradable: await fetchDemoSymbolRules(s.market, s.symbol)
+          .then((rules) => rules !== null)
+          .catch(() => null),
+      })),
+    )
+  ).sort(
+    (a, b) =>
+      Number(b.status === "ready") - Number(a.status === "ready") ||
+      b.strength - a.strength,
+  );
 
   const result: ScanResult = {
     scannedAt: new Date().toISOString(),

@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { TradeRequest, TradeResult, TradeStep } from "@/entities/trade";
+import {
+  MAX_RISK_PCT,
+  type TradeRequest,
+  type TradeResult,
+  type TradeStep,
+} from "@/entities/trade";
 import {
   demoFuturesCloseAt,
   demoFuturesMarketOrder,
@@ -8,6 +13,7 @@ import {
   demoSpotOcoSell,
   fetchDemoPrice,
   fetchDemoSymbolRules,
+  fetchDemoUsdtBalances,
 } from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { appendTrade } from "../api/tradeLog";
@@ -56,6 +62,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
 
   let rules: Awaited<ReturnType<typeof fetchDemoSymbolRules>>;
   let price: number;
+  let availableUsd: number;
   try {
     rules = await fetchDemoSymbolRules(req.market, req.symbol);
     if (!rules)
@@ -63,7 +70,12 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
         "rejected",
         `${req.symbol} нет в Binance Demo Trading (${req.market === "spot" ? "Spot" : "Futures"}).`,
       );
-    price = await fetchDemoPrice(req.market, req.symbol);
+    const [demoPrice, balances] = await Promise.all([
+      fetchDemoPrice(req.market, req.symbol),
+      fetchDemoUsdtBalances(creds),
+    ]);
+    price = demoPrice;
+    availableUsd = balances[req.market];
   } catch (error) {
     // Сеть, а не отсутствие символа: ничего не отправлено, можно повторить.
     return finish(
@@ -72,7 +84,13 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     );
   }
 
-  const checked = validateTrade(req, price, rules, config.maxNotionalUsd);
+  const checked = validateTrade(req, {
+    price,
+    rules,
+    maxNotionalUsd: config.maxNotionalUsd,
+    availableUsd,
+    maxRiskPct: MAX_RISK_PCT,
+  });
   if (!checked.ok) return finish("rejected", checked.errors.join(" "));
   const v = checked.value;
   const entrySide = req.direction === "long" ? "BUY" : "SELL";

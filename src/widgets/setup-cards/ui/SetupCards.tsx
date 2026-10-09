@@ -130,12 +130,20 @@ function SetupCard({
         </ul>
 
         <SetupReview setup={setup} />
-        <TradeTicketDialog
-          setup={setup}
-          quantity={size.quantity}
-          leverage={size.leverage}
-          overview={overview}
-        />
+        {setup.demoTradable === false ? (
+          <p className="rounded-md border border-dashed px-3 py-2 text-center text-sm text-muted-foreground">
+            {setup.base} нет в Binance Demo Trading (
+            {setup.market === "spot" ? "Spot" : "Futures"}) — сделку в демо
+            открыть нельзя
+          </p>
+        ) : (
+          <TradeTicketDialog
+            setup={setup}
+            quantity={size.quantity}
+            leverage={size.leverage}
+            overview={overview}
+          />
+        )}
       </CardContent>
     </Card>
   );

@@ -1,17 +1,19 @@
 "use client";
 
 import { useId } from "react";
+import { formatUsd } from "@/shared/lib";
 import { Input } from "@/shared/ui/input";
 import { MAX_LEVERAGE } from "../lib/sizePosition";
-import { useRiskSettings } from "../model/useRiskSettings";
+import { MAX_RISK_PCT, useRiskSettings } from "../model/useRiskSettings";
 
 function NumberField(props: {
   label: string;
-  value: number;
+  value: number | null;
+  placeholder?: string;
   step: number;
   min: number;
   max?: number;
-  onChange: (value: number) => void;
+  onChange: (value: number | null) => void;
 }) {
   const id = useId();
   return (
@@ -26,39 +28,53 @@ function NumberField(props: {
         min={props.min}
         max={props.max}
         step={props.step}
-        className="w-32 font-mono"
-        value={props.value}
-        onChange={(e) => props.onChange(Number(e.target.value) || 0)}
+        placeholder={props.placeholder}
+        className="w-36 font-mono"
+        value={props.value ?? ""}
+        onChange={(e) =>
+          props.onChange(e.target.value === "" ? null : Number(e.target.value))
+        }
       />
     </div>
   );
 }
 
-export function RiskSettingsBar() {
+export function RiskSettingsBar({
+  autoCapital,
+}: {
+  /** Демо-баланс USDT для режима «авто»; null — неизвестен. */
+  autoCapital: number | null;
+}) {
   const [s, set] = useRiskSettings();
+  const maxPct = MAX_RISK_PCT * 100;
   return (
     <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
       <NumberField
-        label="Капитал, USD"
+        label="Капитал, USD (пусто — авто)"
         value={s.capital}
+        placeholder={
+          autoCapital ? `авто: ${formatUsd(autoCapital)}` : "авто: $1000"
+        }
         step={100}
         min={0}
         onChange={(capital) => set({ capital })}
       />
       <NumberField
-        label="Риск на сделку, %"
-        value={Number((s.riskPct * 100).toFixed(2))}
+        label={`Риск на сделку, % (≤ ${maxPct})`}
+        value={Number((Math.min(s.riskPct, MAX_RISK_PCT) * 100).toFixed(2))}
         step={0.25}
         min={0}
-        max={5}
-        onChange={(v) => set({ riskPct: v / 100 })}
+        max={maxPct}
+        onChange={(v) =>
+          set({ riskPct: Math.min(Math.max(v ?? 0, 0), maxPct) / 100 })
+        }
       />
       <NumberField
         label="Лимит на сделку, USD"
         value={s.maxNotional}
         step={10}
         min={0}
-        onChange={(maxNotional) => set({ maxNotional })}
+        onChange={(maxNotional) => set({ maxNotional: maxNotional ?? 0 })}
       />
       <NumberField
         label={`Плечо фьючерсов (≤ ${MAX_LEVERAGE}x)`}
@@ -67,7 +83,9 @@ export function RiskSettingsBar() {
         min={1}
         max={MAX_LEVERAGE}
         onChange={(leverage) =>
-          set({ leverage: Math.min(Math.max(leverage, 1), MAX_LEVERAGE) })
+          set({
+            leverage: Math.min(Math.max(leverage ?? 1, 1), MAX_LEVERAGE),
+          })
         }
       />
     </div>
