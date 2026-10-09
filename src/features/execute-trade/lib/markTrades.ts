@@ -77,8 +77,10 @@ function splitTrades(orders: OrderAggregate[]): Trade[] {
       cur.lastExit = o;
       cur.orders.push({ order: o, role: "exit", pnl });
       // Разворот одним ордером (шорт 10 закрыт покупкой 15): остаток — вход новой сделки.
-      // Строка ордера получит статус новой сделки (она обрабатывается позже).
-      if (reversal > cur.entryQty * DUST[o.market]) {
+      // Строка ордера получит статус новой сделки, роль «выход» и PnL закрытой.
+      // Только futures: на споте шорта нет, а «лишняя» продажа — это вход за пределами
+      // истории или монеты с депозита; излишек просто отбрасываем.
+      if (o.market === "futures" && reversal > cur.entryQty * DUST[o.market]) {
         cur = {
           dir,
           remaining: reversal,
@@ -205,14 +207,18 @@ export function markTrades(
       }
     }
 
-    for (const { order, role, pnl } of trade.orders)
+    for (const { order, role, pnl } of trade.orders) {
+      // Ордер-разворот уже размечен закрытой сделкой как выход с PnL: роль и PnL
+      // оставляем (PnL виден в строке), статус берём у новой сделки.
+      const prev = marks.get(order.orderId);
       marks.set(order.orderId, {
         status,
-        role,
+        role: prev?.role ?? role,
         stopPrice: isOpen ? stopPrice : null,
         unrealizedPnl: isOpen ? unrealizedPnl : null,
-        pnl,
+        pnl: prev ? prev.pnl : pnl,
       });
+    }
   }
   return marks;
 }

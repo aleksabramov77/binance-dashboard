@@ -234,7 +234,8 @@ describe("markTrades — futures", () => {
     expect(statusOf(marks, short)).toBe("manual-loss");
     expect(marks.get(flip.orderId)).toMatchObject({
       status: "open",
-      role: "entry",
+      role: "exit",
+      pnl: -0.5,
     });
   });
 
@@ -268,6 +269,29 @@ describe("markTrades — spot", () => {
     );
     expect(statusOf(marks, buy)).toBe("tp");
     expect(marks.get(sell.orderId)?.pnl).toBeCloseTo(9.99);
+  });
+
+  it("продажа больше купленного в истории — сделка закрыта, фантомной новой нет", () => {
+    const buy = spot({
+      side: "BUY",
+      time: 1,
+      quantity: 10,
+      avgPrice: 100,
+      quoteQty: 1000,
+    });
+    const sell = spot({ side: "SELL", time: 2, quantity: 15, avgPrice: 110 });
+    const marks = markTrades(
+      [buy, sell],
+      state({
+        closeKinds: new Map([[sell.orderId, "tp"]]),
+        position: { amount: 3, entryPrice: null, unrealizedPnl: null },
+      }),
+    );
+    expect(statusOf(marks, buy)).toBe("tp");
+    expect(marks.get(sell.orderId)).toMatchObject({
+      status: "tp",
+      role: "exit",
+    });
   });
 
   it("покупка без продажи и без монеты на балансе (сброс счёта) → «unknown»", () => {
