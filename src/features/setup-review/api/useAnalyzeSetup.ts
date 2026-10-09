@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { aiCreditsQueryKey } from "@/entities/ai-credits";
 import {
   type Setup,
   type SetupAnalysisResult,
@@ -34,5 +35,11 @@ async function postAnalysis(setup: Setup): Promise<SetupAnalysisResult> {
 }
 
 export function useAnalyzeSetup() {
-  return useMutation({ mutationFn: postAnalysis });
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: postAnalysis,
+    // Разбор стоит денег — обновляем баланс OpenRouter в шапке.
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: aiCreditsQueryKey }),
+  });
 }

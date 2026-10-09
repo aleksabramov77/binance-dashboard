@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { AiCreditsBadge } from "@/entities/ai-credits";
 import { NAV_ITEMS } from "@/shared/config";
 import { cn } from "@/shared/lib";
 
@@ -32,6 +33,9 @@ export function AppHeader() {
             </Link>
           ))}
         </nav>
+        <div className="ml-auto">
+          <AiCreditsBadge />
+        </div>
       </div>
     </header>
   );
