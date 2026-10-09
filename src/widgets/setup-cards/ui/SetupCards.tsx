@@ -1,6 +1,7 @@
 import { DirectionBadge, type Setup } from "@/entities/market-signal";
 import type { TradeOverview } from "@/entities/trade";
 import { type RiskSettings, sizePosition } from "@/features/position-sizing";
+import { SetupReview } from "@/features/setup-review";
 import { TradeTicketDialog } from "@/features/trade-ticket";
 import { cn, formatAmount, formatPrice, formatUsd } from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
@@ -128,6 +129,7 @@ function SetupCard({
           ))}
         </ul>
 
+        <SetupReview setup={setup} />
         <TradeTicketDialog
           setup={setup}
           quantity={size.quantity}

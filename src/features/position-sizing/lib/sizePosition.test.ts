@@ -18,6 +18,16 @@ const setup: Setup = {
   strength: 0.5,
   reasons: [],
   change24h: -0.1,
+  quoteVolumeUsd: 1e8,
+  indicators: {
+    rsi1h: 25,
+    rsi4h: 30,
+    atr1h: 2,
+    ema20: 110,
+    ema50: 120,
+    volumeRatio: 1,
+    distanceAtr: -5,
+  },
 };
 
 describe("sizePosition", () => {

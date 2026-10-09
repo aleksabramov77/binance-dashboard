@@ -43,6 +43,28 @@ export const setupSchema = z.object({
   strength: z.number(),
   reasons: z.array(z.string()),
   change24h: z.number(),
+  quoteVolumeUsd: z.number(),
+  indicators: indicatorsSchema,
+});
+
+/** Разбор сетапа языковой моделью: аргументы, риски и вердикт. */
+export const setupAnalysisSchema = z.object({
+  verdict: z.enum(["take", "wait", "skip"]),
+  /** Уверенность модели в вердикте, 0–100. */
+  confidence: z.number().transform((v) => Math.min(100, Math.max(0, v))),
+  summary: z.string(),
+  pros: z.array(z.string()),
+  cons: z.array(z.string()),
+  /** При каком условии идея ломается и сделку надо закрыть/не открывать. */
+  invalidation: z.string(),
+});
+
+export const setupAnalysisResultSchema = z.object({
+  setupId: z.string(),
+  model: z.string(),
+  createdAt: z.string(),
+  analysis: setupAnalysisSchema,
+  costUsd: z.number().nullable(),
 });
 
 export const scanResultSchema = z.object({
@@ -57,3 +79,5 @@ export type Indicators = z.infer<typeof indicatorsSchema>;
 export type Mover = z.infer<typeof moverSchema>;
 export type Setup = z.infer<typeof setupSchema>;
 export type ScanResult = z.infer<typeof scanResultSchema>;
+export type SetupAnalysis = z.infer<typeof setupAnalysisSchema>;
+export type SetupAnalysisResult = z.infer<typeof setupAnalysisResultSchema>;

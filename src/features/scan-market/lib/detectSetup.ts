@@ -90,5 +90,7 @@ export function detectSetup(mover: Mover, candles1h: Candle[]): Setup | null {
     strength,
     reasons,
     change24h: mover.change24h,
+    quoteVolumeUsd: mover.quoteVolumeUsd,
+    indicators: ind,
   };
 }

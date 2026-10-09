@@ -41,3 +41,23 @@ export function getDemoTradingConfig(): DemoTradingConfig | null {
     maxNotionalUsd: parsed.data.DEMO_MAX_NOTIONAL_USD,
   };
 }
+
+const llmEnvSchema = z.object({
+  OPENROUTER_API_KEY: z.string().min(1),
+  ANALYSIS_MODEL: z.string().min(1).default("anthropic/claude-haiku-5.5"),
+});
+
+export interface LlmConfig {
+  apiKey: string;
+  model: string;
+}
+
+/** OpenRouter для разбора сетапов. null — если ключ не настроен. */
+export function getLlmConfig(): LlmConfig | null {
+  const parsed = llmEnvSchema.safeParse(process.env);
+  if (!parsed.success) return null;
+  return {
+    apiKey: parsed.data.OPENROUTER_API_KEY,
+    model: parsed.data.ANALYSIS_MODEL,
+  };
+}

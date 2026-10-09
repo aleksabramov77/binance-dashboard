@@ -6,7 +6,11 @@ export {
   moverSchema,
   type ScanResult,
   type Setup,
+  type SetupAnalysis,
+  type SetupAnalysisResult,
   scanResultSchema,
+  setupAnalysisResultSchema,
+  setupAnalysisSchema,
   setupSchema,
 } from "./model/schema";
 export { DirectionBadge } from "./ui/DirectionBadge";
