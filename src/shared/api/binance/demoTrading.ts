@@ -2,10 +2,17 @@ import { isStablecoin } from "@/shared/config";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getJsonWithRetry, HttpError } from "@/shared/lib/fetchRetry";
 import {
+  type DemoSymbolOrders,
+  toFuturesSymbolOrders,
+  toSpotSymbolOrders,
+} from "./demoOrders";
+import {
+  algoHistorySchema,
   algoOrderSchema,
   anySchema,
   exchangeInfoSchema,
   type FuturesOrder,
+  futuresAllOrdersSchema,
   futuresBalancesSchema,
   futuresOrderSchema,
   futuresUserTradesSchema,
@@ -14,6 +21,7 @@ import {
   priceSchema,
   type SpotOrder,
   spotAccountBalancesSchema,
+  spotAllOrdersSchema,
   spotMyTradesSchema,
   spotOrderSchema,
   symbolRowsSchema,
@@ -299,6 +307,15 @@ export interface DemoFill {
 const symbolsOf = (rows: { symbol: string }[]) =>
   rows.map((r) => r.symbol).filter(Boolean);
 
+/** Символы с возможной историей сделок + текущие позиции и баланс (нужны и для статусов). */
+export interface DemoTradeSnapshot {
+  symbols: Record<Market, string[]>;
+  /** Открытые позиции демо-фьючерсов по символам. */
+  positions: Map<string, DemoPosition>;
+  /** Монеты на демо-споте: актив → free + locked. */
+  holdings: Map<string, number>;
+}
+
 /**
  * Символы, по которым на демо-счёте могли быть сделки. История сделок Binance
  * требует symbol, поэтому собираем их из запросов без символа. Spot: OCO-история
@@ -307,7 +324,7 @@ const symbolsOf = (rows: { symbol: string }[]) =>
  */
 export async function fetchDemoTradedSymbols(
   creds: BinanceCredentials,
-): Promise<Record<Market, string[]>> {
+): Promise<DemoTradeSnapshot> {
   const spot = (path: string, params = {}) =>
     signedRequest(DEMO_URL.spot, creds, "GET", path, symbolRowsSchema, params);
   const futures = (path: string, params = {}) =>
@@ -319,44 +336,35 @@ export async function fetchDemoTradedSymbols(
       symbolRowsSchema,
       params,
     );
-  const [orderLists, spotOpen, account, income, positions, futOpen, algoOpen] =
+  const [orderLists, spotOpen, holdings, income, positions, futOpen, algoOpen] =
     await Promise.all([
       spot("/api/v3/allOrderList", { limit: 1000 }),
       spot("/api/v3/openOrders"),
-      signedRequest(
-        DEMO_URL.spot,
-        creds,
-        "GET",
-        "/api/v3/account",
-        spotAccountBalancesSchema,
-        { omitZeroBalances: true },
-      ),
+      fetchDemoSpotHoldings(creds),
       futures("/fapi/v1/income", { limit: 1000 }),
-      signedRequest(
-        DEMO_URL.futures,
-        creds,
-        "GET",
-        "/fapi/v3/positionRisk",
-        positionRiskSchema,
-      ),
+      fetchDemoFuturesPositions(creds),
       futures("/fapi/v1/openOrders"),
       futures("/fapi/v1/openAlgoOrders"),
     ]);
-  const held = account.balances
-    .filter((b) => b.free + b.locked > 0 && !isStablecoin(b.asset))
-    .map((b) => `${b.asset}USDT`);
+  const held = [...holdings]
+    .filter(([asset, amount]) => amount > 0 && !isStablecoin(asset))
+    .map(([asset]) => `${asset}USDT`);
   return {
-    spot: [
-      ...new Set([...symbolsOf(orderLists), ...symbolsOf(spotOpen), ...held]),
-    ],
-    futures: [
-      ...new Set([
-        ...symbolsOf(income),
-        ...symbolsOf(positions.filter((p) => p.positionAmt !== 0)),
-        ...symbolsOf(futOpen),
-        ...symbolsOf(algoOpen),
-      ]),
-    ],
+    symbols: {
+      spot: [
+        ...new Set([...symbolsOf(orderLists), ...symbolsOf(spotOpen), ...held]),
+      ],
+      futures: [
+        ...new Set([
+          ...symbolsOf(income),
+          ...positions.keys(),
+          ...symbolsOf(futOpen),
+          ...symbolsOf(algoOpen),
+        ]),
+      ],
+    },
+    positions,
+    holdings,
   };
 }
 
@@ -468,4 +476,97 @@ export async function fetchDemoFills(
     if (error instanceof BinanceApiError && error.code === -1121) return [];
     throw error;
   }
+}
+
+/**
+ * История ордеров символа для статусов сделок (маппинг — `demoOrders.ts`).
+ * Символа нет на демо — пустой результат.
+ */
+export async function fetchDemoSymbolOrders(
+  creds: BinanceCredentials,
+  market: Market,
+  symbol: string,
+): Promise<DemoSymbolOrders> {
+  try {
+    if (market === "spot")
+      return toSpotSymbolOrders(
+        await signedRequest(
+          DEMO_URL.spot,
+          creds,
+          "GET",
+          "/api/v3/allOrders",
+          spotAllOrdersSchema,
+          { symbol, limit: 500 },
+        ),
+      );
+    const [algos, orders] = await Promise.all([
+      signedRequest(
+        DEMO_URL.futures,
+        creds,
+        "GET",
+        "/fapi/v1/allAlgoOrders",
+        algoHistorySchema,
+        { symbol },
+      ),
+      signedRequest(
+        DEMO_URL.futures,
+        creds,
+        "GET",
+        "/fapi/v1/allOrders",
+        futuresAllOrdersSchema,
+        { symbol, limit: 500 },
+      ),
+    ]);
+    return toFuturesSymbolOrders(algos, orders);
+  } catch (error) {
+    if (error instanceof BinanceApiError && error.code === -1121)
+      return { closeKinds: new Map(), openStops: [] };
+    throw error;
+  }
+}
+
+export interface DemoPosition {
+  /** Размер со знаком: минус — шорт. */
+  amount: number;
+  entryPrice: number;
+  unrealizedPnl: number;
+}
+
+/** Открытые позиции демо-фьючерсов по символам. */
+export async function fetchDemoFuturesPositions(
+  creds: BinanceCredentials,
+): Promise<Map<string, DemoPosition>> {
+  const rows = await signedRequest(
+    DEMO_URL.futures,
+    creds,
+    "GET",
+    "/fapi/v3/positionRisk",
+    positionRiskSchema,
+  );
+  const bySymbol = new Map<string, DemoPosition>();
+  for (const r of rows) {
+    if (r.positionAmt === 0) continue;
+    const prev = bySymbol.get(r.symbol);
+    bySymbol.set(r.symbol, {
+      amount: (prev?.amount ?? 0) + r.positionAmt,
+      entryPrice: r.entryPrice,
+      unrealizedPnl: (prev?.unrealizedPnl ?? 0) + r.unRealizedProfit,
+    });
+  }
+  return bySymbol;
+}
+
+/** Монеты на демо-споте: актив → free + locked. */
+export async function fetchDemoSpotHoldings(
+  creds: BinanceCredentials,
+): Promise<Map<string, number>> {
+  const account = await signedRequest(
+    DEMO_URL.spot,
+    creds,
+    "GET",
+    "/api/v3/account",
+    spotAccountBalancesSchema,
+    { omitZeroBalances: true },
+  );
+  return new Map(account.balances.map((b) => [b.asset, b.free + b.locked]));
 }

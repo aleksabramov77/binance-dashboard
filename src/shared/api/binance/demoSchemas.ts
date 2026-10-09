@@ -64,7 +64,56 @@ export const futuresOrderSchema = z
 
 export const positionRiskSchema = z.array(
   z
-    .object({ symbol: z.string(), positionAmt: decimal, entryPrice: decimal })
+    .object({
+      symbol: z.string(),
+      positionAmt: decimal,
+      entryPrice: decimal,
+      unRealizedProfit: decimal.catch(0),
+    })
+    .loose(),
+);
+
+/** История и активные algo-ордера (TP/SL) символа на демо-фьючерсах. */
+export const algoHistorySchema = z.array(
+  z
+    .object({
+      symbol: z.string(),
+      orderType: z.string(),
+      side: z.enum(["BUY", "SELL"]),
+      algoStatus: z.string(),
+      triggerPrice: decimal.catch(0),
+      // id рыночного ордера, которым исполнился TP/SL; "" или нет поля — ещё не срабатывал.
+      actualOrderId: z
+        .union([z.string(), z.number()])
+        .optional()
+        .transform((v) => (v === undefined || v === "" ? null : Number(v)))
+        .catch(null),
+    })
+    .loose(),
+);
+
+export const futuresAllOrdersSchema = z.array(
+  z
+    .object({
+      orderId: z.number(),
+      type: z.string(),
+      side: z.enum(["BUY", "SELL"]),
+      status: z.string(),
+      clientOrderId: z.string(),
+      stopPrice: decimal.catch(0),
+    })
+    .loose(),
+);
+
+export const spotAllOrdersSchema = z.array(
+  z
+    .object({
+      orderId: z.number(),
+      type: z.string(),
+      side: z.enum(["BUY", "SELL"]),
+      status: z.string(),
+      stopPrice: decimal.catch(0),
+    })
     .loose(),
 );
 

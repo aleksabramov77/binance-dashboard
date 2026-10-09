@@ -10,4 +10,5 @@ export {
 } from "./format";
 export { atr, ema, rsi } from "./indicators";
 export { reportClientError } from "./reportClientError";
+export { formatPair, splitSymbol } from "./symbol";
 export { cn } from "./utils";
