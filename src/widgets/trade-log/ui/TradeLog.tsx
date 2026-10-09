@@ -11,9 +11,15 @@ import {
   formatUsd,
 } from "@/shared/lib";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Table, TableBody, TableCell, TableRow } from "@/shared/ui/table";
+
+/** BATUSDT → BAT-USDT. */
+const formatPair = (symbol: string) => {
+  const quote = symbol.match(/(USDT|USDC|FDUSD)$/)?.[1];
+  return quote ? `${symbol.slice(0, -quote.length)}-${quote}` : symbol;
+};
 
 function OrderRow({ order }: { order: ExecutedOrder }) {
-  const base = order.symbol.replace(/USDT$/, "");
   const pnl = order.realizedPnl;
   const fees = order.commissions
     .map((c) =>
@@ -23,42 +29,43 @@ function OrderRow({ order }: { order: ExecutedOrder }) {
     )
     .join(" + ");
   return (
-    <li className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2">
-      <span className="w-28 shrink-0 text-xs text-muted-foreground">
+    <TableRow>
+      <TableCell className="text-muted-foreground">
         {formatDateTime(order.at)}
-      </span>
-      <span
+      </TableCell>
+      <TableCell
         className={cn(
           "font-semibold",
           order.side === "BUY" ? "text-positive" : "text-destructive",
         )}
       >
-        {order.side === "BUY" ? "BUY" : "SELL"} {base}
-      </span>
-      <span className="text-xs text-muted-foreground">
+        {order.side}
+      </TableCell>
+      <TableCell className="font-semibold">
+        {formatPair(order.symbol)}
+      </TableCell>
+      <TableCell className="text-muted-foreground">
         {order.market === "spot" ? "Spot" : "Futures"}
-      </span>
-      <span className="font-mono text-xs">
+      </TableCell>
+      <TableCell className="font-mono text-xs">
         {formatAmount(order.quantity)} по {formatPrice(order.avgPrice)} ≈{" "}
         {formatUsd(order.quoteQty)}
-      </span>
-      {pnl !== null && pnl !== 0 && (
-        <span
-          className={cn(
-            "font-mono text-xs",
-            pnl > 0 ? "text-positive" : "text-destructive",
-          )}
-        >
-          PnL {pnl > 0 ? "+" : ""}
-          {formatUsd(pnl)}
-        </span>
-      )}
-      {fees && (
-        <span className="ml-auto text-xs text-muted-foreground">
-          комиссия {fees}
-        </span>
-      )}
-    </li>
+        {pnl !== null && pnl !== 0 && (
+          <span
+            className={cn(
+              "ml-2",
+              pnl > 0 ? "text-positive" : "text-destructive",
+            )}
+          >
+            PnL {pnl > 0 ? "+" : ""}
+            {formatUsd(pnl)}
+          </span>
+        )}
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">
+        {fees && `комиссия ${fees}`}
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -100,11 +107,13 @@ export function TradeLog({ overview }: { overview: TradeOverview }) {
                 </p>
               )
             ) : (
-              <ul className="divide-y text-sm">
-                {orders.map((o) => (
-                  <OrderRow key={o.id} order={o} />
-                ))}
-              </ul>
+              <Table>
+                <TableBody>
+                  {orders.map((o) => (
+                    <OrderRow key={o.id} order={o} />
+                  ))}
+                </TableBody>
+              </Table>
             )}
             <p className="text-xs text-muted-foreground">
               Исполненные ордера с демо-счёта Binance (вход, срабатывание TP/SL,
