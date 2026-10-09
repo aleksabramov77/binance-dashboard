@@ -7,6 +7,15 @@ export {
   useTradeOverview,
 } from "./api/useTradeOverview";
 export {
+  AUTO_TRADE_OUTCOMES,
+  type AutoTradeAction,
+  type AutoTradeOutcome,
+  type AutoTradeState,
+  autoTradeActionSchema,
+  autoTradeStateSchema,
+  autoTradeToggleSchema,
+} from "./model/autoTrade";
+export {
   type ExecutedOrder,
   executedOrderSchema,
   MAX_LEVERAGE,

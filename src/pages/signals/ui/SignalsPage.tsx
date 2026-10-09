@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { Suspense } from "react";
 import { useScan } from "@/entities/market-signal";
 import { useTradeOverview } from "@/entities/trade";
+import { AutoTradePanel } from "@/features/auto-trade-toggle";
 import {
   RiskSettingsBar,
   useEffectiveRiskSettings,
@@ -46,6 +47,7 @@ function Signals() {
         </Button>
       </header>
 
+      <AutoTradePanel />
       <RiskSettingsBar autoCapital={autoCapital} />
       <SignalsHelp />
 

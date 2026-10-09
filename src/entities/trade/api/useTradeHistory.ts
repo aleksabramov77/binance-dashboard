@@ -15,5 +15,7 @@ export function useTradeHistory() {
   return useQuery({
     queryKey: tradeHistoryQueryKey,
     queryFn: getTradeHistory,
+    // TP/SL срабатывают на бирже, автоторговля открывает сделки сама — обновляем.
+    refetchInterval: 60_000,
   });
 }
