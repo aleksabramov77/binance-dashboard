@@ -28,6 +28,7 @@ export function OffersTable({ ranked }: { ranked: RankedOffer[] }) {
           <TableRow>
             <TableHead>Продукт</TableHead>
             <TableHead className="text-right">Ваша ставка</TableHead>
+            <TableHead className="text-right">Доход / день</TableHead>
             <TableHead className="text-right">Доход / год</TableHead>
             <TableHead className="text-right">Макс. APR</TableHead>
             <TableHead className="text-right">Базовая</TableHead>
@@ -52,6 +53,10 @@ export function OffersTable({ ranked }: { ranked: RankedOffer[] }) {
               </TableCell>
               <TableCell className="text-right font-mono font-semibold tabular-nums">
                 {y ? formatPercent(y.effectiveApr) : "—"}
+              </TableCell>
+              <TableCell className="text-right font-mono tabular-nums">
+                {/* Простые проценты: годовой доход / 365 (Flexible начисляет ежедневно). */}
+                {y ? formatUsd(y.yearlyIncomeUsd / 365) : "—"}
               </TableCell>
               <TableCell className="text-right font-mono tabular-nums">
                 {y ? formatUsd(y.yearlyIncomeUsd) : "—"}
