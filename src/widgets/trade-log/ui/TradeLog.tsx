@@ -17,6 +17,7 @@ import {
 } from "@/shared/lib";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import { Table, TableBody, TableCell, TableRow } from "@/shared/ui/table";
+import { summarizeTrades, type TradeSummary } from "../lib/summarizeTrades";
 
 /** Подсказка индикатора: статус сделки, роль ордера, у открытых — стоп и uPnL. */
 function statusTitle({ trade }: ExecutedOrder): string {
@@ -97,6 +98,31 @@ function OrderRow({ order }: { order: ExecutedOrder }) {
   );
 }
 
+const signed = (v: number) => `${v > 0 ? "+" : ""}${formatUsd(v)}`;
+const pnlTone = (v: number) =>
+  v > 0 ? "text-positive" : v < 0 ? "text-destructive" : undefined;
+
+/** Итог по загруженной истории — для статистики автоторговли. */
+function SummaryLine({ s }: { s: TradeSummary }) {
+  const winRate = s.closed > 0 ? Math.round((s.wins / s.closed) * 100) : null;
+  return (
+    <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+      <span>
+        Закрыто: <b>{s.closed}</b> (в плюс {s.wins}, в минус {s.losses}
+        {winRate !== null && `, ${winRate}% прибыльных`})
+      </span>
+      <span>
+        Итог закрытых:{" "}
+        <b className={pnlTone(s.realizedPnl)}>{signed(s.realizedPnl)}</b>
+      </span>
+      <span>
+        Открыто: <b>{s.open}</b>, сейчас{" "}
+        <b className={pnlTone(s.unrealizedPnl)}>{signed(s.unrealizedPnl)}</b>
+      </span>
+    </p>
+  );
+}
+
 export function TradeLog({ overview }: { overview: TradeOverview }) {
   const history = useTradeHistory();
   const orders = history.data?.orders ?? [];
@@ -128,6 +154,7 @@ export function TradeLog({ overview }: { overview: TradeOverview }) {
         ) : (
           <>
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {orders.length > 0 && <SummaryLine s={summarizeTrades(orders)} />}
             {orders.length === 0 ? (
               !error && (
                 <p className="text-sm text-muted-foreground">

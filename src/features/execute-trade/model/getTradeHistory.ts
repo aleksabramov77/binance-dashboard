@@ -17,7 +17,8 @@ import {
   type SymbolState,
 } from "../lib/markTrades";
 
-const ORDERS_LIMIT = 30;
+/** Строк в таблице: автоторговля за несколько часов даёт десятки ордеров. */
+const ORDERS_LIMIT = 150;
 /** Защита от лавины запросов: на символ уходит 2–3 запроса по 5–20 веса (≤ ~800 веса всего). */
 const SYMBOLS_LIMIT = 40;
 
