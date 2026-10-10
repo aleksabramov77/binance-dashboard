@@ -161,22 +161,30 @@ function ExperimentsDashboard() {
               ` Эпоха №${data.run.id} с ${formatDateTime(data.run.startedAt)}.`}
           </p>
         </div>
-        <Tabs
-          value={market}
-          onValueChange={(v) =>
-            setView({
-              market: MARKET_FILTERS.find((m) => m === v) ?? "all",
-            })
-          }
-        >
-          <TabsList>
-            {MARKET_FILTERS.map((m) => (
-              <TabsTrigger key={m} value={m}>
-                {MARKET_LABELS[m]}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/stats"
+            className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            Разрезы по монетам и направлениям →
+          </Link>
+          <Tabs
+            value={market}
+            onValueChange={(v) =>
+              setView({
+                market: MARKET_FILTERS.find((m) => m === v) ?? "all",
+              })
+            }
+          >
+            <TabsList>
+              {MARKET_FILTERS.map((m) => (
+                <TabsTrigger key={m} value={m}>
+                  {MARKET_LABELS[m]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
       </header>
 
       {isPending && <p className="text-muted-foreground">Загрузка…</p>}

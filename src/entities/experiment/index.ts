@@ -13,6 +13,7 @@ export {
 export {
   readExperimentDetail,
   readExperimentsOverview,
+  readTradeStats,
 } from "./api/readModel";
 // Клиентские хуки и UI лаборатории (хедер, spec 003 · 3a).
 export {
@@ -31,6 +32,7 @@ export {
   useExperiment,
   useExperiments,
 } from "./api/useExperiments";
+export { tradeStatsQueryKey, useTradeStats } from "./api/useTradeStats";
 export {
   type BudgetInputs,
   computeMarketBudgets,
@@ -52,6 +54,16 @@ export {
   formatSignedUsd,
   pnlTone,
 } from "./lib/formatStats";
+export {
+  blacklistCandidates,
+  filterTrades,
+  periodStart,
+  rankGroups,
+  type SliceExperiment,
+  type SliceFilters,
+  type SliceTrade,
+  sliceStats,
+} from "./lib/slices";
 export {
   computeStats,
   type EquityPoint,
@@ -90,6 +102,23 @@ export {
   engineToggleSchema,
 } from "./model/engine";
 export * from "./model/schema";
+// Контракт API разрезов /stats (3c).
+export {
+  parseStatsQuery,
+  STATS_GROUP_BY,
+  STATS_PERIODS,
+  type StatsGroupBy,
+  type StatsGroupView,
+  type StatsPeriod,
+  type StatsQuery,
+  type StatsQueryInput,
+  statsGroupBySchema,
+  statsGroupSchema,
+  statsPeriodSchema,
+  statsQuerySchema,
+  type TradeStatsResponse,
+  tradeStatsResponseSchema,
+} from "./model/statsView";
 // Контракт API страниц /experiments и /experiments/[id].
 export {
   type EquityPointView,

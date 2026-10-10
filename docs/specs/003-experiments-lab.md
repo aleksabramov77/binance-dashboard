@@ -21,7 +21,7 @@
 | 2b | Репозиторий, сид каталога, движок пишет в БД, старт в `instrumentation.ts` | `feat/004b-db-engine` | 1d | PR #21 (база 1d) |
 | 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | PR #22 |
 | 3b | `/experiments` и `/experiments/[id]`, агрегаты `entities/experiment/lib/stats.ts`, API `GET /api/experiments[/id]` | `feat/005b-experiments-page` | 2b | PR (см. ветку); скриншоты `003-experiments-lab/screens/3b-*.png` |
-| 3c | `/stats` — разрезы эксперимент/рынок/монета/направление | `feat/005c-stats` | 2b | — |
+| 3c | `/stats` — разрезы эксперимент/рынок/монета/направление, фильтры и сортировка в URL, топ-3 лучших/худших, кандидаты в blacklist; API `GET /api/experiments/stats`, разрезы `entities/experiment/lib/slices.ts` | `feat/005c-stats` | 3b | PR (см. ветку); скриншоты `003-experiments-lab/screens/3c-*.png` |
 | 3d | `/settings` — сброс тестовых капиталов (новая эпоха) | `feat/005d-settings` | 2b | — |
 | 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | PR #23 |
 | 4 | Вход через GitHub (Auth.js, allowlist), `CRON_SECRET` | `feat/006-auth` | main | ✅ #10 |
@@ -170,6 +170,12 @@
    - `/experiments`: таблица 40 экспериментов — рынок, суть, сделки, win rate, PnL, profit factor, max DD, equity; сортировка и фильтр по рынку в URL (nuqs).
    - `/experiments/[id]`: суть, конфиг, equity-кривая, сделки.
    - `/stats`: группировка по эксперименту, рынку, монете, направлению B/S; фильтры в URL. Отсюда видно, от каких монет отказаться.
+     Сделано (3c): `GET /api/experiments/stats?groupBy=experiment|market|symbol|direction&market=&experiment=&direction=&symbol=&period=epoch|24h|7d&run=`
+     (Zod-схемы `entities/experiment/model/statsView.ts`, 400 на неверные параметры, 404 на неизвестную эпоху).
+     Агрегация на сервере: `filterTrades` → `sliceStats` (поверх `groupStats`); по умолчанию — текущая эпоха, `run` — прошлая.
+     Период: закрытая сделка — по времени закрытия, открытая — по времени открытия. Капитал группы: эксперимент —
+     его бюджет, рынок — сумма бюджетов экспериментов рынка под фильтры, монета/направление — 0 (Max DD в $).
+     Кандидаты в blacklist — до 5 монет с наибольшим реализованным убытком (подсветка в разрезе «монета»).
    - `/settings`: «Сбросить тестовые капиталы» — диалог подтверждения и новая эпоха; стартовый бюджет; включение demo-зеркала у экспериментов.
    - /signals: убрать AutoTradePanel. Слайс `auto-trade` и `auto-trade-toggle` удалить, а `data/auto-trade.json` перестаёт использоваться.
 4. **E4 · spec 006 «Вход через GitHub»** — Auth.js, allowlist, proxy или middleware, страница входа, кнопка выхода в хедере, `CRON_SECRET`.
