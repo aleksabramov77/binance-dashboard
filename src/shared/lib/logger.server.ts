@@ -71,21 +71,34 @@ export type LogSink = (entries: LogEntry[]) => Promise<void>;
 
 const SINK_BATCH = 50;
 const SINK_DELAY_MS = 2000;
-let sink: LogSink | null = null;
-let buffer: LogEntry[] = [];
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Приёмник и буфер — в globalThis: instrumentation.ts и роуты Next собираются разными бандлами, у каждого
+// свой экземпляр этого модуля; приёмник, подключённый в instrumentation, иначе не видят роуты.
+interface SinkState {
+  sink: LogSink | null;
+  buffer: LogEntry[];
+  timer: ReturnType<typeof setTimeout> | null;
+}
+const sinkKey = Symbol.for("binance-dashboard.logSink");
+const g = globalThis as typeof globalThis & { [sinkKey]?: SinkState };
+const state = (): SinkState => {
+  g[sinkKey] ??= { sink: null, buffer: [], timer: null };
+  return g[sinkKey];
+};
 
 export function setLogSink(next: LogSink | null): void {
-  sink = next;
+  state().sink = next;
 }
 
 /** Отправить накопленное в приёмник. На serverless вызывается после ответа (route.server.ts). */
 export function flushLogs(): Promise<void> {
-  if (flushTimer) clearTimeout(flushTimer);
-  flushTimer = null;
-  if (!sink || buffer.length === 0) return Promise.resolve();
-  const batch = buffer;
-  buffer = [];
+  const st = state();
+  if (st.timer) clearTimeout(st.timer);
+  st.timer = null;
+  const sink = st.sink;
+  if (!sink || st.buffer.length === 0) return Promise.resolve();
+  const batch = st.buffer;
+  st.buffer = [];
   return sink(batch).catch((error) => {
     console.error(
       `[log] ✖ log.sink: журнал не записан (${batch.length}) — ${error instanceof Error ? error.message : error}`,
@@ -94,14 +107,15 @@ export function flushLogs(): Promise<void> {
 }
 
 function toSink(entry: LogEntry): void {
-  if (!sink || LEVEL_RANK[entry.level] < LEVEL_RANK.info) return;
-  buffer.push(entry);
-  if (buffer.length >= SINK_BATCH) {
+  const st = state();
+  if (!st.sink || LEVEL_RANK[entry.level] < LEVEL_RANK.info) return;
+  st.buffer.push(entry);
+  if (st.buffer.length >= SINK_BATCH) {
     void flushLogs();
     return;
   }
-  flushTimer ??= setTimeout(() => void flushLogs(), SINK_DELAY_MS);
-  flushTimer.unref?.();
+  st.timer ??= setTimeout(() => void flushLogs(), SINK_DELAY_MS);
+  st.timer.unref?.();
 }
 
 function write(entry: LogEntry): void {
