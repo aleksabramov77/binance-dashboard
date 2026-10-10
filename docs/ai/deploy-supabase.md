@@ -16,7 +16,7 @@
 отдельному решению владельца). На Vercel блоки «Портфель» и «Сделка в демо» показывают «не настроено».
 
 ## Кто что делает
-- **Владелец (iPhone)** — нажатия в Vercel и GitHub: шаги 2, 3 и 5.
+- **Владелец (iPhone)** — нажатия в Vercel и GitHub: шаги 2, 3 и 5 (5 — одно поле).
 - **Claude (Mac)** — переменные окружения через Vercel CLI, миграции БД, проверка (шаги 4 и 6).
   Секреты берутся из `.env.local` на Mac, в чат их пересылать не нужно.
 
@@ -59,31 +59,28 @@
 |---|---|---|
 | `DATABASE_URL` | `.env.local` (Transaction pooler, 6543) | БД; без неё на Vercel приложение сразу падает с понятной ошибкой |
 | `AUTH_SECRET` | генерирует Claude (`openssl rand -base64 32`) | подпись сессий Auth.js |
-| `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET` | шаг 5 | вход через GitHub |
+| `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET` | `.env.local` (OAuth App из spec 006) | вход через GitHub |
 | `AUTH_ALLOWED_GITHUB_LOGINS` | `aleksabramov77` | allowlist |
 | `OPENROUTER_API_KEY` | `.env.local` | «Разбор от ИИ»; доступ закрыт входом |
 
 Не задаются: `BINANCE_*` (ключи на сервер не кладём), `CRON_SECRET` (тик идёт из Supabase),
 `LOG_DIR` (на Vercel логи сами пишутся во временный каталог).
 
-## 5. GitHub OAuth App
-Нужен адрес из шага 2.12.
+## 5. GitHub OAuth App: добавить адрес Vercel
+OAuth App «Binance Dashboard (local)» уже есть (spec 006, в нём адреса для `localhost:5000` и `localhost:5001`).
+Новое приложение не нужно: в него добавляется ещё один callback. Нужен адрес из шага 2.12.
 1. Откройте https://github.com/settings/developers.
 2. Нажмите **OAuth Apps**.
-3. Нажмите **New OAuth App**.
-4. **Application name**: `Binance Dashboard`.
-5. **Homepage URL**: `https://<адрес из шага 2.12>`.
-6. **Authorization callback URL**: `https://<адрес из шага 2.12>/api/auth/callback/github`.
-7. Нажмите **Register application**.
-8. Скопируйте **Client ID** и пришлите в чат.
-9. Нажмите **Generate a new client secret**.
-10. Скопируйте секрет (показывается один раз) и пришлите в чат.
+3. Нажмите **Binance Dashboard (local)**.
+4. В **Authorization callback URL** добавьте строку `https://<адрес из шага 2.12>/api/auth/callback/github`.
+5. Нажмите **Update application**.
 
+Client ID и секрет уже лежат в `.env.local` на Mac: Claude перенесёт их в Vercel сам.
 Callback работает только для production-адреса. Preview-сборки веток PR откроются, но вход в них
 не пройдёт — для проверки используйте production или локальный запуск.
 
 ## 6. Запуск и проверка — делает Claude
-1. Добавляет `AUTH_GITHUB_ID` и `AUTH_GITHUB_SECRET`, запускает **Redeploy** production.
+1. После шага 5 запускает **Redeploy** production.
 2. Проверяет:
    - без входа — редирект на `/login`, `/api/*` → 401;
    - вход через GitHub пускает `aleksabramov77`;
