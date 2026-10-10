@@ -308,11 +308,18 @@ export async function runTick(
     const { config } = exp;
     const tfMs = TIMEFRAME_MS[config.timeframe];
     const bar = lastClosedOpenTime(tfMs, now);
-    if ((bars[exp.id] ?? Number.NEGATIVE_INFINITY) >= bar) continue;
+    const seen = (bars[exp.id] ?? Number.NEGATIVE_INFINITY) >= bar;
+    // hold (S20, F20) — «всегда в позиции»: пока позиции нет, пробуем войти каждый тик.
+    const holdGap =
+      config.entry.type === "hold" &&
+      open.filter((t) => t.experimentId === exp.id).length < config.maxOpen;
+    if (seen && !holdGap) continue;
     try {
       await evaluateExperiment(exp, bar);
-      bars[exp.id] = bar;
-      result.evaluated.push(exp.id);
+      if (!seen) {
+        bars[exp.id] = bar;
+        result.evaluated.push(exp.id);
+      }
     } catch (error) {
       // Свеча не помечена обработанной — следующий тик попробует снова.
       fail(`эксперимент ${exp.id}`, error);
@@ -349,8 +356,13 @@ export async function runTick(
     const inUniverse = new Set(universe);
     // Свеча закрылась давно (первый тик после включения, рестарт, простой) — по такому сигналу не
     // входим: цена уже ушла. Выходы по сигналу оставляем — они закрывают риск.
-    const fresh =
-      now - (bar + TIMEFRAME_MS[config.timeframe]) <= ENGINE.maxSignalAgeMs;
+    const tfMs = TIMEFRAME_MS[config.timeframe];
+    const maxAge = Math.max(
+      ENGINE.minSignalAgeMs,
+      ENGINE.signalAgeShare * tfMs,
+    );
+    const hold = config.entry.type === "hold";
+    const fresh = hold || now - (bar + tfMs) <= maxAge;
 
     for (const { symbol, candles } of ready) {
       const t = ticker.get(symbol);
@@ -401,7 +413,8 @@ export async function runTick(
       if (!size) continue;
 
       const trade: PaperTrade = {
-        id: `${runId}-${exp.id}-${symbol}-${bar}`,
+        // hold входит и посреди свечи (после закрытия позиции) — id по минуте, а не по свече.
+        id: `${runId}-${exp.id}-${symbol}-${hold ? Math.floor(now / MINUTE) * MINUTE : bar}`,
         runId,
         experimentId: exp.id,
         market,
