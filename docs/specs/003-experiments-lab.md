@@ -19,7 +19,7 @@
 | 1d | Тик движка, кэш свечей, юниверс, каталог 40 экспериментов, интерфейс хранилища | `feat/003d-engine` | 1c + 2a | PR #20 |
 | 2a | БД: Drizzle, PGlite локально / Postgres по `DATABASE_URL`, схема, миграции | `feat/004a-db` | 1a | ✅ #9 |
 | 2b | Репозиторий, сид каталога, движок пишет в БД, старт в `instrumentation.ts` | `feat/004b-db-engine` | 1d | PR #21 (база 1d) |
-| 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | в PR |
+| 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | PR #22 |
 | 3b | `/experiments` и `/experiments/[id]` | `feat/005b-experiments-page` | 2b | — |
 | 3c | `/stats` — разрезы эксперимент/рынок/монета/направление | `feat/005c-stats` | 2b | — |
 | 3d | `/settings` — сброс тестовых капиталов (новая эпоха) | `feat/005d-settings` | 2b | — |
