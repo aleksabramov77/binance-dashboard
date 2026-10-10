@@ -70,8 +70,8 @@ export interface ResetRunInput {
   }[];
   /** Ключи engine_state, которые записать вместе с новой эпохой (метки свечей). */
   state: Record<string, unknown>;
-  /** Новый бюджет рынка: делится поровну между экспериментами рынка; не задан — бюджеты не меняются. */
-  marketBudget?: number;
+  /** Новый стартовый бюджет всех экспериментов; не задан — бюджеты не меняются. */
+  initialBudget?: number;
 }
 
 export type ResetRunOutcome =
@@ -143,17 +143,10 @@ export async function resetRun(
           set: { value, updatedAt: sql`now()` },
         });
 
-    if (input.marketBudget !== undefined) {
-      const markets = await tx
-        .select({ market: experimentsTable.market, n: count() })
-        .from(experimentsTable)
-        .groupBy(experimentsTable.market);
-      for (const { market, n } of markets)
-        await tx
-          .update(experimentsTable)
-          .set({ initialBudget: input.marketBudget / n, updatedAt: sql`now()` })
-          .where(eq(experimentsTable.market, market));
-    }
+    if (input.initialBudget !== undefined)
+      await tx
+        .update(experimentsTable)
+        .set({ initialBudget: input.initialBudget, updatedAt: sql`now()` });
 
     return { created: true, runId: run.id, closed, closedWithoutPrice };
   });

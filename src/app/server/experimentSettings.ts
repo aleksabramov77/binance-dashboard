@@ -36,14 +36,7 @@ export async function getLabSettings(): Promise<LabSettings> {
   const epoch = await getEpoch(db, await store.currentRunId());
   return {
     epoch,
-    currentBudget: Math.max(
-      0,
-      ...["spot", "futures"].map((m) =>
-        experiments
-          .filter((e) => e.market === m)
-          .reduce((s, e) => s + e.initialBudget, 0),
-      ),
-    ),
+    currentBudget: Math.max(0, ...experiments.map((e) => e.initialBudget)),
     nextBudget: await readNextBudget(store),
     experiments: experiments.map((e) => ({
       id: e.id,
@@ -57,7 +50,7 @@ export async function getLabSettings(): Promise<LabSettings> {
   };
 }
 
-/** Бюджет рынка следующей эпохи: engine_state.next_budget; при сбросе делится между экспериментами рынка. */
+/** Бюджет следующей эпохи: хранится в engine_state.next_budget, к экспериментам — при сбросе. */
 export async function setNextBudget(
   initialBudget: number,
 ): Promise<LabSettings> {
@@ -148,7 +141,7 @@ export function resetCapitals(input: ResetRequest): Promise<ResetResult> {
           note: input.note,
           closes: plan.closes,
           state: { [ENGINE_KEYS.bars]: plan.bars },
-          marketBudget: await readNextBudget(store),
+          initialBudget: await readNextBudget(store),
         });
       });
       if (!locked.acquired) {

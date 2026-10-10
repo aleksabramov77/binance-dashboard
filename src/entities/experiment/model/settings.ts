@@ -2,14 +2,13 @@ import { marketSchema } from "@binance-dashboard/trading-core";
 import { z } from "zod";
 // Контракт /settings лаборатории (spec 003, задача 3d): эпоха, стартовый бюджет, тумблеры экспериментов.
 
-/** Бюджет рынка (Spot и Futures — каждому), делится поровну между экспериментами рынка при сбросе. */
 export const DEFAULT_INITIAL_BUDGET = 10_000;
 export const MIN_INITIAL_BUDGET = 100;
 export const MAX_INITIAL_BUDGET = 1_000_000;
 /** Слово, которое нужно ввести, чтобы подтвердить сброс. */
 export const RESET_CONFIRM_WORD = "СБРОС";
 
-/** Стартовый бюджет рынка (USD) — форма /settings и POST /api/experiments/settings/budget. */
+/** Стартовый бюджет на эксперимент (USD) — форма /settings и POST /api/experiments/settings/budget. */
 export const budgetFormSchema = z.object({
   initialBudget: z
     .number({ error: "Введите число" })
@@ -46,7 +45,7 @@ export type Epoch = z.infer<typeof epochSchema>;
 
 export const labSettingsSchema = z.object({
   epoch: epochSchema,
-  /** Бюджет рынка, с которым идёт текущая эпоха (сумма бюджетов экспериментов рынка; разный — максимум). */
+  /** Бюджет, с которым идёт текущая эпоха (по экспериментам; разный — максимум). */
   currentBudget: z.number(),
   /** Бюджет для следующей эпохи — вступит после сброса. */
   nextBudget: z.number(),

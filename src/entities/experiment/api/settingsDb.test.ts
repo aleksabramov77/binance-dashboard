@@ -90,7 +90,7 @@ const input = (fromRunId: number): ResetRunInput => ({
     { id: "open-2", close: manual(0, 100), noPrice: true },
   ],
   state: { bars: { F01: 123 } },
-  marketBudget: 30_000,
+  initialBudget: 20_000,
 });
 
 describe("сброс тестовых капиталов (PGlite)", () => {
@@ -137,17 +137,17 @@ describe("сброс тестовых капиталов (PGlite)", () => {
     });
   });
 
-  it("пишет метки свечей и делит бюджет рынка поровну между его экспериментами", async () => {
+  it("пишет метки свечей и новый стартовый бюджет всем экспериментам", async () => {
     const { runId, store } = await setup();
     await resetRun(db, input(runId));
     expect(await store.getState("bars")).toEqual({ F01: 123 });
     const budgets = (await store.listExperiments()).map((e) => e.initialBudget);
-    expect(budgets).toEqual([15_000, 15_000]);
+    expect(budgets).toEqual([20_000, 20_000]);
   });
 
   it("без бюджета — бюджеты экспериментов не меняются", async () => {
     const { runId, store } = await setup();
-    await resetRun(db, { ...input(runId), marketBudget: undefined });
+    await resetRun(db, { ...input(runId), initialBudget: undefined });
     const budgets = (await store.listExperiments()).map((e) => e.initialBudget);
     expect(budgets).toEqual([10_000, 10_000]);
   });

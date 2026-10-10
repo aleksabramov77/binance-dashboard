@@ -30,7 +30,7 @@ describe("каталог экспериментов", () => {
     for (const e of SPOT_EXPERIMENTS)
       expect(e.config.directions).toEqual(["long"]);
     for (const e of EXPERIMENT_CATALOG) {
-      expect(e.initialBudget).toBe(500);
+      expect(e.initialBudget).toBe(10_000);
       expect(e.hypothesis.length).toBeGreaterThan(20);
     }
   });
