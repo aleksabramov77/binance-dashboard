@@ -22,7 +22,7 @@
 | 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | — |
 | 3b | `/experiments` и `/experiments/[id]` | `feat/005b-experiments-page` | 2b | — |
 | 3c | `/stats` — разрезы эксперимент/рынок/монета/направление | `feat/005c-stats` | 2b | — |
-| 3d | `/settings` — сброс тестовых капиталов (новая эпоха) | `feat/005d-settings` | 2b | — |
+| 3d | `/settings` — сброс тестовых капиталов (новая эпоха), стартовый бюджет, вкл/выкл экспериментов | `feat/005d-settings` | 2b | PR (см. ниже) |
 | 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | — |
 | 4 | Вход через GitHub (Auth.js, allowlist), `CRON_SECRET` | `feat/006-auth` | main | ✅ #10 |
 | 5 | Резерв: деплой на Oracle Cloud Always Free (UAE East, Dubai) | `feat/007-deploy` | main | ✅ #12 (VM не создана) |
@@ -35,6 +35,33 @@
 вызывают и `instrumentation.ts` (VM), и Edge Function Supabase (Deno). `trading-core` зависит только от `zod`.
 В `engine_state` ключ `runner` = `oracle` | `supabase` — тик чужого раннера ничего не делает (сделки не
 открываются дважды).
+
+## Задача 3d: `/settings` (реализация)
+- **Страница** `pages/settings` (маршрут `app/settings`): эпоха (номер, начало, заметка, сделок всего/открыто);
+  «Сбросить тестовые капиталы» — подтверждение в самой странице: ввести «СБРОС» (+ необязательная заметка);
+  стартовый бюджет (React Hook Form + Zod, $100–$1 000 000, подсказка «вступит после сброса»); таблица
+  40 экспериментов с тумблером `enabled` и отключённым `demoMirror` с подписью «скоро (задача 6)».
+- **API:** `GET /api/experiments/settings`, `POST /api/experiments/reset {fromRunId, note?}`,
+  `POST /api/experiments/settings/budget {initialBudget}`, `POST /api/experiments/settings/enabled {id, enabled}`.
+- **Сброс** (`src/app/server/experimentSettings.ts → resetCapitals`):
+  1. под блокировкой тика процесса (`withTickLock` в `experimentEngine.ts`): ждёт идущий тик, новые тики ждут сброс;
+  2. последние цены — `ticker/24hr` рынков открытых сделок; `planReset` (`features/paper-engine`, чистая
+     функция) считает закрытия `manual` (`exitFill` + `settle`; нет цены — по цене входа, PnL 0) и метки
+     `engine_state.bars` = последняя закрытая свеча TF каждого эксперимента — новая эпоха не входит по
+     сигналам до сброса, первый вход — со следующей свечи (кроме `hold`);
+  3. `resetRun` (`entities/experiment`) — одна транзакция: `SELECT … FOR UPDATE` последней эпохи, закрытие
+     открытых сделок (`closed_at IS NULL`), новая `runs`, `engine_state.bars`, бюджет всем экспериментам.
+  - **Идемпотентность:** запрос несёт `fromRunId` (эпоху, которую видел пользователь). Эпоха уже не текущая
+    (двойной клик, вторая вкладка, параллельный запрос — ждёт блокировку строки) → `created: false`.
+  - Тумблер движка не меняется. Старые сделки остаются со своим `run_id`.
+- **Бюджет — в `engine_state.next_budget`**, а не на `runs`: без миграции (параллельные ветки эпика тоже
+  могут добавлять миграции), а движок и так читает `experiments.initial_budget` — при сбросе бюджет
+  копируется всем экспериментам. Минус — бюджет старых эпох не сохраняется (открытый вопрос в PRD).
+- **enabled=false** — `runTick` уже не входит в сделки выключенного эксперимента; его открытые сделки
+  доводятся до выхода. Покрыто тестами `runTick.test.ts`.
+- Тесты: `planReset.test.ts`, `settingsDb.test.ts` (PGlite: закрытие открытых, новая эпоха, бюджеты новой
+  эпохи с нуля, метки и бюджет, идемпотентность и параллельные сбросы), `runTick.test.ts` (enabled=false,
+  нет входа по старой свече после сброса).
 
 Ниже — утверждённый пользователем план (2026-10-10).
 

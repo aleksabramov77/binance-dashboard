@@ -7,6 +7,7 @@ import { TIMEFRAME_MS } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
 import type { MarketTicker } from "../lib/universe";
 import { createMemoryStore } from "./memoryStore";
+import { planReset, priceKey } from "./planReset";
 import { type Interval, runTick, type TickDeps } from "./runTick";
 import { ENGINE_KEYS } from "./store";
 
@@ -389,5 +390,58 @@ describe("runTick: кэш свечей", () => {
     const second = m.calls.filter((c) => c.interval === "1h").slice(1);
     expect(second).toHaveLength(1);
     expect(second[0].limit).toBeLessThan(20);
+  });
+});
+
+describe("runTick: выключенный эксперимент и сброс эпохи (задача 3d)", () => {
+  const LONG = ALWAYS_LONG;
+
+  it("enabled=false — новых сделок нет, свеча не обрабатывается", async () => {
+    const store = enabledStore([{ ...exp("A", LONG), enabled: false }]);
+    const r = await runTick(market().deps(store), T0);
+    expect(r.opened).toBe(0);
+    expect(r.evaluated).toEqual([]);
+    expect(store.trades()).toHaveLength(0);
+  });
+
+  it("выключенный эксперимент доводит открытую сделку до выхода", async () => {
+    const experiments = [exp("A", LONG)];
+    const store = enabledStore(experiments);
+    // Стоп long ≈ 98,05: 1m-свеча 12:01 проваливается до 97.
+    const m = market(["BTCUSDT"], (t) => (t === T0 + MIN ? { low: 97 } : {}));
+    expect((await runTick(m.deps(store), T0)).opened).toBe(1);
+    experiments[0].enabled = false;
+    m.setNow(T0 + 3 * MIN);
+    const r = await runTick(m.deps(store), T0 + 3 * MIN);
+    expect(r.closed).toBe(1);
+    expect(store.trades()[0].exitReason).toBe("sl");
+  });
+
+  it("после сброса с метками planReset новая эпоха не входит по свече до сброса", async () => {
+    const experiments = [exp("A", LONG)];
+    const store = enabledStore(experiments);
+    const m = market(["BTCUSDT"]);
+    expect((await runTick(m.deps(store), T0)).opened).toBe(1);
+
+    const now = T0 + MIN;
+    const plan = planReset({
+      experiments,
+      open: store.trades().filter((t) => t.closedAt === null),
+      prices: { [priceKey("futures", "BTCUSDT")]: 101 },
+      now,
+    });
+    for (const c of plan.closes) await store.closeTrade(c.id, c.close);
+    store.newRun();
+    await store.setState(ENGINE_KEYS.bars, plan.bars);
+
+    m.setNow(now);
+    const r = await runTick(m.deps(store), now);
+    expect(r.opened).toBe(0);
+    expect(r.evaluated).toEqual([]);
+    // Следующая свеча TF — уже сигнал новой эпохи.
+    m.setNow(T0 + HOUR);
+    const next = await runTick(m.deps(store), T0 + HOUR);
+    expect(next.opened).toBe(1);
+    expect(store.trades().at(-1)?.runId).toBe(2);
   });
 });
