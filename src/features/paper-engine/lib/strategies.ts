@@ -125,6 +125,7 @@ export function evaluateStrategy(
   const closes = c.map((x) => x.close);
   const price = last(closes);
   const none = (exit = NO_EXIT): StrategyResult => ({ entry: null, exit });
+  if (c.length < 2) return none();
 
   switch (rule.type) {
     case "counterTrend":
@@ -139,7 +140,10 @@ export function evaluateStrategy(
       const exit = { long: last(f) < last(s), short: last(f) > last(s) };
       if (!up && !down) return none(exit);
       return {
-        entry: { direction: up ? "long" : "short", meta: { fast: round(last(f)), slow: round(last(s)) } },
+        entry: {
+          direction: up ? "long" : "short",
+          meta: { fast: round(last(f)), slow: round(last(s)) },
+        },
         exit,
       };
     }
@@ -152,14 +156,24 @@ export function evaluateStrategy(
       const vols = c.map((x) => x.volume);
       const avgVol = last(smaSeries(vols.slice(0, -1), 20));
       const volOk =
-        !rule.volumeMult || (ok(avgVol) && last(vols) >= rule.volumeMult * avgVol);
+        !rule.volumeMult ||
+        (ok(avgVol) && last(vols) >= rule.volumeMult * avgVol);
       const half = donchian(c, Math.max(2, Math.floor(rule.period / 2)));
-      const exit = { long: price < last(half.lower), short: price > last(half.upper) };
+      const exit = {
+        long: price < last(half.lower),
+        short: price > last(half.upper),
+      };
       if (!volOk) return none(exit);
       if (price > hi)
-        return { entry: { direction: "long", stop: lo, meta: { channelHigh: hi } }, exit };
+        return {
+          entry: { direction: "long", stop: lo, meta: { channelHigh: hi } },
+          exit,
+        };
       if (price < lo)
-        return { entry: { direction: "short", stop: hi, meta: { channelLow: lo } }, exit };
+        return {
+          entry: { direction: "short", stop: hi, meta: { channelLow: lo } },
+          exit,
+        };
       return none(exit);
     }
 
@@ -171,9 +185,15 @@ export function evaluateStrategy(
       const exit = { long: price > sma5, short: price < sma5 };
       const meta = { rsi2: round(r) };
       if (price > trend && r < rule.threshold)
-        return { entry: { direction: "long", target: sma5, meta }, exit: NO_EXIT };
+        return {
+          entry: { direction: "long", target: sma5, meta },
+          exit: NO_EXIT,
+        };
       if (price < trend && r > 100 - rule.threshold)
-        return { entry: { direction: "short", target: sma5, meta }, exit: NO_EXIT };
+        return {
+          entry: { direction: "short", target: sma5, meta },
+          exit: NO_EXIT,
+        };
       return none(exit);
     }
 
@@ -182,10 +202,16 @@ export function evaluateStrategy(
       const r = last(rsiSeries(closes));
       if (!ok(last(bb.lower), r)) return none();
       const meta = { rsi: round(r) };
-      if (c.at(-1)!.low <= last(bb.lower) && r < rule.rsiMax)
-        return { entry: { direction: "long", target: last(bb.middle), meta }, exit: NO_EXIT };
-      if (c.at(-1)!.high >= last(bb.upper) && r > 100 - rule.rsiMax)
-        return { entry: { direction: "short", target: last(bb.middle), meta }, exit: NO_EXIT };
+      if (last(c).low <= last(bb.lower) && r < rule.rsiMax)
+        return {
+          entry: { direction: "long", target: last(bb.middle), meta },
+          exit: NO_EXIT,
+        };
+      if (last(c).high >= last(bb.upper) && r > 100 - rule.rsiMax)
+        return {
+          entry: { direction: "short", target: last(bb.middle), meta },
+          exit: NO_EXIT,
+        };
       return none();
     }
 
@@ -223,7 +249,11 @@ export function evaluateStrategy(
       const exit = { long: d === -1, short: d === 1 };
       if (!prev || d === prev) return none(exit);
       return {
-        entry: { direction: d === 1 ? "long" : "short", stop: last(st.line), meta: { line: round(last(st.line)) } },
+        entry: {
+          direction: d === 1 ? "long" : "short",
+          stop: last(st.line),
+          meta: { line: round(last(st.line)) },
+        },
         exit,
       };
     }
@@ -231,14 +261,16 @@ export function evaluateStrategy(
     case "volumeSpike": {
       const vols = c.map((x) => x.volume);
       const avg = last(smaSeries(vols.slice(0, -1), 20));
-      const bar = c.at(-1)!;
+      const bar = last(c);
       const range = bar.high - bar.low;
       if (!ok(avg) || avg <= 0 || range <= 0 || bar.volume < rule.mult * avg)
         return none();
       const pos = (bar.close - bar.low) / range;
       const meta = { volumeRatio: round(bar.volume / avg) };
-      if (pos >= 0.7) return { entry: { direction: "long", meta }, exit: NO_EXIT };
-      if (pos <= 0.3) return { entry: { direction: "short", meta }, exit: NO_EXIT };
+      if (pos >= 0.7)
+        return { entry: { direction: "long", meta }, exit: NO_EXIT };
+      if (pos <= 0.3)
+        return { entry: { direction: "short", meta }, exit: NO_EXIT };
       return none();
     }
 
@@ -248,12 +280,22 @@ export function evaluateStrategy(
       const e200 = last(ema(closes, 200));
       const a = last(atrSeries(c));
       if (!ok(last(e20), e50, e200, a)) return none();
-      const bar = c.at(-1)!;
+      const bar = last(c);
       const meta = { ema20: round(last(e20)) };
       // Тренд выстроен, свеча коснулась EMA20 и закрылась по тренду.
-      if (last(e20) > e50 && e50 > e200 && bar.low <= last(e20) && bar.close > last(e20))
+      if (
+        last(e20) > e50 &&
+        e50 > e200 &&
+        bar.low <= last(e20) &&
+        bar.close > last(e20)
+      )
         return { entry: { direction: "long", meta }, exit: NO_EXIT };
-      if (last(e20) < e50 && e50 < e200 && bar.high >= last(e20) && bar.close < last(e20))
+      if (
+        last(e20) < e50 &&
+        e50 < e200 &&
+        bar.high >= last(e20) &&
+        bar.close < last(e20)
+      )
         return { entry: { direction: "short", meta }, exit: NO_EXIT };
       return none();
     }
@@ -271,7 +313,10 @@ export function evaluateStrategy(
       if (ctx.random >= rule.probability) return none();
       // Направление — от второй половины того же случайного числа.
       const direction = ctx.random < rule.probability / 2 ? "long" : "short";
-      return { entry: { direction, meta: { random: round(ctx.random) } }, exit: NO_EXIT };
+      return {
+        entry: { direction, meta: { random: round(ctx.random) } },
+        exit: NO_EXIT,
+      };
     }
 
     case "hold":

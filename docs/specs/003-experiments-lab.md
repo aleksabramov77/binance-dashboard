@@ -9,7 +9,7 @@
 | # | Задача | Ветка | База | Статус |
 |---|---|---|---|---|
 | 1a | Индикаторы `shared/lib/ta.ts` + схемы `entities/experiment` | `feat/003a-ta-schema` | main | PR |
-| 1b | Стратегии входа `features/paper-engine/lib/strategies.ts` + тесты | `feat/003b-strategies` | 1a | в работе |
+| 1b | Стратегии входа `features/paper-engine/lib/strategies.ts` + тесты | `feat/003b-strategies` | 1a | PR |
 | 1c | Выходы (SL/TP/трейлинг/безубыток/тайм-стоп), sizing 0,5%, симуляция исполнения + тесты | `feat/003c-exits-sizing` | 1b | — |
 | 1d | Тик движка, кэш свечей, юниверс, каталог 40 экспериментов, интерфейс хранилища | `feat/003d-engine` | 1c + 2a | — |
 | 2a | БД: Drizzle, PGlite локально / Postgres по `DATABASE_URL`, схема, миграции | `feat/004a-db` | 1a | — |
