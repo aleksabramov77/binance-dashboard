@@ -23,7 +23,7 @@
 | 3b | `/experiments` и `/experiments/[id]` | `feat/005b-experiments-page` | 2b | — |
 | 3c | `/stats` — разрезы эксперимент/рынок/монета/направление | `feat/005c-stats` | 2b | — |
 | 3d | `/settings` — сброс тестовых капиталов (новая эпоха) | `feat/005d-settings` | 2b | — |
-| 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | PR (ожидает мержа) |
+| 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | PR #23 |
 | 4 | Вход через GitHub (Auth.js, allowlist), `CRON_SECRET` | `feat/006-auth` | main | ✅ #10 |
 | 5 | Резерв: деплой на Oracle Cloud Always Free (UAE East, Dubai) | `feat/007-deploy` | main | ✅ #12 (VM не создана) |
 | 5b | **Основной хостинг**: Supabase — `binance-ping`, `engine-tick`, pg_cron, Vault (spec 007b, AC1–AC4) | `feat/007b-supabase` | main (ping) / 2b (тик) | spec ✅ #14; БД `binance-lab` (Tokyo) создана, миграции применены; AC1 ⏳ #19 (функция в Tokyo, статусы Binance ждут publishable key) |
