@@ -45,6 +45,7 @@
 
 ## Критерии приёмки
 - [ ] AC1. `supabase/functions/binance-ping` отвечает статусами `api.binance.com/api/v3/ping` и `fapi.binance.com/fapi/v1/ping`, а заголовок `x-sb-edge-region` равен `ap-northeast-1`. Это первая проверка, до остальной работы: при 451 переключаемся на Mumbai.
+  - 2026-10-10 (⏳ частично): функция задеплоена в `binance-lab` (Tokyo); вызов с `?forceFunctionRegion=ap-northeast-1` маршрутизируется в Токио — `x-sb-edge-region: ap-northeast-1`. Статусы Binance ещё не получены: токену CLI не хватает права `api_gateway_keys_read`, поэтому publishable/anon ключ для вызова недоступен (запрос без ключа → 401 `UNAUTHORIZED_NO_AUTH_HEADER` от шлюза). Как проверить — `docs/ai/deploy-supabase.md`, раздел «Проверка доступа к Binance».
 - [ ] AC2. `supabase/functions/engine-tick` выполняет один тик общего движка и пишет сделки и состояние в БД. Повторный вызов в ту же минуту ничего не дублирует.
 - [ ] AC3. Миграция `drizzle/` создаёт задание pg_cron `engine-tick-every-minute`; ключ вызова — в Vault. В «Логах» Supabase видны ежеминутные вызовы.
 - [ ] AC4. Переключение раннера `oracle ↔ supabase` описано в `docs/ai/deploy-supabase.md`, тик чужого раннера — no-op.
@@ -66,3 +67,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-10 | Запрос пользователя, ТЗ записано в ветке `docs/007b-supabase-hosting` |
+| 2026-10-10 | AC1: `binance-ping` задеплоена (Tokyo, `x-sb-edge-region: ap-northeast-1`), статусы Binance ждут publishable-ключа (ветка `feat/007b-supabase`) |
