@@ -12,8 +12,8 @@ import { ENGINE_KEYS } from "./store";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
-// Середина часа: последняя 1h-свеча закрыта, текущая — незакрыта.
-const T0 = Date.parse("2026-10-10T12:30:00Z");
+// Начало часа: 1h-свеча 11:00 только что закрылась (свежий сигнал), свеча 12:00 — незакрыта.
+const T0 = Date.parse("2026-10-10T12:00:00Z");
 
 const exp = (
   id: string,
@@ -158,10 +158,8 @@ describe("runTick: входы", () => {
     expect((await runTick(m.deps(store), T0)).evaluated).toEqual(["A"]);
     m.setNow(T0 + 20 * MIN);
     expect((await runTick(m.deps(store), T0 + 20 * MIN)).evaluated).toEqual([]);
-    m.setNow(T0 + 31 * MIN);
-    expect((await runTick(m.deps(store), T0 + 31 * MIN)).evaluated).toEqual([
-      "A",
-    ]);
+    m.setNow(T0 + HOUR);
+    expect((await runTick(m.deps(store), T0 + HOUR)).evaluated).toEqual(["A"]);
   });
 
   it("одна позиция на символ: на новой свече hold не открывает вторую", async () => {
@@ -210,6 +208,41 @@ describe("runTick: входы", () => {
     // Цена 100, EMA тоже 100 — цена не выше EMA → входа нет.
     const r = await runTick(market().deps(store), T0);
     expect(r.opened).toBe(0);
+  });
+});
+
+describe("runTick: устаревшие сигналы", () => {
+  it("первый тик после включения: свеча сигнала закрылась 2 ч назад — метка ставится, входа нет", async () => {
+    // TF 4h: в 14:00 последняя закрытая свеча — 08:00–12:00, она закрылась 2 ч назад.
+    const store = enabledStore([exp("A", { timeframe: "4h" })]);
+    const late = T0 + 2 * HOUR;
+    const m = market();
+    m.setNow(late);
+    const r = await runTick(m.deps(store), late);
+    expect(r.evaluated).toEqual(["A"]);
+    expect(r.opened).toBe(0);
+    expect(await store.getState(ENGINE_KEYS.bars)).toEqual({
+      A: Date.parse("2026-10-10T08:00:00Z"),
+    });
+  });
+
+  it("свежезакрытая свеча (в пределах 3 мин) — вход есть", async () => {
+    const store = enabledStore([exp("A")]);
+    const m = market();
+    m.setNow(T0 + 2 * MIN);
+    expect((await runTick(m.deps(store), T0 + 2 * MIN)).opened).toBe(1);
+    const late = enabledStore([exp("A")]);
+    m.setNow(T0 + 4 * MIN);
+    expect((await runTick(m.deps(late), T0 + 4 * MIN)).opened).toBe(0);
+  });
+
+  it("после устаревшей свечи следующая свежая — входит", async () => {
+    const store = enabledStore([exp("A")]);
+    const m = market();
+    m.setNow(T0 + 30 * MIN);
+    expect((await runTick(m.deps(store), T0 + 30 * MIN)).opened).toBe(0);
+    m.setNow(T0 + HOUR);
+    expect((await runTick(m.deps(store), T0 + HOUR)).opened).toBe(1);
   });
 });
 
