@@ -124,13 +124,28 @@ export type DatabaseConfig =
   | { kind: "postgres"; url: string }
   | { kind: "pglite"; dir: string };
 
+/**
+ * Serverless-хостинг (Vercel выставляет VERCEL=1): процесс живёт только на время запроса,
+ * файловая система только для чтения. Фоновых задач и локальных файлов там нет.
+ */
+export const isServerless = (
+  env: Record<string, string | undefined> = process.env,
+): boolean => env.VERCEL === "1";
+
 /** Куда подключаться: Postgres по DATABASE_URL или встроенный PGlite (локально, без внешних сервисов). */
-export function getDatabaseConfig(): DatabaseConfig {
-  const env = dbEnvSchema.parse({
-    DATABASE_URL: process.env.DATABASE_URL || undefined,
-    PGLITE_DIR: process.env.PGLITE_DIR || undefined,
+export function getDatabaseConfig(
+  env: Record<string, string | undefined> = process.env,
+): DatabaseConfig {
+  const parsed = dbEnvSchema.parse({
+    DATABASE_URL: env.DATABASE_URL || undefined,
+    PGLITE_DIR: env.PGLITE_DIR || undefined,
   });
-  return env.DATABASE_URL
-    ? { kind: "postgres", url: env.DATABASE_URL }
-    : { kind: "pglite", dir: env.PGLITE_DIR };
+  if (parsed.DATABASE_URL)
+    return { kind: "postgres", url: parsed.DATABASE_URL };
+  // PGlite пишет файл на диск — на serverless писать некуда, а данные терялись бы между запросами.
+  if (isServerless(env))
+    throw new Error(
+      "DATABASE_URL не задан: на serverless-хостинге нужен Postgres (Supabase, Transaction pooler).",
+    );
+  return { kind: "pglite", dir: parsed.PGLITE_DIR };
 }
