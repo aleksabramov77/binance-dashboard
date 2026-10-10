@@ -1,6 +1,7 @@
-// Серверный журнал: JSON-строки в data/logs/app-YYYY-MM-DD.jsonl + короткая строка в консоль.
-// Только для сервера (node:fs). Секреты маскируются по имени поля.
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+// Серверный журнал: короткая строка в консоль, записи info+ — пачками в приёмник (БД, см.
+// src/app/server/logs.ts, подключается в instrumentation.ts), локально ещё JSON-строки в
+// data/logs/app-YYYY-MM-DD.jsonl (с debug). Только для сервера. Секреты маскируются по имени поля.
+import { appendFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -65,6 +66,44 @@ export const logFileFor = (date: Date) =>
 
 let dirReady: Promise<unknown> | null = null;
 
+/** Приёмник записей (БД). Ошибки приёмника не должны ронять запрос — их глотает flushLogs. */
+export type LogSink = (entries: LogEntry[]) => Promise<void>;
+
+const SINK_BATCH = 50;
+const SINK_DELAY_MS = 2000;
+let sink: LogSink | null = null;
+let buffer: LogEntry[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function setLogSink(next: LogSink | null): void {
+  sink = next;
+}
+
+/** Отправить накопленное в приёмник. На serverless вызывается после ответа (route.server.ts). */
+export function flushLogs(): Promise<void> {
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = null;
+  if (!sink || buffer.length === 0) return Promise.resolve();
+  const batch = buffer;
+  buffer = [];
+  return sink(batch).catch((error) => {
+    console.error(
+      `[log] ✖ log.sink: журнал не записан (${batch.length}) — ${error instanceof Error ? error.message : error}`,
+    );
+  });
+}
+
+function toSink(entry: LogEntry): void {
+  if (!sink || LEVEL_RANK[entry.level] < LEVEL_RANK.info) return;
+  buffer.push(entry);
+  if (buffer.length >= SINK_BATCH) {
+    void flushLogs();
+    return;
+  }
+  flushTimer ??= setTimeout(() => void flushLogs(), SINK_DELAY_MS);
+  flushTimer.unref?.();
+}
+
 function write(entry: LogEntry): void {
   // Юнит-тесты не пишут в журнал приложения.
   if (process.env.VITEST) return;
@@ -74,6 +113,9 @@ function write(entry: LogEntry): void {
   else if (entry.level === "warn") console.warn(line);
   else if (entry.level === "info") console.log(line);
 
+  toSink(entry);
+  // На Vercel файловый журнал бесполезен (временный каталог экземпляра) — только БД.
+  if (process.env.VERCEL === "1") return;
   dirReady ??= mkdir(LOG_DIR, { recursive: true });
   // Журнал никогда не должен ронять запрос.
   void dirReady
@@ -100,41 +142,12 @@ function emit(
   });
 }
 
-const LEVEL_RANK: Record<LogLevel, number> = {
+export const LEVEL_RANK: Record<LogLevel, number> = {
   debug: 0,
   info: 1,
   warn: 2,
   error: 3,
 };
-
-/** Последние записи за сегодня и вчера, новые сверху; minLevel отсекает менее важные. */
-export async function readRecentLogs(
-  minLevel: LogLevel = "info",
-  limit = 300,
-): Promise<LogEntry[]> {
-  const now = new Date();
-  const days = [new Date(now.getTime() - 86_400_000), now];
-  const lines: string[] = [];
-  for (const day of days) {
-    try {
-      lines.push(...(await readFile(logFileFor(day), "utf8")).split("\n"));
-    } catch {
-      // файла за день может не быть
-    }
-  }
-  const entries: LogEntry[] = [];
-  for (const line of lines.reverse()) {
-    if (!line) continue;
-    try {
-      const entry = JSON.parse(line) as LogEntry;
-      if (LEVEL_RANK[entry.level] >= LEVEL_RANK[minLevel]) entries.push(entry);
-    } catch {
-      // битая строка (например, оборванная запись) — пропускаем
-    }
-    if (entries.length >= limit) break;
-  }
-  return entries;
-}
 
 export const log = {
   debug: (event: string, message: string, data?: Record<string, unknown>) =>
