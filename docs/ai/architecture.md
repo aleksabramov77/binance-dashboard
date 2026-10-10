@@ -29,6 +29,12 @@ Zustand (клиентское состояние, если понадобитс�
   чистые функции — в `lib` (их и тестируем), сценарии — в `model`.
 - Steiger: `pnpm lint:fsd`; отключённые правила и причины — в `steiger.config.mjs`.
 
+## Торговое ядро `packages/trading-core`
+Workspace-пакет `@binance-dashboard/trading-core` (spec 003): индикаторы, схемы экспериментов, стратегии,
+выходы, размер позиции, исполнение paper-сделок. Только чистые функции и Zod — без React, Next, `@/…`,
+сети, БД и env (Biome `overrides`). Приложение импортирует пакет (`transpilePackages` в `next.config.ts`);
+UI сущности — в `src/entities/experiment`. Подробно — `packages/trading-core/README.md`.
+
 ## Сервер и клиент
 - Всё, что использует секреты, `node:crypto` или `node:fs` (логгер), — **только сервер**.
   Такие модули называются `*.server.ts` (`shared/api/binance/demo.server.ts`, `shared/lib/logger.server.ts`,

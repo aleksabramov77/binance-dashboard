@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { EntryRule } from "@/entities/experiment";
-import type { Candle } from "@/shared/api/binance";
-import { macd, supertrend } from "@/shared/lib";
+import type { EntryRule } from "./experiment";
+import { macd, supertrend } from "./indicators";
 import { evaluateStrategy, type StrategyContext } from "./strategies";
+import type { Candle } from "./types";
 
 const bar = (close: number, patch: Partial<Candle> = {}): Candle => ({
   openTime: 0,

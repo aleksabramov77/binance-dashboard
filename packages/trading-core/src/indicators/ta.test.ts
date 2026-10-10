@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rsi } from "./indicators";
+import { rsi } from "./basic";
 import {
   adxSeries,
   atrSeries,

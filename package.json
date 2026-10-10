@@ -17,6 +17,7 @@
     "schedule:install": "bash scripts/install-schedule.sh"
   },
   "dependencies": {
+    "@binance-dashboard/trading-core": "workspace:*",
     "@tanstack/react-query": "^5.104.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Торговое ядро — TS-исходники workspace-пакета, Next их транспилирует.
+  transpilePackages: ["@binance-dashboard/trading-core"],
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
