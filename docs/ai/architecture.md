@@ -137,6 +137,14 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   сущности. Внешние ключи и джойны — только внутри домена.
 - Подключение: `DATABASE_URL` → postgres.js (прод — Supabase, пулер в режиме transaction, `prepare: false`);
   без неё — встроенный PGlite в `PGLITE_DIR` (по умолчанию `data/pglite`), внешние сервисы не нужны.
+- Движок лаборатории (задача 2b): хранилище — `createDbExperimentStore(db)` из `entities/experiment`
+  (структурно = `ExperimentStore` движка), сид каталога (`seedExperiments`, upsert по id; `enabled`,
+  `demo_mirror`, `initial_budget` пишутся только при вставке) и первая эпоха (`ensureRun`). Композиция —
+  `src/app/server/experimentEngine.ts`: таймер раз в минуту (+5 с) из `instrumentation.ts` (singleton в
+  `globalThis`, не в фазе build), блокировка тика общая с `POST /api/cron/tick`, кэш свечей в памяти
+  процесса, публичные свечи/тикеры/funding (`premiumIndex`) без ключей. Роль раннера процесса —
+  `ENGINE_RUNNER` (`oracle` по умолчанию); тумблер — `engine_state.enabled` (по умолчанию выкл),
+  `GET/POST /api/experiments/engine {enabled}`.
 - Миграции — `drizzle/`: `pnpm db:generate` собирает схемы из `src/entities/*/model/db.ts` (коммитятся).
   Применяются `pnpm db:migrate` и автоматически при старте сервера (`instrumentation.ts`); сбой БД
   пишется в журнал и не роняет дашборд.
