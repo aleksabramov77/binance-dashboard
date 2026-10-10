@@ -2,7 +2,7 @@ import type {
   ExitReason,
   ExperimentMarket,
   TradeDirection,
-} from "./experiment";
+} from "./experiment.ts";
 
 /** Комиссия taker Binance без скидок: spot 0,1%, USDⓈ-M futures 0,05%. */
 export const FEE_RATE: Record<ExperimentMarket, number> = {

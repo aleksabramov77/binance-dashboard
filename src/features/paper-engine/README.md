@@ -68,4 +68,9 @@ spec 007b). Поэтому модули слайса импортируют то
 ## Где запускается
 - VM (план A): `src/app/server/experimentEngine.ts` — хранилище на Drizzle (`entities/experiment`),
   таймер раз в минуту из `instrumentation.ts`, `POST /api/cron/tick`, тумблер `GET/POST /api/experiments/engine`.
-- Supabase (план B, spec 007b): Edge Function собирает те же `TickDeps` с `runner: "supabase"`.
+- Supabase (spec 007b): Edge Function `supabase/functions/engine-tick` — тот же `runEngineTick` с
+  `runner: "supabase"`.
+- Общая композиция — `src/app/server/engineTick.ts`: тик идёт в одной транзакции под
+  `pg_try_advisory_xact_lock` (`entities/experiment` → `withEngineTickLock`); блокировку держит другой
+  процесс — статус `locked`, тик пропускается. Чужой раннер — `foreign-runner` без записей в БД.
+- Модули слайса импортируются Deno исходниками: относительные импорты — с расширением `.ts`.

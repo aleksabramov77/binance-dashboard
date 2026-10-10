@@ -98,9 +98,56 @@ Callback работает только для production-адреса. Preview-�
    - вход через GitHub пускает `aleksabramov77`;
    - страницы открываются, функции работают в `hnd1` (заголовок ответа `x-vercel-id` содержит `hnd1`).
 
-## 7. Переключение раннера тика (Oracle ↔ Supabase)
-Описывается вместе с `engine-tick` в задаче 5b: ключ `runner` в таблице `engine_state`
-(`oracle` | `supabase`), тик чужого раннера ничего не делает.
+## 7. Тик движка в Supabase и переключение раннера (Oracle ↔ Supabase)
+Тики исполняет только один раннер: ключ `runner` в `engine_state` (`oracle` | `supabase`, не задан —
+`oracle`). Тик чужого раннера ничего не делает (`foreign-runner`): ни сделок, ни записей в БД. Кроме того,
+любой тик (VM, `/api/cron/tick`, Edge Function) идёт в транзакции под `pg_try_advisory_xact_lock`
+(ключ `ENGINE_TICK_LOCK_KEY`): пока один тик работает, второй сразу завершается со статусом `locked`.
+
+Все команды — с Mac из корня репозитория, секреты берутся из `.env.local` и не печатаются
+(`ENV_FILE=<путь>` — другой файл). Скрипт — `scripts/engine-supabase.ts`.
+
+| Команда | Что делает | Меняет прод |
+|---|---|---|
+| `pnpm engine:supabase status` | раннер, тумблер, последний тик, задание pg_cron и 5 последних запусков | нет |
+| `pnpm engine:supabase secret` | `ENGINE_TICK_SECRET`: создаёт в `.env.local`, если нет, и пишет в секреты функций (Management API) | секрет функции |
+| `pnpm engine:supabase invoke` | один ручной `POST` в `engine-tick` (Tokyo), печатает статус, регион и итог тика | только если `runner` = supabase |
+| `pnpm engine:supabase cron-install` | `secret` + Vault (`engine_tick_url`, `engine_tick_secret`) + задание pg_cron `engine-tick-every-minute` | да: вызовы раз в минуту |
+| `pnpm engine:supabase cron-remove` | снимает задание pg_cron | да |
+| `pnpm engine:supabase runner supabase` | тики исполняет Supabase (ждёт конца текущего тика) | да |
+| `pnpm engine:supabase runner oracle` | тики исполняет VM / Next-сервер | да |
+
+### Запуск движка в Supabase (решение владельца)
+1. `pnpm engine:supabase cron-install` — каждую минуту pg_cron вызывает функцию. Пока `runner` = oracle,
+   вызовы — no-op (`foreign-runner`, ~150 мс); так можно проверить расписание без последствий.
+2. Проверка: `pnpm engine:supabase status` → у задания есть запуски со `status: succeeded`;
+   Supabase → **Edge Functions** → **engine-tick** → **Logs** — вызов раз в минуту.
+3. `pnpm engine:supabase runner supabase` — с этой минуты тики исполняет Supabase.
+4. Тумблер «Автоторговля» в интерфейсе (или `engine_state.enabled = true`) — движок начинает торговать
+   (paper). Пока тумблер выключен, тик отвечает `disabled`.
+5. Если на VM тоже запущен Next-сервер, его тики становятся no-op сами; `ENGINE_RUNNER` на VM менять не нужно.
+
+Обратно на Oracle: `pnpm engine:supabase runner oracle` (вызовы pg_cron снова no-op) и при желании
+`pnpm engine:supabase cron-remove`.
+
+То же через **SQL Editor** Supabase, без скрипта:
+```sql
+-- кто исполняет тики
+insert into engine_state (key, value) values ('runner', '"supabase"')  -- или '"oracle"'
+on conflict (key) do update set value = excluded.value, updated_at = now();
+-- состояние
+select key, value from engine_state where key in ('runner', 'enabled', 'last_tick');
+select * from cron.job_run_details order by start_time desc limit 5;
+-- снять задание
+select cron.unschedule('engine-tick-every-minute');
+```
+
+### Почему задание pg_cron не в `drizzle/`
+`supabase/migrations/20261010120000_engine_tick_cron.sql` — отдельно от drizzle-миграций: pg_cron и pg_net
+есть только в Supabase (в PGlite тестов и локальной БД их нет), а drizzle-миграции применяются
+автоматически (`pnpm dev` с `DATABASE_URL` прода, `pnpm db:migrate`) — ежеминутные вызовы начались бы
+без решения владельца. Файл идемпотентный: `create extension if not exists`, `cron.schedule` с тем же
+именем заменяет задание. Адрес функции и ключ вызова задание читает из Vault при каждом запуске.
 
 ---
 
@@ -124,6 +171,23 @@ pnpm dlx supabase@2.120.0 functions deploy binance-ping --project-ref "$SUPABASE
 ```
 
 CLI кладёт локальное состояние в `supabase/.temp/` — папка в `.gitignore`.
+
+### Функция engine-tick
+```bash
+pnpm check:edge   # deno check функций (Deno скачивается через pnpm dlx)
+pnpm dlx supabase@2.120.0 functions deploy engine-tick --project-ref "$SUPABASE_PROJECT_REF" --use-api
+```
+- Общий код (`src/app/server/engineTick.ts`, `features/paper-engine`, `entities/experiment`,
+  `packages/trading-core`, `shared/api/binance/marketApi.ts`) подключается исходниками через import map
+  `supabase/functions/engine-tick/deno.json`; npm-пакеты — `npm:zod`, `npm:drizzle-orm`, `npm:postgres`
+  тех же версий, что в `package.json` (обновляете пакет — обновите и `deno.json`).
+- Бандлер Supabase не угадывает расширения: в этих модулях относительные импорты — с `.ts`
+  (Biome `useImportExtensions`). Добавляете в import map новый модуль — те же правила.
+- БД — `SUPABASE_DB_URL` (Supabase задаёт сам), `prepare: false`.
+- Вызов — только `POST` с `Authorization: Bearer <ENGINE_TICK_SECRET>`; `verify_jwt = false`
+  (`supabase/config.toml`), секрет проверяет функция. Нет секрета у функции — `503`, неверный — `401`.
+- Ответ — итог тика: `status` (`ok` | `disabled` | `foreign-runner` | `locked`), `opened`, `closed`,
+  `evaluated`, `errors`, `ms`, `region`. Лимиты Free: CPU 2 с, 150 с по времени (spec 007b).
 
 ### Проверка доступа к Binance
 Функция `binance-ping` параллельно вызывает публичные `GET https://api.binance.com/api/v3/ping` (Spot)

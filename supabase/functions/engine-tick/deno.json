@@ -1,0 +1,14 @@
+{
+  "imports": {
+    "@/app/server/engineTick": "../../../src/app/server/engineTick.ts",
+    "@/entities/experiment": "../../../src/entities/experiment/engine.ts",
+    "@/features/paper-engine": "../../../src/features/paper-engine/index.ts",
+    "@/shared/api/binance/marketApi": "../../../src/shared/api/binance/marketApi.ts",
+    "@binance-dashboard/trading-core": "../../../packages/trading-core/src/index.ts",
+    "zod": "npm:zod@4.6.5",
+    "drizzle-orm": "npm:drizzle-orm@0.45.3",
+    "drizzle-orm/": "npm:/drizzle-orm@0.45.3/",
+    "postgres": "npm:postgres@3.4.9"
+  },
+  "lock": false
+}

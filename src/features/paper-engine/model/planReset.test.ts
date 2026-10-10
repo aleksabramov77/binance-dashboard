@@ -1,6 +1,6 @@
 import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
-import { planReset, priceKey } from "./planReset";
+import { planReset, priceKey } from "./planReset.ts";
 
 const NOW = Date.parse("2026-10-10T12:34:56Z");
 

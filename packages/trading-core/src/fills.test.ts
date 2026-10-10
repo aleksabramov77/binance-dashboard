@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entryFill, exitFill, settle, unrealizedPnl } from "./fills";
+import { entryFill, exitFill, settle, unrealizedPnl } from "./fills.ts";
 
 describe("entryFill / exitFill", () => {
   it("вход по рынку хуже цены на 0,05%", () => {

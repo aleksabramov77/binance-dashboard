@@ -1,5 +1,5 @@
 import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
-import type { ExperimentStore, TradeClose, TradeProgress } from "./store";
+import type { ExperimentStore, TradeClose, TradeProgress } from "./store.ts";
 
 export interface MemoryStore extends ExperimentStore {
   /** Все сделки (открытые и закрытые) — для тестов и отладки. */

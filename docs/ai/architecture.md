@@ -69,6 +69,12 @@ Zustand (клиентское состояние, если понадобитс�
 - Движок `features/paper-engine` тоже среда-независимый (его тик исполняет и Edge Function Supabase на
   Deno, spec 007b): только `trading-core`, `zod` и свои модули, без `@/**` и `node:*` (Biome override).
   Сеть, БД и время внедряются через `TickDeps`; композиция — в `src/app/server/*`.
+- **Общая композиция тика** `src/app/server/engineTick.ts` (`runEngineTick`) — одна для VM
+  (`experimentEngine.ts`) и Edge Function `supabase/functions/engine-tick` (Deno): advisory lock в БД,
+  проверка раннера, хранилище Drizzle, `TickDeps`. Её и всё, что Deno грузит исходниками
+  (`trading-core`, `paper-engine`, `entities/experiment`, `shared/api/binance/marketApi.ts`), пишется без
+  `node:*`, Next и `*.server`, с явными расширениями `.ts` в относительных импортах (бандлер Supabase
+  не угадывает расширения) — оба правила проверяет Biome; `pnpm check:edge` — `deno check` функций.
 - Исключение: `@/shared/lib` реэкспортирует индикаторы (ema/rsi/atr и ta-серии) из `trading-core`, чтобы
   сканер Сигналов не дублировал математику. Индикаторы доменно-нейтральны; если ядро начнут использовать
   другие домены шире индикаторов — вынести индикаторы в свой пакет.

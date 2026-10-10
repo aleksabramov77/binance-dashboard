@@ -1,6 +1,6 @@
 import type { ExitRule } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
-import { computeLevels } from "./levels";
+import { computeLevels } from "./levels.ts";
 
 const signal = { direction: "long" as const, meta: {} };
 

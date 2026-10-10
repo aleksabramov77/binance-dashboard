@@ -4,7 +4,7 @@ import {
   EXPERIMENT_CATALOG,
   FUTURES_EXPERIMENTS,
   SPOT_EXPERIMENTS,
-} from "./catalog";
+} from "./catalog.ts";
 
 const ids = (prefix: string) =>
   Array.from(

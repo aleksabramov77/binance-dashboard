@@ -5,21 +5,21 @@ export {
   FUTURES_EXPERIMENTS,
   INITIAL_BUDGET,
   SPOT_EXPERIMENTS,
-} from "./config/catalog";
-export { ENGINE } from "./config/engine";
-export type { CandleCache } from "./lib/candles";
+} from "./config/catalog.ts";
+export { ENGINE } from "./config/engine.ts";
+export type { CandleCache } from "./lib/candles.ts";
 export {
   isEligibleSymbol,
   type MarketTicker,
   pickUniverse,
-} from "./lib/universe";
-export { createMemoryStore, type MemoryStore } from "./model/memoryStore";
+} from "./lib/universe.ts";
+export { createMemoryStore, type MemoryStore } from "./model/memoryStore.ts";
 export {
   planReset,
   priceKey,
   type ResetClose,
   type ResetPlan,
-} from "./model/planReset";
+} from "./model/planReset.ts";
 export {
   type Interval,
   readEnabled,
@@ -28,7 +28,7 @@ export {
   type TickDeps,
   type TickResult,
   type TickStatus,
-} from "./model/runTick";
+} from "./model/runTick.ts";
 export {
   DEFAULT_RUNNER,
   ENGINE_KEYS,
@@ -37,4 +37,4 @@ export {
   RUNNERS,
   type TradeClose,
   type TradeProgress,
-} from "./model/store";
+} from "./model/store.ts";

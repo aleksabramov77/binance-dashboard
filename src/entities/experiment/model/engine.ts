@@ -7,7 +7,7 @@ export const engineToggleSchema = z.object({ enabled: z.boolean() });
 
 /** Итог последнего тика (engine_state.last_tick). */
 export const engineTickSchema = z.object({
-  status: z.enum(["ok", "disabled", "foreign-runner"]),
+  status: z.enum(["ok", "disabled", "foreign-runner", "locked"]),
   runner: engineRunnerSchema,
   at: z.string(),
   opened: z.number(),

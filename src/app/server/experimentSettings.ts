@@ -10,6 +10,7 @@ import {
   type ResetResult,
   resetRun,
   setExperimentEnabled,
+  withEngineTickLock,
 } from "@/entities/experiment";
 import { ENGINE_KEYS, planReset, priceKey } from "@/features/paper-engine";
 import { fetch24hTickers } from "@/shared/api/binance/public.server";
@@ -95,52 +96,74 @@ async function lastPrices(
   return prices;
 }
 
+/** Сколько ждать межпроцессную блокировку тика (тик Supabase или другого экземпляра) перед сбросом. */
+const RESET_LOCK_ATTEMPTS = 60;
+const RESET_LOCK_RETRY_MS = 1000;
+
 /**
  * «Сбросить тестовые капиталы»: под блокировкой тика закрыть открытые сделки текущей эпохи по
  * последней цене (manual), начать новую эпоху с бюджетом next_budget и пометить текущие свечи
  * обработанными. Тумблер движка не меняется. fromRunId уже не текущая — ничего не делает.
+ * Блокировки две: процесса (withTickLock — таймер этого сервера) и межпроцессная advisory lock в БД
+ * (withEngineTickLock — та же, что берёт тик, в т.ч. Edge Function Supabase); чтение сделок и запись
+ * эпохи — внутри неё, поэтому тик другого раннера не вклинится между ними.
  */
 export function resetCapitals(input: ResetRequest): Promise<ResetResult> {
   return withTickLock(async () => {
     await ensureEngineReady();
     const db = getDb();
-    const store = createDbExperimentStore(db);
-    const runId = await store.currentRunId();
-    if (runId !== input.fromRunId)
-      return {
-        created: false,
-        epoch: await getEpoch(db, runId),
-        closed: 0,
-        closedWithoutPrice: 0,
-      };
-
-    const [experiments, open] = await Promise.all([
-      store.listExperiments(),
-      store.openTrades(runId),
-    ]);
-    const prices = await lastPrices(new Set(open.map((t) => t.market)));
-    const now = Date.now();
-    const plan = planReset({ experiments, open, prices, now });
-    const outcome = await resetRun(db, {
-      fromRunId: input.fromRunId,
-      note: input.note,
-      closes: plan.closes,
-      state: { [ENGINE_KEYS.bars]: plan.bars },
-      initialBudget: await readNextBudget(store),
+    const noop = async (runId: number): Promise<ResetResult> => ({
+      created: false,
+      epoch: await getEpoch(db, runId),
+      closed: 0,
+      closedWithoutPrice: 0,
     });
-    const epoch = await getEpoch(db, outcome.runId);
-    if (!outcome.created)
-      return { created: false, epoch, closed: 0, closedWithoutPrice: 0 };
-    log.info(
-      "experiments.reset",
-      `Новая эпоха #${outcome.runId}: закрыто ${outcome.closed} сделок`,
-      { ...outcome, fromRunId: input.fromRunId },
+    const runId = await createDbExperimentStore(db).currentRunId();
+    if (runId !== input.fromRunId) return noop(runId);
+
+    // Сеть — до блокировки: цены по рынкам, где сейчас есть открытые сделки.
+    const openBefore = await createDbExperimentStore(db).openTrades(runId);
+    const prices = await lastPrices(new Set(openBefore.map((t) => t.market)));
+
+    for (let attempt = 0; attempt < RESET_LOCK_ATTEMPTS; attempt++) {
+      const locked = await withEngineTickLock(db, async (tx) => {
+        const store = createDbExperimentStore(tx);
+        const current = await store.currentRunId();
+        if (current !== input.fromRunId)
+          return { created: false as const, runId: current };
+        const [experiments, open] = await Promise.all([
+          store.listExperiments(),
+          store.openTrades(current),
+        ]);
+        const plan = planReset({ experiments, open, prices, now: Date.now() });
+        return resetRun(tx, {
+          fromRunId: input.fromRunId,
+          note: input.note,
+          closes: plan.closes,
+          state: { [ENGINE_KEYS.bars]: plan.bars },
+          initialBudget: await readNextBudget(store),
+        });
+      });
+      if (!locked.acquired) {
+        await new Promise((r) => setTimeout(r, RESET_LOCK_RETRY_MS));
+        continue;
+      }
+      const outcome = locked.value;
+      if (!outcome.created) return noop(outcome.runId);
+      log.info(
+        "experiments.reset",
+        `Новая эпоха #${outcome.runId}: закрыто ${outcome.closed} сделок`,
+        { ...outcome, fromRunId: input.fromRunId },
+      );
+      return {
+        created: true,
+        epoch: await getEpoch(db, outcome.runId),
+        closed: outcome.closed,
+        closedWithoutPrice: outcome.closedWithoutPrice,
+      };
+    }
+    throw new Error(
+      "Сброс не выполнен: блокировку тика держит другой процесс дольше минуты. Повторите позже.",
     );
-    return {
-      created: true,
-      epoch,
-      closed: outcome.closed,
-      closedWithoutPrice: outcome.closedWithoutPrice,
-    };
   });
 }

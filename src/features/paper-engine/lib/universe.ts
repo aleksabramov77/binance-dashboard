@@ -1,5 +1,10 @@
 import { MAJORS, type Universe } from "@binance-dashboard/trading-core";
-import { ENGINE, LEVERAGED_TOKEN, QUOTE, STABLECOINS } from "../config/engine";
+import {
+  ENGINE,
+  LEVERAGED_TOKEN,
+  QUOTE,
+  STABLECOINS,
+} from "../config/engine.ts";
 
 /** Тикер 24 ч рынка — то, что нужно движку от Binance. */
 export interface MarketTicker {

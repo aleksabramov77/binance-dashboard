@@ -5,21 +5,20 @@ import {
   paperTradeSchema,
 } from "@binance-dashboard/trading-core";
 import { and, asc, desc, eq, isNotNull, isNull, sql, sum } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import {
   engineStateTable,
   experimentsTable,
   type PaperTradeRow,
   paperTradesTable,
   runsTable,
-} from "../model/db";
+} from "../model/db.ts";
+import type { ExperimentDb } from "./tickLock.ts";
 
 // Хранилище лаборатории на Drizzle. Структурно совпадает с ExperimentStore движка
 // (features/paper-engine): сущность фичу не импортирует, сверку типов делает композиция
 // (src/app/server). Без @/… и node:* — тот же код подойдёт Edge Function Supabase (Deno).
 
-/** Любая БД Drizzle на Postgres: postgres.js, PGlite. */
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = ExperimentDb;
 
 /** Строка paper_trades → PaperTrade (даты — ISO). Общая с readModel. */
 export const toTrade = (r: PaperTradeRow): PaperTrade =>

@@ -111,6 +111,72 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "src/app/server/engineTick.ts",
+        "src/entities/experiment/engine.ts",
+        "src/entities/experiment/api/**",
+        "src/entities/experiment/model/**",
+        "src/shared/api/binance/marketApi.ts",
+        "src/shared/api/binance/marketSchemas.ts",
+        "!**/*.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/pages/*/**",
+                      "@/widgets/*/**",
+                      "@/features/*/**",
+                      "@/entities/*/**"
+                    ],
+                    "message": "FSD: импортируйте слайс только через его public API (index.ts), без deep imports."
+                  },
+                  {
+                    "group": [
+                      "node:*",
+                      "next",
+                      "next/**",
+                      "react",
+                      "react/**",
+                      "react-dom",
+                      "react-dom/**",
+                      "@/shared/lib/*.server",
+                      "@/shared/**/*.server",
+                      "@/shared/db/**",
+                      "@/shared/config/**"
+                    ],
+                    "message": "Модуль грузит Edge Function engine-tick (Deno, spec 007b): без Node API, Next/React и серверных модулей (*.server, env)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "packages/trading-core/src/**",
+        "src/features/paper-engine/**",
+        "src/entities/experiment/**",
+        "src/app/server/engineTick.ts",
+        "src/shared/api/binance/marketApi.ts",
+        "src/shared/api/binance/marketSchemas.ts"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useImportExtensions": "error"
+          }
+        }
+      }
     }
   ]
 }

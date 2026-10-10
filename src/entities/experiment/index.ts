@@ -1,14 +1,6 @@
-// Хуки страниц лаборатории (клиент).
-
-// Хранилище движка на Drizzle и сид каталога (только сервер: вызывает композиция src/app/server).
+// Серверная подсистема движка (хранилище, блокировка тика, таблицы, схемы) — отдельный вход для Deno.
 
 export { loadBudgetInputs } from "./api/budgetsStore";
-export {
-  createDbExperimentStore,
-  type DbExperimentStore,
-  ensureRun,
-  seedExperiments,
-} from "./api/dbStore";
 // Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
 export {
   readExperimentDetail,
@@ -48,6 +40,7 @@ export {
   useSetNextBudget,
 } from "./api/useLabSettings";
 export { tradeStatsQueryKey, useTradeStats } from "./api/useTradeStats";
+export * from "./engine.ts";
 export {
   type BudgetInputs,
   computeMarketBudgets,
@@ -95,28 +88,6 @@ export {
   type MarketBudget,
   marketBudgetSchema,
 } from "./model/budget";
-// Таблицы домена (Drizzle). Чистые описания без подключения — запросы делает сервер через shared/db.
-export {
-  type ExperimentRow,
-  engineStateTable,
-  experimentsTable,
-  type NewExperimentRow,
-  type NewPaperTradeRow,
-  type PaperTradeRow,
-  paperTradesTable,
-  type RunRow,
-  runsTable,
-} from "./model/db";
-// Контракт API движка: статус и тумблер.
-export {
-  type EngineStatus,
-  type EngineTick,
-  engineRunnerSchema,
-  engineStatusSchema,
-  engineTickSchema,
-  engineToggleSchema,
-} from "./model/engine";
-export * from "./model/schema";
 export {
   type BudgetForm,
   budgetFormSchema,

@@ -1,4 +1,4 @@
-export { atr, ema, rsi } from "./basic";
+export { atr, ema, rsi } from "./basic.ts";
 export {
   adxSeries,
   atrSeries,
@@ -9,4 +9,4 @@ export {
   rsiSeries,
   smaSeries,
   supertrend,
-} from "./ta";
+} from "./ta.ts";

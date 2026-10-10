@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type SizeInput, sizePosition } from "./sizing";
+import { type SizeInput, sizePosition } from "./sizing.ts";
 
 const input = (patch: Partial<SizeInput> = {}): SizeInput => ({
   entry: 100,

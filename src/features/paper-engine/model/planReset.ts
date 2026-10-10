@@ -5,8 +5,8 @@ import {
   settle,
   TIMEFRAME_MS,
 } from "@binance-dashboard/trading-core";
-import { lastClosedOpenTime } from "../lib/candles";
-import type { TradeClose } from "./store";
+import { lastClosedOpenTime } from "../lib/candles.ts";
+import type { TradeClose } from "./store.ts";
 
 // План «Сбросить тестовые капиталы» (spec 003, задача 3d). Чистая функция: что закрыть и какие
 // метки свечей поставить. Атомарно применяет план хранилище (entities/experiment → resetRun),

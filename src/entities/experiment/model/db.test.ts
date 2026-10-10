@@ -5,7 +5,7 @@ import {
   experimentsTable as experiments,
   paperTradesTable as paperTrades,
   runsTable as runs,
-} from "./db";
+} from "./db.ts";
 
 let db: Db;
 let close: () => Promise<void>;

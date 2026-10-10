@@ -1,4 +1,4 @@
-import type { EntryRule, TradeDirection } from "./experiment";
+import type { EntryRule, TradeDirection } from "./experiment.ts";
 import {
   adxSeries,
   atrSeries,
@@ -9,8 +9,8 @@ import {
   rsiSeries,
   smaSeries,
   supertrend,
-} from "./indicators";
-import type { Candle } from "./types";
+} from "./indicators/index.ts";
+import type { Candle } from "./types.ts";
 
 export interface StrategyContext {
   /** Закрытые свечи таймфрейма эксперимента, последняя — только что закрытая. */

@@ -1,5 +1,5 @@
-import type { ExitReason, ExitRule, TradeDirection } from "./experiment";
-import type { Candle } from "./types";
+import type { ExitReason, ExitRule, TradeDirection } from "./experiment.ts";
+import type { Candle } from "./types.ts";
 
 const MINUTE = 60_000;
 
