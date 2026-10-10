@@ -42,7 +42,7 @@ Zustand (клиентское состояние, если понадобитс�
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing,auto-trade*}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
 | Лаборатория экспериментов | `pages/{experiments,stats,settings}`, `features/paper-engine`, `entities/experiment` | `/api/experiments/*`, `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
-| Платформа (не домен) | `app/*`, `widgets/app-header`, `pages/logs`, `entities/log-entry`, `shared/*`, авторизация | `/api/logs`, `/api/auth/*` | `data/logs`, подключение к БД |
+| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login}`, `entities/log-entry`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs`, `/api/auth/*`, страница `/login` | `data/logs`, подключение к БД |
 
 Правила:
 - **Нет импортов между доменами** ни на каком слое. Фича лаборатории не импортирует `entities/trade`,
@@ -50,7 +50,9 @@ Zustand (клиентское состояние, если понадобитс�
   переезжает в `shared` (индикатор, формат денег, клиент Binance), а не берётся из чужого домена.
 - **`shared` не знает о доменах:** в нём нет слов «эксперимент», «earn», «сетап», «портфель». Исключение —
   клиенты внешних сервисов (`shared/api/binance`), они общие для всех.
-- **Авторизация — сквозная и только в платформе:** `proxy`/middleware и `shared/auth`. Код доменов не
+- **Авторизация — сквозная и только в платформе:** `proxy.ts`, `shared/lib/auth`, `features/auth`,
+  `src/app/server/auth.ts`. В production при неполной настройке proxy отвечает 503 на всё, включая
+  `/api/cron/*` (fail-closed). `/api/cron/tick` закрыт Bearer `CRON_SECRET`, а тик в нём — код Лаборатории. Код доменов не
   проверяет сессию, не импортирует Auth.js и не знает о пользователе; защита включается централизованно.
 - **Склейка доменов — только в платформе:** хедер (`widgets/app-header`) и серверная композиция
   (`src/app/server/*`, `instrumentation.ts`) собирают домены через их public API (`index.ts`).
