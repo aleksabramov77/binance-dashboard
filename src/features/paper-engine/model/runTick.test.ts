@@ -38,6 +38,11 @@ const exp = (
   },
 });
 
+/** Стратегия, которая на каждой свече даёт long (momentum: единственный символ всегда в топе). */
+const ALWAYS_LONG: Partial<ExperimentConfig> = {
+  entry: { type: "momentum", lookbackBars: 3, topK: 5 },
+};
+
 const MS: Record<Interval, number> = { ...TIMEFRAME_MS, "1m": MIN };
 
 /**
@@ -213,8 +218,8 @@ describe("runTick: входы", () => {
 
 describe("runTick: устаревшие сигналы", () => {
   it("первый тик после включения: свеча сигнала закрылась 2 ч назад — метка ставится, входа нет", async () => {
-    // TF 4h: в 14:00 последняя закрытая свеча — 08:00–12:00, она закрылась 2 ч назад.
-    const store = enabledStore([exp("A", { timeframe: "4h" })]);
+    // TF 4h: в 14:00 последняя закрытая свеча — 08:00–12:00, она закрылась 2 ч назад (окно 4h — 12 мин).
+    const store = enabledStore([exp("A", { ...ALWAYS_LONG, timeframe: "4h" })]);
     const late = T0 + 2 * HOUR;
     const m = market();
     m.setNow(late);
@@ -226,23 +231,59 @@ describe("runTick: устаревшие сигналы", () => {
     });
   });
 
-  it("свежезакрытая свеча (в пределах 3 мин) — вход есть", async () => {
-    const store = enabledStore([exp("A")]);
-    const m = market();
-    m.setNow(T0 + 2 * MIN);
-    expect((await runTick(m.deps(store), T0 + 2 * MIN)).opened).toBe(1);
-    const late = enabledStore([exp("A")]);
-    m.setNow(T0 + 4 * MIN);
-    expect((await runTick(m.deps(late), T0 + 4 * MIN)).opened).toBe(0);
+  it("окно свежести зависит от TF: 1h — 3 мин, 4h — 12 мин, 1d — 72 мин", async () => {
+    const cases: [ExperimentConfig["timeframe"], number, number][] = [
+      // [TF, момент закрытия свечи, сколько минут прошло → войдёт ли]
+      ["1h", T0, 2],
+      ["1h", T0, 4],
+      ["4h", T0, 11],
+      ["4h", T0, 13],
+      ["1d", Date.parse("2026-10-10T00:00:00Z"), 70],
+      ["1d", Date.parse("2026-10-10T00:00:00Z"), 74],
+    ];
+    const opened = [];
+    for (const [timeframe, closedAt, minutes] of cases) {
+      const store = enabledStore([exp("A", { ...ALWAYS_LONG, timeframe })]);
+      const m = market();
+      const now = closedAt + minutes * MIN;
+      m.setNow(now);
+      opened.push((await runTick(m.deps(store), now)).opened);
+    }
+    expect(opened).toEqual([1, 0, 1, 0, 1, 0]);
   });
 
   it("после устаревшей свечи следующая свежая — входит", async () => {
-    const store = enabledStore([exp("A")]);
+    const store = enabledStore([exp("A", ALWAYS_LONG)]);
     const m = market();
     m.setNow(T0 + 30 * MIN);
     expect((await runTick(m.deps(store), T0 + 30 * MIN)).opened).toBe(0);
     m.setNow(T0 + HOUR);
     expect((await runTick(m.deps(store), T0 + HOUR)).opened).toBe(1);
+  });
+
+  it("hold (S20, F20): свежесть не проверяется — входит на старой свече 1d", async () => {
+    const store = enabledStore([exp("H", { timeframe: "1d" })]);
+    const m = market();
+    m.setNow(T0);
+    // В 12:00 свеча 1d закрылась 12 ч назад — для другой стратегии входа бы не было.
+    expect((await runTick(m.deps(store), T0)).opened).toBe(1);
+  });
+
+  it("hold: позиция закрылась посреди свечи — входит снова в следующий тик", async () => {
+    const hit = T0 + 2 * MIN;
+    const m = market(["BTCUSDT"], (t) => (t === hit ? { high: 105 } : {}));
+    const store = enabledStore([exp("H", { maxOpen: 1 })]);
+    await runTick(m.deps(store), T0);
+    m.setNow(T0 + 4 * MIN);
+    const r = await runTick(m.deps(store), T0 + 4 * MIN);
+    expect(r.closed).toBe(1);
+    expect(r.opened).toBe(1);
+    expect(r.evaluated).toEqual([]);
+    const ids = store.trades().map((t) => t.id);
+    expect(new Set(ids).size).toBe(2);
+    // Тот же тик повторно — без дублей.
+    await runTick(m.deps(store), T0 + 4 * MIN);
+    expect(store.trades()).toHaveLength(2);
   });
 });
 
@@ -250,7 +291,7 @@ describe("runTick: выходы по 1m-свечам", () => {
   it("закрывает по TP и не входит повторно на той же свече TF", async () => {
     const hit = T0 + 2 * MIN;
     const m = market(["BTCUSDT"], (t) => (t === hit ? { high: 105 } : {}));
-    const store = enabledStore([exp("A")]);
+    const store = enabledStore([exp("A", ALWAYS_LONG)]);
     await runTick(m.deps(store), T0);
     m.setNow(T0 + 4 * MIN);
     const r = await runTick(m.deps(store), T0 + 4 * MIN);
