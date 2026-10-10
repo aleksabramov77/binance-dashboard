@@ -29,6 +29,40 @@ Zustand (клиентское состояние, если понадобитс�
   чистые функции — в `lib` (их и тестируем), сценарии — в `model`.
 - Steiger: `pnpm lint:fsd`; отключённые правила и причины — в `steiger.config.mjs`.
 
+## Домены и изоляция
+Приложение будет большим дашбордом из независимых разделов. FSD запрещает импорты между слайсами
+одного слоя, но не запрещает, например, фиче экспериментов взять сущность Earn с нижнего слоя. Поэтому
+поверх FSD действует правило **доменов**: каждый слайс принадлежит ровно одному домену, домены
+друг о друге не знают.
+
+| Домен | Слайсы (сейчас и планируемые) | API-роуты | Данные |
+|---|---|---|---|
+| Earn | `pages/earn`, `widgets/{best-offers,changes-feed,offers-table}`, `features/{collect-snapshot,refresh-snapshot,offer-filters}`, `entities/earn-offer` | `/api/earn/*` | `data/snapshots` |
+| Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
+| Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing,auto-trade*}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
+| Лаборатория экспериментов | `pages/{experiments,stats,settings}`, `features/paper-engine`, `entities/experiment` | `/api/experiments/*`, `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
+| ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
+| Платформа (не домен) | `app/*`, `widgets/app-header`, `pages/logs`, `entities/log-entry`, `shared/*`, авторизация | `/api/logs`, `/api/auth/*` | `data/logs`, подключение к БД |
+
+Правила:
+- **Нет импортов между доменами** ни на каком слое. Фича лаборатории не импортирует `entities/trade`,
+  `entities/earn-offer` и т.п., даже если это «вниз» по FSD. Нужна общая вещь — она без бизнес-смысла
+  переезжает в `shared` (индикатор, формат денег, клиент Binance), а не берётся из чужого домена.
+- **`shared` не знает о доменах:** в нём нет слов «эксперимент», «earn», «сетап», «портфель». Исключение —
+  клиенты внешних сервисов (`shared/api/binance`), они общие для всех.
+- **Авторизация — сквозная и только в платформе:** `proxy`/middleware и `shared/auth`. Код доменов не
+  проверяет сессию, не импортирует Auth.js и не знает о пользователе; защита включается централизованно.
+- **Склейка доменов — только в платформе:** хедер (`widgets/app-header`) и серверная композиция
+  (`src/app/server/*`, `instrumentation.ts`) собирают домены через их public API (`index.ts`).
+  Домен не вызывает другой домен напрямую; если нужно (демо-зеркало лаборатории → сделка в демо),
+  зависимость внедряется функцией из `src/app/server/*`, как `AutoTradeDeps`.
+- **Свои данные:** у домена свои таблицы (без внешних ключей в чужие таблицы и без джойнов между
+  доменами), свои файлы в `data/`, свой префикс API-роутов, свой `config`. Чужие данные — только через
+  public API другого домена в слое композиции.
+- **Проверка удалением:** домен можно удалить (его слайсы, роуты, таблицы, строку в хедере) — и остальные
+  собираются и проходят тесты без правок. Если нет — граница нарушена.
+- Новый слайс — сразу в таблицу выше, в свой домен. Новый домен — новая строка.
+
 ## Сервер и клиент
 - Всё, что использует секреты, `node:crypto` или `node:fs` (логгер), — **только сервер**.
   Такие модули называются `*.server.ts` (`shared/api/binance/demo.server.ts`, `shared/lib/logger.server.ts`,
