@@ -85,8 +85,8 @@ export function EpochCard({ settings }: { settings: LabSettings }) {
               Открытые сделки эпохи #{epoch.id} ({epoch.openTrades}) закроются
               по последней цене с причиной «manual», начнётся эпоха #
               {epoch.id + 1} с бюджетом {formatUsd(settings.nextBudget)} на
-              эксперимент. Старые сделки остаются в истории. Тумблер движка не
-              меняется.
+              каждый рынок (поровну между его экспериментами), сделки по $50.
+              Старые сделки остаются в истории. Тумблер движка не меняется.
             </p>
             <label htmlFor={noteId} className="flex flex-col gap-1 text-sm">
               Заметка к новой эпохе (необязательно)

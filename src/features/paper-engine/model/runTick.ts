@@ -410,6 +410,7 @@ export async function runTick(
         initialBudget: exp.initialBudget,
         availableUsd: exp.initialBudget + (realized[exp.id] ?? 0) - used,
         leverage,
+        fixedNotionalUsd: ENGINE.tradeNotionalUsd,
       });
       if (!size) continue;
 

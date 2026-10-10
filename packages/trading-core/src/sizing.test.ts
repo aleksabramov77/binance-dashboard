@@ -50,4 +50,17 @@ describe("sizePosition", () => {
     expect(sizePosition(input({ availableUsd: 0 }))).toBeNull();
     expect(sizePosition(input({ stop: 98, availableUsd: 2 }))).toBeNull();
   });
+
+  it("фиксированный объём $50: риск и лимит 10% не применяются, свободные деньги — да", () => {
+    expect(
+      sizePosition(input({ stop: 98, fixedNotionalUsd: 50 })),
+    ).toMatchObject({ notional: 50, riskUsd: 1 });
+    expect(
+      sizePosition(input({ stop: 98, fixedNotionalUsd: 50, availableUsd: 30 }))
+        ?.notional,
+    ).toBeCloseTo(30);
+    expect(
+      sizePosition(input({ stop: null, fixedNotionalUsd: 50 }))?.notional,
+    ).toBeCloseTo(50);
+  });
 });

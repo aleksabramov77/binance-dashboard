@@ -43,8 +43,8 @@ export function BudgetCard({ settings }: { settings: LabSettings }) {
       <CardHeader>
         <CardTitle>Стартовый бюджет</CardTitle>
         <CardDescription>
-          На каждый эксперимент, USD. Риск сделки — 0,5% бюджета, объём — не
-          больше 10%.
+          На каждый рынок (Spot и Futures), USD — делится поровну между его
+          экспериментами. Объём каждой сделки — $50.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -53,7 +53,7 @@ export function BudgetCard({ settings }: { settings: LabSettings }) {
           onSubmit={form.handleSubmit((values) => save.mutate(values))}
         >
           <label htmlFor={inputId} className="flex flex-col gap-1 text-sm">
-            Бюджет следующей эпохи
+            Бюджет рынка на следующую эпоху
             <Input
               id={inputId}
               type="number"

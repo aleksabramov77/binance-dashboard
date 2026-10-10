@@ -5,7 +5,8 @@ import type {
 } from "@binance-dashboard/trading-core";
 
 /** Стартовый капитал каждого эксперимента, USD (spec 003). */
-export const INITIAL_BUDGET = 10_000;
+/** Бюджет рынка $10 000 на 20 экспериментов рынка (решение пользователя 2026-10-10). */
+export const INITIAL_BUDGET = 500;
 
 type Entry = Pick<Experiment, "id" | "name" | "hypothesis"> & {
   config: ExperimentConfig;
