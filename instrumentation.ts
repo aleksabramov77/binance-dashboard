@@ -3,6 +3,10 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.NEXT_PHASE === "phase-production-build") return;
+  const { isServerless } = await import("@/shared/config/env.server");
+  // Serverless (Vercel): процесс живёт только на время запроса — фоновых таймеров нет, а миграции
+  // применяются отдельно (`pnpm db:migrate`), а не на каждом холодном старте. Тик — снаружи (spec 007b).
+  if (isServerless()) return;
   const { migrateDb } = await import("@/shared/db/client.server");
   const { log } = await import("@/shared/lib/logger.server");
   // Сбой БД не должен ронять остальной дашборд: ошибка — в журнал.

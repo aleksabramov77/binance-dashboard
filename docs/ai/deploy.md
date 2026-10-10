@@ -1,4 +1,7 @@
-# Деплой на Oracle Cloud Always Free
+# Деплой на Oracle Cloud Always Free (резерв)
+
+> **Резервный вариант.** Основной хостинг с 2026-10-10 — Supabase + Vercel: [deploy-supabase.md](deploy-supabase.md).
+> Одновременно тик крутит только один раннер (`engine_state.runner`, spec 007b).
 
 Приложение работает на бесплатной VM Oracle Cloud, независимо от Mac владельца.
 
