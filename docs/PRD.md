@@ -232,6 +232,7 @@ bStocks, но публичного торгового API для них не н�
 | `BINANCE_TRADE_*` + флаг Live (этап 3.3) | реальные сделки | Spot + Futures, IP-whitelist, **без вывода** |
 | `OPENROUTER_API_KEY` | «Разбор от ИИ» через OpenRouter | — |
 | `ANALYSIS_MODEL` | модель разбора (по умолчанию `anthropic/claude-haiku-5.5`) | — |
+| `DATABASE_URL` | Postgres лаборатории (Supabase); пусто — локальный PGlite в `PGLITE_DIR` | — |
 
 Баланс OpenRouter виден в шапке дашборда (бейдж «ИИ $…», `GET /api/openrouter/balance`): остаток
 счёта = пополнено − потрачено (`/api/v1/credits`), в подсказке — лимит ключа (`/api/v1/key`).
