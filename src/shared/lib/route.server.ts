@@ -1,7 +1,18 @@
 // Обёртка API-роутов: журнал каждого запроса (метод, путь, статус, время) и единая обработка
 // непредвиденных ошибок — клиент всегда получает JSON { error }, а в журнале остаётся стек.
+import { after } from "next/server";
 import { HttpError, NetworkError } from "./fetchRetry";
-import { log } from "./logger.server";
+import { flushLogs, log } from "./logger.server";
+
+/** Дописать журнал в БД после ответа: на serverless процесс замирает, как только ответ отдан. */
+function flushAfterResponse(): void {
+  try {
+    after(flushLogs);
+  } catch {
+    // Вне запроса Next (тесты, скрипты) after недоступен — пишем сразу.
+    void flushLogs();
+  }
+}
 
 /** ctx — второй аргумент Next (params динамических сегментов); у статических роутов не нужен. */
 type Handler<Ctx> = (request: Request, ctx: Ctx) => Promise<Response>;
@@ -17,6 +28,7 @@ export function withLogging<Ctx = unknown>(
   options: Options = {},
 ): Handler<Ctx> {
   return async (request: Request, ctx: Ctx) => {
+    flushAfterResponse();
     const started = Date.now();
     const { pathname } = new URL(request.url);
     const base = { route: name, method: request.method, path: pathname };

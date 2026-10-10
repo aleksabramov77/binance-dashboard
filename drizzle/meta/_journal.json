@@ -15,6 +15,13 @@
       "when": 1791652141766,
       "tag": "0001_wise_hawkeye",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791655749416,
+      "tag": "0002_messy_maestro",
+      "breakpoints": true
     }
   ]
 }

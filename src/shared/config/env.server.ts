@@ -108,7 +108,27 @@ export function getAuthConfig(
   };
 }
 
-/** Секрет для /api/cron/tick. null — не задан. */
+export interface TelegramConfig {
+  token: string;
+  /** Чат владельца: бот пишет лично (chat id из /start). null — ещё не известен. */
+  chatId: string | null;
+}
+
+/** Бот уведомлений (монитор логов). null — токен не задан. */
+export function getTelegramConfig(
+  env: Record<string, string | undefined> = process.env,
+): TelegramConfig | null {
+  const token = env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) return null;
+  return { token, chatId: env.TELEGRAM_CHAT_ID?.trim() || null };
+}
+
+/** Модель для разбора сбоев монитором логов: дешёвая, отдельно от разбора сетапов. */
+export const getLogAnalysisModel = (
+  env: Record<string, string | undefined> = process.env,
+): string => env.LOG_ANALYSIS_MODEL?.trim() || "anthropic/claude-haiku-5.5";
+
+/** Секрет для /api/cron/* (тик, снимок Earn, монитор логов). null — не задан. */
 export const getCronSecret = (
   env: Record<string, string | undefined> = process.env,
 ): string | null => env.CRON_SECRET || null;

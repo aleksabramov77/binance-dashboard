@@ -42,7 +42,7 @@ Zustand (клиентское состояние, если понадобитс�
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
 | Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`), `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
-| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login}`, `entities/log-entry`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs`, `/api/auth/*`, страница `/login` | `data/logs`, подключение к БД |
+| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → Telegram), `src/app/server/{logs,logMonitor}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs`, `/api/cron/log-monitor`, `/api/auth/*`, страница `/login` | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
 
 Правила:
 - **Нет импортов между доменами** ни на каком слое. Фича лаборатории не импортирует `entities/trade`,
@@ -125,8 +125,12 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 | `CRON_SECRET` | Bearer-секрет для `POST /api/cron/tick` |
 
 ## Логирование и ошибки
-- `log.debug|info|warn|error(event, message, data?, error?)` из `shared/lib/logger.server.ts`:
-  JSON-строки в `data/logs/app-YYYY-MM-DD.jsonl` + строка в консоль. Секреты маскируются.
+- `log.debug|info|warn|error(event, message, data?, error?)` из `shared/lib/logger.server.ts`: строка в консоль,
+  записи info+ пачками в таблицу `app_logs` (приёмник подключает `instrumentation.ts`; на Vercel запись после
+  ответа через `after()` в `withLogging`), локально ещё `data/logs/app-YYYY-MM-DD.jsonl` с debug. Секреты маскируются.
+- Монитор журнала (`features/log-monitor`, `POST /api/cron/log-monitor`, pg_cron каждые 15 мин): всплески ошибок,
+  5xx по ручкам, движок не тикает, упавший cron, старый Earn → разбор ИИ (`LOG_ANALYSIS_MODEL`) → Telegram;
+  повтор не чаще 2 ч, «восстановлено» один раз. Журнал хранится 14 дней.
 - Каждый API-роут обёрнут `withLogging` (`shared/lib/route.server.ts`): непредвиденная ошибка →
   JSON `{ error }` (502 — сбой внешнего сервиса, 500 — наш), стек в журнале.
 - Ошибки браузера уходят в `POST /api/logs`. Страница `/logs` показывает журнал.
