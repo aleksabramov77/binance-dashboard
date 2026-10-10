@@ -23,7 +23,8 @@ beforeEach(async () => {
 });
 afterEach(() => close());
 
-const NOW = Date.parse("2026-10-10T12:00:30Z");
+// Полночь: свежие свечи всех TF, включая 1d (по устаревшим сигналам движок не входит).
+const NOW = Date.parse("2026-10-10T00:00:30Z");
 const STEP: Record<string, number> = {
   "1m": 60_000,
   "5m": 300_000,

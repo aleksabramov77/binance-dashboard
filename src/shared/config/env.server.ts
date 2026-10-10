@@ -138,13 +138,23 @@ export function getDatabaseConfig(): DatabaseConfig {
 const RUNNER_ROLES = ["oracle", "supabase"] as const;
 export type RunnerRole = (typeof RUNNER_ROLES)[number];
 
+export interface RunnerRoleConfig {
+  role: RunnerRole;
+  /** Значение ENGINE_RUNNER, которое не распознано (тогда role = oracle); null — всё в порядке. */
+  invalid: string | null;
+}
+
 /**
  * Роль этого процесса как тик-раннера фонового движка: oracle (VM, по умолчанию) или supabase.
  * Тик работает, только если роль совпадает с выбранной в состоянии движка (spec 007b).
  */
 export function getRunnerRole(
   env: Record<string, string | undefined> = process.env,
-): RunnerRole {
-  const parsed = z.enum(RUNNER_ROLES).safeParse(env.ENGINE_RUNNER);
-  return parsed.success ? parsed.data : "oracle";
+): RunnerRoleConfig {
+  const raw = env.ENGINE_RUNNER?.trim();
+  if (!raw) return { role: "oracle", invalid: null };
+  const parsed = z.enum(RUNNER_ROLES).safeParse(raw);
+  return parsed.success
+    ? { role: parsed.data, invalid: null }
+    : { role: "oracle", invalid: raw };
 }

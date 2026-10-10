@@ -41,6 +41,7 @@ interface EngineProcess {
   ready: Promise<void> | null;
   cache: CandleCache;
   perpetuals: { at: number; symbols: Set<string> } | null;
+  warnedRunner: boolean;
 }
 
 // Один таймер, одна блокировка тика и один кэш свечей на процесс: в dev instrumentation и роуты —
@@ -56,8 +57,23 @@ function engine(): EngineProcess {
     ready: null,
     cache: new Map(),
     perpetuals: null,
+    warnedRunner: false,
   };
   return g[key];
+}
+
+/** Роль раннера из ENGINE_RUNNER; неизвестное значение — oracle и одно предупреждение в журнал на процесс. */
+function runnerRole() {
+  const { role, invalid } = getRunnerRole();
+  const e = engine();
+  if (invalid !== null && !e.warnedRunner) {
+    e.warnedRunner = true;
+    log.warn(
+      "engine.runner",
+      `Неизвестный ENGINE_RUNNER="${invalid}" — использую oracle (допустимо: oracle, supabase)`,
+    );
+  }
+  return role;
 }
 
 const store = (): ExperimentStore => createDbExperimentStore(getDb());
@@ -98,7 +114,7 @@ async function perpetualSymbols(): Promise<Set<string>> {
 
 function deps(): TickDeps {
   return {
-    runner: getRunnerRole(),
+    runner: runnerRole(),
     store: store(),
     candles: (market, symbol, interval, limit) =>
       fetchKlines(market, symbol, interval, Math.min(limit, 1000)),
@@ -168,7 +184,7 @@ export function startExperimentEngine(): void {
   );
   schedule(e);
   log.info("engine.start", "Таймер движка лаборатории запущен", {
-    runner: getRunnerRole(),
+    runner: runnerRole(),
   });
 }
 
@@ -181,7 +197,7 @@ export async function getEngineStatus(): Promise<EngineStatus> {
   return {
     enabled: await readEnabled(s),
     runner: await readRunner(s),
-    processRunner: getRunnerRole(),
+    processRunner: runnerRole(),
     lastTick: lastTick.success ? lastTick.data : null,
   };
 }
