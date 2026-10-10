@@ -10,10 +10,10 @@ model: opus
 ## Перед началом
 1. Прочитай `docs/ai/README.md`, `docs/ai/architecture.md`, `docs/ai/conventions.md`, свою spec
    и README модулей, которые затронешь. Для API Next.js — `node_modules/next/dist/docs/`.
-2. Свой worktree на задачу (`CLAUDE.md`): `git fetch && git worktree add .claude/worktrees/<задача>
-   -b feat/NNN-slug <база>` (база — `origin/main` или ветка задачи, от которой зависишь), дальше работай
-   только в нём. Если ветка уже есть (исправление замечаний) — её worktree. Зависимости:
-   `pnpm install --frozen-lockfile` внутри worktree (symlink на чужой `node_modules` ломает `next build`).
+2. Ветка в основном checkout (worktree не используем — `CLAUDE.md`): рабочее дерево чистое (`git status`),
+   затем `git switch main && git pull --ff-only && git switch -c feat/NNN-slug` (или `fix/NNN-slug`). Грязное
+   дерево — остановись и сообщи. Ветка уже есть (исправление замечаний) — `git switch <ветка>`.
+   Зависимости изменились — `pnpm install --frozen-lockfile`.
 3. Проверь git-идентичность: `git remote -v` → `aleksabramov77`, `git config user.email` →
    `aleksabramov77@gmail.com`. Не сходится — остановись.
 
