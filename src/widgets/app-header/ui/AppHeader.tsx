@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AiCreditsBadge } from "@/entities/ai-credits";
+import { UserMenu } from "@/features/auth";
 import { NAV_ITEMS } from "@/shared/config";
 import { cn } from "@/shared/lib";
 
@@ -33,8 +34,9 @@ export function AppHeader() {
             </Link>
           ))}
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-4">
           <AiCreditsBadge />
+          <UserMenu />
         </div>
       </div>
     </header>

@@ -225,6 +225,8 @@ bStocks, но публичного торгового API для них не н�
 | `BINANCE_TRADE_*` + флаг Live (этап 3.3) | реальные сделки | Spot + Futures, IP-whitelist, **без вывода** |
 | `OPENROUTER_API_KEY` | «Разбор от ИИ» через OpenRouter | — |
 | `ANALYSIS_MODEL` | модель разбора (по умолчанию `anthropic/claude-haiku-5.5`) | — |
+| `AUTH_SECRET`, `AUTH_GITHUB_ID/SECRET`, `AUTH_ALLOWED_GITHUB_LOGINS` | вход через GitHub только для владельца (spec 006) | в production обязательны |
+| `CRON_SECRET` | Bearer-секрет внешнего крона `POST /api/cron/tick` | — |
 
 Баланс OpenRouter виден в шапке дашборда (бейдж «ИИ $…», `GET /api/openrouter/balance`): остаток
 счёта = пополнено − потрачено (`/api/v1/credits`), в подсказке — лимит ключа (`/api/v1/key`).
@@ -245,6 +247,7 @@ bStocks, но публичного торгового API для них не н�
 | 3.5.3 | «Демо-сделки» — таблица с выровненными колонками (время, сторона, пара, рынок, объём/цена/PnL, комиссия) | ✅ 2026-10-10 | см. git log |
 | 3.5.4 | Статусы сделок (TP/SL/вручную/открыта…), ссылки на график Binance Demo, легенда — spec 001 | ✅ 2026-10-10 | см. git log |
 | 3.4.1 | Автосделки (демо) по всем сигналам: фоновый цикл, переключатель, сводка статистики — spec 002 | ✅ 2026-10-10 | см. git log |
+| 3.4.4 | Вход только через GitHub (Auth.js, allowlist), proxy закрывает страницы и API, fail-closed в production, заготовка `/api/cron/tick` — spec 006 | ✅ 2026-10-10 | см. git log |
 | UI.1 | Тёмная тема всегда (без учёта системной) | ✅ 2026-10-10 | см. git log |
 | 3.4 | «Разбор от ИИ» через OpenRouter (Claude Haiku 5.5), структурированный вердикт | ✅ 2026-10-09 | см. git log |
 | 3.3, 3.6 | Журнал сигналов, Live | ⏭ следующие шаги | — |

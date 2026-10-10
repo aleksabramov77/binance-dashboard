@@ -47,6 +47,26 @@ Zustand (клиентское состояние, если понадобитс�
 - OpenRouter — «Разбор от ИИ» (`OPENROUTER_API_KEY`).
 Сетевые повторы — `shared/lib/fetchRetry.ts`; подписанные запросы — `shared/api/binance/signed.ts`.
 
+## Доступ (вход через GitHub)
+- `proxy.ts` (корень; в Next 16 так называется бывший middleware, Node runtime) закрывает все страницы
+  и `/api/*`. Решение принимает чистая функция `decideAccess` (`shared/lib/auth/accessPolicy.ts`):
+  нет сессии → страницы редиректят на `/login?callbackUrl=…`, API → 401.
+- Auth.js v5 (`src/app/server/auth.ts`): провайдер GitHub, JWT-сессия на 30 дней, пускает только логины
+  из `AUTH_ALLOWED_GITHUB_LOGINS` (проверка при входе и в proxy на каждый запрос).
+- Режим — `getAuthConfig()` (`shared/config/env.server.ts`): без `AUTH_SECRET` вне production — защита
+  выключена (локальная разработка, `/api/auth/*` → 404); в production без полного набора `AUTH_*` или при
+  частичной настройке — **закрыто всё** (503, fail-closed).
+- Без сессии открыты только `/login`, `/api/auth/*` и `/api/cron/*`. Cron защищён своим секретом:
+  `Authorization: Bearer $CRON_SECRET` (`shared/lib/auth/cronAuth.server.ts`, сравнение за постоянное время).
+- UI: `features/auth` — кнопка «Войти через GitHub», меню пользователя в хедере (аватар, логин, «Выйти»).
+
+| Переменная | Назначение |
+|---|---|
+| `AUTH_SECRET` | ключ подписи сессий (`openssl rand -base64 32`) |
+| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | GitHub OAuth App |
+| `AUTH_ALLOWED_GITHUB_LOGINS` | кому можно войти, через запятую |
+| `CRON_SECRET` | Bearer-секрет для `POST /api/cron/tick` |
+
 ## Логирование и ошибки
 - `log.debug|info|warn|error(event, message, data?, error?)` из `shared/lib/logger.server.ts`:
   JSON-строки в `data/logs/app-YYYY-MM-DD.jsonl` + строка в консоль. Секреты маскируются.
