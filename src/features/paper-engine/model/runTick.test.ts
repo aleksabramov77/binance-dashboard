@@ -5,10 +5,10 @@ import type {
 } from "@binance-dashboard/trading-core";
 import { TIMEFRAME_MS } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
-import type { MarketTicker } from "../lib/universe";
-import { createMemoryStore } from "./memoryStore";
-import { type Interval, runTick, type TickDeps } from "./runTick";
-import { ENGINE_KEYS } from "./store";
+import type { MarketTicker } from "../lib/universe.ts";
+import { createMemoryStore } from "./memoryStore.ts";
+import { type Interval, runTick, type TickDeps } from "./runTick.ts";
+import { ENGINE_KEYS } from "./store.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;

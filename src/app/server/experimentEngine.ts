@@ -1,12 +1,10 @@
-// Композиция движка лаборатории (spec 003, задача 2b) для Node-сервера (VM): тик из features/paper-engine
-// получает хранилище на Drizzle (entities/experiment), публичные данные Binance без ключей и таймер.
-// Только сервер. Edge Function Supabase (spec 007b) собирает те же зависимости по-своему.
+// Композиция движка лаборатории (spec 003, задача 2b) для Node-сервера (VM): таймер, тумблер, статус.
+// Сам тик (блокировка, хранилище, TickDeps) — общий среда-независимый engineTick.ts; его же вызывает
+// Edge Function Supabase (spec 007b). Только сервер.
 import {
   createDbExperimentStore,
   type EngineStatus,
   engineTickSchema,
-  ensureRun,
-  seedExperiments,
 } from "@/entities/experiment";
 import {
   type CandleCache,
@@ -15,8 +13,6 @@ import {
   type ExperimentStore,
   readEnabled,
   readRunner,
-  runTick,
-  type TickDeps,
   type TickResult,
 } from "@/features/paper-engine";
 import {
@@ -28,6 +24,12 @@ import {
 import { getRunnerRole } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import {
+  createPerpetualsSource,
+  type EngineTickEnv,
+  prepareEngineDb,
+  runEngineTick,
+} from "./engineTick";
 
 const MINUTE = 60_000;
 /** Тик — через несколько секунд после начала минуты: Binance успевает закрыть свечу. */
@@ -40,7 +42,7 @@ interface EngineProcess {
   running: Promise<TickResult> | null;
   ready: Promise<void> | null;
   cache: CandleCache;
-  perpetuals: { at: number; symbols: Set<string> } | null;
+  perpetuals: () => Promise<Set<string>>;
   warnedRunner: boolean;
 }
 
@@ -56,7 +58,11 @@ function engine(): EngineProcess {
     running: null,
     ready: null,
     cache: new Map(),
-    perpetuals: null,
+    perpetuals: createPerpetualsSource(
+      fetchPerpetualSymbols,
+      PERPETUALS_TTL_MS,
+      Date.now,
+    ),
     warnedRunner: false,
   };
   return g[key];
@@ -82,9 +88,7 @@ const store = (): ExperimentStore => createDbExperimentStore(getDb());
 export function ensureEngineReady(): Promise<void> {
   const e = engine();
   e.ready ??= (async () => {
-    const db = getDb();
-    await seedExperiments(db, EXPERIMENT_CATALOG);
-    await ensureRun(db);
+    await prepareEngineDb(getDb());
     log.info(
       "engine.seed",
       `Каталог: ${EXPERIMENT_CATALOG.length} экспериментов`,
@@ -96,47 +100,30 @@ export function ensureEngineReady(): Promise<void> {
   return e.ready;
 }
 
-async function perpetualSymbols(): Promise<Set<string>> {
+function tickEnv(): EngineTickEnv {
   const e = engine();
-  const now = Date.now();
-  if (e.perpetuals && now - e.perpetuals.at < PERPETUALS_TTL_MS)
-    return e.perpetuals.symbols;
-  try {
-    const symbols = await fetchPerpetualSymbols();
-    e.perpetuals = { at: now, symbols };
-    return symbols;
-  } catch (error) {
-    // Справочник не обновился — работаем по старому, если он есть.
-    if (e.perpetuals) return e.perpetuals.symbols;
-    throw error;
-  }
-}
-
-function deps(): TickDeps {
   return {
+    db: getDb(),
     runner: runnerRole(),
-    store: store(),
-    candles: (market, symbol, interval, limit) =>
-      fetchKlines(market, symbol, interval, Math.min(limit, 1000)),
-    tickers: async (market) => {
-      const list = await fetch24hTickers(market);
-      if (market === "spot") return list;
-      const perps = await perpetualSymbols();
-      return list.filter((t) => perps.has(t.symbol));
-    },
-    funding: fetchFundingRates,
-    cache: engine().cache,
+    market: { fetchKlines, fetch24hTickers, fetchFundingRates },
+    perpetuals: e.perpetuals,
+    cache: e.cache,
     log: (level, event, message, data) => log[level](event, message, data),
   };
 }
 
-/** Один тик под блокировкой процесса: таймер и /api/cron/tick не выполняются параллельно. */
+/**
+ * Один тик. Блокировка процесса — таймер и /api/cron/tick не выполняются параллельно; межпроцессная
+ * (advisory lock в БД, runEngineTick) — с Edge Function Supabase и другими экземплярами сервера.
+ */
 export function tickExperimentEngine(): Promise<TickResult> {
   const e = engine();
   e.running ??= (async () => {
     await ensureEngineReady();
     const started = Date.now();
-    const result = await runTick(deps(), started);
+    const result = await runEngineTick(tickEnv(), started);
+    if (result.status === "locked")
+      log.info("engine.tick", "Тик пропущен: блокировку держит другой процесс");
     if (result.status === "ok" && (result.evaluated.length || result.closed))
       log.info(
         "engine.tick",

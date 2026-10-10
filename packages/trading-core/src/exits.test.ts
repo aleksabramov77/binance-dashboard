@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type ExitPolicy, type OpenPosition, walkExits } from "./exits";
-import type { Candle } from "./types";
+import { type ExitPolicy, type OpenPosition, walkExits } from "./exits.ts";
+import type { Candle } from "./types.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;

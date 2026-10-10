@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { atr, ema, rsi } from "./basic";
+import { atr, ema, rsi } from "./basic.ts";
 
 describe("ema", () => {
   it("начинается с SMA и сходится к постоянному ряду", () => {

@@ -1,8 +1,12 @@
 import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { experimentsTable } from "../model/db";
-import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
+import { experimentsTable } from "../model/db.ts";
+import {
+  createDbExperimentStore,
+  ensureRun,
+  seedExperiments,
+} from "./dbStore.ts";
 
 let db: Db;
 let close: () => Promise<void>;

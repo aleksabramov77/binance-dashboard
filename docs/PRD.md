@@ -257,6 +257,7 @@ bStocks, но публичного торгового API для них не н�
 | 3.4.1 | Автосделки (демо) по всем сигналам: фоновый цикл, переключатель, сводка статистики — spec 002 | ✅ 2026-10-10 | см. git log |
 | 3.4.2 | Лаборатория экспериментов, волна 1: индикаторы и схемы, стратегии, торговое ядро `packages/trading-core` (выходы, sizing 0,5%, исполнение), БД (Drizzle, PGlite/Postgres), деплой-скрипты Oracle, изоляция доменов — spec 003, PR #7 #8 #13 #9 #12 #11 | ✅ 2026-10-10 | `bae97b2` |
 | 3.4.3 | Лаборатория, волна 2: движок `features/paper-engine` (тик, юниверс, кэш свечей, каталог 40 экспериментов) — PR #20; движок пишет в БД (Drizzle-хранилище, сид, таймер, `/api/cron/tick`, тумблер `/api/experiments/engine`) — PR #21. Ожидают мержа | 🚧 2026-10-10 | — |
+| 3.4.5 | Тик движка в Supabase (spec 007b, AC2–AC4): Edge Function `engine-tick` (Tokyo) на общей композиции `runEngineTick`, межпроцессная блокировка тика (advisory lock), задание pg_cron + Vault (`pnpm engine:supabase cron-install`), переключение раннера `pnpm engine:supabase runner`. Функция задеплоена, в проде no-op до решения владельца | 🚧 2026-10-10 | PR (ветка `feat/007b-engine-tick`) |
 | 3.4.4 | Вход только через GitHub (Auth.js, allowlist), proxy закрывает страницы и API, fail-closed в production, заготовка `/api/cron/tick` — spec 006 | ✅ 2026-10-10 | см. git log |
 | UI.1 | Тёмная тема всегда (без учёта системной) | ✅ 2026-10-10 | см. git log |
 | 3.4 | «Разбор от ИИ» через OpenRouter (Claude Haiku 5.5), структурированный вердикт | ✅ 2026-10-09 | см. git log |

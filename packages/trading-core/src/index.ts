@@ -7,8 +7,8 @@ export {
   type OpenPosition,
   type WalkResult,
   walkExits,
-} from "./exits";
-export * from "./experiment";
+} from "./exits.ts";
+export * from "./experiment.ts";
 export {
   entryFill,
   exitFill,
@@ -18,18 +18,18 @@ export {
   SLIPPAGE,
   settle,
   unrealizedPnl,
-} from "./fills";
-export * from "./indicators";
+} from "./fills.ts";
+export * from "./indicators/index.ts";
 export {
   type PositionSize,
   SIZING,
   type SizeInput,
   sizePosition,
-} from "./sizing";
+} from "./sizing.ts";
 export {
   type EntrySignal,
   evaluateStrategy,
   type StrategyContext,
   type StrategyResult,
-} from "./strategies";
-export type { Candle } from "./types";
+} from "./strategies.ts";
+export type { Candle } from "./types.ts";

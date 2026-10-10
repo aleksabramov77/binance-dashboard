@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rsi } from "./basic";
+import { rsi } from "./basic.ts";
 import {
   adxSeries,
   atrSeries,
@@ -10,7 +10,7 @@ import {
   rsiSeries,
   smaSeries,
   supertrend,
-} from "./ta";
+} from "./ta.ts";
 
 const bar = (close: number, range = 1): Ohlc => ({
   open: close,

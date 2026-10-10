@@ -13,7 +13,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import type { ExperimentConfig } from "./schema";
+import type { ExperimentConfig } from "./schema.ts";
 
 type Json = Record<string, unknown>;
 

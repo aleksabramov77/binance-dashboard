@@ -6,3 +6,9 @@ project_id = "binance-lab"
 [functions.binance-ping]
 # Проверка JWT включена: вызывать с publishable/anon ключом проекта.
 verify_jwt = true
+
+[functions.engine-tick]
+# Тик движка (spec 007b, AC2). JWT шлюзом не проверяется: функция сама сверяет
+# Authorization: Bearer <ENGINE_TICK_SECRET> (секрет функции и Vault → engine_tick_secret).
+# Import map с путями к общему коду (src/, packages/trading-core) — functions/engine-tick/deno.json.
+verify_jwt = false

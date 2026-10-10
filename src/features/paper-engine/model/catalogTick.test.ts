@@ -1,11 +1,11 @@
 import type { Candle } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
-import { EXPERIMENT_CATALOG } from "../config/catalog";
-import { seededRandom } from "../lib/candles";
-import type { MarketTicker } from "../lib/universe";
-import { createMemoryStore } from "./memoryStore";
-import { type Interval, runTick, type TickDeps } from "./runTick";
-import { ENGINE_KEYS } from "./store";
+import { EXPERIMENT_CATALOG } from "../config/catalog.ts";
+import { seededRandom } from "../lib/candles.ts";
+import type { MarketTicker } from "../lib/universe.ts";
+import { createMemoryStore } from "./memoryStore.ts";
+import { type Interval, runTick, type TickDeps } from "./runTick.ts";
+import { ENGINE_KEYS } from "./store.ts";
 
 const MIN = 60_000;
 const MS: Record<Interval, number> = {

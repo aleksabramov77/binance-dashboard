@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isEligibleSymbol, type MarketTicker, pickUniverse } from "./universe";
+import {
+  isEligibleSymbol,
+  type MarketTicker,
+  pickUniverse,
+} from "./universe.ts";
 
 const t = (
   symbol: string,

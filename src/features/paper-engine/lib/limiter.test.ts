@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLimiter } from "./limiter";
+import { createLimiter } from "./limiter.ts";
 
 describe("ограничитель параллельности", () => {
   it("не запускает больше n задач одновременно и выполняет все", async () => {

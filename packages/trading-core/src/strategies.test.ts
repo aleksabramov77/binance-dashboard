@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { EntryRule } from "./experiment";
-import { macd, supertrend } from "./indicators";
-import { evaluateStrategy, type StrategyContext } from "./strategies";
-import type { Candle } from "./types";
+import type { EntryRule } from "./experiment.ts";
+import { macd, supertrend } from "./indicators/index.ts";
+import { evaluateStrategy, type StrategyContext } from "./strategies.ts";
+import type { Candle } from "./types.ts";
 
 const bar = (close: number, patch: Partial<Candle> = {}): Candle => ({
   openTime: 0,

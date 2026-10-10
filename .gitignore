@@ -50,3 +50,6 @@ next-env.d.ts
 # Supabase CLI (локальное состояние, project ref)
 supabase/.temp/
 supabase/.branches/
+
+# Deno lock от supabase CLI при деплое функций (версии — в deno.json)
+supabase/functions/**/deno.lock

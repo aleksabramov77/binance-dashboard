@@ -18,7 +18,7 @@ import {
   walkExits,
 } from "@binance-dashboard/trading-core";
 import { z } from "zod";
-import { ENGINE } from "../config/engine";
+import { ENGINE } from "../config/engine.ts";
 import {
   type CandleCache,
   candleKey,
@@ -26,17 +26,17 @@ import {
   lastClosedOpenTime,
   mergeCandles,
   seededRandom,
-} from "../lib/candles";
-import { computeLevels } from "../lib/levels";
-import { createLimiter } from "../lib/limiter";
-import { type MarketTicker, pickUniverse } from "../lib/universe";
+} from "../lib/candles.ts";
+import { computeLevels } from "../lib/levels.ts";
+import { createLimiter } from "../lib/limiter.ts";
+import { type MarketTicker, pickUniverse } from "../lib/universe.ts";
 import {
   DEFAULT_RUNNER,
   ENGINE_KEYS,
   type EngineRunner,
   type ExperimentStore,
   RUNNERS,
-} from "./store";
+} from "./store.ts";
 
 // Тик движка экспериментов. Среда-независимый: без @/…, node:*, process.env, fs и таймеров —
 // его вызывают и in-process таймер на VM (instrumentation.ts), и Edge Function Supabase (Deno).
@@ -71,7 +71,8 @@ export interface TickDeps {
   ) => void;
 }
 
-export type TickStatus = "ok" | "disabled" | "foreign-runner";
+/** locked — тик не запускался: блокировку тика держит другой процесс (ставит композиция, не runTick). */
+export type TickStatus = "ok" | "disabled" | "foreign-runner" | "locked";
 
 export interface TickResult {
   status: TickStatus;

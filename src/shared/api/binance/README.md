@@ -19,7 +19,11 @@
   `timestamp` и подпись на каждую попытку, повторы при сетевых сбоях, валидация ответа Zod.
   Ошибка биржи → `BinanceApiError` (с `code`, повторять бессмысленно); 2xx с неожиданным телом →
   `ResponseFormatError` (для ордеров значит «скорее всего исполнен»).
-- `market.ts`, `client.ts` — публичные запросы через `getJsonWithRetry` (`shared/lib/fetchRetry.ts`).
+- `marketApi.ts` — **среда-независимые** публичные рыночные запросы (`createMarketApi(getJson)`): тикеры,
+  свечи, бессрочные фьючерсы, funding. Без `@/…` и `node:*` — его импортирует и Edge Function Supabase
+  `engine-tick` (Deno, spec 007b). Транспорт (повторы, журнал) передаётся аргументом.
+- `market.ts` — `createMarketApi` поверх `getJsonWithRetry` (`shared/lib/fetchRetry.ts`) для Node;
+  `client.ts` — Earn и цены через тот же `getJsonWithRetry`.
 - `accountClient.ts` — Spot, Funding, Simple Earn (read-only).
 - `demoTrading.ts` — справочник символов, цены, балансы, ордера Spot/OCO, Futures + algo TP/SL, позиции,
   `fetchDemoOpenSymbols` — символы с открытой позицией или ордерами. История: `fetchDemoTradedSymbols` —

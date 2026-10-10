@@ -4,7 +4,14 @@ export {
   type DbExperimentStore,
   ensureRun,
   seedExperiments,
-} from "./api/dbStore";
+} from "./api/dbStore.ts";
+// Межпроцессная блокировка тика (advisory lock в общей БД, spec 007b).
+export {
+  ENGINE_TICK_LOCK_KEY,
+  type ExperimentDb,
+  type LockedResult,
+  withEngineTickLock,
+} from "./api/tickLock.ts";
 // Таблицы домена (Drizzle). Чистые описания без подключения — запросы делает сервер через shared/db.
 export {
   type ExperimentRow,
@@ -16,7 +23,7 @@ export {
   paperTradesTable,
   type RunRow,
   runsTable,
-} from "./model/db";
+} from "./model/db.ts";
 // Контракт API движка: статус и тумблер.
 export {
   type EngineStatus,
@@ -25,5 +32,5 @@ export {
   engineStatusSchema,
   engineTickSchema,
   engineToggleSchema,
-} from "./model/engine";
-export * from "./model/schema";
+} from "./model/engine.ts";
+export * from "./model/schema.ts";
