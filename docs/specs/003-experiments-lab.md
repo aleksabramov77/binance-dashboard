@@ -23,7 +23,7 @@
 | 3b | `/experiments` и `/experiments/[id]` | `feat/005b-experiments-page` | 2b | — |
 | 3c | `/stats` — разрезы эксперимент/рынок/монета/направление | `feat/005c-stats` | 2b | — |
 | 3d | `/settings` — сброс тестовых капиталов (новая эпоха) | `feat/005d-settings` | 2b | — |
-| 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | — |
+| 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | PR (ожидает мержа) |
 | 4 | Вход через GitHub (Auth.js, allowlist), `CRON_SECRET` | `feat/006-auth` | main | ✅ #10 |
 | 5 | Резерв: деплой на Oracle Cloud Always Free (UAE East, Dubai) | `feat/007-deploy` | main | ✅ #12 (VM не создана) |
 | 5b | **Основной хостинг**: Supabase — `binance-ping`, `engine-tick`, pg_cron, Vault (spec 007b, AC1–AC4) | `feat/007b-supabase` | main (ping) / 2b (тик) | spec ✅ #14; БД `binance-lab` (Tokyo) создана, миграции применены; AC1 ⏳ #19 (функция в Tokyo, статусы Binance ждут publishable key) |
@@ -178,7 +178,7 @@
 - `fetchKlines`, `fetch24hTickers`, `fetchPerpetualSymbols` — `src/shared/api/binance/market.ts`.
 - `getJsonWithRetry` — `shared/lib/fetchRetry.ts`.
 - `log` — `shared/lib/logger.server.ts`; `withLogging` для роутов.
-- Паттерн singleton-таймера в `globalThis` и lock — `features/auto-trade/model/autoTrader.ts`; переносим в движок.
+- Паттерн singleton-таймера в `globalThis` и lock — был в `features/auto-trade/model/autoTrader.ts` (удалён в 3e), перенесён в `src/app/server/experimentEngine.ts`.
 - `instrumentation.ts`, `app/server/*` — композиция серверных зависимостей.
 - `placeTrade` из `features/execute-trade` — demo-зеркало (E6).
 - Индикаторы — `features/scan-market/lib/computeIndicators.ts`; детектор `detectSetup` — для baseline S01/F01.
