@@ -51,6 +51,6 @@ Developer-у (файлы ещё не закоммичены в main; он пер
 Если задачу отменили на любом шаге: закрой PR (если был), вернись на `main` и удали ветку
 (`git switch main`, `git branch -D <ветка>`, `git push origin --delete <ветка>`), spec — статус `cancelled`.
 
-Worktree временно не используются (`CLAUDE.md`): конвейер работает в основном checkout, одна задача за раз.
+Каждая задача — в своём worktree (`CLAUDE.md`, `docs/ai/workflow.md`); крупное требование сначала дробится на мелкие задачи.
 
 `gh` всегда только `GH_CONFIG_DIR="$HOME/.config/gh-personal" gh …`.

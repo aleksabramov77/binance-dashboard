@@ -11,4 +11,15 @@ export {
 export { atr, ema, rsi } from "./indicators";
 export { reportClientError } from "./reportClientError";
 export { formatPair, splitSymbol } from "./symbol";
+export {
+  adxSeries,
+  atrSeries,
+  bollinger,
+  donchian,
+  macd,
+  type Ohlc,
+  rsiSeries,
+  smaSeries,
+  supertrend,
+} from "./ta";
 export { cn } from "./utils";
