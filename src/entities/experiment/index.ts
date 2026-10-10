@@ -11,6 +11,7 @@ export {
 export {
   readExperimentDetail,
   readExperimentsOverview,
+  readTradeStats,
 } from "./api/readModel";
 export {
   EXPERIMENT_TRADES_LIMIT,
@@ -19,6 +20,7 @@ export {
   useExperiment,
   useExperiments,
 } from "./api/useExperiments";
+export { tradeStatsQueryKey, useTradeStats } from "./api/useTradeStats";
 // Агрегаты по сделкам и конфиг человеческим текстом — для страниц и разрезов /stats.
 export {
   type ConfigLine,
@@ -35,6 +37,16 @@ export {
   formatSignedUsd,
   pnlTone,
 } from "./lib/formatStats";
+export {
+  blacklistCandidates,
+  filterTrades,
+  periodStart,
+  rankGroups,
+  type SliceExperiment,
+  type SliceFilters,
+  type SliceTrade,
+  sliceStats,
+} from "./lib/slices";
 export {
   computeStats,
   type EquityPoint,
@@ -67,6 +79,23 @@ export {
   engineToggleSchema,
 } from "./model/engine";
 export * from "./model/schema";
+// Контракт API разрезов /stats (3c).
+export {
+  parseStatsQuery,
+  STATS_GROUP_BY,
+  STATS_PERIODS,
+  type StatsGroupBy,
+  type StatsGroupView,
+  type StatsPeriod,
+  type StatsQuery,
+  type StatsQueryInput,
+  statsGroupBySchema,
+  statsGroupSchema,
+  statsPeriodSchema,
+  statsQuerySchema,
+  type TradeStatsResponse,
+  tradeStatsResponseSchema,
+} from "./model/statsView";
 // Контракт API страниц /experiments и /experiments/[id].
 export {
   type EquityPointView,

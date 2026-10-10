@@ -8,6 +8,8 @@ import {
   ensureRun,
   readExperimentDetail,
   readExperimentsOverview,
+  readTradeStats,
+  type StatsQuery,
   seedExperiments,
 } from "@/entities/experiment";
 import {
@@ -231,4 +233,10 @@ export async function getExperimentsOverview() {
 export async function getExperimentDetail(id: string, limit: number) {
   await ensureEngineReady();
   return readExperimentDetail(getDb(), id, await readEnabled(store()), limit);
+}
+
+/** Страница /stats: разрезы сделок эпохи; null — нет такой эпохи. */
+export async function getTradeStats(query: StatsQuery) {
+  await ensureEngineReady();
+  return readTradeStats(getDb(), query, Date.now());
 }

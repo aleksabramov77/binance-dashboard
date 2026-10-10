@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { runsTable } from "../model/db";
 import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
-import { readExperimentDetail, readExperimentsOverview } from "./readModel";
+import {
+  readExperimentDetail,
+  readExperimentsOverview,
+  readTradeStats,
+} from "./readModel";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -108,5 +112,105 @@ describe("чтение для страниц лаборатории", () => {
     expect(detail?.stats.trades).toBe(3);
     expect(detail?.equity.map((p) => p.equity)).toEqual([1000, 1010, 1006]);
     expect(await readExperimentDetail(db, "NOPE", false, 10)).toBeNull();
+  });
+});
+
+describe("разрезы /stats", () => {
+  const NOW = Date.parse("2026-10-10T12:00:00Z");
+  const at = (base: PaperTrade, patch: Partial<PaperTrade>): PaperTrade => ({
+    ...base,
+    ...patch,
+  });
+
+  async function seed() {
+    await seedExperiments(db, [
+      exp("F01"),
+      { ...exp("S01"), market: "spot", initialBudget: 500 },
+    ]);
+    const store = createDbExperimentStore(db);
+    const old = await ensureRun(db);
+    await store.insertTrade(trade("old", old, "F01", 1, 500));
+    const [{ id: run }] = await db
+      .insert(runsTable)
+      .values({ note: "вторая" })
+      .returning({ id: runsTable.id });
+    await store.insertTrade(trade("a", run, "F01", 2, 10));
+    await store.insertTrade(
+      at(trade("b", run, "F01", 4, -4), {
+        symbol: "ETHUSDT",
+        direction: "short",
+      }),
+    );
+    await store.insertTrade(
+      at(trade("c", run, "S01", 6, -8), { market: "spot", symbol: "SOLUSDT" }),
+    );
+    // Закрыта 5 дней назад — вне «24 ч», внутри «7 дн».
+    await store.insertTrade(
+      at(trade("d", run, "S01", 1, 3), {
+        market: "spot",
+        closedAt: "2026-10-05T00:00:00.000Z",
+      }),
+    );
+    return { old, run };
+  }
+
+  it("по умолчанию — текущая эпоха, разрез по эксперименту с подписями и бюджетами", async () => {
+    const { old, run } = await seed();
+    const r = await readTradeStats(
+      db,
+      { groupBy: "experiment", period: "epoch" },
+      NOW,
+    );
+    expect(r?.run.id).toBe(run);
+    expect(r?.runs.map((x) => x.id)).toEqual([run, old]);
+    expect(r?.since).toBeNull();
+    expect(r?.total).toMatchObject({ closed: 4, realizedPnl: 1, equity: 1501 });
+    expect(
+      r?.groups.map((g) => [g.label, g.stats.realizedPnl, g.stats.equity]),
+    ).toEqual([
+      ["F01 · F01", 6, 1006],
+      ["S01 · S01", -5, 495],
+    ]);
+    expect(r?.options.symbols).toEqual(["BTCUSDT", "ETHUSDT", "SOLUSDT"]);
+    expect(r?.options.experiments.map((e) => e.id)).toEqual(["F01", "S01"]);
+  });
+
+  it("фильтры и период применяются на сервере; прошлая эпоха — по run", async () => {
+    const { old } = await seed();
+    const spotDay = await readTradeStats(
+      db,
+      { groupBy: "symbol", market: "spot", period: "24h" },
+      NOW,
+    );
+    expect(spotDay?.groups.map((g) => [g.key, g.stats.realizedPnl])).toEqual([
+      ["SOLUSDT", -8],
+    ]);
+    expect(spotDay?.total.initialBudget).toBe(500);
+
+    const byDirection = await readTradeStats(
+      db,
+      { groupBy: "direction", period: "7d" },
+      NOW,
+    );
+    expect(byDirection?.groups.map((g) => [g.label, g.stats.trades])).toEqual([
+      ["Long (B)", 3],
+      ["Short (S)", 1],
+    ]);
+
+    const byMarket = await readTradeStats(
+      db,
+      { groupBy: "market", period: "epoch", run: old },
+      NOW,
+    );
+    expect(byMarket?.groups.map((g) => [g.label, g.stats.realizedPnl])).toEqual(
+      [["Futures", 500]],
+    );
+    expect(
+      await readTradeStats(
+        db,
+        { groupBy: "market", period: "epoch", run: 999 },
+        NOW,
+      ),
+    ).toBeNull();
   });
 });
