@@ -8,14 +8,22 @@ import {
   fetchWalletBalances,
 } from "@/shared/api/binance/account.server";
 import { fetchTickerPrices } from "@/shared/api/binance/public.server";
-import { getBinanceCredentials } from "@/shared/config/env.server";
+import {
+  getBinanceCredentials,
+  isServerless,
+} from "@/shared/config/env.server";
 import { aprWithTiers } from "./tierApr";
 
 const DUST_USD = 0.01;
 
 export async function loadPortfolio(): Promise<Portfolio> {
   const creds = getBinanceCredentials();
-  if (!creds) return { status: "not-configured" };
+  // В облаке ключа реального аккаунта нет намеренно (решение владельца 2026-10-10, docs/ai/deploy-supabase.md).
+  if (!creds)
+    return {
+      status: "not-configured",
+      hosting: isServerless() ? "cloud" : "local",
+    };
 
   try {
     const [spot, funding, flexible, locked, wallets, prices] =
