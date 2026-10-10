@@ -1,5 +1,4 @@
-import type { EntryRule, TradeDirection } from "@/entities/experiment";
-import type { Candle } from "@/shared/api/binance";
+import type { EntryRule, TradeDirection } from "./experiment";
 import {
   adxSeries,
   atrSeries,
@@ -10,7 +9,8 @@ import {
   rsiSeries,
   smaSeries,
   supertrend,
-} from "@/shared/lib";
+} from "./indicators";
+import type { Candle } from "./types";
 
 export interface StrategyContext {
   /** Закрытые свечи таймфрейма эксперимента, последняя — только что закрытая. */
@@ -49,7 +49,7 @@ const crossDown = (a: number[], b: number[]) =>
 const ok = (...v: number[]) => v.every(Number.isFinite);
 const round = (v: number) => Number(v.toPrecision(6));
 
-/** Пороги сканера дашборда (features/scan-market/config/rules.ts) — baseline-эксперименты. */
+/** Копия порогов сканера дашборда (не импорт: домены изолированы) — baseline-эксперименты S01/F01. */
 const SCANNER = {
   rebound: { maxChange24h: -0.07, maxRsi: 35, maxDistanceAtr: -2 },
   overheat: { minChange24h: 0.12, minRsi: 70, minDistanceAtr: 2.5 },
