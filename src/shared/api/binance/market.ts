@@ -2,6 +2,7 @@ import { getJsonWithRetry } from "@/shared/lib/fetchRetry";
 import {
   futuresExchangeInfoSchema,
   klinesSchema,
+  premiumIndexSchema,
   type Ticker24h,
   ticker24hSchema,
 } from "./marketSchemas";
@@ -73,4 +74,16 @@ export async function fetchPerpetualSymbols(): Promise<Set<string>> {
       )
       .map((s) => s.symbol),
   );
+}
+
+/** Текущие ставки funding бессрочных фьючерсов (доля за период): { BTCUSDT: 0.0001 }. Без ключа. */
+export async function fetchFundingRates(): Promise<Record<string, number>> {
+  const list = premiumIndexSchema.parse(
+    await getJson(`${BASE.futures}/premiumIndex`),
+  );
+  const out: Record<string, number> = {};
+  for (const p of list)
+    if (typeof p.lastFundingRate === "number")
+      out[p.symbol] = p.lastFundingRate;
+  return out;
 }

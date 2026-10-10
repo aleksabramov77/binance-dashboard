@@ -3,6 +3,7 @@ export { fetchEarnProducts, fetchTickerPrices } from "./client";
 export {
   fetch24hTicker,
   fetch24hTickers,
+  fetchFundingRates,
   fetchKlines,
   fetchPerpetualSymbols,
 } from "./market";

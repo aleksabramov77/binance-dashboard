@@ -16,17 +16,18 @@
 | 1a | Индикаторы `shared/lib/ta.ts` + схемы `entities/experiment` | `feat/003a-ta-schema` | main | ✅ #7 |
 | 1b | Стратегии входа `features/paper-engine/lib/strategies.ts` + тесты | `feat/003b-strategies` | 1a | ✅ #8 |
 | 1c | Торговое ядро `packages/trading-core` (перенос индикаторов, схем, стратегий) + выходы, sizing 0,5%, исполнение + тесты | `feat/003c-exits-sizing` | 1b | ✅ #13 |
-| 1d | Тик движка, кэш свечей, юниверс, каталог 40 экспериментов, интерфейс хранилища | `feat/003d-engine` | 1c + 2a | — |
+| 1d | Тик движка, кэш свечей, юниверс, каталог 40 экспериментов, интерфейс хранилища | `feat/003d-engine` | 1c + 2a | PR #20 |
 | 2a | БД: Drizzle, PGlite локально / Postgres по `DATABASE_URL`, схема, миграции | `feat/004a-db` | 1a | ✅ #9 |
-| 2b | Репозиторий, сид каталога, движок пишет в БД, старт в `instrumentation.ts` | `feat/004b-db-engine` | 1d | — |
+| 2b | Репозиторий, сид каталога, движок пишет в БД, старт в `instrumentation.ts` | `feat/004b-db-engine` | 1d | PR #21 (база 1d) |
 | 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | — |
 | 3b | `/experiments` и `/experiments/[id]` | `feat/005b-experiments-page` | 2b | — |
 | 3c | `/stats` — разрезы эксперимент/рынок/монета/направление | `feat/005c-stats` | 2b | — |
 | 3d | `/settings` — сброс тестовых капиталов (новая эпоха) | `feat/005d-settings` | 2b | — |
 | 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | — |
 | 4 | Вход через GitHub (Auth.js, allowlist), `CRON_SECRET` | `feat/006-auth` | main | ✅ #10 |
-| 5 | Деплой на Oracle Cloud Always Free (UAE East, Dubai) | `feat/007-deploy` | main | ✅ #12 (VM ещё не создана) |
-| 5b | Резервный хостинг Supabase + Vercel (spec 007b) | `docs/007b-supabase-hosting` → `feat/007b-supabase` | main (ping) / 1d+2b (тик) / 4 (Vercel) | PR #14; AC1 ⏳ (функция в Tokyo, статусы Binance ждут ключа) |
+| 5 | Резерв: деплой на Oracle Cloud Always Free (UAE East, Dubai) | `feat/007-deploy` | main | ✅ #12 (VM не создана) |
+| 5b | **Основной хостинг**: Supabase — `binance-ping`, `engine-tick`, pg_cron, Vault (spec 007b, AC1–AC4) | `feat/007b-supabase` | main (ping) / 2b (тик) | spec ✅ #14; БД `binance-lab` (Tokyo) создана, миграции применены; AC1 ⏳ #19 (функция в Tokyo, статусы Binance ждут publishable key) |
+| 5c | **Основной хостинг**: Vercel (hnd1) + GitHub OAuth App под `*.vercel.app` (spec 007b, AC5–AC6) | `feat/007c-vercel` | main | ✅ #18 (код); ждёт проект и токен Vercel от пользователя |
 | 6 | Demo-зеркало лучших экспериментов | `feat/008-demo-mirror` | 2b | — |
 
 **Требования к движку (1d, 2b) из резервного хостинга (spec 007b):** тик — среда-независимая функция

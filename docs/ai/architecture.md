@@ -40,7 +40,7 @@ Zustand (клиентское состояние, если понадобитс�
 | Earn | `pages/earn`, `widgets/{best-offers,changes-feed,offers-table}`, `features/{collect-snapshot,refresh-snapshot,offer-filters}`, `entities/earn-offer` | `/api/earn/*` | `data/snapshots` |
 | Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing,auto-trade*}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
-| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра + UI стратегий), `features/paper-engine` (движок, задача 1d), `pages/{experiments,stats,settings}` | `/api/experiments/*`, `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
+| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра + UI стратегий), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `pages/{experiments,stats,settings}` | `/api/experiments/*`, `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
 | Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login}`, `entities/log-entry`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs`, `/api/auth/*`, страница `/login` | `data/logs`, подключение к БД |
 
@@ -66,6 +66,9 @@ Zustand (клиентское состояние, если понадобитс�
 - **Ядро домена может быть отдельным workspace-пакетом** (`packages/*`), как `trading-core`: чистый TypeScript
   без `@/**`, Next, React, TanStack и `node:*` (запрет — Biome override). Приложение подключает его через
   `transpilePackages`; слайсы домена импортируют ядро по имени пакета.
+- Движок `features/paper-engine` тоже среда-независимый (его тик исполняет и Edge Function Supabase на
+  Deno, spec 007b): только `trading-core`, `zod` и свои модули, без `@/**` и `node:*` (Biome override).
+  Сеть, БД и время внедряются через `TickDeps`; композиция — в `src/app/server/*`.
 - Исключение: `@/shared/lib` реэкспортирует индикаторы (ema/rsi/atr и ta-серии) из `trading-core`, чтобы
   сканер Сигналов не дублировал математику. Индикаторы доменно-нейтральны; если ядро начнут использовать
   другие домены шире индикаторов — вынести индикаторы в свой пакет.
@@ -134,6 +137,14 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   сущности. Внешние ключи и джойны — только внутри домена.
 - Подключение: `DATABASE_URL` → postgres.js (прод — Supabase, пулер в режиме transaction, `prepare: false`);
   без неё — встроенный PGlite в `PGLITE_DIR` (по умолчанию `data/pglite`), внешние сервисы не нужны.
+- Движок лаборатории (задача 2b): хранилище — `createDbExperimentStore(db)` из `entities/experiment`
+  (структурно = `ExperimentStore` движка), сид каталога (`seedExperiments`, upsert по id; `enabled`,
+  `demo_mirror`, `initial_budget` пишутся только при вставке) и первая эпоха (`ensureRun`). Композиция —
+  `src/app/server/experimentEngine.ts`: таймер раз в минуту (+5 с) из `instrumentation.ts` (singleton в
+  `globalThis`, не в фазе build), блокировка тика общая с `POST /api/cron/tick`, кэш свечей в памяти
+  процесса, публичные свечи/тикеры/funding (`premiumIndex`) без ключей. Роль раннера процесса —
+  `ENGINE_RUNNER` (`oracle` по умолчанию); тумблер — `engine_state.enabled` (по умолчанию выкл),
+  `GET/POST /api/experiments/engine {enabled}`.
 - Миграции — `drizzle/`: `pnpm db:generate` собирает схемы из `src/entities/*/model/db.ts` (коммитятся).
   Применяются `pnpm db:migrate` и автоматически при старте сервера (`instrumentation.ts`); сбой БД
   пишется в журнал и не роняет дашборд.

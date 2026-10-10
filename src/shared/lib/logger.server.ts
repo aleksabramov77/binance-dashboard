@@ -1,6 +1,7 @@
 // Серверный журнал: JSON-строки в data/logs/app-YYYY-MM-DD.jsonl + короткая строка в консоль.
 // Только для сервера (node:fs). Секреты маскируются по имени поля.
 import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -15,8 +16,12 @@ export interface LogEntry {
   error?: { name: string; message: string; code?: unknown; stack?: string };
 }
 
+// На serverless (Vercel) каталог проекта только для чтения — пишем во временный каталог экземпляра.
 export const LOG_DIR =
-  process.env.LOG_DIR ?? path.join(process.cwd(), "data", "logs");
+  process.env.LOG_DIR ??
+  (process.env.VERCEL === "1"
+    ? path.join(tmpdir(), "logs")
+    : path.join(process.cwd(), "data", "logs"));
 
 const SECRET_KEY = /key|secret|signature|token|authorization|password/i;
 
