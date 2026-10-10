@@ -1,20 +1,19 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { sessionSchema } from "../model/schema";
+import { toAuthState } from "../model/schema";
 
-/** Текущая сессия. Вход не настроен (локально) → 404 → null, меню не показываем. */
-async function getSession() {
+/** Состояние входа: отключён локально / не вошли / вошли. */
+async function getAuthState() {
   const res = await fetch("/api/auth/session", { cache: "no-store" });
-  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Сессия недоступна (${res.status})`);
-  return sessionSchema.parse(await res.json());
+  return toAuthState(await res.json());
 }
 
 export function useSession() {
   return useQuery({
     queryKey: ["auth-session"],
-    queryFn: getSession,
+    queryFn: getAuthState,
     staleTime: 5 * 60_000,
     retry: false,
   });

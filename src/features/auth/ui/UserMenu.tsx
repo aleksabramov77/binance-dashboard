@@ -5,11 +5,20 @@ import { signOut } from "next-auth/react";
 import { Button } from "@/shared/ui/button";
 import { useSession } from "../api/useSession";
 
-/** Аватар и логин GitHub + «Выйти». Без входа (локальный режим) ничего не показывает. */
+/** Аватар и логин GitHub + «Выйти». Локально без настроек входа — пометка «вход отключён». */
 export function UserMenu() {
-  const { data: session } = useSession();
-  if (!session) return null;
-  const { login, name, image } = session.user;
+  const { data: auth } = useSession();
+  if (auth?.status === "disabled")
+    return (
+      <span
+        className="text-muted-foreground text-xs"
+        title="AUTH_SECRET не задан — защита выключена (только локально)"
+      >
+        Вход отключён локально
+      </span>
+    );
+  if (auth?.status !== "signed-in") return null;
+  const { login, name, image } = auth.user;
   return (
     <div className="flex items-center gap-2 text-sm">
       {image ? (
