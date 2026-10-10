@@ -134,3 +134,17 @@ export function getDatabaseConfig(): DatabaseConfig {
     ? { kind: "postgres", url: env.DATABASE_URL }
     : { kind: "pglite", dir: env.PGLITE_DIR };
 }
+
+const RUNNER_ROLES = ["oracle", "supabase"] as const;
+export type RunnerRole = (typeof RUNNER_ROLES)[number];
+
+/**
+ * Роль этого процесса как тик-раннера фонового движка: oracle (VM, по умолчанию) или supabase.
+ * Тик работает, только если роль совпадает с выбранной в состоянии движка (spec 007b).
+ */
+export function getRunnerRole(
+  env: Record<string, string | undefined> = process.env,
+): RunnerRole {
+  const parsed = z.enum(RUNNER_ROLES).safeParse(env.ENGINE_RUNNER);
+  return parsed.success ? parsed.data : "oracle";
+}
