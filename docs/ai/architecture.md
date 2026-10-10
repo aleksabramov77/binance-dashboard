@@ -29,6 +29,48 @@ Zustand (клиентское состояние, если понадобитс�
   чистые функции — в `lib` (их и тестируем), сценарии — в `model`.
 - Steiger: `pnpm lint:fsd`; отключённые правила и причины — в `steiger.config.mjs`.
 
+## Домены и изоляция
+Приложение будет большим дашбордом из независимых разделов. FSD запрещает импорты между слайсами
+одного слоя, но не запрещает, например, фиче экспериментов взять сущность Earn с нижнего слоя. Поэтому
+поверх FSD действует правило **доменов**: каждый слайс принадлежит ровно одному домену, домены
+друг о друге не знают.
+
+| Домен | Слайсы (сейчас и планируемые) | API-роуты | Данные |
+|---|---|---|---|
+| Earn | `pages/earn`, `widgets/{best-offers,changes-feed,offers-table}`, `features/{collect-snapshot,refresh-snapshot,offer-filters}`, `entities/earn-offer` | `/api/earn/*` | `data/snapshots` |
+| Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
+| Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing,auto-trade*}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
+| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра + UI стратегий), `features/paper-engine` (движок, задача 1d), `pages/{experiments,stats,settings}` | `/api/experiments/*`, `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
+| ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
+| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login}`, `entities/log-entry`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs`, `/api/auth/*`, страница `/login` | `data/logs`, подключение к БД |
+
+Правила:
+- **Нет импортов между доменами** ни на каком слое. Фича лаборатории не импортирует `entities/trade`,
+  `entities/earn-offer` и т.п., даже если это «вниз» по FSD. Нужна общая вещь — она без бизнес-смысла
+  переезжает в `shared` (индикатор, формат денег, клиент Binance), а не берётся из чужого домена.
+- **`shared` не знает о доменах:** в нём нет слов «эксперимент», «earn», «сетап», «портфель». Исключение —
+  клиенты внешних сервисов (`shared/api/binance`), они общие для всех.
+- **Авторизация — сквозная и только в платформе:** `proxy.ts`, `shared/lib/auth`, `features/auth`,
+  `src/app/server/auth.ts`. В production при неполной настройке proxy отвечает 503 на всё, включая
+  `/api/cron/*` (fail-closed). `/api/cron/tick` закрыт Bearer `CRON_SECRET`, а тик в нём — код Лаборатории. Код доменов не
+  проверяет сессию, не импортирует Auth.js и не знает о пользователе; защита включается централизованно.
+- **Склейка доменов — только в платформе:** хедер (`widgets/app-header`) и серверная композиция
+  (`src/app/server/*`, `instrumentation.ts`) собирают домены через их public API (`index.ts`).
+  Домен не вызывает другой домен напрямую; если нужно (демо-зеркало лаборатории → сделка в демо),
+  зависимость внедряется функцией из `src/app/server/*`, как `AutoTradeDeps`.
+- **Свои данные:** у домена свои таблицы (без внешних ключей в чужие таблицы и без джойнов между
+  доменами), свои файлы в `data/`, свой префикс API-роутов, свой `config`. Чужие данные — только через
+  public API другого домена в слое композиции.
+- **Проверка удалением:** домен можно удалить (его слайсы, роуты, таблицы, строку в хедере) — и остальные
+  собираются и проходят тесты без правок. Если нет — граница нарушена.
+- **Ядро домена может быть отдельным workspace-пакетом** (`packages/*`), как `trading-core`: чистый TypeScript
+  без `@/**`, Next, React, TanStack и `node:*` (запрет — Biome override). Приложение подключает его через
+  `transpilePackages`; слайсы домена импортируют ядро по имени пакета.
+- Исключение: `@/shared/lib` реэкспортирует индикаторы (ema/rsi/atr и ta-серии) из `trading-core`, чтобы
+  сканер Сигналов не дублировал математику. Индикаторы доменно-нейтральны; если ядро начнут использовать
+  другие домены шире индикаторов — вынести индикаторы в свой пакет.
+- Новый слайс — сразу в таблицу выше, в свой домен. Новый домен — новая строка.
+
 ## Торговое ядро `packages/trading-core`
 Workspace-пакет `@binance-dashboard/trading-core` (spec 003): индикаторы, схемы экспериментов, стратегии,
 выходы, размер позиции, исполнение paper-сделок. Только чистые функции и Zod — без React, Next, `@/…`,
