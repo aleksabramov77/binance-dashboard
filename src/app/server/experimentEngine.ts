@@ -42,6 +42,8 @@ const PERPETUALS_TTL_MS = 60 * MINUTE;
 interface EngineProcess {
   timer: ReturnType<typeof setTimeout> | null;
   running: Promise<TickResult> | null;
+  /** Операция, которая не должна идти параллельно с тиком (сброс эпохи); тики ждут её. */
+  exclusive: Promise<unknown> | null;
   ready: Promise<void> | null;
   cache: CandleCache;
   perpetuals: { at: number; symbols: Set<string> } | null;
@@ -58,6 +60,7 @@ function engine(): EngineProcess {
   g[key] ??= {
     timer: null,
     running: null,
+    exclusive: null,
     ready: null,
     cache: new Map(),
     perpetuals: null,
@@ -138,6 +141,8 @@ function deps(): TickDeps {
 export function tickExperimentEngine(): Promise<TickResult> {
   const e = engine();
   e.running ??= (async () => {
+    // Идёт сброс эпохи — тик ждёт его и работает уже по новой эпохе.
+    await e.exclusive?.catch(() => undefined);
     await ensureEngineReady();
     const started = Date.now();
     const result = await runTick(deps(), started);
@@ -156,6 +161,28 @@ export function tickExperimentEngine(): Promise<TickResult> {
     e.running = null;
   });
   return e.running;
+}
+
+/**
+ * Выполнить fn под блокировкой тика (сброс эпохи): дождаться текущего тика и предыдущей такой
+ * операции; новые тики ждут, пока fn не закончится. Вызовы идут строго по очереди.
+ * Блокировка — на процесс; тик другого раннера (Supabase) отсекается проверкой runner в тике.
+ */
+export function withTickLock<T>(fn: () => Promise<T>): Promise<T> {
+  const e = engine();
+  // Ждём только начатое до нас: новые тики сами ждут e.exclusive (иначе взаимная блокировка).
+  const before = [e.exclusive, e.running];
+  const run = (async () => {
+    for (const p of before) await p?.catch(() => undefined);
+    return fn();
+  })();
+  e.exclusive = run;
+  run
+    .finally(() => {
+      if (e.exclusive === run) e.exclusive = null;
+    })
+    .catch(() => undefined);
+  return run;
 }
 
 function schedule(e: EngineProcess) {

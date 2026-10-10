@@ -15,6 +15,14 @@ export {
   readExperimentsOverview,
   readTradeStats,
 } from "./api/readModel";
+// /settings лаборатории (задача 3d): атомарный сброс эпохи, тумблеры, контракт и хуки.
+export {
+  getEpoch,
+  type ResetRunInput,
+  type ResetRunOutcome,
+  resetRun,
+  setExperimentEnabled,
+} from "./api/settingsDb";
 // Клиентские хуки и UI лаборатории (хедер, spec 003 · 3a).
 export {
   engineStatusQueryKey,
@@ -32,6 +40,13 @@ export {
   useExperiment,
   useExperiments,
 } from "./api/useExperiments";
+export {
+  labSettingsQueryKey,
+  useLabSettings,
+  useResetCapitals,
+  useSetExperimentEnabled,
+  useSetNextBudget,
+} from "./api/useLabSettings";
 export { tradeStatsQueryKey, useTradeStats } from "./api/useTradeStats";
 export {
   type BudgetInputs,
@@ -102,6 +117,24 @@ export {
   engineToggleSchema,
 } from "./model/engine";
 export * from "./model/schema";
+export {
+  type BudgetForm,
+  budgetFormSchema,
+  DEFAULT_INITIAL_BUDGET,
+  type Epoch,
+  type ExperimentEnabled,
+  epochSchema,
+  experimentEnabledSchema,
+  type LabSettings,
+  labSettingsSchema,
+  MAX_INITIAL_BUDGET,
+  MIN_INITIAL_BUDGET,
+  RESET_CONFIRM_WORD,
+  type ResetRequest,
+  type ResetResult,
+  resetRequestSchema,
+  resetResultSchema,
+} from "./model/settings";
 // Контракт API разрезов /stats (3c).
 export {
   parseStatsQuery,
