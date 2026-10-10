@@ -1,6 +1,8 @@
 // Хуки страниц лаборатории (клиент).
 
 // Хранилище движка на Drizzle и сид каталога (только сервер: вызывает композиция src/app/server).
+
+export { loadBudgetInputs } from "./api/budgetsStore";
 export {
   createDbExperimentStore,
   type DbExperimentStore,
@@ -12,6 +14,16 @@ export {
   readExperimentDetail,
   readExperimentsOverview,
 } from "./api/readModel";
+// Клиентские хуки и UI лаборатории (хедер, spec 003 · 3a).
+export {
+  engineStatusQueryKey,
+  readEngineStatus,
+  useEngineStatus,
+} from "./api/useEngineStatus";
+export {
+  experimentBudgetsQueryKey,
+  useExperimentBudgets,
+} from "./api/useExperimentBudgets";
 export {
   EXPERIMENT_TRADES_LIMIT,
   experimentQueryKey,
@@ -19,6 +31,11 @@ export {
   useExperiment,
   useExperiments,
 } from "./api/useExperiments";
+export {
+  type BudgetInputs,
+  computeMarketBudgets,
+  type PriceLookup,
+} from "./lib/budgets";
 // Агрегаты по сделкам и конфиг человеческим текстом — для страниц и разрезов /stats.
 export {
   type ConfigLine,
@@ -45,6 +62,12 @@ export {
   type StatsTrade,
   type TradeStats,
 } from "./lib/stats";
+export {
+  type ExperimentBudgets,
+  experimentBudgetsSchema,
+  type MarketBudget,
+  marketBudgetSchema,
+} from "./model/budget";
 // Таблицы домена (Drizzle). Чистые описания без подключения — запросы делает сервер через shared/db.
 export {
   type ExperimentRow,
@@ -81,3 +104,4 @@ export {
   tradeStatsSchema,
 } from "./model/view";
 export { EquityChart } from "./ui/EquityChart";
+export { MarketBudgets } from "./ui/MarketBudgets";
