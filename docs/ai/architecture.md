@@ -40,7 +40,7 @@ Zustand (клиентское состояние, если понадобитс�
 | Earn | `pages/earn`, `widgets/{best-offers,changes-feed,offers-table}`, `features/{collect-snapshot,refresh-snapshot,offer-filters}`, `entities/earn-offer` | `/api/earn/*` | `data/snapshots` |
 | Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing,auto-trade*}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
-| Лаборатория экспериментов | `pages/{experiments,stats,settings}`, `features/paper-engine`, `entities/experiment` | `/api/experiments/*`, `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
+| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра + UI стратегий), `features/paper-engine` (движок, задача 1d), `pages/{experiments,stats,settings}` | `/api/experiments/*`, `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
 | Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login}`, `entities/log-entry`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs`, `/api/auth/*`, страница `/login` | `data/logs`, подключение к БД |
 
@@ -63,6 +63,12 @@ Zustand (клиентское состояние, если понадобитс�
   public API другого домена в слое композиции.
 - **Проверка удалением:** домен можно удалить (его слайсы, роуты, таблицы, строку в хедере) — и остальные
   собираются и проходят тесты без правок. Если нет — граница нарушена.
+- **Ядро домена может быть отдельным workspace-пакетом** (`packages/*`), как `trading-core`: чистый TypeScript
+  без `@/**`, Next, React, TanStack и `node:*` (запрет — Biome override). Приложение подключает его через
+  `transpilePackages`; слайсы домена импортируют ядро по имени пакета.
+- Исключение: `@/shared/lib` реэкспортирует индикаторы (ema/rsi/atr и ta-серии) из `trading-core`, чтобы
+  сканер Сигналов не дублировал математику. Индикаторы доменно-нейтральны; если ядро начнут использовать
+  другие домены шире индикаторов — вынести индикаторы в свой пакет.
 - Новый слайс — сразу в таблицу выше, в свой домен. Новый домен — новая строка.
 
 ## Сервер и клиент
