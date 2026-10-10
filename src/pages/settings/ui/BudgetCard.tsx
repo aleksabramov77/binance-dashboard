@@ -43,8 +43,7 @@ export function BudgetCard({ settings }: { settings: LabSettings }) {
       <CardHeader>
         <CardTitle>Стартовый бюджет</CardTitle>
         <CardDescription>
-          На каждый эксперимент, USD. Риск сделки — 0,5% бюджета, объём — не
-          больше 10%.
+          На каждый эксперимент, USD. Объём каждой сделки — $50.
         </CardDescription>
       </CardHeader>
       <CardContent>

@@ -130,7 +130,7 @@ describe("runTick: роль раннера и тумблер", () => {
 });
 
 describe("runTick: входы", () => {
-  it("открывает сделку по закрытой свече: слиппедж, стоп 2 ATR, TP 2R, размер от риска", async () => {
+  it("открывает сделку по закрытой свече: слиппедж, стоп 2 ATR, TP 2R, объём $50", async () => {
     const store = enabledStore([exp("A")]);
     const r = await runTick(market().deps(store), T0);
     expect(r.opened).toBe(1);
@@ -140,8 +140,8 @@ describe("runTick: входы", () => {
     expect(t.entryPrice).toBeCloseTo(100.05);
     expect(t.initialStop).toBeCloseTo(98.05);
     expect(t.takeProfit).toBeCloseTo(104.05);
-    // Риск 0,5% от 10 000 = 50 USD / 2 = 25 шт., но объём ≤ 10% (1000 USD) → ~9,995 шт.
-    expect(t.quantity * t.entryPrice).toBeCloseTo(1000);
+    // Фиксированный объём сделки $50 (ENGINE.tradeNotionalUsd).
+    expect(t.quantity * t.entryPrice).toBeCloseTo(50);
     // Незакрытая свеча 12:00 отброшена: сигнал по свече 11:00.
     expect(t.signal.bar).toBe(Date.parse("2026-10-10T11:00:00Z"));
     expect(t.checkedUntil).toBe(T0 + MIN);

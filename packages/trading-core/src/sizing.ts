@@ -17,6 +17,11 @@ export interface SizeInput {
   availableUsd: number;
   /** Плечо: 1 для spot. Маржа = объём / плечо. */
   leverage: number;
+  /**
+   * Фиксированный объём сделки, USD (решение пользователя 2026-10-10: $50). Задан — риск и лимит 10%
+   * не применяются, объём урезается только свободными деньгами.
+   */
+  fixedNotionalUsd?: number;
 }
 
 export interface PositionSize {
@@ -28,7 +33,10 @@ export interface PositionSize {
   margin: number;
 }
 
-/** Объём от риска 0,5% стартового бюджета, урезанный лимитом 10% и свободными деньгами. null — входить не на что. */
+/**
+ * Объём сделки: фиксированный fixedNotionalUsd, если задан, иначе от риска 0,5% стартового бюджета с
+ * лимитом 10%; в обоих случаях — не больше свободных денег. null — входить не на что.
+ */
 export function sizePosition(
   input: SizeInput,
   rules: typeof SIZING = SIZING,
@@ -38,12 +46,14 @@ export function sizePosition(
   const riskPerUnit = stop === null ? null : Math.abs(entry - stop);
   if (riskPerUnit === 0) return null;
 
-  const cap = Math.min(
-    rules.maxNotionalPct * initialBudget,
-    Math.max(0, availableUsd) * leverage,
-  );
+  const free = Math.max(0, availableUsd) * leverage;
+  const fixed = input.fixedNotionalUsd;
+  const cap =
+    fixed !== undefined
+      ? Math.min(fixed, free)
+      : Math.min(rules.maxNotionalPct * initialBudget, free);
   const byRisk =
-    riskPerUnit === null
+    fixed !== undefined || riskPerUnit === null
       ? Number.POSITIVE_INFINITY
       : (rules.riskPct * initialBudget) / riskPerUnit;
   const quantity = Math.min(byRisk, cap / entry);
