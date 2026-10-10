@@ -41,3 +41,13 @@ export const futuresExchangeInfoSchema = z.object({
 });
 
 export type Ticker24h = z.infer<typeof ticker24hSchema>[number];
+
+/** /fapi/v1/premiumIndex без symbol: mark price и текущая ставка funding по всем фьючерсам. */
+export const premiumIndexSchema = z.array(
+  z.object({
+    symbol: z.string(),
+    markPrice: decimal,
+    // У поставочных контрактов ставки нет — пустая строка.
+    lastFundingRate: z.union([z.literal(""), decimal]).catch(""),
+  }),
+);

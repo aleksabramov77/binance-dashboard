@@ -63,3 +63,8 @@ spec 007b). Поэтому модули слайса импортируют то
 - Funding в PnL не учитывается (вторая итерация); ставка funding нужна только сигналу F14.
 - Свеча TF не пришла от Binance к моменту тика — символ пропускается в этой свече.
 - Ошибка тикеров рынка — свеча эксперимента не помечается и обрабатывается следующим тиком.
+
+## Где запускается
+- VM (план A): `src/app/server/experimentEngine.ts` — хранилище на Drizzle (`entities/experiment`),
+  таймер раз в минуту из `instrumentation.ts`, `POST /api/cron/tick`, тумблер `GET/POST /api/experiments/engine`.
+- Supabase (план B, spec 007b): Edge Function собирает те же `TickDeps` с `runner: "supabase"`.
