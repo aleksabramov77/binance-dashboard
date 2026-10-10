@@ -5,11 +5,8 @@ import {
 } from "@/shared/api/binance/public.server";
 import { saveSnapshot } from "../api/snapshotStore";
 
-/** Скачивает свежие предложения Binance Earn и сохраняет снимок на диск. */
-export async function collectSnapshot(): Promise<{
-  snapshot: Snapshot;
-  file: string;
-}> {
+/** Скачивает свежие предложения Binance Earn и сохраняет снимок в БД. */
+export async function collectSnapshot(): Promise<{ snapshot: Snapshot }> {
   const [products, prices] = await Promise.all([
     fetchEarnProducts(),
     fetchTickerPrices(),
@@ -18,6 +15,6 @@ export async function collectSnapshot(): Promise<{
     fetchedAt: new Date().toISOString(),
     offers: normalizeProducts(products, prices),
   };
-  const file = await saveSnapshot(snapshot);
-  return { snapshot, file };
+  await saveSnapshot(snapshot);
+  return { snapshot };
 }

@@ -13,6 +13,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "engine:supabase": "tsx scripts/engine-supabase.ts",
+    "earn:supabase": "tsx scripts/earn-supabase.ts",
     "check:edge": "pnpm dlx deno@2.9.6 check --config supabase/functions/engine-tick/deno.json supabase/functions/engine-tick/index.ts supabase/functions/binance-ping/index.ts",
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",

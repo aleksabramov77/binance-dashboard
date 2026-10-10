@@ -1,7 +1,11 @@
 import path from "node:path";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
-  test: { environment: "node" },
+  // .claude/worktrees — копии репозитория других веток, их тесты здесь не гоняем.
+  test: {
+    environment: "node",
+    exclude: [...configDefaults.exclude, ".claude/**"],
+  },
 });

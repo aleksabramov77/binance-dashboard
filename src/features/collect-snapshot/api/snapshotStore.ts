@@ -1,32 +1,44 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { type Snapshot, snapshotSchema } from "@/entities/earn-offer";
+import { count, desc } from "drizzle-orm";
+import {
+  earnSnapshotsTable,
+  type Snapshot,
+  snapshotSchema,
+} from "@/entities/earn-offer";
+import { type Db, getDb } from "@/shared/db/client.server";
 
-const SNAPSHOT_DIR =
-  process.env.EARN_DATA_DIR ?? path.join(process.cwd(), "data", "snapshots");
-
-const fileNameFor = (fetchedAt: string) =>
-  `${fetchedAt.replaceAll(":", "-")}.json`;
-
-export async function saveSnapshot(snapshot: Snapshot): Promise<string> {
-  await mkdir(SNAPSHOT_DIR, { recursive: true });
-  const file = path.join(SNAPSHOT_DIR, fileNameFor(snapshot.fetchedAt));
-  await writeFile(file, JSON.stringify(snapshot));
-  return file;
+/** Сохраняет снимок; повтор с тем же fetchedAt ничего не дублирует. */
+export async function saveSnapshot(
+  snapshot: Snapshot,
+  db: Db = getDb(),
+): Promise<void> {
+  await db
+    .insert(earnSnapshotsTable)
+    .values({ fetchedAt: snapshot.fetchedAt, offers: snapshot.offers })
+    .onConflictDoNothing({ target: earnSnapshotsTable.fetchedAt });
 }
 
-/** Имена файлов снимков, от старых к новым (ISO-имена сортируются лексикографически). */
-export async function listSnapshotFiles(): Promise<string[]> {
-  try {
-    const files = await readdir(SNAPSHOT_DIR);
-    return files.filter((f) => f.endsWith(".json")).sort();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
+/** Последние limit снимков, от старых к новым. */
+export async function listRecentSnapshots(
+  limit: number,
+  db: Db = getDb(),
+): Promise<Snapshot[]> {
+  const rows = await db
+    .select({
+      fetchedAt: earnSnapshotsTable.fetchedAt,
+      offers: earnSnapshotsTable.offers,
+    })
+    .from(earnSnapshotsTable)
+    .orderBy(desc(earnSnapshotsTable.fetchedAt))
+    .limit(limit);
+  return rows.reverse().map((row) =>
+    snapshotSchema.parse({
+      fetchedAt: new Date(row.fetchedAt).toISOString(),
+      offers: row.offers,
+    }),
+  );
 }
 
-export async function readSnapshot(fileName: string): Promise<Snapshot> {
-  const raw = await readFile(path.join(SNAPSHOT_DIR, fileName), "utf8");
-  return snapshotSchema.parse(JSON.parse(raw));
+export async function countSnapshots(db: Db = getDb()): Promise<number> {
+  const [row] = await db.select({ n: count() }).from(earnSnapshotsTable);
+  return row?.n ?? 0;
 }
