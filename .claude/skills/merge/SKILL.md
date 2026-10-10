@@ -24,7 +24,7 @@ PR: $ARGUMENTS (если пусто — `gh pr list` и спроси, какой
 
 ## Уборка
 - Локальная ветка PR: `git branch -D <headRefName>`, если осталась; `git fetch --prune`.
-- Старые worktree (новые сейчас не создаём — `CLAUDE.md`): для каждого из `git worktree list`, кроме
+- Worktree: для каждого из `git worktree list`, кроме
   основного, чья ветка смержена в `main` (`git branch --merged main`) или удалена на remote, —
   `git worktree remove <путь>` (незакоммиченные изменения внутри → не удаляй, спроси пользователя),
   затем `git worktree prune`. Worktree с несмерженными ветками не трогай.
