@@ -19,11 +19,11 @@
 | 1d | Тик движка, кэш свечей, юниверс, каталог 40 экспериментов, интерфейс хранилища | `feat/003d-engine` | 1c + 2a | PR #20 |
 | 2a | БД: Drizzle, PGlite локально / Postgres по `DATABASE_URL`, схема, миграции | `feat/004a-db` | 1a | ✅ #9 |
 | 2b | Репозиторий, сид каталога, движок пишет в БД, старт в `instrumentation.ts` | `feat/004b-db-engine` | 1d | PR #21 (база 1d) |
-| 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | — |
-| 3b | `/experiments` и `/experiments/[id]` | `feat/005b-experiments-page` | 2b | — |
-| 3c | `/stats` — разрезы эксперимент/рынок/монета/направление | `feat/005c-stats` | 2b | — |
-| 3d | `/settings` — сброс тестовых капиталов (новая эпоха), стартовый бюджет, вкл/выкл экспериментов | `feat/005d-settings` | 2b | PR (см. ниже) |
-| 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | — |
+| 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | PR #22 |
+| 3b | `/experiments` и `/experiments/[id]`, агрегаты `entities/experiment/lib/stats.ts`, API `GET /api/experiments[/id]` | `feat/005b-experiments-page` | 2b | PR (см. ветку); скриншоты `003-experiments-lab/screens/3b-*.png` |
+| 3c | `/stats` — разрезы эксперимент/рынок/монета/направление, фильтры и сортировка в URL, топ-3 лучших/худших, кандидаты в blacklist; API `GET /api/experiments/stats`, разрезы `entities/experiment/lib/slices.ts` | `feat/005c-stats` | 3b | PR (см. ветку); скриншоты `003-experiments-lab/screens/3c-*.png` |
+| 3d | `/settings` — сброс тестовых капиталов (новая эпоха), стартовый бюджет, вкл/выкл экспериментов | `feat/005d-settings` | 2b | PR #26 |
+| 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | PR #23 |
 | 4 | Вход через GitHub (Auth.js, allowlist), `CRON_SECRET` | `feat/006-auth` | main | ✅ #10 |
 | 5 | Резерв: деплой на Oracle Cloud Always Free (UAE East, Dubai) | `feat/007-deploy` | main | ✅ #12 (VM не создана) |
 | 5b | **Основной хостинг**: Supabase — `binance-ping`, `engine-tick`, pg_cron, Vault (spec 007b, AC1–AC4) | `feat/007b-supabase` | main (ping) / 2b (тик) | spec ✅ #14; БД `binance-lab` (Tokyo) создана, миграции применены; AC1 ⏳ #19 (функция в Tokyo, статусы Binance ждут publishable key) |
@@ -96,6 +96,10 @@
   - Код стратегий — чистые функции в `lib`, на них Vitest-тесты.
 - **Рынки:** Spot (только long) и USDⓈ-M Futures (long/short), по 20 экспериментов на рынок. «Другие» рынки (COIN-M, Margin) пока вне scope: paper-движок рыночно-агностичен, рынок добавляется как третий `market` с базой URL.
 - **Бюджет:** у каждого эксперимента свой стартовый капитал (по умолчанию $10 000). Equity = старт + реализованный PnL − комиссии. В хедере — сумма по рынку (Spot / Futures).
+  Реализация 3a: `pnl` закрытой сделки уже за вычетом комиссий; в equity хедера добавлен нереализованный PnL
+  открытых позиций по последней цене (`ticker/24hr`, кэш 20 с; нет цены хоть у одной позиции — не учитывается,
+  подсказка это показывает). API `GET /api/experiments/budgets`, хук `useExperimentBudgets` (раз в 30 с),
+  тумблер — `features/engine-toggle` (оптимистично + инвалидация). Скриншоты: `docs/specs/003-experiments-lab/screens/3a-header-*.png`.
   - Сброс — новая «эпоха» (`run_id`): старые сделки остаются в БД, статистика по умолчанию показывает текущую эпоху.
 - **Движок:** тик раз в минуту.
   - Свечи сигналов (15m/1h/4h) кэшируются по (market, symbol, tf). Стратегии вызываются только при закрытии новой свечи своего TF.
@@ -193,6 +197,12 @@
    - `/experiments`: таблица 40 экспериментов — рынок, суть, сделки, win rate, PnL, profit factor, max DD, equity; сортировка и фильтр по рынку в URL (nuqs).
    - `/experiments/[id]`: суть, конфиг, equity-кривая, сделки.
    - `/stats`: группировка по эксперименту, рынку, монете, направлению B/S; фильтры в URL. Отсюда видно, от каких монет отказаться.
+     Сделано (3c): `GET /api/experiments/stats?groupBy=experiment|market|symbol|direction&market=&experiment=&direction=&symbol=&period=epoch|24h|7d&run=`
+     (Zod-схемы `entities/experiment/model/statsView.ts`, 400 на неверные параметры, 404 на неизвестную эпоху).
+     Агрегация на сервере: `filterTrades` → `sliceStats` (поверх `groupStats`); по умолчанию — текущая эпоха, `run` — прошлая.
+     Период: закрытая сделка — по времени закрытия, открытая — по времени открытия. Капитал группы: эксперимент —
+     его бюджет, рынок — сумма бюджетов экспериментов рынка под фильтры, монета/направление — 0 (Max DD в $).
+     Кандидаты в blacklist — до 5 монет с наибольшим реализованным убытком (подсветка в разрезе «монета»).
    - `/settings`: «Сбросить тестовые капиталы» — диалог подтверждения и новая эпоха; стартовый бюджет; включение demo-зеркала у экспериментов.
    - /signals: убрать AutoTradePanel. Слайс `auto-trade` и `auto-trade-toggle` удалить, а `data/auto-trade.json` перестаёт использоваться.
 4. **E4 · spec 006 «Вход через GitHub»** — Auth.js, allowlist, proxy или middleware, страница входа, кнопка выхода в хедере, `CRON_SECRET`.
@@ -205,7 +215,7 @@
 - `fetchKlines`, `fetch24hTickers`, `fetchPerpetualSymbols` — `src/shared/api/binance/market.ts`.
 - `getJsonWithRetry` — `shared/lib/fetchRetry.ts`.
 - `log` — `shared/lib/logger.server.ts`; `withLogging` для роутов.
-- Паттерн singleton-таймера в `globalThis` и lock — `features/auto-trade/model/autoTrader.ts`; переносим в движок.
+- Паттерн singleton-таймера в `globalThis` и lock — был в `features/auto-trade/model/autoTrader.ts` (удалён в 3e), перенесён в `src/app/server/experimentEngine.ts`.
 - `instrumentation.ts`, `app/server/*` — композиция серверных зависимостей.
 - `placeTrade` из `features/execute-trade` — demo-зеркало (E6).
 - Индикаторы — `features/scan-market/lib/computeIndicators.ts`; детектор `detectSetup` — для baseline S01/F01.

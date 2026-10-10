@@ -6,6 +6,10 @@ import {
   type EngineStatus,
   engineTickSchema,
   ensureRun,
+  readExperimentDetail,
+  readExperimentsOverview,
+  readTradeStats,
+  type StatsQuery,
   seedExperiments,
 } from "@/entities/experiment";
 import {
@@ -47,7 +51,7 @@ interface EngineProcess {
 }
 
 // Один таймер, одна блокировка тика и один кэш свечей на процесс: в dev instrumentation и роуты —
-// разные бандлы, поэтому состояние в globalThis (как у features/auto-trade).
+// разные бандлы, поэтому состояние в globalThis.
 const key = Symbol.for("binance-dashboard.experimentEngine");
 type GlobalWithEngine = typeof globalThis & { [key]?: EngineProcess };
 const g = globalThis as GlobalWithEngine;
@@ -244,4 +248,22 @@ export async function setEngineEnabled(
       log.error("engine.tick", "Тик движка не выполнен", undefined, error),
     );
   return getEngineStatus();
+}
+
+/** Страница /experiments: каталог со статистикой текущей эпохи. */
+export async function getExperimentsOverview() {
+  await ensureEngineReady();
+  return readExperimentsOverview(getDb(), await readEnabled(store()));
+}
+
+/** Страница /experiments/[id]; null — эксперимента нет в каталоге. */
+export async function getExperimentDetail(id: string, limit: number) {
+  await ensureEngineReady();
+  return readExperimentDetail(getDb(), id, await readEnabled(store()), limit);
+}
+
+/** Страница /stats: разрезы сделок эпохи; null — нет такой эпохи. */
+export async function getTradeStats(query: StatsQuery) {
+  await ensureEngineReady();
+  return readTradeStats(getDb(), query, Date.now());
 }
