@@ -59,23 +59,39 @@
 |---|---|---|
 | `DATABASE_URL` | `.env.local` (Transaction pooler, 6543) | БД; без неё на Vercel приложение сразу падает с понятной ошибкой |
 | `AUTH_SECRET` | генерирует Claude (`openssl rand -base64 32`) | подпись сессий Auth.js |
-| `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET` | `.env.local` (OAuth App из spec 006) | вход через GitHub |
+| `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET` | шаг 5: prod-App — из чата, local-App — из `.env.local` | вход через GitHub |
 | `AUTH_ALLOWED_GITHUB_LOGINS` | `aleksabramov77` | allowlist |
 | `OPENROUTER_API_KEY` | `.env.local` | «Разбор от ИИ»; доступ закрыт входом |
+| `CRON_SECRET` | генерирует Claude (`openssl rand -hex 32`) | без него в production `/api/cron/*` отвечает 503 (fail-closed). Тик по spec 007b идёт из Supabase в Edge Function, а не в Vercel; если когда-нибудь Supabase будет дёргать `POST /api/cron/tick`, тот же секрет кладётся в Vault и шлётся как `Authorization: Bearer <CRON_SECRET>` |
 
-Не задаются: `BINANCE_*` (ключи на сервер не кладём), `CRON_SECRET` (тик идёт из Supabase),
-`LOG_DIR` (на Vercel логи сами пишутся во временный каталог).
+Важно: при неполном наборе `AUTH_*` в production приложение отвечает 503 на всё (fail-closed, spec 006).
 
-## 5. GitHub OAuth App: добавить адрес Vercel
-OAuth App «Binance Dashboard (local)» уже есть (spec 006, в нём адреса для `localhost:5000` и `localhost:5001`).
-Новое приложение не нужно: в него добавляется ещё один callback. Нужен адрес из шага 2.12.
+Не задаются: `BINANCE_*` (ключи на сервер не кладём), `LOG_DIR` (на Vercel логи сами пишутся во временный каталог).
+
+## 5. GitHub OAuth App для production
+Нужен адрес из шага 2.12. Есть два варианта, выбирает владелец.
+
+**Вариант А (рекомендуется): отдельное prod-App.** У прода свой секрет: утечка локального
+`.env.local` не открывает вход в прод.
+1. Откройте https://github.com/settings/developers.
+2. Нажмите **OAuth Apps**.
+3. Нажмите **New OAuth App**.
+4. **Application name**: `Binance Dashboard (prod)`.
+5. **Homepage URL**: `https://<адрес из шага 2.12>`.
+6. **Authorization callback URL**: `https://<адрес из шага 2.12>/api/auth/callback/github`.
+7. Нажмите **Register application**.
+8. Скопируйте **Client ID** и пришлите в чат.
+9. Нажмите **Generate a new client secret**.
+10. Скопируйте секрет (показывается один раз) и пришлите в чат. Claude внесёт его только в Vercel.
+
+**Вариант Б: добавить адрес в существующее «Binance Dashboard (local)»** (spec 006, сейчас в нём
+`localhost:5000` и `localhost:5001`). Проще, но у локального запуска и прода один секрет.
 1. Откройте https://github.com/settings/developers.
 2. Нажмите **OAuth Apps**.
 3. Нажмите **Binance Dashboard (local)**.
 4. В **Authorization callback URL** добавьте строку `https://<адрес из шага 2.12>/api/auth/callback/github`.
-5. Нажмите **Update application**.
+5. Нажмите **Update application**. Client ID и секрет Claude возьмёт из `.env.local`.
 
-Client ID и секрет уже лежат в `.env.local` на Mac: Claude перенесёт их в Vercel сам.
 Callback работает только для production-адреса. Preview-сборки веток PR откроются, но вход в них
 не пройдёт — для проверки используйте production или локальный запуск.
 
