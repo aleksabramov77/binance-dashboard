@@ -1,0 +1,50 @@
+name: Deploy
+
+# Деплой на VM (Oracle Cloud, docs/ai/deploy.md) после зелёного CI на main. Можно запустить вручную.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Деплои идут строго по очереди, новый не отменяет начатый.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: ssh → deploy.sh
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VM_HOST: ${{ secrets.VM_HOST }}
+      VM_USER: ${{ secrets.VM_USER }}
+      VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+    steps:
+      - name: Секреты заданы?
+        id: secrets
+        run: |
+          if [ -z "$VM_HOST" ] || [ -z "$VM_USER" ] || [ -z "$VM_SSH_KEY" ]; then
+            echo "::notice::VM ещё не настроена (нет секретов VM_HOST/VM_USER/VM_SSH_KEY) — деплой пропущен."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: SSH-ключ
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Деплой
+        if: steps.secrets.outputs.ready == 'true'
+        run: ssh -o BatchMode=yes "$VM_USER@$VM_HOST" 'bash /opt/binance-dashboard/scripts/deploy/deploy.sh'

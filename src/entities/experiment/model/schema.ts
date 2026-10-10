@@ -1,0 +1,31 @@
+// Сущность «эксперимент/стратегия»: расчёты и схемы — в автономном ядре packages/trading-core
+// (spec 003), здесь — реэкспорт для слоёв приложения; UI сущности — в ui/ этого слайса.
+// Слайс не знает об авторизации, дашбордах и других фичах (правило FSD).
+export {
+  directionSchema,
+  type EntryRule,
+  type EntryType,
+  EXIT_REASONS,
+  type ExitReason,
+  type ExitRule,
+  type Experiment,
+  type ExperimentConfig,
+  type ExperimentMarket,
+  entrySchema,
+  exitReasonSchema,
+  exitSchema,
+  experimentConfigSchema,
+  experimentSchema,
+  MAJORS,
+  MARKETS,
+  marketSchema,
+  type PaperTrade,
+  paperTradeSchema,
+  TIMEFRAME_MS,
+  TIMEFRAMES,
+  type Timeframe,
+  type TradeDirection,
+  timeframeSchema,
+  type Universe,
+  universeSchema,
+} from "@binance-dashboard/trading-core";

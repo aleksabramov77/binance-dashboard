@@ -29,6 +29,12 @@ Zustand (клиентское состояние, если понадобитс�
   чистые функции — в `lib` (их и тестируем), сценарии — в `model`.
 - Steiger: `pnpm lint:fsd`; отключённые правила и причины — в `steiger.config.mjs`.
 
+## Торговое ядро `packages/trading-core`
+Workspace-пакет `@binance-dashboard/trading-core` (spec 003): индикаторы, схемы экспериментов, стратегии,
+выходы, размер позиции, исполнение paper-сделок. Только чистые функции и Zod — без React, Next, `@/…`,
+сети, БД и env (Biome `overrides`). Приложение импортирует пакет (`transpilePackages` в `next.config.ts`);
+UI сущности — в `src/entities/experiment`. Подробно — `packages/trading-core/README.md`.
+
 ## Сервер и клиент
 - Всё, что использует секреты, `node:crypto` или `node:fs` (логгер), — **только сервер**.
   Такие модули называются `*.server.ts` (`shared/api/binance/demo.server.ts`, `shared/lib/logger.server.ts`,
@@ -75,4 +81,17 @@ Zustand (клиентское состояние, если понадобитс�
 - Ошибки браузера уходят в `POST /api/logs`. Страница `/logs` показывает журнал.
 
 ## Данные на диске
-`data/` в `.gitignore`: `snapshots/` (снимки Earn), `logs/`. БД нет.
+`data/` в `.gitignore`: `snapshots/` (снимки Earn), `logs/`, `pglite/` (локальная БД).
+
+## База данных (spec 003, задача 2a)
+- Postgres через Drizzle ORM. `src/shared/db/client.server.ts` — доменно-нейтральное подключение:
+  `getDb`, `migrateDb`, `closeDb`, `createMemoryDb` (тесты). Только сервер. Схемы в клиент не
+  передаются: запросы явно указывают таблицу (`db.select().from(experimentsTable)`).
+- Таблицы живут в слайсах своих доменов — `src/entities/<сущность>/model/db.ts` (лаборатория:
+  `experiments`, `runs` — эпохи сброса, `paper_trades`, `engine_state`) и экспортируются через public API
+  сущности. Внешние ключи и джойны — только внутри домена.
+- Подключение: `DATABASE_URL` → postgres.js (прод — Supabase, пулер в режиме transaction, `prepare: false`);
+  без неё — встроенный PGlite в `PGLITE_DIR` (по умолчанию `data/pglite`), внешние сервисы не нужны.
+- Миграции — `drizzle/`: `pnpm db:generate` собирает схемы из `src/entities/*/model/db.ts` (коммитятся).
+  Применяются `pnpm db:migrate` и автоматически при старте сервера (`instrumentation.ts`); сбой БД
+  пишется в журнал и не роняет дашборд.

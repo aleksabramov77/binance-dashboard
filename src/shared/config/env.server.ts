@@ -112,3 +112,25 @@ export function getAuthConfig(
 export const getCronSecret = (
   env: Record<string, string | undefined> = process.env,
 ): string | null => env.CRON_SECRET || null;
+
+const dbEnvSchema = z.object({
+  /** Postgres (прод — Supabase, строка подключения пулера). Пусто — локальный PGlite. */
+  DATABASE_URL: z.url().optional(),
+  /** Каталог файла PGlite, когда DATABASE_URL не задан. */
+  PGLITE_DIR: z.string().min(1).default("data/pglite"),
+});
+
+export type DatabaseConfig =
+  | { kind: "postgres"; url: string }
+  | { kind: "pglite"; dir: string };
+
+/** Куда подключаться: Postgres по DATABASE_URL или встроенный PGlite (локально, без внешних сервисов). */
+export function getDatabaseConfig(): DatabaseConfig {
+  const env = dbEnvSchema.parse({
+    DATABASE_URL: process.env.DATABASE_URL || undefined,
+    PGLITE_DIR: process.env.PGLITE_DIR || undefined,
+  });
+  return env.DATABASE_URL
+    ? { kind: "postgres", url: env.DATABASE_URL }
+    : { kind: "pglite", dir: env.PGLITE_DIR };
+}
