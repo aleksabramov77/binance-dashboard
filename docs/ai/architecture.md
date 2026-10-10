@@ -58,13 +58,14 @@ Zustand (клиентское состояние, если понадобитс�
 `data/` в `.gitignore`: `snapshots/` (снимки Earn), `logs/`, `pglite/` (локальная БД).
 
 ## База данных (spec 003, задача 2a)
-- Postgres через Drizzle ORM: `src/shared/db/schema.ts` (таблицы `experiments`, `runs` — эпохи сброса,
-  `paper_trades`, `engine_state`), клиент — `src/shared/db/client.server.ts` (`getDb`, `migrateDb`,
-  `createMemoryDb` для тестов). Только сервер.
+- Postgres через Drizzle ORM. `src/shared/db/client.server.ts` — доменно-нейтральное подключение:
+  `getDb`, `migrateDb`, `closeDb`, `createMemoryDb` (тесты). Только сервер. Схемы в клиент не
+  передаются: запросы явно указывают таблицу (`db.select().from(experimentsTable)`).
+- Таблицы живут в слайсах своих доменов — `src/entities/<сущность>/model/db.ts` (лаборатория:
+  `experiments`, `runs` — эпохи сброса, `paper_trades`, `engine_state`) и экспортируются через public API
+  сущности. Внешние ключи и джойны — только внутри домена.
 - Подключение: `DATABASE_URL` → postgres.js (прод — Supabase, пулер в режиме transaction, `prepare: false`);
   без неё — встроенный PGlite в `PGLITE_DIR` (по умолчанию `data/pglite`), внешние сервисы не нужны.
-- Миграции — `drizzle/` (генерирует `pnpm db:generate` после правки схемы, коммитятся). Применяются
-  `pnpm db:migrate` и автоматически при старте сервера (`instrumentation.ts`); сбой БД пишется в журнал
-  и не роняет дашборд.
-- jsonb-колонки в shared типизированы обобщённо (shared не знает о сущностях): проверка и маппинг
-  в типы `entities/experiment` — Zod в репозитории сущности.
+- Миграции — `drizzle/`: `pnpm db:generate` собирает схемы из `src/entities/*/model/db.ts` (коммитятся).
+  Применяются `pnpm db:migrate` и автоматически при старте сервера (`instrumentation.ts`); сбой БД
+  пишется в журнал и не роняет дашборд.

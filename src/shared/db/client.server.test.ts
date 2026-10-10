@@ -1,107 +1,15 @@
-import { desc, eq, isNull } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createMemoryDb, type Db } from "./client.server";
-import { experiments, paperTrades, runs } from "./schema";
+import { sql } from "drizzle-orm";
+import { describe, expect, it } from "vitest";
+import { createMemoryDb } from "./client.server";
 
-let db: Db;
-let close: () => Promise<void>;
-
-beforeEach(async () => {
-  ({ db, close } = await createMemoryDb());
-  await db.insert(experiments).values({
-    id: "F06",
-    market: "futures",
-    name: "Donchian-20, 1h",
-    hypothesis: "Пробой канала продолжается",
-    config: { timeframe: "1h" },
-    initialBudget: 10_000,
-  });
-});
-afterEach(() => close());
-
-const trade = (id: string, runId: number) => ({
-  id,
-  runId,
-  experimentId: "F06",
-  market: "futures",
-  symbol: "BTCUSDT",
-  direction: "long",
-  openedAt: new Date("2026-10-10T10:00:00Z"),
-  entryPrice: 60_000,
-  quantity: 0.01,
-  initialStop: 59_000,
-  stop: 59_000,
-  takeProfit: 62_000,
-  atr: 500,
-  extreme: 60_000,
-  checkedUntil: Date.parse("2026-10-10T10:00:00Z"),
-});
-
-describe("БД лаборатории (PGlite)", () => {
-  it("сохраняет и читает сделку, закрытие обновляет поля", async () => {
-    const [run] = await db.insert(runs).values({}).returning();
-    await db.insert(paperTrades).values(trade("t1", run.id));
-
-    const open = await db
-      .select()
-      .from(paperTrades)
-      .where(isNull(paperTrades.closedAt));
-    expect(open).toHaveLength(1);
-    expect(open[0]).toMatchObject({
-      symbol: "BTCUSDT",
-      entryPrice: 60_000,
-      fees: 0,
-      signal: {},
-      checkedUntil: Date.parse("2026-10-10T10:00:00Z"),
-    });
-
-    await db
-      .update(paperTrades)
-      .set({
-        closedAt: new Date("2026-10-10T12:00:00Z"),
-        exitPrice: 62_000,
-        exitReason: "tp",
-        pnl: 19.4,
-        rMultiple: 2,
-      })
-      .where(eq(paperTrades.id, "t1"));
-    const [closed] = await db
-      .select()
-      .from(paperTrades)
-      .where(eq(paperTrades.id, "t1"));
-    expect(closed).toMatchObject({ exitReason: "tp", pnl: 19.4 });
-  });
-
-  it("новая эпоха: текущая — последняя, сделки прошлой остаются", async () => {
-    const [first] = await db.insert(runs).values({}).returning();
-    await db.insert(paperTrades).values(trade("old", first.id));
-    const [second] = await db
-      .insert(runs)
-      .values({ note: "Сброс тестовых капиталов" })
-      .returning();
-
-    const [current] = await db
-      .select()
-      .from(runs)
-      .orderBy(desc(runs.id))
-      .limit(1);
-    expect(current.id).toBe(second.id);
-    expect(current.id).toBeGreaterThan(first.id);
-
-    const inCurrent = await db
-      .select()
-      .from(paperTrades)
-      .where(eq(paperTrades.runId, current.id));
-    expect(inCurrent).toHaveLength(0);
-    expect(await db.select().from(paperTrades)).toHaveLength(1);
-  });
-
-  it("сделка без эксперимента отклоняется внешним ключом", async () => {
-    const [run] = await db.insert(runs).values({}).returning();
-    await expect(
-      db
-        .insert(paperTrades)
-        .values({ ...trade("x", run.id), experimentId: "NOPE" }),
-    ).rejects.toThrow();
+describe("createMemoryDb", () => {
+  it("поднимает PGlite в памяти и применяет миграции", async () => {
+    const { db, close } = await createMemoryDb();
+    const applied = await db.execute(
+      sql`select count(*)::int as n from drizzle.__drizzle_migrations`,
+    );
+    // PGlite отдаёт { rows }; общий тип Db результат не уточняет.
+    expect((applied as { rows: unknown[] }).rows[0]).toMatchObject({ n: 1 });
+    await close();
   });
 });

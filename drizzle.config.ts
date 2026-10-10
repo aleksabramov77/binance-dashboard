@@ -4,6 +4,7 @@ import { defineConfig } from "drizzle-kit";
 // или автоматически при старте сервера (instrumentation.ts).
 export default defineConfig({
   dialect: "postgresql",
-  schema: "./src/shared/db/schema.ts",
+  // Таблицы — в слайсах своих доменов (docs/ai/architecture.md → «Домены и изоляция»).
+  schema: "./src/entities/*/model/db.ts",
   out: "./drizzle",
 });

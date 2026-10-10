@@ -9,11 +9,11 @@ import { migrate as migratePostgres } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 import { type DatabaseConfig, getDatabaseConfig } from "../config/env.server";
 import { log } from "../lib/logger.server";
-import * as schema from "./schema";
+// Доменно-нейтральный слой: подключение и миграции. Таблицы живут в слайсах своих доменов
+// (src/entities/*/model/db.ts) и передаются в запросы явно — db.select().from(table).
 
-export type DbSchema = typeof schema;
 /** Общий тип для Postgres и PGlite: запросы Drizzle одинаковые. */
-export type Db = PgDatabase<PgQueryResultHKT, DbSchema>;
+export type Db = PgDatabase<PgQueryResultHKT>;
 
 interface Connection {
   db: Db;
@@ -28,7 +28,7 @@ function connect(config: DatabaseConfig): Connection {
   if (config.kind === "postgres") {
     // prepare: false — пулер Supabase в режиме transaction не держит prepared statements.
     const client = postgres(config.url, { max: 5, prepare: false });
-    const db = drizzlePostgres(client, { schema });
+    const db = drizzlePostgres(client);
     return {
       db: db as unknown as Db,
       kind: "postgres",
@@ -42,7 +42,7 @@ function connect(config: DatabaseConfig): Connection {
 }
 
 function pgliteConnection(client: PGlite): Connection {
-  const db = drizzlePglite(client, { schema });
+  const db = drizzlePglite(client);
   return {
     db: db as unknown as Db,
     kind: "pglite",

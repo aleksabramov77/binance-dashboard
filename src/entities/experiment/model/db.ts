@@ -1,6 +1,6 @@
-// Таблицы лаборатории экспериментов (spec 003). Слой shared не знает о сущностях, поэтому
-// jsonb здесь — обобщённые записи: проверку и маппинг в типы entities/experiment делает Zod
-// в репозитории сущности.
+// Таблицы домена «Лаборатория экспериментов» (spec 003). Без внешних ключей и джойнов в таблицы
+// других доменов (docs/ai/architecture.md → «Домены и изоляция»). drizzle-kit собирает схемы
+// из src/entities/*/model/db.ts. Подключение и миграции — доменно-нейтральный shared/db.
 import {
   bigint,
   boolean,
@@ -13,16 +13,17 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
+import type { ExperimentConfig } from "./schema";
 
 type Json = Record<string, unknown>;
 
 /** Эксперимент: суть (гипотеза), конфигурация входа/выхода и стартовый бюджет. */
-export const experiments = pgTable("experiments", {
+export const experimentsTable = pgTable("experiments", {
   id: text("id").primaryKey(),
   market: text("market").notNull(),
   name: text("name").notNull(),
   hypothesis: text("hypothesis").notNull(),
-  config: jsonb("config").$type<Json>().notNull(),
+  config: jsonb("config").$type<ExperimentConfig>().notNull(),
   initialBudget: doublePrecision("initial_budget").notNull(),
   enabled: boolean("enabled").notNull().default(true),
   demoMirror: boolean("demo_mirror").notNull().default(false),
@@ -35,7 +36,7 @@ export const experiments = pgTable("experiments", {
 });
 
 /** Эпоха учёта: «Сбросить тестовые капиталы» начинает новую; текущая — с наибольшим id. */
-export const runs = pgTable("runs", {
+export const runsTable = pgTable("runs", {
   id: serial("id").primaryKey(),
   startedAt: timestamp("started_at", { withTimezone: true })
     .notNull()
@@ -44,16 +45,16 @@ export const runs = pgTable("runs", {
 });
 
 /** Paper-сделка эксперимента. Открыта, пока closed_at = null. */
-export const paperTrades = pgTable(
+export const paperTradesTable = pgTable(
   "paper_trades",
   {
     id: text("id").primaryKey(),
     runId: integer("run_id")
       .notNull()
-      .references(() => runs.id),
+      .references(() => runsTable.id),
     experimentId: text("experiment_id")
       .notNull()
-      .references(() => experiments.id),
+      .references(() => experimentsTable.id),
     market: text("market").notNull(),
     symbol: text("symbol").notNull(),
     direction: text("direction").notNull(),
@@ -84,7 +85,7 @@ export const paperTrades = pgTable(
 );
 
 /** Состояние движка: включён ли, последний тик, ошибки — ключ → значение. */
-export const engineState = pgTable("engine_state", {
+export const engineStateTable = pgTable("engine_state", {
   key: text("key").primaryKey(),
   value: jsonb("value").$type<unknown>().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
@@ -92,8 +93,8 @@ export const engineState = pgTable("engine_state", {
     .defaultNow(),
 });
 
-export type ExperimentRow = typeof experiments.$inferSelect;
-export type NewExperimentRow = typeof experiments.$inferInsert;
-export type RunRow = typeof runs.$inferSelect;
-export type PaperTradeRow = typeof paperTrades.$inferSelect;
-export type NewPaperTradeRow = typeof paperTrades.$inferInsert;
+export type ExperimentRow = typeof experimentsTable.$inferSelect;
+export type NewExperimentRow = typeof experimentsTable.$inferInsert;
+export type RunRow = typeof runsTable.$inferSelect;
+export type PaperTradeRow = typeof paperTradesTable.$inferSelect;
+export type NewPaperTradeRow = typeof paperTradesTable.$inferInsert;
