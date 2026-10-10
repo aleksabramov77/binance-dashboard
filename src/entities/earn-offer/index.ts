@@ -1,6 +1,8 @@
 export { getEarnOverview } from "./api/getEarnOverview";
 export { earnOverviewQueryKey, useEarnOverview } from "./api/useEarnOverview";
 export { evaluateOffer, type OfferYield, yearlyIncome } from "./lib/yield";
+// Таблица снимков (Drizzle) — запросы делает сервер через shared/db.
+export { earnSnapshotsTable } from "./model/db";
 export { APR_CHANGE_THRESHOLD, diffSnapshots } from "./model/diff";
 export { normalizeProducts } from "./model/normalize";
 export {
