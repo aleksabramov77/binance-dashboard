@@ -1,0 +1,8 @@
+# Supabase CLI: минимальная конфигурация (spec 007b). Проект binance-lab, регион Tokyo.
+# project_id — локальное имя для `supabase start`; удалённый проект задаётся флагом
+# --project-ref (значение SUPABASE_PROJECT_REF из .env.local).
+project_id = "binance-lab"
+
+[functions.binance-ping]
+# Проверка JWT включена: вызывать с publishable/anon ключом проекта.
+verify_jwt = true

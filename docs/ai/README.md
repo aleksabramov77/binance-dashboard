@@ -10,6 +10,7 @@
 | [`conventions.md`](conventions.md) | Нейминг, тесты, коммиты, ветки, PR, Definition of Done |
 | [`workflow.md`](workflow.md) | AI-конвейер: `/feature`, `/bug`, `/merge`, роли агентов |
 | [`deploy.md`](deploy.md) | Деплой на Oracle Cloud (Dubai): VM, HTTPS, Supabase, GitHub OAuth, автодеплой, ключи на сервере |
+| [`deploy-supabase.md`](deploy-supabase.md) | Supabase (spec 007b): Edge Functions, деплой, проверка доступа к Binance |
 | [`../specs/`](../specs/) | ТЗ на каждую фичу и баг (`NNN-slug.md`) + шаблоны |
 
 README внутри сложных модулей (читать перед правкой модуля):

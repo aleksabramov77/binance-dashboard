@@ -46,3 +46,7 @@ next-env.d.ts
 
 # worktrees Claude Code
 /.claude/worktrees
+
+# Supabase CLI (локальное состояние, project ref)
+supabase/.temp/
+supabase/.branches/

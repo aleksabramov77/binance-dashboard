@@ -26,7 +26,7 @@
 | 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | — |
 | 4 | Вход через GitHub (Auth.js, allowlist), `CRON_SECRET` | `feat/006-auth` | main | ✅ #10 |
 | 5 | Деплой на Oracle Cloud Always Free (UAE East, Dubai) | `feat/007-deploy` | main | ✅ #12 (VM ещё не создана) |
-| 5b | Резервный хостинг Supabase + Vercel (spec 007b) | `docs/007b-supabase-hosting` → `feat/007b-supabase` | main (ping) / 1d+2b (тик) / 4 (Vercel) | PR #14 |
+| 5b | Резервный хостинг Supabase + Vercel (spec 007b) | `docs/007b-supabase-hosting` → `feat/007b-supabase` | main (ping) / 1d+2b (тик) / 4 (Vercel) | PR #14; AC1 ⏳ (функция в Tokyo, статусы Binance ждут ключа) |
 | 6 | Demo-зеркало лучших экспериментов | `feat/008-demo-mirror` | 2b | — |
 
 **Требования к движку (1d, 2b) из резервного хостинга (spec 007b):** тик — среда-независимая функция
