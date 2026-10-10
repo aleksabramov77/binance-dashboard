@@ -347,6 +347,10 @@ export async function runTick(
         : {};
     const ranks = momentumRanks(exp, ready, universe);
     const inUniverse = new Set(universe);
+    // Свеча закрылась давно (первый тик после включения, рестарт, простой) — по такому сигналу не
+    // входим: цена уже ушла. Выходы по сигналу оставляем — они закрывают риск.
+    const fresh =
+      now - (bar + TIMEFRAME_MS[config.timeframe]) <= ENGINE.maxSignalAgeMs;
 
     for (const { symbol, candles } of ready) {
       const t = ticker.get(symbol);
@@ -365,7 +369,7 @@ export async function runTick(
             await closeTrade(trade, price, "signal", now);
 
       const entry = signal.entry;
-      if (!entry || !inUniverse.has(symbol)) continue;
+      if (!entry || !fresh || !inUniverse.has(symbol)) continue;
       if (!allowed(exp, entry.direction)) continue;
       const current = mine();
       if (current.length >= config.maxOpen) continue;
