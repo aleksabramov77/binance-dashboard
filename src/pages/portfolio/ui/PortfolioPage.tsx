@@ -47,6 +47,26 @@ function SetupInstructions() {
   );
 }
 
+function CloudNotice() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Портфель доступен только на компьютере</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <p>
+          Ключ вашего аккаунта Binance в облако не загружается: так безопаснее
+          для аккаунта. Поэтому балансы и план перекладки здесь не показываются.
+        </p>
+        <p className="text-muted-foreground">
+          Чтобы посмотреть портфель, запустите дашборд на своём компьютере (
+          <code>pnpm dev</code>) — там ключ лежит в <code>.env.local</code>.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function PortfolioPage() {
   const portfolio = usePortfolio();
   const earn = useEarnOverview();
@@ -90,7 +110,8 @@ export function PortfolioPage() {
       {portfolio.error && (
         <p className="text-destructive">{portfolio.error.message}</p>
       )}
-      {data?.status === "not-configured" && <SetupInstructions />}
+      {data?.status === "not-configured" &&
+        (data.hosting === "cloud" ? <CloudNotice /> : <SetupInstructions />)}
       {data?.status === "error" && (
         <p className="rounded-xl border border-destructive/50 p-4 text-sm text-destructive">
           {data.message}

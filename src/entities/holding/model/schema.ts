@@ -24,7 +24,11 @@ export const walletSchema = z.object({
 });
 
 export const portfolioSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("not-configured") }),
+  z.object({
+    status: z.literal("not-configured"),
+    /** cloud — облачный хостинг: ключ аккаунта туда не кладём, портфель только локально. */
+    hosting: z.enum(["local", "cloud"]).default("local"),
+  }),
   z.object({ status: z.literal("error"), message: z.string() }),
   z.object({
     status: z.literal("ok"),
