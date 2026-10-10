@@ -1,5 +1,5 @@
 // Вход через GitHub (Auth.js v5). Пускаем только логины из AUTH_ALLOWED_GITHUB_LOGINS.
-// Без настроек (локально) Auth.js не создаётся: proxy пропускает всё, /api/auth/* → 404.
+// Без настроек (локально) Auth.js не создаётся: proxy пропускает всё, /api/auth/* — authFallback.ts.
 import NextAuth, { type DefaultSession, type NextAuthResult } from "next-auth";
 import GitHub from "next-auth/providers/github";
 import { getAuthConfig } from "@/shared/config/env.server";

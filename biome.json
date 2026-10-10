@@ -115,7 +115,7 @@
     {
       "includes": [
         "src/app/server/engineTick.ts",
-        "src/entities/experiment/index.ts",
+        "src/entities/experiment/engine.ts",
         "src/entities/experiment/api/**",
         "src/entities/experiment/model/**",
         "src/shared/api/binance/marketApi.ts",

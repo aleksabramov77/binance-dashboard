@@ -1,36 +1,140 @@
-// Хранилище движка на Drizzle и сид каталога (только сервер: вызывает композиция src/app/server).
+// Серверная подсистема движка (хранилище, блокировка тика, таблицы, схемы) — отдельный вход для Deno.
+
+export { loadBudgetInputs } from "./api/budgetsStore";
+// Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
 export {
-  createDbExperimentStore,
-  type DbExperimentStore,
-  ensureRun,
-  seedExperiments,
-} from "./api/dbStore.ts";
-// Межпроцессная блокировка тика (advisory lock в общей БД, spec 007b).
+  readExperimentDetail,
+  readExperimentsOverview,
+  readTradeStats,
+} from "./api/readModel";
+// /settings лаборатории (задача 3d): атомарный сброс эпохи, тумблеры, контракт и хуки.
 export {
-  ENGINE_TICK_LOCK_KEY,
-  type ExperimentDb,
-  type LockedResult,
-  withEngineTickLock,
-} from "./api/tickLock.ts";
-// Таблицы домена (Drizzle). Чистые описания без подключения — запросы делает сервер через shared/db.
+  getEpoch,
+  type ResetRunInput,
+  type ResetRunOutcome,
+  resetRun,
+  setExperimentEnabled,
+} from "./api/settingsDb";
+// Клиентские хуки и UI лаборатории (хедер, spec 003 · 3a).
 export {
-  type ExperimentRow,
-  engineStateTable,
-  experimentsTable,
-  type NewExperimentRow,
-  type NewPaperTradeRow,
-  type PaperTradeRow,
-  paperTradesTable,
-  type RunRow,
-  runsTable,
-} from "./model/db.ts";
-// Контракт API движка: статус и тумблер.
+  engineStatusQueryKey,
+  readEngineStatus,
+  useEngineStatus,
+} from "./api/useEngineStatus";
 export {
-  type EngineStatus,
-  type EngineTick,
-  engineRunnerSchema,
-  engineStatusSchema,
-  engineTickSchema,
-  engineToggleSchema,
-} from "./model/engine.ts";
-export * from "./model/schema.ts";
+  experimentBudgetsQueryKey,
+  useExperimentBudgets,
+} from "./api/useExperimentBudgets";
+export {
+  EXPERIMENT_TRADES_LIMIT,
+  experimentQueryKey,
+  experimentsQueryKey,
+  useExperiment,
+  useExperiments,
+} from "./api/useExperiments";
+export {
+  labSettingsQueryKey,
+  useLabSettings,
+  useResetCapitals,
+  useSetExperimentEnabled,
+  useSetNextBudget,
+} from "./api/useLabSettings";
+export { tradeStatsQueryKey, useTradeStats } from "./api/useTradeStats";
+export * from "./engine.ts";
+export {
+  type BudgetInputs,
+  computeMarketBudgets,
+  type PriceLookup,
+} from "./lib/budgets";
+// Агрегаты по сделкам и конфиг человеческим текстом — для страниц и разрезов /stats.
+export {
+  type ConfigLine,
+  describeConfig,
+  describeEntry,
+  describeStop,
+  describeTakeProfit,
+  describeUniverse,
+} from "./lib/describeConfig";
+export {
+  formatProfitFactor,
+  formatR,
+  formatRate,
+  formatSignedUsd,
+  pnlTone,
+} from "./lib/formatStats";
+export {
+  blacklistCandidates,
+  filterTrades,
+  periodStart,
+  rankGroups,
+  type SliceExperiment,
+  type SliceFilters,
+  type SliceTrade,
+  sliceStats,
+} from "./lib/slices";
+export {
+  computeStats,
+  type EquityPoint,
+  equityCurve,
+  groupStats,
+  maxDrawdown,
+  type StatsGroup,
+  type StatsTrade,
+  type TradeStats,
+} from "./lib/stats";
+export {
+  type ExperimentBudgets,
+  experimentBudgetsSchema,
+  type MarketBudget,
+  marketBudgetSchema,
+} from "./model/budget";
+export {
+  type BudgetForm,
+  budgetFormSchema,
+  DEFAULT_INITIAL_BUDGET,
+  type Epoch,
+  type ExperimentEnabled,
+  epochSchema,
+  experimentEnabledSchema,
+  type LabSettings,
+  labSettingsSchema,
+  MAX_INITIAL_BUDGET,
+  MIN_INITIAL_BUDGET,
+  RESET_CONFIRM_WORD,
+  type ResetRequest,
+  type ResetResult,
+  resetRequestSchema,
+  resetResultSchema,
+} from "./model/settings";
+// Контракт API разрезов /stats (3c).
+export {
+  parseStatsQuery,
+  STATS_GROUP_BY,
+  STATS_PERIODS,
+  type StatsGroupBy,
+  type StatsGroupView,
+  type StatsPeriod,
+  type StatsQuery,
+  type StatsQueryInput,
+  statsGroupBySchema,
+  statsGroupSchema,
+  statsPeriodSchema,
+  statsQuerySchema,
+  type TradeStatsResponse,
+  tradeStatsResponseSchema,
+} from "./model/statsView";
+// Контракт API страниц /experiments и /experiments/[id].
+export {
+  type EquityPointView,
+  type ExperimentDetailResponse,
+  type ExperimentSummary,
+  type ExperimentsResponse,
+  equityPointSchema,
+  experimentDetailResponseSchema,
+  experimentSummarySchema,
+  experimentsResponseSchema,
+  type TradeStatsView,
+  tradeStatsSchema,
+} from "./model/view";
+export { EquityChart } from "./ui/EquityChart";
+export { MarketBudgets } from "./ui/MarketBudgets";

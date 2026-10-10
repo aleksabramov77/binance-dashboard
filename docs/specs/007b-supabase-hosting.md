@@ -53,7 +53,8 @@
 - [x] AC4. Переключение раннера `oracle ↔ supabase` описано в `docs/ai/deploy-supabase.md`, тик чужого раннера — no-op.
   - 2026-10-10 ✅: `pnpm engine:supabase runner oracle|supabase` (ждёт конца текущего тика — та же advisory-блокировка) или SQL в разделе 7 `deploy-supabase.md`; no-op чужого раннера — тесты и живой вызов (AC2).
 - [ ] AC5. Vercel: проект из GitHub-репозитория, регион `hnd1`, env (`DATABASE_URL`, `AUTH_*`); страницы лаборатории открываются после входа через GitHub.
-- [ ] AC6. `docs/ai/deploy-supabase.md` — пошаговая инструкция для пользователя (iPhone/Mac, один шаг — одно действие, точные английские названия кнопок): Supabase-проект в Токио, ключи, Vercel, GitHub OAuth App с callback для домена `*.vercel.app`.
+  Сделано 2026-10-10: https://binance-dashboard-gold.vercel.app, функции в `hnd1`, env на месте, вход через OAuth App «Binance Dashboard (prod)» пускает `aleksabramov77`, без входа — `/login` и 401. Осталось: страницы лаборатории (задача 3b) — проверить после их мержа.
+- [x] AC6. `docs/ai/deploy-supabase.md` — пошаговая инструкция для пользователя (iPhone/Mac, один шаг — одно действие, точные английские названия кнопок): Supabase-проект в Токио, ключи, Vercel, GitHub OAuth App с callback для домена `*.vercel.app`.
 
 ## Вне scope
 - Отказ от Oracle: скрипты spec 007 остаются резервом (переключение раннера — `engine_state.runner`).
@@ -71,5 +72,6 @@
 |---|---|
 | 2026-10-10 | Запрос пользователя, ТЗ записано в ветке `docs/007b-supabase-hosting` |
 | 2026-10-10 | AC1: `binance-ping` задеплоена (Tokyo, `x-sb-edge-region: ap-northeast-1`), статусы Binance ждут publishable-ключа (ветка `feat/007b-supabase`) |
+| 2026-10-10 | AC5/AC6: PR #18 (vercel.json `hnd1`, serverless-режим, инструкция); проект Vercel `binance-dashboard`, адрес https://binance-dashboard-gold.vercel.app, env через API Vercel, OAuth App «Binance Dashboard (prod)»; вход владельца проверен |
 | 2026-10-10 | AC1 ✅: из Tokyo Spot ping 200 (17 мс), Futures 200 (53 мс) |
 | 2026-10-10 | AC2, AC4 ✅, AC3 ⏳: `engine-tick` + advisory lock тика + pg_cron SQL + `pnpm engine:supabase` (ветка `feat/007b-engine-tick`); функция задеплоена, в проде no-op до переключения раннера |

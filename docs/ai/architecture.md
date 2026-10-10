@@ -39,8 +39,8 @@ Zustand (клиентское состояние, если понадобитс�
 |---|---|---|---|
 | Earn | `pages/earn`, `widgets/{best-offers,changes-feed,offers-table}`, `features/{collect-snapshot,refresh-snapshot,offer-filters}`, `entities/earn-offer` | `/api/earn/*` | `data/snapshots` |
 | Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
-| Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing,auto-trade*}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
-| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра + UI стратегий), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `pages/{experiments,stats,settings}` | `/api/experiments/*`, `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
+| Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
+| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`), `/api/cron/tick` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state` |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
 | Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login}`, `entities/log-entry`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs`, `/api/auth/*`, страница `/login` | `data/logs`, подключение к БД |
 
@@ -57,7 +57,7 @@ Zustand (клиентское состояние, если понадобитс�
 - **Склейка доменов — только в платформе:** хедер (`widgets/app-header`) и серверная композиция
   (`src/app/server/*`, `instrumentation.ts`) собирают домены через их public API (`index.ts`).
   Домен не вызывает другой домен напрямую; если нужно (демо-зеркало лаборатории → сделка в демо),
-  зависимость внедряется функцией из `src/app/server/*`, как `AutoTradeDeps`.
+  зависимость внедряется функцией из `src/app/server/*` (как `experimentEngine.ts` внедряет в движок свечи и хранилище).
 - **Свои данные:** у домена свои таблицы (без внешних ключей в чужие таблицы и без джойнов между
   доменами), свои файлы в `data/`, свой префикс API-роутов, свой `config`. Чужие данные — только через
   public API другого домена в слое композиции.

@@ -21,6 +21,7 @@ spec 007b). Поэтому модули слайса импортируют то
 | `model/store.ts` | интерфейс `ExperimentStore`, ключи `engine_state`, роли раннера |
 | `model/memoryStore.ts` | хранилище в памяти (тесты, прогоны без БД) |
 | `model/runTick.ts` | `runTick(deps, now)` — один тик |
+| `model/planReset.ts` | `planReset` — план сброса эпохи (задача 3d): закрытия `manual` по последней цене (нет цены — по входу, PnL 0) и метки `bars` = последняя закрытая свеча TF; применяет `resetRun` из `entities/experiment` одной транзакцией |
 
 ## Тик
 1. `engine_state.runner` ≠ своя роль (`oracle` | `supabase`, по умолчанию `oracle`) → `foreign-runner`, ничего не делаем.

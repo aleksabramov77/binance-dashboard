@@ -5,6 +5,10 @@ import {
   createDbExperimentStore,
   type EngineStatus,
   engineTickSchema,
+  readExperimentDetail,
+  readExperimentsOverview,
+  readTradeStats,
+  type StatsQuery,
 } from "@/entities/experiment";
 import {
   type CandleCache,
@@ -40,6 +44,8 @@ const PERPETUALS_TTL_MS = 60 * MINUTE;
 interface EngineProcess {
   timer: ReturnType<typeof setTimeout> | null;
   running: Promise<TickResult> | null;
+  /** Операция, которая не должна идти параллельно с тиком (сброс эпохи); тики ждут её. */
+  exclusive: Promise<unknown> | null;
   ready: Promise<void> | null;
   cache: CandleCache;
   perpetuals: () => Promise<Set<string>>;
@@ -47,7 +53,7 @@ interface EngineProcess {
 }
 
 // Один таймер, одна блокировка тика и один кэш свечей на процесс: в dev instrumentation и роуты —
-// разные бандлы, поэтому состояние в globalThis (как у features/auto-trade).
+// разные бандлы, поэтому состояние в globalThis.
 const key = Symbol.for("binance-dashboard.experimentEngine");
 type GlobalWithEngine = typeof globalThis & { [key]?: EngineProcess };
 const g = globalThis as GlobalWithEngine;
@@ -56,6 +62,7 @@ function engine(): EngineProcess {
   g[key] ??= {
     timer: null,
     running: null,
+    exclusive: null,
     ready: null,
     cache: new Map(),
     perpetuals: createPerpetualsSource(
@@ -119,6 +126,8 @@ function tickEnv(): EngineTickEnv {
 export function tickExperimentEngine(): Promise<TickResult> {
   const e = engine();
   e.running ??= (async () => {
+    // Идёт сброс эпохи — тик ждёт его и работает уже по новой эпохе.
+    await e.exclusive?.catch(() => undefined);
     await ensureEngineReady();
     const started = Date.now();
     const result = await runEngineTick(tickEnv(), started);
@@ -139,6 +148,28 @@ export function tickExperimentEngine(): Promise<TickResult> {
     e.running = null;
   });
   return e.running;
+}
+
+/**
+ * Выполнить fn под блокировкой тика (сброс эпохи): дождаться текущего тика и предыдущей такой
+ * операции; новые тики ждут, пока fn не закончится. Вызовы идут строго по очереди.
+ * Блокировка — на процесс; тик другого раннера (Supabase) отсекается проверкой runner в тике.
+ */
+export function withTickLock<T>(fn: () => Promise<T>): Promise<T> {
+  const e = engine();
+  // Ждём только начатое до нас: новые тики сами ждут e.exclusive (иначе взаимная блокировка).
+  const before = [e.exclusive, e.running];
+  const run = (async () => {
+    for (const p of before) await p?.catch(() => undefined);
+    return fn();
+  })();
+  e.exclusive = run;
+  run
+    .finally(() => {
+      if (e.exclusive === run) e.exclusive = null;
+    })
+    .catch(() => undefined);
+  return run;
 }
 
 function schedule(e: EngineProcess) {
@@ -204,4 +235,22 @@ export async function setEngineEnabled(
       log.error("engine.tick", "Тик движка не выполнен", undefined, error),
     );
   return getEngineStatus();
+}
+
+/** Страница /experiments: каталог со статистикой текущей эпохи. */
+export async function getExperimentsOverview() {
+  await ensureEngineReady();
+  return readExperimentsOverview(getDb(), await readEnabled(store()));
+}
+
+/** Страница /experiments/[id]; null — эксперимента нет в каталоге. */
+export async function getExperimentDetail(id: string, limit: number) {
+  await ensureEngineReady();
+  return readExperimentDetail(getDb(), id, await readEnabled(store()), limit);
+}
+
+/** Страница /stats: разрезы сделок эпохи; null — нет такой эпохи. */
+export async function getTradeStats(query: StatsQuery) {
+  await ensureEngineReady();
+  return readTradeStats(getDb(), query, Date.now());
 }
