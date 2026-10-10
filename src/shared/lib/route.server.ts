@@ -3,24 +3,25 @@
 import { HttpError, NetworkError } from "./fetchRetry";
 import { log } from "./logger.server";
 
-type Handler = (request: Request) => Promise<Response>;
+/** ctx — второй аргумент Next (params динамических сегментов); у статических роутов не нужен. */
+type Handler<Ctx> = (request: Request, ctx: Ctx) => Promise<Response>;
 
 interface Options {
   /** Не писать успешные запросы (для частого опроса, например журнала). */
   quiet?: boolean;
 }
 
-export function withLogging(
+export function withLogging<Ctx = unknown>(
   name: string,
-  handler: Handler,
+  handler: Handler<Ctx>,
   options: Options = {},
-): Handler {
-  return async (request: Request) => {
+): Handler<Ctx> {
+  return async (request: Request, ctx: Ctx) => {
     const started = Date.now();
     const { pathname } = new URL(request.url);
     const base = { route: name, method: request.method, path: pathname };
     try {
-      const response = await handler(request);
+      const response = await handler(request, ctx);
       const data = {
         ...base,
         status: response.status,

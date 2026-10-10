@@ -6,6 +6,8 @@ import {
   type EngineStatus,
   engineTickSchema,
   ensureRun,
+  readExperimentDetail,
+  readExperimentsOverview,
   seedExperiments,
 } from "@/entities/experiment";
 import {
@@ -217,4 +219,16 @@ export async function setEngineEnabled(
       log.error("engine.tick", "Тик движка не выполнен", undefined, error),
     );
   return getEngineStatus();
+}
+
+/** Страница /experiments: каталог со статистикой текущей эпохи. */
+export async function getExperimentsOverview() {
+  await ensureEngineReady();
+  return readExperimentsOverview(getDb(), await readEnabled(store()));
+}
+
+/** Страница /experiments/[id]; null — эксперимента нет в каталоге. */
+export async function getExperimentDetail(id: string, limit: number) {
+  await ensureEngineReady();
+  return readExperimentDetail(getDb(), id, await readEnabled(store()), limit);
 }

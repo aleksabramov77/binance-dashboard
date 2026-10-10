@@ -21,7 +21,8 @@ import {
 /** Любая БД Drizzle на Postgres: postgres.js, PGlite. */
 type Db = PgDatabase<PgQueryResultHKT>;
 
-const toTrade = (r: PaperTradeRow): PaperTrade =>
+/** Строка paper_trades → PaperTrade (даты — ISO). Общая с readModel. */
+export const toTrade = (r: PaperTradeRow): PaperTrade =>
   paperTradeSchema.parse({
     ...r,
     openedAt: r.openedAt.toISOString(),

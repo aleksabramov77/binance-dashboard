@@ -20,7 +20,7 @@
 | 2a | БД: Drizzle, PGlite локально / Postgres по `DATABASE_URL`, схема, миграции | `feat/004a-db` | 1a | ✅ #9 |
 | 2b | Репозиторий, сид каталога, движок пишет в БД, старт в `instrumentation.ts` | `feat/004b-db-engine` | 1d | PR #21 (база 1d) |
 | 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | — |
-| 3b | `/experiments` и `/experiments/[id]` | `feat/005b-experiments-page` | 2b | — |
+| 3b | `/experiments` и `/experiments/[id]`, агрегаты `entities/experiment/lib/stats.ts`, API `GET /api/experiments[/id]` | `feat/005b-experiments-page` | 2b | PR (см. ветку); скриншоты `003-experiments-lab/screens/3b-*.png` |
 | 3c | `/stats` — разрезы эксперимент/рынок/монета/направление | `feat/005c-stats` | 2b | — |
 | 3d | `/settings` — сброс тестовых капиталов (новая эпоха) | `feat/005d-settings` | 2b | — |
 | 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | — |
