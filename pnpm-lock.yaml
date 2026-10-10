@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@binance-dashboard/trading-core':
+        specifier: workspace:*
+        version: link:packages/trading-core
       '@electric-sql/pglite':
         specifier: 0.5.8
         version: 0.5.8
@@ -90,6 +93,12 @@ importers:
       vitest:
         specifier: ^5.0.3
         version: 5.0.3(@types/node@20.19.43)(vite@8.3.4(@types/node@20.19.43)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+
+  packages/trading-core:
+    dependencies:
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
 packages:
 
