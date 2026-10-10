@@ -1,0 +1,63 @@
+// Бюджеты лаборатории для хедера (spec 003 · 3a): данные эпохи из БД + последние цены Binance для
+// нереализованного PnL открытых позиций. Только сервер.
+import {
+  computeMarketBudgets,
+  type ExperimentBudgets,
+  type ExperimentMarket,
+  loadBudgetInputs,
+  type PriceLookup,
+} from "@/entities/experiment";
+import { fetch24hTickers } from "@/shared/api/binance/public.server";
+import { getDb } from "@/shared/db/client.server";
+import { log } from "@/shared/lib/logger.server";
+import { ensureEngineReady } from "./experimentEngine";
+
+/** Хедер опрашивает раз в 30 с с каждой вкладки — тикеры кэшируем на процесс, чтобы не тратить вес Binance. */
+const PRICES_TTL_MS = 20_000;
+
+type PriceCache = Map<
+  ExperimentMarket,
+  { at: number; prices: Map<string, number> }
+>;
+const key = Symbol.for("binance-dashboard.experimentBudgetPrices");
+const g = globalThis as typeof globalThis & { [key]?: PriceCache };
+
+async function lastPrices(
+  market: ExperimentMarket,
+): Promise<Map<string, number>> {
+  g[key] ??= new Map();
+  const cached = g[key].get(market);
+  if (cached && Date.now() - cached.at < PRICES_TTL_MS) return cached.prices;
+  const prices = new Map(
+    (await fetch24hTickers(market)).map((t) => [t.symbol, t.lastPrice]),
+  );
+  g[key].set(market, { at: Date.now(), prices });
+  return prices;
+}
+
+export async function getExperimentBudgets(): Promise<ExperimentBudgets> {
+  await ensureEngineReady();
+  const { runId, inputs } = await loadBudgetInputs(getDb());
+  const markets = [...new Set(inputs.open.map((t) => t.market))];
+
+  let prices: PriceLookup | null = null;
+  try {
+    const loaded = new Map(
+      await Promise.all(
+        markets.map(async (m) => [m, await lastPrices(m)] as const),
+      ),
+    );
+    prices = (market, symbol) => loaded.get(market)?.get(symbol);
+  } catch (error) {
+    // Нет цен — показываем equity без нереализованного PnL (подсказка в хедере это объясняет).
+    log.warn(
+      "experiments.budgets",
+      "Цены для нереализованного PnL недоступны",
+      {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+  }
+
+  return { runId, markets: computeMarketBudgets(inputs, prices) };
+}

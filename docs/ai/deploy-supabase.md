@@ -1,5 +1,8 @@
 # Деплой: Supabase + Vercel (основной вариант)
 
+**Сейчас:** https://binance-dashboard-gold.vercel.app — Vercel-проект `binance-dashboard` (команда `aleksabramov77s-projects`), функции в `hnd1`.
+Прод-секреты (`AUTH_SECRET`, `CRON_SECRET`, OAuth prod-App) — копия на Mac владельца: `~/.config/vercel/binance-dashboard-prod.env` (chmod 600); токен Vercel — `~/.config/vercel/claude-mac.token`.
+
 Решение владельца 2026-10-10: основной хостинг — Supabase + Vercel, резерв — Oracle VM ([deploy.md](deploy.md)).
 Требования и критерии — [spec 007b](../specs/007b-supabase-hosting.md).
 
@@ -40,7 +43,8 @@
 9. **Framework Preset** — **Next.js**, остальное не меняйте.
 10. Нажмите **Deploy**.
 11. Дождитесь окончания (2–3 минуты). Сайт пока ответит «Вход не настроен» — так и должно быть.
-12. Нажмите **Continue to Dashboard** и скопируйте адрес из **Domains** (вида `binance-dashboard-xxxx.vercel.app`). Пришлите его в чат.
+12. Нажмите **Continue to Dashboard**. Постоянный адрес — короткий production-домен проекта: **`https://binance-dashboard-gold.vercel.app`** (Vercel выдал сам, т.к. `binance-dashboard.vercel.app` занят).
+    Адреса вида `binance-dashboard-<хеш>-aleksabramov77s-projects.vercel.app` — отдельные сборки, они закрыты Vercel Authentication и для входа не годятся.
 
 ## 3. Токен Vercel для Claude
 1. Откройте https://vercel.com/account/settings/tokens.
@@ -105,7 +109,6 @@ Callback работает только для production-адреса. Preview-�
 |---|---|---|
 | Earn: «Обновить сейчас» не сохраняет снимок, расписание 09:00/21:00 не работает | снимки — файлы в `data/snapshots`, а диск Vercel только для чтения; расписание — launchd на Mac | Earn пока смотреть локально; перенос снимков в БД — отдельная задача домена Earn |
 | «Логи» показывают только журнал одного экземпляра функции | журнал пишется во временный каталог экземпляра | полный журнал — **Vercel → Project → Logs** |
-| Старый переключатель «Автосделки (демо)» ничего не делает | фонового процесса нет, demo-ключей нет | убирается в задаче 3e |
 | Запросы к Binance идут из Tokyo (`hnd1`) | регион функций | если Binance ответит 451 — сменить регион в `vercel.json` (spec 007b: запасной — Mumbai, `bom1`) |
 
 ## Edge Functions (Supabase)

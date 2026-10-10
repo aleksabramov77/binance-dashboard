@@ -102,7 +102,7 @@ const signed = (v: number) => `${v > 0 ? "+" : ""}${formatUsd(v)}`;
 const pnlTone = (v: number) =>
   v > 0 ? "text-positive" : v < 0 ? "text-destructive" : undefined;
 
-/** Итог по загруженной истории — для статистики автоторговли. */
+/** Итог по загруженной истории демо-сделок. */
 function SummaryLine({ s }: { s: TradeSummary }) {
   const winRate = s.closed > 0 ? Math.round((s.wins / s.closed) * 100) : null;
   return (
