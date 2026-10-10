@@ -84,6 +84,33 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/features/paper-engine/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/**",
+                      "next",
+                      "next/**",
+                      "react",
+                      "react/**",
+                      "node:*"
+                    ],
+                    "message": "paper-engine среда-независим (Node и Deno): только trading-core, zod и свои модули (src/features/paper-engine/README.md)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

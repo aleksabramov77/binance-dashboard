@@ -16,7 +16,7 @@
 | 1a | Индикаторы `shared/lib/ta.ts` + схемы `entities/experiment` | `feat/003a-ta-schema` | main | ✅ #7 |
 | 1b | Стратегии входа `features/paper-engine/lib/strategies.ts` + тесты | `feat/003b-strategies` | 1a | ✅ #8 |
 | 1c | Торговое ядро `packages/trading-core` (перенос индикаторов, схем, стратегий) + выходы, sizing 0,5%, исполнение + тесты | `feat/003c-exits-sizing` | 1b | ✅ #13 |
-| 1d | Тик движка, кэш свечей, юниверс, каталог 40 экспериментов, интерфейс хранилища | `feat/003d-engine` | 1c + 2a | — |
+| 1d | Тик движка, кэш свечей, юниверс, каталог 40 экспериментов, интерфейс хранилища | `feat/003d-engine` | 1c + 2a | PR #20 |
 | 2a | БД: Drizzle, PGlite локально / Postgres по `DATABASE_URL`, схема, миграции | `feat/004a-db` | 1a | ✅ #9 |
 | 2b | Репозиторий, сид каталога, движок пишет в БД, старт в `instrumentation.ts` | `feat/004b-db-engine` | 1d | — |
 | 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | — |
