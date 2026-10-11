@@ -96,6 +96,9 @@ export function useSetExperimentDemoMirror() {
         method: "POST",
         body,
       }),
-    onSuccess: (data) => queryClient.setQueryData(labSettingsQueryKey, data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(labSettingsQueryKey, data);
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+    },
   });
 }

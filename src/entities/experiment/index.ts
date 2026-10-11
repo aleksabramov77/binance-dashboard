@@ -8,6 +8,7 @@ export {
   claimMirrorsToClose,
   listMirrorCandidates,
   type MirrorCandidate,
+  type MirrorSummary,
   type MirrorToClose,
   setExperimentDemoMirror,
   updateMirror,
@@ -148,6 +149,8 @@ export {
 } from "./model/statsView";
 // Контракт API страниц /experiments и /experiments/[id].
 export {
+  type DemoSummary,
+  demoSummarySchema,
   type EquityPointView,
   type ExperimentDetailResponse,
   type ExperimentSummary,

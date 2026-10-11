@@ -13,6 +13,8 @@ const summary = (
   hypothesis: "",
   initialBudget: 1000,
   enabled: true,
+  demoMirror: false,
+  demo: { trades: 0, open: 0, closed: 0, rejected: 0, pnl: 0 },
   stats: computeStats(
     pnls.map((pnl, i) => ({
       openedAt: "2026-10-10T00:00:00Z",
@@ -57,5 +59,23 @@ describe("sortExperiments", () => {
     expect(sortExperiments(list, "all", "profitFactor", "desc")[0].id).toBe(
       "F01",
     );
+  });
+
+  it("демо-счёт: сначала торгующие на демо; PnL демо без закрытых — в конце", () => {
+    const a = { ...summary("S01", "spot", []), demoMirror: true };
+    const b = {
+      ...summary("S02", "spot", []),
+      demo: { trades: 3, open: 1, closed: 2, rejected: 0, pnl: -4 },
+    };
+    const c = {
+      ...summary("S03", "spot", []),
+      demo: { trades: 1, open: 0, closed: 1, rejected: 0, pnl: 2 },
+    };
+    expect(
+      sortExperiments([b, c, a], "all", "demo", "desc").map((e) => e.id),
+    ).toEqual(["S01", "S02", "S03"]);
+    expect(
+      sortExperiments([a, b, c], "all", "demoPnl", "desc").map((e) => e.id),
+    ).toEqual(["S03", "S02", "S01"]);
   });
 });
