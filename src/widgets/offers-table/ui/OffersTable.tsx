@@ -1,19 +1,63 @@
+"use client";
+
 import { OfferName, TierSummary } from "@/entities/earn-offer";
 import type { RankedOffer } from "@/features/offer-filters";
-import { cn, formatAmount, formatPercent, formatUsd } from "@/shared/lib";
+import {
+  cn,
+  formatAmount,
+  formatPercent,
+  formatUsd,
+  type SortValue,
+  sortRows,
+  useTableSort,
+} from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
+import { SortableHead } from "@/shared/ui/sortable-head";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
 
 const MAX_ROWS = 200;
 
+const SORT_KEYS = [
+  "product",
+  "effectiveApr",
+  "daily",
+  "yearly",
+  "maxApr",
+  "baseApr",
+  "tiers",
+  "minimum",
+] as const;
+const SORT_VALUE: Record<
+  (typeof SORT_KEYS)[number],
+  (r: RankedOffer) => SortValue
+> = {
+  product: ({ offer }) => offer.asset,
+  effectiveApr: ({ yield: y }) => y?.effectiveApr,
+  daily: ({ yield: y }) => y?.yearlyIncomeUsd,
+  yearly: ({ yield: y }) => y?.yearlyIncomeUsd,
+  maxApr: ({ offer }) => offer.maxApr,
+  baseApr: ({ offer }) => offer.baseApr,
+  // Бонус ступеней сверх базовой ставки.
+  tiers: ({ offer }) => offer.maxApr - offer.baseApr,
+  // Минимум в $, чтобы сравнивать разные активы; без цены — в конце.
+  minimum: ({ offer }) =>
+    !offer.minPurchase
+      ? 0
+      : offer.priceUsd
+        ? offer.minPurchase * offer.priceUsd
+        : null,
+};
+
 export function OffersTable({ ranked }: { ranked: RankedOffer[] }) {
+  // Без выбранной колонки — порядок ранжирования (лучшая ставка сверху).
+  const { sort, head } = useTableSort("offersSort", SORT_KEYS);
+  const rows = sort ? sortRows(ranked, SORT_VALUE[sort.key], sort.dir) : ranked;
   if (ranked.length === 0) {
     return (
       <p className="py-10 text-center text-muted-foreground">
@@ -26,18 +70,35 @@ export function OffersTable({ ranked }: { ranked: RankedOffer[] }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Продукт</TableHead>
-            <TableHead className="text-right">Ваша ставка</TableHead>
-            <TableHead className="text-right">Доход / день</TableHead>
-            <TableHead className="text-right">Доход / год</TableHead>
-            <TableHead className="text-right">Макс. APR</TableHead>
-            <TableHead className="text-right">Базовая</TableHead>
-            <TableHead>Бонусные ступени</TableHead>
-            <TableHead className="text-right">Минимум</TableHead>
+            <SortableHead {...head("product")}>Продукт</SortableHead>
+            <SortableHead
+              className="text-right"
+              {...head("effectiveApr", "desc")}
+            >
+              Ваша ставка
+            </SortableHead>
+            <SortableHead className="text-right" {...head("daily", "desc")}>
+              Доход / день
+            </SortableHead>
+            <SortableHead className="text-right" {...head("yearly", "desc")}>
+              Доход / год
+            </SortableHead>
+            <SortableHead className="text-right" {...head("maxApr", "desc")}>
+              Макс. APR
+            </SortableHead>
+            <SortableHead className="text-right" {...head("baseApr", "desc")}>
+              Базовая
+            </SortableHead>
+            <SortableHead {...head("tiers", "desc")}>
+              Бонусные ступени
+            </SortableHead>
+            <SortableHead className="text-right" {...head("minimum")}>
+              Минимум
+            </SortableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {ranked.slice(0, MAX_ROWS).map(({ offer, yield: y }) => (
+          {rows.slice(0, MAX_ROWS).map(({ offer, yield: y }) => (
             <TableRow
               key={offer.id}
               className={cn(offer.soldOut && "opacity-50")}

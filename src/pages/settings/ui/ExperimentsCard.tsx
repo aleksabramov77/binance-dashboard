@@ -4,6 +4,7 @@ import {
   type LabSettings,
   useSetExperimentEnabled,
 } from "@/entities/experiment";
+import { sortRows, useTableSort } from "@/shared/lib";
 import {
   Card,
   CardContent,
@@ -11,17 +12,30 @@ import {
   CardHeader,
   CardTitle,
 } from "@/shared/ui/card";
+import { SortableHead } from "@/shared/ui/sortable-head";
 import { Switch } from "@/shared/ui/switch";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
 
 const MARKET_LABEL = { spot: "Spot", futures: "Futures" } as const;
+
+const SORT_KEYS = ["id", "market", "name", "enabled", "demoMirror"] as const;
+type Experiment = LabSettings["experiments"][number];
+const SORT_VALUE: Record<
+  (typeof SORT_KEYS)[number],
+  (e: Experiment) => string | boolean
+> = {
+  id: (e) => e.id,
+  market: (e) => MARKET_LABEL[e.market],
+  name: (e) => e.name,
+  enabled: (e) => e.enabled,
+  demoMirror: (e) => e.demoMirror,
+};
 
 /** Список экспериментов: вкл/выкл каждого; demo-зеркало пока только хранится (задача 6). */
 export function ExperimentsCard({
@@ -31,6 +45,10 @@ export function ExperimentsCard({
 }) {
   const toggle = useSetExperimentEnabled();
   const enabled = experiments.filter((e) => e.enabled).length;
+  const { sort, head } = useTableSort("expSort", SORT_KEYS);
+  const rows = sort
+    ? sortRows(experiments, SORT_VALUE[sort.key], sort.dir)
+    : experiments;
 
   return (
     <Card>
@@ -50,15 +68,29 @@ export function ExperimentsCard({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-16">ID</TableHead>
-              <TableHead className="w-20">Рынок</TableHead>
-              <TableHead>Суть</TableHead>
-              <TableHead className="w-24 text-center">Включён</TableHead>
-              <TableHead className="w-36 text-center">Demo-зеркало</TableHead>
+              <SortableHead className="w-16" {...head("id")}>
+                ID
+              </SortableHead>
+              <SortableHead className="w-20" {...head("market")}>
+                Рынок
+              </SortableHead>
+              <SortableHead {...head("name")}>Суть</SortableHead>
+              <SortableHead
+                className="w-24 text-center"
+                {...head("enabled", "desc")}
+              >
+                Включён
+              </SortableHead>
+              <SortableHead
+                className="w-36 text-center"
+                {...head("demoMirror", "desc")}
+              >
+                Demo-зеркало
+              </SortableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {experiments.map((e) => (
+            {rows.map((e) => (
               <TableRow key={e.id}>
                 <TableCell className="font-mono">{e.id}</TableCell>
                 <TableCell>{MARKET_LABEL[e.market]}</TableCell>
