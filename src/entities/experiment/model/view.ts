@@ -36,6 +36,15 @@ export const runInfoSchema = z.object({
   startedAt: z.string(),
 });
 
+/** Демо-торговля эксперимента за эпоху (spec 008), см. MirrorSummary. */
+export const demoSummarySchema = z.object({
+  trades: z.number().int(),
+  open: z.number().int(),
+  closed: z.number().int(),
+  rejected: z.number().int(),
+  pnl: z.number(),
+});
+
 export const experimentSummarySchema = experimentSchema
   .pick({
     id: true,
@@ -44,13 +53,16 @@ export const experimentSummarySchema = experimentSchema
     hypothesis: true,
     initialBudget: true,
     enabled: true,
+    demoMirror: true,
   })
-  .extend({ stats: tradeStatsSchema });
+  .extend({ stats: tradeStatsSchema, demo: demoSummarySchema });
 
 export const experimentsResponseSchema = z.object({
   run: runInfoSchema,
   /** Тумблер движка: выключен — новых сделок не будет (пустое состояние страницы). */
   engineEnabled: z.boolean(),
+  /** На сервере задан ключ Binance Demo — без него демо-торговля не включится (spec 008). */
+  demoConfigured: z.boolean(),
   experiments: z.array(experimentSummarySchema),
 });
 
@@ -68,6 +80,7 @@ export const experimentDetailResponseSchema = z.object({
 
 export type TradeStatsView = z.infer<typeof tradeStatsSchema>;
 export type EquityPointView = z.infer<typeof equityPointSchema>;
+export type DemoSummary = z.infer<typeof demoSummarySchema>;
 export type ExperimentSummary = z.infer<typeof experimentSummarySchema>;
 export type ExperimentsResponse = z.infer<typeof experimentsResponseSchema>;
 export type ExperimentDetailResponse = z.infer<

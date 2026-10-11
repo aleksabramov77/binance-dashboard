@@ -10,6 +10,7 @@ import {
   pnlTone,
   useExperiments,
 } from "@/entities/experiment";
+import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
 import { cn, formatDateTime, formatUsd } from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
 import { SortableHead } from "@/shared/ui/sortable-head";
@@ -87,13 +88,30 @@ const COLUMNS: {
     numeric: true,
     description: "Капитал эксперимента: стартовый бюджет + реализованный PnL.",
   },
+  {
+    key: "demo",
+    label: "Демо-счёт",
+    numeric: false,
+    description:
+      "Галочка — эксперимент торгует и на демо-счёте Binance (demo.binance.com, виртуальные деньги): каждый новый вход повторяется на бирже с тем же объёмом, стопом и тейком. Включение и выключение — с подтверждением. Под галочкой — сделок на демо за эпоху (открыто сейчас).",
+  },
+  {
+    key: "demoPnl",
+    label: "PnL демо ≈",
+    numeric: true,
+    description:
+      "Оценка результата закрытых сделок на демо-счёте: (цена выхода − цена входа на бирже) × количество, без комиссий. Отличается от paper-PnL проскальзыванием и минимальными объёмами биржи. Точная история — на странице «Сигналы» → «Демо-сделки».",
+  },
 ];
 
 function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
   const [{ sort, dir }, setView] = useExperimentsView();
   return (
     <SortableHead
-      className={cn(column.numeric && "text-right")}
+      className={cn(
+        column.numeric && "text-right",
+        column.key === "demo" && "text-center",
+      )}
       active={sort === column.key}
       dir={dir}
       onSort={(next) => setView({ sort: column.key, dir: next })}
@@ -105,7 +123,39 @@ function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
   );
 }
 
-function ExperimentRow({ e }: { e: ExperimentSummary }) {
+function DemoCell({
+  e,
+  demoConfigured,
+}: {
+  e: ExperimentSummary;
+  demoConfigured: boolean;
+}) {
+  const d = e.demo;
+  return (
+    <TableCell className="text-center">
+      <div className="flex flex-col items-center gap-1">
+        <DemoMirrorToggle experiment={e} demoConfigured={demoConfigured} />
+        {(d.trades > 0 || d.rejected > 0) && (
+          <span
+            className="text-xs whitespace-nowrap text-muted-foreground"
+            title={`Сделок на демо: ${d.trades}, открыто: ${d.open}, не открылись: ${d.rejected}`}
+          >
+            {d.trades} сд.{d.open > 0 && ` · ${d.open} откр.`}
+            {d.rejected > 0 && ` · ${d.rejected} отказ`}
+          </span>
+        )}
+      </div>
+    </TableCell>
+  );
+}
+
+function ExperimentRow({
+  e,
+  demoConfigured,
+}: {
+  e: ExperimentSummary;
+  demoConfigured: boolean;
+}) {
   const s = e.stats;
   return (
     <TableRow className={cn(!e.enabled && "opacity-50")}>
@@ -154,6 +204,12 @@ function ExperimentRow({ e }: { e: ExperimentSummary }) {
       </TableCell>
       <TableCell className="text-right font-mono tabular-nums">
         {formatUsd(s.equity)}
+      </TableCell>
+      <DemoCell e={e} demoConfigured={demoConfigured} />
+      <TableCell
+        className={cn("text-right font-mono tabular-nums", pnlTone(e.demo.pnl))}
+      >
+        {e.demo.closed ? formatSignedUsd(e.demo.pnl) : "—"}
       </TableCell>
     </TableRow>
   );
@@ -231,7 +287,11 @@ function ExperimentsDashboard() {
             </TableHeader>
             <TableBody>
               {rows.map((e) => (
-                <ExperimentRow key={e.id} e={e} />
+                <ExperimentRow
+                  key={e.id}
+                  e={e}
+                  demoConfigured={data.demoConfigured}
+                />
               ))}
             </TableBody>
           </Table>

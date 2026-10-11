@@ -223,3 +223,66 @@ export async function mirrorStatuses(
     ]),
   );
 }
+
+/** Демо-торговля эксперимента за эпоху (spec 008): по строкам demo_mirror_orders её сделок. */
+export interface MirrorSummary {
+  /** Сделок, вход которых исполнен на демо (открытые и закрытые). */
+  trades: number;
+  /** Сейчас открыто на демо (вход отправляется, позиция открыта или закрывается). */
+  open: number;
+  /** Закрыто на демо. */
+  closed: number;
+  /** Не открылись (отказ биржи) или пропущены. */
+  rejected: number;
+  /**
+   * Оценка PnL закрытых демо-сделок, $: (выход paper-сделки − вход на демо) × количество на демо,
+   * без комиссий. Точный результат — в истории демо-счёта на /signals.
+   */
+  pnl: number;
+}
+
+export async function mirrorSummaries(
+  db: Db,
+  runId: number,
+): Promise<Map<string, MirrorSummary>> {
+  const rows = await db
+    .select({
+      experimentId: demoMirrorOrdersTable.experimentId,
+      status: demoMirrorOrdersTable.status,
+      direction: demoMirrorOrdersTable.direction,
+      entryPrice: demoMirrorOrdersTable.entryPrice,
+      quantity: demoMirrorOrdersTable.quantity,
+      exitPrice: paperTradesTable.exitPrice,
+    })
+    .from(demoMirrorOrdersTable)
+    .innerJoin(
+      paperTradesTable,
+      eq(paperTradesTable.id, demoMirrorOrdersTable.tradeId),
+    )
+    .where(eq(paperTradesTable.runId, runId));
+  const out = new Map<string, MirrorSummary>();
+  for (const r of rows) {
+    let s = out.get(r.experimentId);
+    if (!s) {
+      s = { trades: 0, open: 0, closed: 0, rejected: 0, pnl: 0 };
+      out.set(r.experimentId, s);
+    }
+    const status = r.status as MirrorStatus;
+    if (status === "rejected") {
+      s.rejected++;
+      continue;
+    }
+    s.trades++;
+    if (status !== "closed") {
+      s.open++;
+      continue;
+    }
+    s.closed++;
+    if (r.exitPrice !== null && r.entryPrice !== null && r.quantity !== null)
+      s.pnl +=
+        (r.direction === "short" ? -1 : 1) *
+        (r.exitPrice - r.entryPrice) *
+        r.quantity;
+  }
+  return out;
+}

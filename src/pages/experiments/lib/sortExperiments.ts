@@ -26,6 +26,11 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
       return s.closed ? s.maxDrawdownPct : null;
     case "equity":
       return s.equity;
+    case "demo":
+      // Сначала торгующие на демо, среди них — по числу демо-сделок.
+      return (e.demoMirror ? 1e6 : 0) + e.demo.trades;
+    case "demoPnl":
+      return e.demo.closed ? e.demo.pnl : null;
   }
 }
 

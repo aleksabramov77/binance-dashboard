@@ -11,6 +11,8 @@ export const SORT_KEYS = [
   "profitFactor",
   "maxDrawdown",
   "equity",
+  "demo",
+  "demoPnl",
 ] as const;
 export const SORT_DIRS = ["asc", "desc"] as const;
 

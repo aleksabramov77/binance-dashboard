@@ -2,9 +2,9 @@
 
 import {
   type LabSettings,
-  useSetExperimentDemoMirror,
   useSetExperimentEnabled,
 } from "@/entities/experiment";
+import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
 import { sortRows, useTableSort } from "@/shared/lib";
 import {
   Card,
@@ -13,7 +13,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/shared/ui/card";
-import { Checkbox } from "@/shared/ui/checkbox";
 import { SortableHead } from "@/shared/ui/sortable-head";
 import { Switch } from "@/shared/ui/switch";
 import {
@@ -59,7 +58,6 @@ export function ExperimentsCard({
   demoConfigured: boolean;
 }) {
   const toggle = useSetExperimentEnabled();
-  const mirror = useSetExperimentDemoMirror();
   const enabled = experiments.filter((e) => e.enabled).length;
   const mirrored = experiments.filter((e) => e.demoMirror).length;
   const { sort, head } = useTableSort("expSort", SORT_KEYS);
@@ -85,9 +83,9 @@ export function ExperimentsCard({
             добавлен.
           </p>
         )}
-        {(toggle.error ?? mirror.error) && (
+        {toggle.error && (
           <p className="mb-3 text-sm text-destructive">
-            {(toggle.error ?? mirror.error)?.message}
+            {toggle.error.message}
           </p>
         )}
         <Table>
@@ -122,7 +120,7 @@ export function ExperimentsCard({
                 {...head("demoMirror")}
                 description={HELP.demoMirror}
               >
-                Demo-зеркало
+                Демо-счёт
               </SortableHead>
             </TableRow>
           </TableHeader>
@@ -148,13 +146,9 @@ export function ExperimentsCard({
                   />
                 </TableCell>
                 <TableCell className="text-center">
-                  <Checkbox
-                    checked={e.demoMirror}
-                    disabled={mirror.isPending && mirror.variables?.id === e.id}
-                    aria-label={`Demo-зеркало ${e.id}`}
-                    onCheckedChange={(checked) =>
-                      mirror.mutate({ id: e.id, demoMirror: checked === true })
-                    }
+                  <DemoMirrorToggle
+                    experiment={e}
+                    demoConfigured={demoConfigured}
                   />
                 </TableCell>
               </TableRow>

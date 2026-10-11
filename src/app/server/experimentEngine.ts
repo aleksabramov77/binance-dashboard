@@ -25,7 +25,10 @@ import {
   fetchKlines,
   fetchPerpetualSymbols,
 } from "@/shared/api/binance/public.server";
-import { getRunnerRole } from "@/shared/config/env.server";
+import {
+  getDemoTradingConfig,
+  getRunnerRole,
+} from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import {
@@ -240,7 +243,11 @@ export async function setEngineEnabled(
 /** Страница /experiments: каталог со статистикой текущей эпохи. */
 export async function getExperimentsOverview() {
   await ensureEngineReady();
-  return readExperimentsOverview(getDb(), await readEnabled(store()));
+  return readExperimentsOverview(
+    getDb(),
+    await readEnabled(store()),
+    getDemoTradingConfig() !== null,
+  );
 }
 
 /** Страница /experiments/[id]; null — эксперимента нет в каталоге. */
