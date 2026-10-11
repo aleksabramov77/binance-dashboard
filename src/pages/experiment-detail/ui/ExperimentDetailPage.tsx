@@ -21,14 +21,17 @@ import {
   formatPair,
   formatPrice,
   formatUsd,
+  type SortValue,
+  sortRows,
+  useTableSort,
 } from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { SortableHead } from "@/shared/ui/sortable-head";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -92,7 +95,38 @@ function Metrics({ s }: { s: TradeStatsView }) {
   );
 }
 
+const TRADE_SORT_KEYS = [
+  "openedAt",
+  "closedAt",
+  "symbol",
+  "direction",
+  "entryPrice",
+  "exitPrice",
+  "exitReason",
+  "pnl",
+  "r",
+] as const;
+const TRADE_SORT_VALUE: Record<
+  (typeof TRADE_SORT_KEYS)[number],
+  (t: PaperTrade) => SortValue
+> = {
+  openedAt: (t) => Date.parse(t.openedAt),
+  // Открытые сделки (без выхода) — в конце.
+  closedAt: (t) => (t.closedAt ? Date.parse(t.closedAt) : null),
+  symbol: (t) => t.symbol,
+  direction: (t) => t.direction,
+  entryPrice: (t) => t.entryPrice,
+  exitPrice: (t) => t.exitPrice,
+  exitReason: (t) => (t.exitReason ? EXIT_LABELS[t.exitReason] : null),
+  pnl: (t) => t.pnl,
+  r: (t) => t.rMultiple,
+};
+
 function TradesTable({ trades }: { trades: PaperTrade[] }) {
+  const { sort, head } = useTableSort("tradesSort", TRADE_SORT_KEYS);
+  const rows = sort
+    ? sortRows(trades, TRADE_SORT_VALUE[sort.key], sort.dir)
+    : trades;
   if (trades.length === 0)
     return (
       <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
@@ -104,19 +138,30 @@ function TradesTable({ trades }: { trades: PaperTrade[] }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Вход</TableHead>
-            <TableHead>Выход</TableHead>
-            <TableHead>Символ</TableHead>
-            <TableHead>Направление</TableHead>
-            <TableHead className="text-right">Цена входа</TableHead>
-            <TableHead className="text-right">Цена выхода</TableHead>
-            <TableHead>Причина</TableHead>
-            <TableHead className="text-right">PnL</TableHead>
-            <TableHead className="text-right">R</TableHead>
+            <SortableHead {...head("openedAt", "desc")}>Вход</SortableHead>
+            <SortableHead {...head("closedAt", "desc")}>Выход</SortableHead>
+            <SortableHead {...head("symbol")}>Символ</SortableHead>
+            <SortableHead {...head("direction")}>Направление</SortableHead>
+            <SortableHead
+              className="text-right"
+              {...head("entryPrice", "desc")}
+            >
+              Цена входа
+            </SortableHead>
+            <SortableHead className="text-right" {...head("exitPrice", "desc")}>
+              Цена выхода
+            </SortableHead>
+            <SortableHead {...head("exitReason")}>Причина</SortableHead>
+            <SortableHead className="text-right" {...head("pnl", "desc")}>
+              PnL
+            </SortableHead>
+            <SortableHead className="text-right" {...head("r", "desc")}>
+              R
+            </SortableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {trades.map((t) => (
+          {rows.map((t) => (
             <TableRow key={t.id}>
               <TableCell className="text-sm tabular-nums">
                 {formatDateTime(t.openedAt)}

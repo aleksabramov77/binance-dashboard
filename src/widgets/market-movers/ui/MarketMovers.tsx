@@ -1,11 +1,19 @@
+"use client";
+
 import type { Mover } from "@/entities/market-signal";
-import { cn, formatPrice } from "@/shared/lib";
+import {
+  cn,
+  formatPrice,
+  type SortValue,
+  sortRows,
+  useTableSort,
+} from "@/shared/lib";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { SortableHead } from "@/shared/ui/sortable-head";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -17,7 +25,29 @@ function rsiTone(value: number | undefined) {
   return "";
 }
 
-function MoversTable({ title, movers }: { title: string; movers: Mover[] }) {
+const SORT_KEYS = ["coin", "price", "change", "volume", "rsi", "ema"] as const;
+const SORT_VALUE: Record<(typeof SORT_KEYS)[number], (m: Mover) => SortValue> =
+  {
+    coin: (m) => m.base,
+    price: (m) => m.price,
+    change: (m) => m.change24h,
+    volume: (m) => m.quoteVolumeUsd,
+    rsi: (m) => m.indicators?.rsi1h,
+    ema: (m) => m.indicators?.distanceAtr,
+  };
+
+function MoversTable({
+  title,
+  movers,
+  sortParam,
+}: {
+  title: string;
+  movers: Mover[];
+  /** Параметр URL сортировки: на странице две таблицы, у каждой свой. */
+  sortParam: string;
+}) {
+  const { sort, head } = useTableSort(sortParam, SORT_KEYS);
+  const rows = sort ? sortRows(movers, SORT_VALUE[sort.key], sort.dir) : movers;
   return (
     <Card>
       <CardHeader>
@@ -27,16 +57,31 @@ function MoversTable({ title, movers }: { title: string; movers: Mover[] }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-6">Монета</TableHead>
-              <TableHead className="text-right">Цена</TableHead>
-              <TableHead className="text-right">24 ч</TableHead>
-              <TableHead className="text-right">Оборот</TableHead>
-              <TableHead className="text-right">RSI 1h / 4h</TableHead>
-              <TableHead className="pr-6 text-right">От EMA50</TableHead>
+              <SortableHead className="pl-6" {...head("coin")}>
+                Монета
+              </SortableHead>
+              <SortableHead className="text-right" {...head("price", "desc")}>
+                Цена
+              </SortableHead>
+              <SortableHead className="text-right" {...head("change", "desc")}>
+                24 ч
+              </SortableHead>
+              <SortableHead className="text-right" {...head("volume", "desc")}>
+                Оборот
+              </SortableHead>
+              <SortableHead className="text-right" {...head("rsi", "desc")}>
+                RSI 1h / 4h
+              </SortableHead>
+              <SortableHead
+                className="pr-6 text-right"
+                {...head("ema", "desc")}
+              >
+                От EMA50
+              </SortableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {movers.map((m) => {
+            {rows.map((m) => {
               const ind = m.indicators;
               return (
                 <TableRow key={m.symbol}>
@@ -97,8 +142,16 @@ export function MarketMovers({
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-2">
-      <MoversTable title="Лидеры роста за 24 ч" movers={gainers} />
-      <MoversTable title="Лидеры падения за 24 ч" movers={losers} />
+      <MoversTable
+        title="Лидеры роста за 24 ч"
+        movers={gainers}
+        sortParam="gainersSort"
+      />
+      <MoversTable
+        title="Лидеры падения за 24 ч"
+        movers={losers}
+        sortParam="losersSort"
+      />
     </div>
   );
 }

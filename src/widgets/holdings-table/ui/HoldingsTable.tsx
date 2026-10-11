@@ -1,3 +1,5 @@
+"use client";
+
 import {
   type Holding,
   holdingValueUsd,
@@ -8,31 +10,60 @@ import {
   formatDateTime,
   formatPercent,
   formatUsd,
+  type SortValue,
+  sortRows,
+  useTableSort,
 } from "@/shared/lib";
+import { SortableHead } from "@/shared/ui/sortable-head";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
 
+const SORT_KEYS = ["asset", "place", "amount", "usd", "apr", "yearly"] as const;
+const SORT_VALUE: Record<
+  (typeof SORT_KEYS)[number],
+  (h: Holding) => SortValue
+> = {
+  asset: (h) => h.asset,
+  place: (h) => PLACE_LABELS[h.place],
+  amount: (h) => h.amount + h.frozen,
+  usd: (h) => holdingValueUsd(h),
+  apr: (h) => h.apr,
+  yearly: (h) => {
+    const value = holdingValueUsd(h);
+    return value === null ? null : value * h.apr;
+  },
+};
+
 export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
-  const rows = [...holdings].sort(
-    (a, b) => (holdingValueUsd(b) ?? 0) - (holdingValueUsd(a) ?? 0),
-  );
+  const { sort, head } = useTableSort("holdingsSort", SORT_KEYS);
+  // По умолчанию — самые крупные позиции сверху.
+  const rows = sort
+    ? sortRows(holdings, SORT_VALUE[sort.key], sort.dir)
+    : sortRows(holdings, SORT_VALUE.usd, "desc");
   return (
     <div className="overflow-x-auto rounded-xl border bg-card">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Актив</TableHead>
-            <TableHead>Где лежит</TableHead>
-            <TableHead className="text-right">Количество</TableHead>
-            <TableHead className="text-right">≈ USD</TableHead>
-            <TableHead className="text-right">Ставка</TableHead>
-            <TableHead className="text-right">Доход / год</TableHead>
+            <SortableHead {...head("asset")}>Актив</SortableHead>
+            <SortableHead {...head("place")}>Где лежит</SortableHead>
+            <SortableHead className="text-right" {...head("amount", "desc")}>
+              Количество
+            </SortableHead>
+            <SortableHead className="text-right" {...head("usd", "desc")}>
+              ≈ USD
+            </SortableHead>
+            <SortableHead className="text-right" {...head("apr", "desc")}>
+              Ставка
+            </SortableHead>
+            <SortableHead className="text-right" {...head("yearly", "desc")}>
+              Доход / год
+            </SortableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

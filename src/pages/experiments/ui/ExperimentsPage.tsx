@@ -1,6 +1,5 @@
 "use client";
 
-import { ArrowDown, ArrowUp } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useMemo } from "react";
 import {
@@ -13,11 +12,11 @@ import {
 } from "@/entities/experiment";
 import { cn, formatDateTime, formatUsd } from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
+import { SortableHead } from "@/shared/ui/sortable-head";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -46,41 +45,30 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: "equity", label: "Equity", numeric: true },
 ];
 
-function SortableHead({ column }: { column: (typeof COLUMNS)[number] }) {
+function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
   const [{ sort, dir }, setView] = useExperimentsView();
   const active = sort === column.key;
-  const Arrow = dir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <TableHead
+    <SortableHead
       className={cn(column.numeric && "text-right")}
-      aria-sort={
-        active ? (dir === "asc" ? "ascending" : "descending") : undefined
+      active={active}
+      dir={dir}
+      onSort={() =>
+        setView({
+          sort: column.key,
+          // Повторный клик меняет направление; новая колонка — сначала лучшие.
+          dir: active
+            ? dir === "asc"
+              ? "desc"
+              : "asc"
+            : column.numeric && column.key !== "maxDrawdown"
+              ? "desc"
+              : "asc",
+        })
       }
     >
-      <button
-        type="button"
-        className={cn(
-          "inline-flex items-center gap-1 hover:text-foreground",
-          active && "text-foreground",
-        )}
-        onClick={() =>
-          setView({
-            sort: column.key,
-            // Повторный клик меняет направление; новая числовая колонка — сначала лучшие.
-            dir: active
-              ? dir === "asc"
-                ? "desc"
-                : "asc"
-              : column.numeric && column.key !== "maxDrawdown"
-                ? "desc"
-                : "asc",
-          })
-        }
-      >
-        {column.label}
-        {active && <Arrow className="size-3" aria-hidden />}
-      </button>
-    </TableHead>
+      {column.label}
+    </SortableHead>
   );
 }
 
@@ -204,7 +192,7 @@ function ExperimentsDashboard() {
             <TableHeader>
               <TableRow>
                 {COLUMNS.map((c) => (
-                  <SortableHead key={c.key} column={c} />
+                  <ColumnHead key={c.key} column={c} />
                 ))}
               </TableRow>
             </TableHeader>

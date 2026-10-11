@@ -25,5 +25,12 @@ export {
   formatUsd,
 } from "./format";
 export { reportClientError } from "./reportClientError";
+export {
+  SORT_DIRS,
+  type SortDir,
+  type SortValue,
+  sortRows,
+  useTableSort,
+} from "./sort";
 export { formatPair, splitSymbol } from "./symbol";
 export { cn } from "./utils";

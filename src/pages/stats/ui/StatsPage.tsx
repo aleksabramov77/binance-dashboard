@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, Ban } from "lucide-react";
+import { ArrowLeft, Ban } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useMemo } from "react";
 import {
@@ -28,11 +28,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
+import { SortableHead } from "@/shared/ui/sortable-head";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -77,40 +77,30 @@ const COLUMNS: { key: GroupSortKey; label: string; numeric: boolean }[] = [
 /** Для этих колонок «лучше» — меньше: первая сортировка по возрастанию. */
 const ASC_FIRST: GroupSortKey[] = ["key", "fees", "maxDrawdown"];
 
-function SortableHead({ column }: { column: (typeof COLUMNS)[number] }) {
+function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
   const [{ sort, dir }, setView] = useStatsView();
   const active = sort === column.key;
-  const Arrow = dir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <TableHead
+    <SortableHead
       className={cn(column.numeric && "text-right")}
-      aria-sort={
-        active ? (dir === "asc" ? "ascending" : "descending") : undefined
+      active={active}
+      dir={dir}
+      onSort={() =>
+        setView({
+          sort: column.key,
+          // Повторный клик меняет направление; новая колонка — сначала лучшие.
+          dir: active
+            ? dir === "asc"
+              ? "desc"
+              : "asc"
+            : ASC_FIRST.includes(column.key)
+              ? "asc"
+              : "desc",
+        })
       }
     >
-      <button
-        type="button"
-        className={cn(
-          "inline-flex items-center gap-1 hover:text-foreground",
-          active && "text-foreground",
-        )}
-        onClick={() =>
-          setView({
-            sort: column.key,
-            dir: active
-              ? dir === "asc"
-                ? "desc"
-                : "asc"
-              : ASC_FIRST.includes(column.key)
-                ? "asc"
-                : "desc",
-          })
-        }
-      >
-        {column.label}
-        {active && <Arrow className="size-3" aria-hidden />}
-      </button>
-    </TableHead>
+      {column.label}
+    </SortableHead>
   );
 }
 
@@ -586,7 +576,7 @@ function StatsDashboard() {
                   <TableHeader>
                     <TableRow>
                       {COLUMNS.map((c) => (
-                        <SortableHead key={c.key} column={c} />
+                        <ColumnHead key={c.key} column={c} />
                       ))}
                     </TableRow>
                   </TableHeader>
