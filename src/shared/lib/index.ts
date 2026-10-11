@@ -26,10 +26,14 @@ export {
 } from "./format";
 export { reportClientError } from "./reportClientError";
 export {
+  loadSort,
+  type SavedSort,
   SORT_DIRS,
   type SortDir,
   type SortValue,
+  saveSort,
   sortRows,
+  useRestoreSort,
   useTableSort,
 } from "./sort";
 export { formatPair, splitSymbol } from "./symbol";
