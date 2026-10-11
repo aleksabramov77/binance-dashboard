@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TradeRequest } from "@/entities/trade";
 import {
+  fitToMinNotional,
   floorToStep,
   isDust,
   roundToTick,
@@ -135,5 +136,20 @@ describe("isDust", () => {
   });
   it("нормальный остаток продаём", () => {
     expect(isDust(8.6, 5.7, rules)).toBe(false);
+  });
+});
+
+describe("fitToMinNotional", () => {
+  const r = { stepSize: "0.001", minNotional: 50 };
+  it("$49,77 у BTC поднимается до минимума с запасом, округление вверх к шагу", () => {
+    const qty = fitToMinNotional(0.0007, 71_100, r);
+    expect(qty * 71_100).toBeGreaterThanOrEqual(50);
+    expect(qty).toBeCloseTo(0.001, 9);
+  });
+  it("объём уже выше минимума — без изменений", () => {
+    expect(fitToMinNotional(0.002, 71_100, r)).toBe(0.002);
+  });
+  it("минимум больше втрое — не поднимаем (сделка была бы не той)", () => {
+    expect(fitToMinNotional(0.0001, 71_100, r)).toBe(0.0001);
   });
 });

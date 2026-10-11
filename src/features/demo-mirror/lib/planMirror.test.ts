@@ -51,6 +51,8 @@ describe("planMirror", () => {
         direction: "long",
         quantity: 0.5,
         leverage: 1,
+        fitMinNotional: true,
+        stopOnly: false,
         stopLoss: 95,
         takeProfit: 110,
       },
@@ -78,5 +80,10 @@ describe("planMirror", () => {
       ["b", "skip"],
       ["spot", "open"],
     ]);
+  });
+
+  it("без TP у paper-сделки — на бирже только стоп", () => {
+    const [d] = planMirror([trade({ takeProfit: null })], new Set(), NOW);
+    expect(d.kind === "open" && d.request.stopOnly).toBe(true);
   });
 });

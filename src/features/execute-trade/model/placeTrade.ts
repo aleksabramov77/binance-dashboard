@@ -13,6 +13,7 @@ import {
   demoFuturesPrepare,
   demoSpotMarketOrder,
   demoSpotOcoSell,
+  demoSpotStopLossSell,
   fetchDemoOpenSymbols,
   fetchDemoPrice,
   fetchDemoSymbolRules,
@@ -21,6 +22,22 @@ import {
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { floorToStep, validateTrade } from "../lib/validateTrade";
+
+/** Binance -4509: позиция ещё не видна (closePosition сразу после входа) — повторяем. */
+const POSITION_RETRY_DELAYS_MS = [1000, 2000];
+
+async function withPositionRetry<T>(fn: () => Promise<T>): Promise<T> {
+  for (const delay of POSITION_RETRY_DELAYS_MS) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!(error instanceof BinanceApiError && error.code === -4509))
+        throw error;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  return fn();
+}
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -155,7 +172,27 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
         "Неизвестно, исполнилась ли покупка, — проверьте баланс и ордера на demo.binance.com.",
       );
     }
+    const protectLabel = req.stopOnly ? "Стоп" : "OCO: тейк + стоп";
     try {
+      if (req.stopOnly) {
+        const stop = await demoSpotStopLossSell(
+          creds,
+          req.symbol,
+          sellQty,
+          v.stopLoss,
+        );
+        steps.push({
+          label: protectLabel,
+          ok: true,
+          detail: `SL ${v.stopLoss} на ${sellQty}, без тейка, ордер #${stop.orderId}`,
+        });
+        return finish(
+          "protected",
+          "Позиция открыта, стоп выставлен (тейка нет — выход по стратегии).",
+          entryPrice,
+          filled,
+        );
+      }
       const oco = await demoSpotOcoSell(
         creds,
         req.symbol,
@@ -164,7 +201,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
         v.stopLoss,
       );
       steps.push({
-        label: "OCO: тейк + стоп",
+        label: protectLabel,
         ok: true,
         detail: `TP ${v.takeProfit} / SL ${v.stopLoss} на ${sellQty}, список #${oco.orderListId}`,
       });
@@ -175,14 +212,10 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
         filled,
       );
     } catch (error) {
-      steps.push({
-        label: "OCO: тейк + стоп",
-        ok: false,
-        detail: errorText(error),
-      });
+      steps.push({ label: protectLabel, ok: false, detail: errorText(error) });
       return finish(
         "unprotected",
-        "Куплено, но TP/SL не выставились — закройте позицию вручную на demo.binance.com.",
+        "Куплено, но защита не выставилась — закройте позицию вручную на demo.binance.com.",
         entryPrice,
         filled,
       );
@@ -280,17 +313,16 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   }
 
   let isProtected = true;
-  for (const [label, type, trigger] of [
+  const protections = [
     ["Stop Loss", "STOP_MARKET", v.stopLoss],
     ["Take Profit", "TAKE_PROFIT_MARKET", v.takeProfit],
-  ] as const) {
+  ] as const;
+  for (const [label, type, trigger] of req.stopOnly
+    ? protections.slice(0, 1)
+    : protections) {
     try {
-      const algo = await demoFuturesCloseAt(
-        creds,
-        req.symbol,
-        exitSide,
-        type,
-        trigger,
+      const algo = await withPositionRetry(() =>
+        demoFuturesCloseAt(creds, req.symbol, exitSide, type, trigger),
       );
       steps.push({
         label,
@@ -305,7 +337,9 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   return isProtected
     ? finish(
         "protected",
-        "Позиция открыта, TP и SL выставлены.",
+        req.stopOnly
+          ? "Позиция открыта, стоп выставлен (тейка нет — выход по стратегии)."
+          : "Позиция открыта, TP и SL выставлены.",
         entryPrice,
         filled,
       )

@@ -21,6 +21,7 @@ const summary = (
     wins: 0,
     losses: 0,
     rejected: 0,
+    skipped: 0,
     pnl: 0,
   },
   stats: computeStats(
@@ -80,6 +81,7 @@ describe("sortExperiments", () => {
         wins: 0,
         losses: 2,
         rejected: 0,
+        skipped: 0,
         pnl: -4,
       },
     };
@@ -92,6 +94,7 @@ describe("sortExperiments", () => {
         wins: 1,
         losses: 0,
         rejected: 0,
+        skipped: 0,
         pnl: 2,
       },
     };

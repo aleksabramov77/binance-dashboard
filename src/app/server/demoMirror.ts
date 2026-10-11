@@ -38,7 +38,7 @@ export async function runDemoMirror() {
     open: (req) => placeTrade(req),
     markSkipped: (tradeId, reason) =>
       updateMirror(db, tradeId, {
-        status: "rejected",
+        status: "skipped",
         message: reason,
         steps: [],
       }),

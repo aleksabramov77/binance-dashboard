@@ -44,6 +44,7 @@ export const demoSummarySchema = z.object({
   wins: z.number().int(),
   losses: z.number().int(),
   rejected: z.number().int(),
+  skipped: z.number().int(),
   pnl: z.number(),
 });
 

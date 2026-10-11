@@ -176,5 +176,6 @@ export {
   type TradeStatsView,
   tradeStatsSchema,
 } from "./model/view";
+export { DemoMisses } from "./ui/DemoMisses";
 export { EquityChart } from "./ui/EquityChart";
 export { MarketBudgets } from "./ui/MarketBudgets";

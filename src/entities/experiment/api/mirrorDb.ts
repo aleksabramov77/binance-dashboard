@@ -236,8 +236,13 @@ export interface MirrorSummary {
   /** Закрытые в плюс / в минус. */
   wins: number;
   losses: number;
-  /** Не открылись (отказ биржи) или пропущены. */
+  /** Не открылись: биржа или проверка заявки отказали. */
   rejected: number;
+  /**
+   * Пропущены зеркалом по своим правилам: по монете уже есть зеркальная позиция, вход старше
+   * 10 минут, пара не к USDT. Биржа тут ни при чём.
+   */
+  skipped: number;
   /**
    * PnL закрытых демо-сделок, $, без комиссий: (выход − вход на демо) × количество на демо.
    * Выход — фактическая цена, если позицию закрыло зеркало по рынку, иначе (TP/SL биржи) —
@@ -253,6 +258,7 @@ export const emptyMirrorSummary = (): MirrorSummary => ({
   wins: 0,
   losses: 0,
   rejected: 0,
+  skipped: 0,
   pnl: 0,
 });
 
@@ -291,6 +297,10 @@ export async function mirrorSummaries(
     const status = r.status as MirrorStatus;
     if (status === "rejected") {
       s.rejected++;
+      continue;
+    }
+    if (status === "skipped") {
+      s.skipped++;
       continue;
     }
     s.trades++;

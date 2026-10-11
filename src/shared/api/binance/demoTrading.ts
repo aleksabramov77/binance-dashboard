@@ -168,6 +168,30 @@ export async function demoSpotMarketOrder(
   );
 }
 
+/** Стоп на продажу (STOP_LOSS — по рынку при касании stopPrice), без тейка. */
+export async function demoSpotStopLossSell(
+  creds: BinanceCredentials,
+  symbol: string,
+  quantity: string,
+  stopPrice: string,
+): Promise<SpotOrder> {
+  return signedRequest(
+    DEMO_URL.spot,
+    creds,
+    "POST",
+    "/api/v3/order",
+    spotOrderSchema,
+    {
+      symbol,
+      side: "SELL",
+      type: "STOP_LOSS",
+      quantity,
+      stopPrice,
+      newOrderRespType: "RESULT",
+    },
+  );
+}
+
 /** OCO на продажу: лимитный тейк выше рынка + стоп-маркет ниже. */
 export async function demoSpotOcoSell(
   creds: BinanceCredentials,

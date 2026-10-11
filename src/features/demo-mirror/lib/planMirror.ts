@@ -22,6 +22,10 @@ export interface MirrorOrderRequest {
   stopLoss: number;
   takeProfit: number;
   leverage: number;
+  /** Объём ниже минимума символа — поднять до минимума (не больше чем втрое). */
+  fitMinNotional: boolean;
+  /** У paper-сделки нет TP — на бирже только стоп (тейк закроет само зеркало). */
+  stopOnly: boolean;
 }
 
 export type MirrorDecision =
@@ -114,6 +118,8 @@ export function planMirror(
         direction: t.direction,
         quantity: t.quantity,
         leverage: t.market === "futures" ? MIRROR.leverage : 1,
+        fitMinNotional: true,
+        stopOnly: t.takeProfit === null,
         ...mirrorLevels(t),
       },
     });

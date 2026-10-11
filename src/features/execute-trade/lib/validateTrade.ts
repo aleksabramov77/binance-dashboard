@@ -20,6 +20,25 @@ export function roundToTick(value: number, tick: string): string {
   return (Math.round(value / t) * t).toFixed(stepDecimals(tick));
 }
 
+/** Во сколько раз можно поднять объём до минимума символа (fitMinNotional). */
+export const MAX_MIN_NOTIONAL_BUMP = 3;
+
+/**
+ * Количество, поднятое до minNotional символа с запасом 1% и округлением вверх к шагу,
+ * если объём ниже минимума не больше чем в MAX_MIN_NOTIONAL_BUMP раз; иначе — как было.
+ */
+export function fitToMinNotional(
+  quantity: number,
+  price: number,
+  rules: Pick<SymbolRules, "stepSize" | "minNotional">,
+): number {
+  const notional = quantity * price;
+  if (notional >= rules.minNotional || price <= 0) return quantity;
+  if (rules.minNotional > notional * MAX_MIN_NOTIONAL_BUMP) return quantity;
+  const step = Number(rules.stepSize);
+  return Math.ceil((rules.minNotional * 1.01) / price / step - 1e-9) * step;
+}
+
 export interface ValidatedTrade {
   quantity: string;
   stopLoss: string;
@@ -62,7 +81,12 @@ export function validateTrade(
       `Для шорта нужно TP < цена (${price}) < SL — уровни устарели, пересканируйте.`,
     );
 
-  const quantity = floorToStep(req.quantity, rules.stepSize);
+  const quantity = floorToStep(
+    req.fitMinNotional
+      ? fitToMinNotional(req.quantity, price, rules)
+      : req.quantity,
+    rules.stepSize,
+  );
   const qty = Number(quantity);
   const notionalUsd = qty * price;
   if (qty <= 0 || qty < rules.minQty)
