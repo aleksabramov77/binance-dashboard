@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { z } from "zod";
+import type { ExperimentDemoMirror } from "../model/mirror";
 import {
   type BudgetForm,
   type ExperimentEnabled,
@@ -83,5 +84,18 @@ export function useSetExperimentEnabled() {
       queryClient.setQueryData(labSettingsQueryKey, data);
       void queryClient.invalidateQueries({ queryKey: ["experiments"] });
     },
+  });
+}
+
+/** Demo-зеркало эксперимента (spec 008): новые paper-сделки повторяются на Binance Demo. */
+export function useSetExperimentDemoMirror() {
+  const queryClient = useQueryClient();
+  return useMutation<LabSettings, Error, ExperimentDemoMirror>({
+    mutationFn: (body) =>
+      request("/api/experiments/settings/mirror", labSettingsSchema, {
+        method: "POST",
+        body,
+      }),
+    onSuccess: (data) => queryClient.setQueryData(labSettingsQueryKey, data),
   });
 }

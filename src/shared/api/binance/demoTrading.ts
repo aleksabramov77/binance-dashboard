@@ -267,6 +267,58 @@ export async function demoFuturesCloseAt(
   );
 }
 
+/** Закрытие (части) фьючерсной позиции по рынку: reduceOnly — не откроет встречную позицию. */
+export async function demoFuturesReduceMarket(
+  creds: BinanceCredentials,
+  symbol: string,
+  side: "BUY" | "SELL",
+  quantity: string,
+): Promise<FuturesOrder> {
+  return signedRequest(
+    DEMO_URL.futures,
+    creds,
+    "POST",
+    "/fapi/v1/order",
+    futuresOrderSchema,
+    {
+      symbol,
+      side,
+      type: "MARKET",
+      quantity,
+      reduceOnly: true,
+      newOrderRespType: "RESULT",
+    },
+  );
+}
+
+/** Binance: -2011 Unknown order / нет открытых ордеров — для «отменить всё» это не ошибка. */
+const isNothingToCancel = (error: unknown) =>
+  error instanceof BinanceApiError && error.code === -2011;
+
+/**
+ * Отменяет все открытые ордера по символу: spot — включая OCO; futures — обычные и algo (TP/SL).
+ * Нечего отменять — не ошибка.
+ */
+export async function demoCancelAllOrders(
+  creds: BinanceCredentials,
+  market: Market,
+  symbol: string,
+): Promise<void> {
+  const paths =
+    market === "spot"
+      ? ["/api/v3/openOrders"]
+      : ["/fapi/v1/allOpenOrders", "/fapi/v1/algoOpenOrders"];
+  for (const path of paths) {
+    try {
+      await signedRequest(DEMO_URL[market], creds, "DELETE", path, anySchema, {
+        symbol,
+      });
+    } catch (error) {
+      if (!isNothingToCancel(error)) throw error;
+    }
+  }
+}
+
 /** Текущая позиция по символу на демо-фьючерсах (размер со знаком: минус — шорт). */
 export async function demoFuturesPosition(
   creds: BinanceCredentials,

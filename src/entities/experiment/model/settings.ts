@@ -49,6 +49,8 @@ export const labSettingsSchema = z.object({
   currentBudget: z.number(),
   /** Бюджет для следующей эпохи — вступит после сброса. */
   nextBudget: z.number(),
+  /** На сервере задан ключ Binance Demo — без него зеркало не может торговать (spec 008). */
+  demoConfigured: z.boolean(),
   experiments: z.array(
     z.object({
       id: z.string(),

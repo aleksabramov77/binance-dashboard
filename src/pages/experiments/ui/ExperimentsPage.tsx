@@ -35,37 +35,70 @@ const MARKET_LABELS: Record<MarketFilter, string> = {
   futures: "Futures",
 };
 
-const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
-  { key: "id", label: "Эксперимент", numeric: false },
-  { key: "trades", label: "Сделки", numeric: true },
-  { key: "winRate", label: "Win rate", numeric: true },
-  { key: "pnl", label: "PnL", numeric: true },
-  { key: "profitFactor", label: "Profit factor", numeric: true },
-  { key: "maxDrawdown", label: "Max DD", numeric: true },
-  { key: "equity", label: "Equity", numeric: true },
+const COLUMNS: {
+  key: SortKey;
+  label: string;
+  numeric: boolean;
+  description: string;
+}[] = [
+  {
+    key: "id",
+    label: "Эксперимент",
+    numeric: false,
+    description:
+      "Код, название, рынок и гипотеза эксперимента. Клик по строке — подробности, конфиг и сделки.",
+  },
+  {
+    key: "trades",
+    label: "Сделки",
+    numeric: true,
+    description: "Закрытые сделки текущей эпохи (+ открытые сейчас).",
+  },
+  {
+    key: "winRate",
+    label: "Win rate",
+    numeric: true,
+    description: "Доля прибыльных среди закрытых сделок.",
+  },
+  {
+    key: "pnl",
+    label: "PnL",
+    numeric: true,
+    description:
+      "Реализованная прибыль или убыток закрытых сделок после комиссий.",
+  },
+  {
+    key: "profitFactor",
+    label: "Profit factor",
+    numeric: true,
+    description:
+      "Сумма прибылей / сумма убытков. Больше 1 — стратегия зарабатывает; ∞ — убытков ещё не было.",
+  },
+  {
+    key: "maxDrawdown",
+    label: "Max DD",
+    numeric: true,
+    description:
+      "Наибольшая просадка equity от пика, в % от стартового капитала.",
+  },
+  {
+    key: "equity",
+    label: "Equity",
+    numeric: true,
+    description: "Капитал эксперимента: стартовый бюджет + реализованный PnL.",
+  },
 ];
 
 function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
   const [{ sort, dir }, setView] = useExperimentsView();
-  const active = sort === column.key;
   return (
     <SortableHead
       className={cn(column.numeric && "text-right")}
-      active={active}
+      active={sort === column.key}
       dir={dir}
-      onSort={() =>
-        setView({
-          sort: column.key,
-          // Повторный клик меняет направление; новая колонка — сначала лучшие.
-          dir: active
-            ? dir === "asc"
-              ? "desc"
-              : "asc"
-            : column.numeric && column.key !== "maxDrawdown"
-              ? "desc"
-              : "asc",
-        })
-      }
+      onSort={(next) => setView({ sort: column.key, dir: next })}
+      onReset={() => setView({ sort: null, dir: null })}
+      description={column.description}
     >
       {column.label}
     </SortableHead>

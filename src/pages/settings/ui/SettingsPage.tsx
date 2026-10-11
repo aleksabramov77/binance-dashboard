@@ -29,7 +29,10 @@ export function SettingsPage() {
             <EpochCard settings={settings.data} />
             <BudgetCard settings={settings.data} />
           </div>
-          <ExperimentsCard experiments={settings.data.experiments} />
+          <ExperimentsCard
+            experiments={settings.data.experiments}
+            demoConfigured={settings.data.demoConfigured}
+          />
         </>
       )}
     </div>

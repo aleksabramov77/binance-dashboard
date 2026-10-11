@@ -18,6 +18,7 @@ import type {
   ExperimentsResponse,
 } from "../model/view";
 import { toTrade } from "./dbStore";
+import { mirrorStatuses } from "./mirrorDb";
 
 // Чтение для страниц лаборатории (только сервер): эксперименты и сделки текущей эпохи
 // со статистикой. Эпоха — runs с наибольшим id; сид и создание первой эпохи — ensureEngineReady.
@@ -103,13 +104,19 @@ export async function readExperimentDetail(
   const experiment: Experiment = experimentSchema.parse(row);
   const run = await currentRun(db);
   const trades = await runTrades(db, run.id, id);
+  const shown = trades.slice(-limit).reverse();
+  const mirrors = await mirrorStatuses(
+    db,
+    shown.map((t) => t.id),
+  );
   return {
     run,
     engineEnabled,
     experiment,
     stats: computeStats(trades, experiment.initialBudget),
     equity: equityCurve(trades, experiment.initialBudget, run.startedAt),
-    trades: trades.slice(-limit).reverse(),
+    trades: shown,
+    mirrors: Object.fromEntries(mirrors),
   };
 }
 

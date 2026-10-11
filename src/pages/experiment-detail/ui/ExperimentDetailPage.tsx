@@ -10,6 +10,8 @@ import {
   formatR,
   formatRate,
   formatSignedUsd,
+  MIRROR_STATUS_LABELS,
+  type MirrorView,
   type PaperTrade,
   pnlTone,
   type TradeStatsView,
@@ -105,7 +107,24 @@ const TRADE_SORT_KEYS = [
   "exitReason",
   "pnl",
   "r",
+  "mirror",
 ] as const;
+const HELP: Record<(typeof TRADE_SORT_KEYS)[number], string> = {
+  openedAt: "Время входа в сделку (по закрытию свечи сигнала).",
+  closedAt: "Время выхода. «открыта» — сделка ещё идёт.",
+  symbol: "Торговая пара.",
+  direction:
+    "Лонг — покупка, зарабатывает на росте. Шорт — продажа, зарабатывает на падении (только Futures).",
+  entryPrice: "Цена входа с учётом проскальзывания 0,05%.",
+  exitPrice: "Цена выхода: по стопу, тейку, трейлингу, времени или сигналу.",
+  exitReason:
+    "Почему сделка закрыта: тейк-профит, стоп-лосс, трейлинг-стоп, безубыток, тайм-стоп, противоположный сигнал или вручную (сброс капиталов).",
+  pnl: "Прибыль или убыток сделки в $ после комиссий.",
+  r: "Результат в R — в долях первоначального риска (расстояния до стопа). +2R — заработали двойной риск, −1R — сработал стоп.",
+  mirror:
+    "Зеркало сделки в Binance Demo: открыта с TP/SL, не открылась (причина — в подсказке при наведении), закрыта. Пусто — сделка не зеркалилась.",
+};
+
 const TRADE_SORT_VALUE: Record<
   (typeof TRADE_SORT_KEYS)[number],
   (t: PaperTrade) => SortValue
@@ -120,12 +139,44 @@ const TRADE_SORT_VALUE: Record<
   exitReason: (t) => (t.exitReason ? EXIT_LABELS[t.exitReason] : null),
   pnl: (t) => t.pnl,
   r: (t) => t.rMultiple,
+  // Заполняется в TradesTable: статус зеркала хранится отдельно от сделки.
+  mirror: () => null,
 };
 
-function TradesTable({ trades }: { trades: PaperTrade[] }) {
+function MirrorCell({ mirror }: { mirror: MirrorView | undefined }) {
+  if (!mirror) return <span className="text-muted-foreground">—</span>;
+  const tone =
+    mirror.status === "protected" || mirror.status === "closed"
+      ? "outline"
+      : mirror.status === "rejected"
+        ? "secondary"
+        : "destructive";
+  return (
+    <Badge variant={tone} title={mirror.message} className="font-normal">
+      {MIRROR_STATUS_LABELS[mirror.status]}
+    </Badge>
+  );
+}
+
+function TradesTable({
+  trades,
+  mirrors,
+}: {
+  trades: PaperTrade[];
+  mirrors: Record<string, MirrorView>;
+}) {
   const { sort, head } = useTableSort("tradesSort", TRADE_SORT_KEYS);
   const rows = sort
-    ? sortRows(trades, TRADE_SORT_VALUE[sort.key], sort.dir)
+    ? sortRows(
+        trades,
+        sort.key === "mirror"
+          ? (t) => {
+              const m = mirrors[t.id];
+              return m ? MIRROR_STATUS_LABELS[m.status] : null;
+            }
+          : TRADE_SORT_VALUE[sort.key],
+        sort.dir,
+      )
     : trades;
   if (trades.length === 0)
     return (
@@ -138,25 +189,51 @@ function TradesTable({ trades }: { trades: PaperTrade[] }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <SortableHead {...head("openedAt", "desc")}>Вход</SortableHead>
-            <SortableHead {...head("closedAt", "desc")}>Выход</SortableHead>
-            <SortableHead {...head("symbol")}>Символ</SortableHead>
-            <SortableHead {...head("direction")}>Направление</SortableHead>
+            <SortableHead {...head("openedAt")} description={HELP.openedAt}>
+              Вход
+            </SortableHead>
+            <SortableHead {...head("closedAt")} description={HELP.closedAt}>
+              Выход
+            </SortableHead>
+            <SortableHead {...head("symbol")} description={HELP.symbol}>
+              Символ
+            </SortableHead>
+            <SortableHead {...head("direction")} description={HELP.direction}>
+              Направление
+            </SortableHead>
             <SortableHead
               className="text-right"
-              {...head("entryPrice", "desc")}
+              {...head("entryPrice")}
+              description={HELP.entryPrice}
             >
               Цена входа
             </SortableHead>
-            <SortableHead className="text-right" {...head("exitPrice", "desc")}>
+            <SortableHead
+              className="text-right"
+              {...head("exitPrice")}
+              description={HELP.exitPrice}
+            >
               Цена выхода
             </SortableHead>
-            <SortableHead {...head("exitReason")}>Причина</SortableHead>
-            <SortableHead className="text-right" {...head("pnl", "desc")}>
+            <SortableHead {...head("exitReason")} description={HELP.exitReason}>
+              Причина
+            </SortableHead>
+            <SortableHead
+              className="text-right"
+              {...head("pnl")}
+              description={HELP.pnl}
+            >
               PnL
             </SortableHead>
-            <SortableHead className="text-right" {...head("r", "desc")}>
+            <SortableHead
+              className="text-right"
+              {...head("r")}
+              description={HELP.r}
+            >
               R
+            </SortableHead>
+            <SortableHead {...head("mirror")} description={HELP.mirror}>
+              Demo
             </SortableHead>
           </TableRow>
         </TableHeader>
@@ -202,6 +279,9 @@ function TradesTable({ trades }: { trades: PaperTrade[] }) {
               </TableCell>
               <TableCell className="text-right font-mono tabular-nums">
                 {formatR(t.rMultiple)}
+              </TableCell>
+              <TableCell>
+                <MirrorCell mirror={mirrors[t.id]} />
               </TableCell>
             </TableRow>
           ))}
@@ -296,7 +376,7 @@ export function ExperimentDetailPage({ id }: { id: string }) {
               {data.stats.trades > data.trades.length &&
                 ` (последние ${data.trades.length} из ${data.stats.trades})`}
             </h2>
-            <TradesTable trades={data.trades} />
+            <TradesTable trades={data.trades} mirrors={data.mirrors} />
           </section>
         </>
       )}

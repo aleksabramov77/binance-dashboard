@@ -3,6 +3,7 @@ import {
   paperTradeSchema,
 } from "@binance-dashboard/trading-core";
 import { z } from "zod";
+import { mirrorViewSchema } from "./mirror";
 
 // Контракт API страниц лаборатории: GET /api/experiments и GET /api/experiments/[id] (spec 003, 3b).
 
@@ -61,6 +62,8 @@ export const experimentDetailResponseSchema = z.object({
   equity: z.array(equityPointSchema),
   /** Сделки эпохи, новые сверху; не больше limit из запроса. */
   trades: z.array(paperTradeSchema),
+  /** Demo-зеркало показанных сделок: id сделки → статус (spec 008). Нет ключа — не зеркалилась. */
+  mirrors: z.record(z.string(), mirrorViewSchema),
 });
 
 export type TradeStatsView = z.infer<typeof tradeStatsSchema>;
