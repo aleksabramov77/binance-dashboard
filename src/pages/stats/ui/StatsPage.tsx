@@ -2,6 +2,7 @@
 
 import { ArrowLeft, Ban } from "lucide-react";
 import Link from "next/link";
+import { useQueryState } from "nuqs";
 import { Suspense, useMemo } from "react";
 import {
   blacklistCandidates,
@@ -18,7 +19,13 @@ import {
   type TradeStatsView,
   useTradeStats,
 } from "@/entities/experiment";
-import { cn, formatDateTime, formatUsd } from "@/shared/lib";
+import {
+  cn,
+  formatDateTime,
+  formatUsd,
+  saveSort,
+  useRestoreSort,
+} from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import {
@@ -40,6 +47,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { sortGroups } from "../lib/sortGroups";
 import {
   DIRECTION_FILTERS,
+  GROUP_SORT_KEYS,
   type GroupSortKey,
   MARKET_FILTERS,
   useStatsView,
@@ -131,8 +139,14 @@ function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
       className={cn(column.numeric && "text-right")}
       active={sort === column.key}
       dir={dir}
-      onSort={(next) => setView({ sort: column.key, dir: next })}
-      onReset={() => setView({ sort: null, dir: null })}
+      onSort={(next) => {
+        void setView({ sort: column.key, dir: next });
+        saveSort("stats", { key: column.key, dir: next });
+      }}
+      onReset={() => {
+        void setView({ sort: null, dir: null });
+        saveSort("stats", null);
+      }}
       description={column.description}
     >
       {column.label}
@@ -479,6 +493,11 @@ function GroupRow({
 
 function StatsDashboard() {
   const [view, setView] = useStatsView();
+  // Последняя сортировка из localStorage, если в URL её нет.
+  const [urlSort] = useQueryState("sort");
+  useRestoreSort("stats", GROUP_SORT_KEYS, urlSort !== null, (saved) =>
+    setView({ sort: saved.key, dir: saved.dir }),
+  );
   const { data, isPending, error, isPlaceholderData } = useTradeStats({
     groupBy: view.groupBy,
     market: view.market ?? undefined,

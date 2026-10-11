@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useQueryState } from "nuqs";
 import { Suspense, useMemo } from "react";
 import {
   type ExperimentSummary,
@@ -11,7 +12,13 @@ import {
   useExperiments,
 } from "@/entities/experiment";
 import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
-import { cn, formatDateTime, formatUsd } from "@/shared/lib";
+import {
+  cn,
+  formatDateTime,
+  formatUsd,
+  saveSort,
+  useRestoreSort,
+} from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
 import { SortableHead } from "@/shared/ui/sortable-head";
 import {
@@ -26,6 +33,7 @@ import { sortExperiments } from "../lib/sortExperiments";
 import {
   MARKET_FILTERS,
   type MarketFilter,
+  SORT_KEYS,
   type SortKey,
   useExperimentsView,
 } from "../model/useExperimentsView";
@@ -114,8 +122,14 @@ function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
       )}
       active={sort === column.key}
       dir={dir}
-      onSort={(next) => setView({ sort: column.key, dir: next })}
-      onReset={() => setView({ sort: null, dir: null })}
+      onSort={(next) => {
+        void setView({ sort: column.key, dir: next });
+        saveSort("experiments", { key: column.key, dir: next });
+      }}
+      onReset={() => {
+        void setView({ sort: null, dir: null });
+        saveSort("experiments", null);
+      }}
       description={column.description}
     >
       {column.label}
@@ -218,6 +232,11 @@ function ExperimentRow({
 function ExperimentsDashboard() {
   const { data, isPending, error } = useExperiments();
   const [{ market, sort, dir }, setView] = useExperimentsView();
+  // Последняя сортировка из localStorage, если в URL её нет.
+  const [urlSort] = useQueryState("sort");
+  useRestoreSort("experiments", SORT_KEYS, urlSort !== null, (saved) =>
+    setView({ sort: saved.key, dir: saved.dir }),
+  );
   const rows = useMemo(
     () => sortExperiments(data?.experiments ?? [], market, sort, dir),
     [data, market, sort, dir],
