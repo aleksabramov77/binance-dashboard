@@ -2,6 +2,7 @@
 
 import {
   type LabSettings,
+  useSetExperimentDemoMirror,
   useSetExperimentEnabled,
 } from "@/entities/experiment";
 import { sortRows, useTableSort } from "@/shared/lib";
@@ -12,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/shared/ui/card";
+import { Checkbox } from "@/shared/ui/checkbox";
 import { SortableHead } from "@/shared/ui/sortable-head";
 import { Switch } from "@/shared/ui/switch";
 import {
@@ -26,6 +28,17 @@ const MARKET_LABEL = { spot: "Spot", futures: "Futures" } as const;
 
 const SORT_KEYS = ["id", "market", "name", "enabled", "demoMirror"] as const;
 type Experiment = LabSettings["experiments"][number];
+const HELP: Record<(typeof SORT_KEYS)[number], string> = {
+  id: "Код эксперимента: S — Spot (только покупки), F — Futures (лонг и шорт).",
+  market:
+    "Рынок Binance, на котором эксперимент торгует на бумаге: Spot или USDⓈ-M Futures.",
+  name: "Название и гипотеза: что проверяет эксперимент и по каким правилам входит и выходит.",
+  enabled:
+    "Включённый эксперимент открывает новые paper-сделки. Выключенный новых не открывает, а открытые доводит до выхода.",
+  demoMirror:
+    "Отмеченный эксперимент повторяет новые paper-входы в Binance Demo Trading (виртуальные деньги) с теми же SL/TP и объёмом. Демо-позиция закрывается вместе с paper-сделкой. Снятая галочка не закрывает уже открытые зеркала.",
+};
+
 const SORT_VALUE: Record<
   (typeof SORT_KEYS)[number],
   (e: Experiment) => string | boolean
@@ -37,14 +50,18 @@ const SORT_VALUE: Record<
   demoMirror: (e) => e.demoMirror,
 };
 
-/** Список экспериментов: вкл/выкл каждого; demo-зеркало пока только хранится (задача 6). */
+/** Список экспериментов: вкл/выкл каждого и отметка demo-зеркала (spec 008). */
 export function ExperimentsCard({
   experiments,
+  demoConfigured,
 }: {
   experiments: LabSettings["experiments"];
+  demoConfigured: boolean;
 }) {
   const toggle = useSetExperimentEnabled();
+  const mirror = useSetExperimentDemoMirror();
   const enabled = experiments.filter((e) => e.enabled).length;
+  const mirrored = experiments.filter((e) => e.demoMirror).length;
   const { sort, head } = useTableSort("expSort", SORT_KEYS);
   const rows = sort
     ? sortRows(experiments, SORT_VALUE[sort.key], sort.dir)
@@ -56,34 +73,54 @@ export function ExperimentsCard({
         <CardTitle>Эксперименты</CardTitle>
         <CardDescription>
           Включено {enabled} из {experiments.length}. Выключенный эксперимент не
-          открывает новые сделки; уже открытые доводятся до выхода.
+          открывает новые сделки; уже открытые доводятся до выхода. В Binance
+          Demo зеркалится: {mirrored}.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {toggle.error && (
+        {!demoConfigured && (
+          <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+            На сервере не задан ключ Binance Demo (BINANCE_DEMO_API_KEY /
+            SECRET) — отмеченные эксперименты не будут зеркалиться, пока ключ не
+            добавлен.
+          </p>
+        )}
+        {(toggle.error ?? mirror.error) && (
           <p className="mb-3 text-sm text-destructive">
-            {toggle.error.message}
+            {(toggle.error ?? mirror.error)?.message}
           </p>
         )}
         <Table>
           <TableHeader>
             <TableRow>
-              <SortableHead className="w-16" {...head("id")}>
+              <SortableHead
+                className="w-16"
+                {...head("id")}
+                description={HELP.id}
+              >
                 ID
               </SortableHead>
-              <SortableHead className="w-20" {...head("market")}>
+              <SortableHead
+                className="w-20"
+                {...head("market")}
+                description={HELP.market}
+              >
                 Рынок
               </SortableHead>
-              <SortableHead {...head("name")}>Суть</SortableHead>
+              <SortableHead {...head("name")} description={HELP.name}>
+                Суть
+              </SortableHead>
               <SortableHead
                 className="w-24 text-center"
-                {...head("enabled", "desc")}
+                {...head("enabled")}
+                description={HELP.enabled}
               >
                 Включён
               </SortableHead>
               <SortableHead
                 className="w-36 text-center"
-                {...head("demoMirror", "desc")}
+                {...head("demoMirror")}
+                description={HELP.demoMirror}
               >
                 Demo-зеркало
               </SortableHead>
@@ -111,16 +148,14 @@ export function ExperimentsCard({
                   />
                 </TableCell>
                 <TableCell className="text-center">
-                  <div className="flex flex-col items-center gap-1">
-                    <Switch
-                      checked={e.demoMirror}
-                      disabled
-                      aria-label={`Demo-зеркало ${e.id}`}
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      скоро (задача 6)
-                    </span>
-                  </div>
+                  <Checkbox
+                    checked={e.demoMirror}
+                    disabled={mirror.isPending && mirror.variables?.id === e.id}
+                    aria-label={`Demo-зеркало ${e.id}`}
+                    onCheckedChange={(checked) =>
+                      mirror.mutate({ id: e.id, demoMirror: checked === true })
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ))}

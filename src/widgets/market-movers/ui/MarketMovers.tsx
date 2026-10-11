@@ -26,6 +26,15 @@ function rsiTone(value: number | undefined) {
 }
 
 const SORT_KEYS = ["coin", "price", "change", "volume", "rsi", "ema"] as const;
+const HELP: Record<(typeof SORT_KEYS)[number], string> = {
+  coin: "Монета и где торгуется: Spot и/или бессрочные фьючерсы (Perp).",
+  price: "Последняя цена в USDT.",
+  change: "Изменение цены за последние 24 часа.",
+  volume: "Оборот за 24 часа в $ — чем больше, тем ликвиднее монета.",
+  rsi: "RSI(14) на 1h и 4h: выше 70 — перекупленность (красный), ниже 30 — перепроданность (зелёный). Сортировка — по 1h.",
+  ema: "Насколько цена отошла от EMA50 на 1h, в ATR. Большое значение — цена сильно растянута от средней.",
+};
+
 const SORT_VALUE: Record<(typeof SORT_KEYS)[number], (m: Mover) => SortValue> =
   {
     coin: (m) => m.base,
@@ -57,24 +66,45 @@ function MoversTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <SortableHead className="pl-6" {...head("coin")}>
+              <SortableHead
+                className="pl-6"
+                {...head("coin")}
+                description={HELP.coin}
+              >
                 Монета
               </SortableHead>
-              <SortableHead className="text-right" {...head("price", "desc")}>
+              <SortableHead
+                className="text-right"
+                {...head("price")}
+                description={HELP.price}
+              >
                 Цена
               </SortableHead>
-              <SortableHead className="text-right" {...head("change", "desc")}>
+              <SortableHead
+                className="text-right"
+                {...head("change")}
+                description={HELP.change}
+              >
                 24 ч
               </SortableHead>
-              <SortableHead className="text-right" {...head("volume", "desc")}>
+              <SortableHead
+                className="text-right"
+                {...head("volume")}
+                description={HELP.volume}
+              >
                 Оборот
               </SortableHead>
-              <SortableHead className="text-right" {...head("rsi", "desc")}>
+              <SortableHead
+                className="text-right"
+                {...head("rsi")}
+                description={HELP.rsi}
+              >
                 RSI 1h / 4h
               </SortableHead>
               <SortableHead
                 className="pr-6 text-right"
-                {...head("ema", "desc")}
+                {...head("ema")}
+                description={HELP.ema}
               >
                 От EMA50
               </SortableHead>

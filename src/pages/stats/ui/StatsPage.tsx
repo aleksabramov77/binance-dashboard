@@ -63,41 +63,77 @@ const ALL = "all";
 /** Сколько худших монет подсвечивать как кандидатов в blacklist. */
 const BLACKLIST_SIZE = 5;
 
-const COLUMNS: { key: GroupSortKey; label: string; numeric: boolean }[] = [
-  { key: "key", label: "Группа", numeric: false },
-  { key: "trades", label: "Сделки", numeric: true },
-  { key: "winRate", label: "Win rate", numeric: true },
-  { key: "pnl", label: "PnL", numeric: true },
-  { key: "fees", label: "Комиссии", numeric: true },
-  { key: "profitFactor", label: "Profit factor", numeric: true },
-  { key: "avgR", label: "Средний R", numeric: true },
-  { key: "maxDrawdown", label: "Max DD", numeric: true },
+const COLUMNS: {
+  key: GroupSortKey;
+  label: string;
+  numeric: boolean;
+  description: string;
+}[] = [
+  {
+    key: "key",
+    label: "Группа",
+    numeric: false,
+    description:
+      "Группа разреза: эксперимент, рынок, монета или направление (вкладки сверху).",
+  },
+  {
+    key: "trades",
+    label: "Сделки",
+    numeric: true,
+    description: "Закрытые сделки группы за период (+ открытые сейчас).",
+  },
+  {
+    key: "winRate",
+    label: "Win rate",
+    numeric: true,
+    description: "Доля прибыльных среди закрытых сделок.",
+  },
+  {
+    key: "pnl",
+    label: "PnL",
+    numeric: true,
+    description:
+      "Реализованная прибыль или убыток закрытых сделок после комиссий.",
+  },
+  {
+    key: "fees",
+    label: "Комиссии",
+    numeric: true,
+    description: "Комиссии биржи (taker) — уже вычтены из PnL.",
+  },
+  {
+    key: "profitFactor",
+    label: "Profit factor",
+    numeric: true,
+    description:
+      "Сумма прибылей / сумма убытков. Больше 1 — группа зарабатывает; ∞ — убытков ещё не было.",
+  },
+  {
+    key: "avgR",
+    label: "Средний R",
+    numeric: true,
+    description:
+      "Средний результат сделки в R (долях риска до стопа). Выше 0 — у стратегии есть преимущество.",
+  },
+  {
+    key: "maxDrawdown",
+    label: "Max DD",
+    numeric: true,
+    description:
+      "Наибольшая просадка накопленного PnL группы от пика, в $ (и в % капитала для экспериментов и рынков).",
+  },
 ];
-
-/** Для этих колонок «лучше» — меньше: первая сортировка по возрастанию. */
-const ASC_FIRST: GroupSortKey[] = ["key", "fees", "maxDrawdown"];
 
 function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
   const [{ sort, dir }, setView] = useStatsView();
-  const active = sort === column.key;
   return (
     <SortableHead
       className={cn(column.numeric && "text-right")}
-      active={active}
+      active={sort === column.key}
       dir={dir}
-      onSort={() =>
-        setView({
-          sort: column.key,
-          // Повторный клик меняет направление; новая колонка — сначала лучшие.
-          dir: active
-            ? dir === "asc"
-              ? "desc"
-              : "asc"
-            : ASC_FIRST.includes(column.key)
-              ? "asc"
-              : "desc",
-        })
-      }
+      onSort={(next) => setView({ sort: column.key, dir: next })}
+      onReset={() => setView({ sort: null, dir: null })}
+      description={column.description}
     >
       {column.label}
     </SortableHead>

@@ -1,6 +1,17 @@
 // Серверная подсистема движка (хранилище, блокировка тика, таблицы, схемы) — отдельный вход для Deno.
 
 export { loadBudgetInputs } from "./api/budgetsStore";
+// Demo-зеркало (spec 008): какие сделки повторить на Binance Demo и какие закрыть (только сервер).
+export {
+  activeMirrorSymbols,
+  claimMirror,
+  claimMirrorsToClose,
+  listMirrorCandidates,
+  type MirrorCandidate,
+  type MirrorToClose,
+  setExperimentDemoMirror,
+  updateMirror,
+} from "./api/mirrorDb";
 // Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
 export {
   readExperimentDetail,
@@ -36,6 +47,7 @@ export {
   labSettingsQueryKey,
   useLabSettings,
   useResetCapitals,
+  useSetExperimentDemoMirror,
   useSetExperimentEnabled,
   useSetNextBudget,
 } from "./api/useLabSettings";
@@ -88,6 +100,17 @@ export {
   type MarketBudget,
   marketBudgetSchema,
 } from "./model/budget";
+export {
+  ACTIVE_MIRROR_STATUSES,
+  type ExperimentDemoMirror,
+  experimentDemoMirrorSchema,
+  MIRROR_STATUS_LABELS,
+  MIRROR_STATUSES,
+  type MirrorStatus,
+  type MirrorView,
+  mirrorStatusSchema,
+  OPEN_MIRROR_STATUSES,
+} from "./model/mirror";
 export {
   type BudgetForm,
   budgetFormSchema,

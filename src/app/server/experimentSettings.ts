@@ -9,11 +9,13 @@ import {
   type ResetRequest,
   type ResetResult,
   resetRun,
+  setExperimentDemoMirror,
   setExperimentEnabled,
   withEngineTickLock,
 } from "@/entities/experiment";
 import { ENGINE_KEYS, planReset, priceKey } from "@/features/paper-engine";
 import { fetch24hTickers } from "@/shared/api/binance/public.server";
+import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { ensureEngineReady, withTickLock } from "./experimentEngine";
@@ -38,6 +40,7 @@ export async function getLabSettings(): Promise<LabSettings> {
     epoch,
     currentBudget: Math.max(0, ...experiments.map((e) => e.initialBudget)),
     nextBudget: await readNextBudget(store),
+    demoConfigured: getDemoTradingConfig() !== null,
     experiments: experiments.map((e) => ({
       id: e.id,
       market: e.market,
@@ -71,6 +74,20 @@ export async function toggleExperiment(
   await ensureEngineReady();
   if (!(await setExperimentEnabled(getDb(), id, enabled))) return null;
   log.info("experiments.toggle", `${id} ${enabled ? "включён" : "выключен"}`);
+  return getLabSettings();
+}
+
+/** Demo-зеркало эксперимента (spec 008); null — эксперимента нет. Открытые зеркала не трогаем. */
+export async function toggleDemoMirror(
+  id: string,
+  demoMirror: boolean,
+): Promise<LabSettings | null> {
+  await ensureEngineReady();
+  if (!(await setExperimentDemoMirror(getDb(), id, demoMirror))) return null;
+  log.info(
+    "experiments.mirror",
+    `${id}: demo-зеркало ${demoMirror ? "включено" : "выключено"}`,
+  );
   return getLabSettings();
 }
 

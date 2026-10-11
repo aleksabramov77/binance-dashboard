@@ -33,6 +33,21 @@ const SORT_KEYS = [
   "tiers",
   "minimum",
 ] as const;
+const HELP: Record<(typeof SORT_KEYS)[number], string> = {
+  product:
+    "Монета и тип продукта Simple Earn: Flexible — можно забрать в любой момент, Locked — на срок.",
+  effectiveApr:
+    "Годовая ставка на вашу сумму (из фильтра) с учётом бонусных ступеней: бонус обычно действует только до лимита суммы.",
+  daily: "Ожидаемый доход в день на вашу сумму: годовой доход / 365.",
+  yearly:
+    "Ожидаемый доход за год на вашу сумму по текущим ставкам (простые проценты).",
+  maxApr: "Максимальная ставка продукта — на первой бонусной ступени.",
+  baseApr: "Базовая ставка без бонусов — на сумму сверх бонусных лимитов.",
+  tiers:
+    "Бонусные ступени: дополнительная ставка до лимита суммы. Сортировка — по размеру бонуса сверх базовой ставки.",
+  minimum: "Минимальная сумма покупки. Сортировка — по эквиваленту в $.",
+};
+
 const SORT_VALUE: Record<
   (typeof SORT_KEYS)[number],
   (r: RankedOffer) => SortValue
@@ -70,29 +85,52 @@ export function OffersTable({ ranked }: { ranked: RankedOffer[] }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <SortableHead {...head("product")}>Продукт</SortableHead>
+            <SortableHead {...head("product")} description={HELP.product}>
+              Продукт
+            </SortableHead>
             <SortableHead
               className="text-right"
-              {...head("effectiveApr", "desc")}
+              {...head("effectiveApr")}
+              description={HELP.effectiveApr}
             >
               Ваша ставка
             </SortableHead>
-            <SortableHead className="text-right" {...head("daily", "desc")}>
+            <SortableHead
+              className="text-right"
+              {...head("daily")}
+              description={HELP.daily}
+            >
               Доход / день
             </SortableHead>
-            <SortableHead className="text-right" {...head("yearly", "desc")}>
+            <SortableHead
+              className="text-right"
+              {...head("yearly")}
+              description={HELP.yearly}
+            >
               Доход / год
             </SortableHead>
-            <SortableHead className="text-right" {...head("maxApr", "desc")}>
+            <SortableHead
+              className="text-right"
+              {...head("maxApr")}
+              description={HELP.maxApr}
+            >
               Макс. APR
             </SortableHead>
-            <SortableHead className="text-right" {...head("baseApr", "desc")}>
+            <SortableHead
+              className="text-right"
+              {...head("baseApr")}
+              description={HELP.baseApr}
+            >
               Базовая
             </SortableHead>
-            <SortableHead {...head("tiers", "desc")}>
+            <SortableHead {...head("tiers")} description={HELP.tiers}>
               Бонусные ступени
             </SortableHead>
-            <SortableHead className="text-right" {...head("minimum")}>
+            <SortableHead
+              className="text-right"
+              {...head("minimum")}
+              description={HELP.minimum}
+            >
               Минимум
             </SortableHead>
           </TableRow>

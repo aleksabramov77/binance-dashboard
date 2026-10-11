@@ -24,6 +24,16 @@ import {
 } from "@/shared/ui/table";
 
 const SORT_KEYS = ["asset", "place", "amount", "usd", "apr", "yearly"] as const;
+const HELP: Record<(typeof SORT_KEYS)[number], string> = {
+  asset: "Монета на вашем счёте Binance.",
+  place:
+    "Где лежит: спот-кошелёк, Flexible или Locked Earn, фьючерсный кошелёк и т. п.",
+  amount: "Количество монет, включая замороженные.",
+  usd: "Оценка в долларах по текущей цене.",
+  apr: "Годовая ставка, которую сейчас приносит позиция. 0% (красным) — деньги лежат без дохода.",
+  yearly: "Ожидаемый доход за год по текущей ставке.",
+};
+
 const SORT_VALUE: Record<
   (typeof SORT_KEYS)[number],
   (h: Holding) => SortValue
@@ -50,18 +60,38 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <SortableHead {...head("asset")}>Актив</SortableHead>
-            <SortableHead {...head("place")}>Где лежит</SortableHead>
-            <SortableHead className="text-right" {...head("amount", "desc")}>
+            <SortableHead {...head("asset")} description={HELP.asset}>
+              Актив
+            </SortableHead>
+            <SortableHead {...head("place")} description={HELP.place}>
+              Где лежит
+            </SortableHead>
+            <SortableHead
+              className="text-right"
+              {...head("amount")}
+              description={HELP.amount}
+            >
               Количество
             </SortableHead>
-            <SortableHead className="text-right" {...head("usd", "desc")}>
+            <SortableHead
+              className="text-right"
+              {...head("usd")}
+              description={HELP.usd}
+            >
               ≈ USD
             </SortableHead>
-            <SortableHead className="text-right" {...head("apr", "desc")}>
+            <SortableHead
+              className="text-right"
+              {...head("apr")}
+              description={HELP.apr}
+            >
               Ставка
             </SortableHead>
-            <SortableHead className="text-right" {...head("yearly", "desc")}>
+            <SortableHead
+              className="text-right"
+              {...head("yearly")}
+              description={HELP.yearly}
+            >
               Доход / год
             </SortableHead>
           </TableRow>

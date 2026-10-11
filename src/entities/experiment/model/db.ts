@@ -93,8 +93,43 @@ export const engineStateTable = pgTable("engine_state", {
     .defaultNow(),
 });
 
+/**
+ * Зеркало paper-сделки в Binance Demo (spec 008). Одна строка на сделку: вставка — «захват» сделки
+ * зеркалом (повторный прогон её не тронет), дальше — статус входа и закрытия на демо-счёте.
+ * Отдельная таблица, чтобы движок (Edge Function) и paper_trades не менялись.
+ */
+export const demoMirrorOrdersTable = pgTable(
+  "demo_mirror_orders",
+  {
+    tradeId: text("trade_id")
+      .primaryKey()
+      .references(() => paperTradesTable.id),
+    experimentId: text("experiment_id").notNull(),
+    market: text("market").notNull(),
+    symbol: text("symbol").notNull(),
+    direction: text("direction").notNull(),
+    /** pending → protected | unprotected | rejected; затем closing → closed | close_failed. */
+    status: text("status").notNull(),
+    /** id попытки входа (TradeResult.id) — ищется в журнале по trade.done/trade.rejected. */
+    demoRef: text("demo_ref"),
+    entryPrice: doublePrecision("entry_price"),
+    quantity: doublePrecision("quantity"),
+    message: text("message").notNull().default(""),
+    steps: jsonb("steps").$type<unknown[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+  },
+  (t) => [index("demo_mirror_orders_status_idx").on(t.status)],
+);
+
 export type ExperimentRow = typeof experimentsTable.$inferSelect;
 export type NewExperimentRow = typeof experimentsTable.$inferInsert;
 export type RunRow = typeof runsTable.$inferSelect;
 export type PaperTradeRow = typeof paperTradesTable.$inferSelect;
 export type NewPaperTradeRow = typeof paperTradesTable.$inferInsert;
+export type DemoMirrorOrderRow = typeof demoMirrorOrdersTable.$inferSelect;

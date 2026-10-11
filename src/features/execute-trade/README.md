@@ -8,6 +8,10 @@
 - `placeTrade(request): TradeResult` — вход по рынку + защита TP/SL, пошаговый отчёт `steps`.
 - `getTradeOverview()` — настроен ли демо-ключ, лимит объёма, балансы USDT и `openSymbols` — символы
   с открытой позицией или ордерами (по ним карточки сетапов помечаются «уже в сделке»).
+- `closeDemoPosition({ market, symbol, direction, quantity })` — закрыть демо-позицию по рынку: снять все
+  ордера символа (spot — в т.ч. OCO; futures — обычные и algo), затем futures — `reduceOnly` на весь размер
+  позиции, spot — продажа min(купленное, на балансе). Позиции уже нет — только снимает ордера, статус `closed`.
+  Вызывает demo-зеркало (spec 008, `src/app/server/demoMirror.ts`).
 - `getTradeHistory()` — история демо-сделок с биржи (`GET /api/trade/history`), локально не хранится.
 
 ## История и статусы сделок (`model/getTradeHistory.ts`)
