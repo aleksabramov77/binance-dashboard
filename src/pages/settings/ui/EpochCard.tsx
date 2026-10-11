@@ -17,7 +17,7 @@ import {
 } from "@/shared/ui/card";
 import { Input } from "@/shared/ui/input";
 
-/** Текущая эпоха и «Сбросить тестовые капиталы» с подтверждением вводом слова. */
+/** Текущая эпоха и «Сбросить все Paper» (новая эпоха) с подтверждением вводом слова. */
 export function EpochCard({ settings }: { settings: LabSettings }) {
   const { epoch } = settings;
   const reset = useResetCapitals();
@@ -43,7 +43,7 @@ export function EpochCard({ settings }: { settings: LabSettings }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Эпоха #{epoch.id}</CardTitle>
+        <CardTitle>Paper: все эксперименты · эпоха #{epoch.id}</CardTitle>
         <CardDescription>
           Начата {formatDateTime(epoch.startedAt)}
           {epoch.note ? ` · ${epoch.note}` : ""}
@@ -77,7 +77,7 @@ export function EpochCard({ settings }: { settings: LabSettings }) {
               setConfirming(true);
             }}
           >
-            Сбросить тестовые капиталы
+            Сбросить все Paper
           </Button>
         ) : (
           <div className="flex flex-col gap-3 rounded-lg border border-destructive/50 p-4">
@@ -86,7 +86,8 @@ export function EpochCard({ settings }: { settings: LabSettings }) {
               по последней цене с причиной «manual», начнётся эпоха #
               {epoch.id + 1} с бюджетом {formatUsd(settings.nextBudget)} на
               эксперимент. Старые сделки остаются в истории. Тумблер движка не
-              меняется.
+              меняется. Демо-счёт Binance этим не сбрасывается (его демо-позиции
+              этих сделок зеркало закроет вместе с ними).
             </p>
             <label htmlFor={noteId} className="flex flex-col gap-1 text-sm">
               Заметка к новой эпохе (необязательно)

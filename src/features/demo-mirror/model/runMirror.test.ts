@@ -34,7 +34,12 @@ function deps(over: Partial<MirrorDeps> = {}): MirrorDeps {
     markSkipped: vi.fn(async () => {}),
     saveOpen: vi.fn(async () => {}),
     claimToClose: async () => [],
-    close: async () => ({ status: "closed", message: "ok", steps: [] }),
+    close: async () => ({
+      status: "closed",
+      message: "ok",
+      steps: [],
+      exitPrice: null,
+    }),
     saveClose: vi.fn(async () => {}),
     ...over,
   };
@@ -68,7 +73,7 @@ describe("runMirror", () => {
       ],
       close: async () => {
         order.push("close");
-        return { status: "closed", message: "ok", steps: [] };
+        return { status: "closed", message: "ok", steps: [], exitPrice: null };
       },
       listCandidates: async () => [
         trade({ tradeId: "a" }),

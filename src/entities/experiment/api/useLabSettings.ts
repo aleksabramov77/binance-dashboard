@@ -5,7 +5,13 @@ import type { z } from "zod";
 import type { ExperimentDemoMirror } from "../model/mirror";
 import {
   type BudgetForm,
+  type DemoResetRequest,
+  type DemoResetResult,
+  demoResetResultSchema,
   type ExperimentEnabled,
+  type ExperimentReset,
+  type ExperimentResetResult,
+  experimentResetResultSchema,
   type LabSettings,
   labSettingsSchema,
   type ResetRequest,
@@ -98,6 +104,38 @@ export function useSetExperimentDemoMirror() {
       }),
     onSuccess: (data) => {
       queryClient.setQueryData(labSettingsQueryKey, data);
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+    },
+  });
+}
+
+/** Отдельный сброс paper-капитала эксперимента: меняются его сделки и статистика. */
+export function useResetExperimentPaper() {
+  const queryClient = useQueryClient();
+  return useMutation<ExperimentResetResult, Error, ExperimentReset>({
+    mutationFn: (body) =>
+      request("/api/experiments/reset/paper", experimentResetResultSchema, {
+        method: "POST",
+        body,
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(labSettingsQueryKey, data.settings);
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+    },
+  });
+}
+
+/** Демо-сброс эксперимента (id) или всех (null): закрыть демо-позиции, обнулить демо-статистику. */
+export function useResetDemo() {
+  const queryClient = useQueryClient();
+  return useMutation<DemoResetResult, Error, DemoResetRequest>({
+    mutationFn: (body) =>
+      request("/api/experiments/reset/demo", demoResetResultSchema, {
+        method: "POST",
+        body,
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(labSettingsQueryKey, data.settings);
       void queryClient.invalidateQueries({ queryKey: ["experiments"] });
     },
   });

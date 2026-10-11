@@ -1,5 +1,6 @@
 import { marketSchema } from "@binance-dashboard/trading-core";
 import { z } from "zod";
+import { demoSummarySchema } from "./view";
 // Контракт /settings лаборатории (spec 003, задача 3d): эпоха, стартовый бюджет, тумблеры экспериментов.
 
 export const DEFAULT_INITIAL_BUDGET = 10_000;
@@ -60,9 +61,46 @@ export const labSettingsSchema = z.object({
       enabled: z.boolean(),
       demoMirror: z.boolean(),
       initialBudget: z.number(),
+      /** Paper-счёт эксперимента в текущей эпохе (с учётом отдельного сброса). */
+      paper: z.object({
+        equity: z.number(),
+        pnl: z.number(),
+        closed: z.number().int(),
+        open: z.number().int(),
+        /** Когда капитал эксперимента сбрасывали отдельно; null — с начала эпохи. */
+        resetAt: z.string().nullable(),
+      }),
+      /** Демо-торговля с последнего демо-сброса. */
+      demo: demoSummarySchema.extend({ resetAt: z.string().nullable() }),
     }),
   ),
+  /** Свободные USDT на демо-счёте Binance; null — ключа нет или биржа не ответила. */
+  demoBalances: z.object({ spot: z.number(), futures: z.number() }).nullable(),
 });
+
+export const experimentResetSchema = z.object({ id: z.string().min(1) });
+export type ExperimentReset = z.infer<typeof experimentResetSchema>;
+
+/** Демо-сброс: id — один эксперимент, null — все. */
+export const demoResetRequestSchema = z.object({
+  id: z.string().min(1).nullable(),
+});
+export type DemoResetRequest = z.infer<typeof demoResetRequestSchema>;
+
+export const experimentResetResultSchema = z.object({
+  closed: z.number().int(),
+  closedWithoutPrice: z.number().int(),
+  settings: labSettingsSchema,
+});
+export type ExperimentResetResult = z.infer<typeof experimentResetResultSchema>;
+
+export const demoResetResultSchema = z.object({
+  /** Сколько демо-позиций закрыто / не удалось закрыть (повторит крон зеркала). */
+  closed: z.number().int(),
+  failed: z.number().int(),
+  settings: labSettingsSchema,
+});
+export type DemoResetResult = z.infer<typeof demoResetResultSchema>;
 export type LabSettings = z.infer<typeof labSettingsSchema>;
 
 export const resetResultSchema = z.object({

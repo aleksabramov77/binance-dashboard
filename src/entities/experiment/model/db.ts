@@ -27,6 +27,13 @@ export const experimentsTable = pgTable("experiments", {
   initialBudget: doublePrecision("initial_budget").notNull(),
   enabled: boolean("enabled").notNull().default(true),
   demoMirror: boolean("demo_mirror").notNull().default(false),
+  /**
+   * Отдельный сброс paper-капитала эксперимента: в учёт эпохи идут только его сделки, открытые
+   * не раньше этого момента. null — не сбрасывался (весь учёт эпохи).
+   */
+  resetAt: timestamp("reset_at", { withTimezone: true }),
+  /** Сброс демо-статистики эксперимента: в учёт идут зеркала, созданные не раньше. */
+  demoResetAt: timestamp("demo_reset_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -114,6 +121,8 @@ export const demoMirrorOrdersTable = pgTable(
     demoRef: text("demo_ref"),
     entryPrice: doublePrecision("entry_price"),
     quantity: doublePrecision("quantity"),
+    /** Цена выхода на демо, если позицию закрыло зеркало по рынку; TP/SL биржи — null. */
+    exitPrice: doublePrecision("exit_price"),
     message: text("message").notNull().default(""),
     steps: jsonb("steps").$type<unknown[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true })

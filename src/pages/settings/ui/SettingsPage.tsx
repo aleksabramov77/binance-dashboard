@@ -2,8 +2,9 @@
 
 import { useLabSettings } from "@/entities/experiment";
 import { BudgetCard } from "./BudgetCard";
+import { DemoAccountsCard } from "./DemoAccountsCard";
 import { EpochCard } from "./EpochCard";
-import { ExperimentsCard } from "./ExperimentsCard";
+import { PaperAccountsCard } from "./PaperAccountsCard";
 
 // /settings — настройки Лаборатории экспериментов (spec 003, задача 3d).
 export function SettingsPage() {
@@ -14,9 +15,10 @@ export function SettingsPage() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Настройки</h1>
         <p className="text-sm text-muted-foreground">
-          Лаборатория экспериментов: текущая эпоха учёта, сброс тестовых
-          капиталов, стартовый бюджет и включение отдельных экспериментов. Всё
-          здесь — paper-торговля, реальные ордера не отправляются.
+          Два счёта лаборатории — отдельно: <b>Paper</b> (симуляция на бумаге,
+          без ордеров) и <b>демо-счёт Binance</b> (реальные ордера на
+          demo.binance.com с виртуальными деньгами). Сбросить можно любой
+          эксперимент отдельно или все сразу — в своём блоке.
         </p>
       </header>
       {settings.isPending && <p className="text-muted-foreground">Загрузка…</p>}
@@ -25,14 +27,14 @@ export function SettingsPage() {
       )}
       {settings.data && (
         <>
+          <h2 className="text-lg font-semibold">Paper — симуляция</h2>
           <div className="grid gap-6 lg:grid-cols-2">
             <EpochCard settings={settings.data} />
             <BudgetCard settings={settings.data} />
           </div>
-          <ExperimentsCard
-            experiments={settings.data.experiments}
-            demoConfigured={settings.data.demoConfigured}
-          />
+          <PaperAccountsCard experiments={settings.data.experiments} />
+          <h2 className="text-lg font-semibold">Binance Demo — демо-счёт</h2>
+          <DemoAccountsCard settings={settings.data} />
         </>
       )}
     </div>

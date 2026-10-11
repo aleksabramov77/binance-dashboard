@@ -4,8 +4,11 @@ import {
   activeMirrorSymbols,
   claimMirror,
   claimMirrorsToClose,
+  claimOpenMirrors,
+  type DemoResetResult,
   listMirrorCandidates,
   type MirrorCandidate,
+  markDemoReset,
   updateMirror,
 } from "@/entities/experiment";
 import { runMirror } from "@/features/demo-mirror";
@@ -13,6 +16,7 @@ import { closeDemoPosition, placeTrade } from "@/features/execute-trade";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import { getLabSettings } from "./experimentSettings";
 
 export async function runDemoMirror() {
   const db = getDb();
@@ -54,6 +58,7 @@ export async function runDemoMirror() {
         status: r.status === "closed" ? "closed" : "close_failed",
         message: r.message,
         steps: r.steps,
+        exitPrice: r.exitPrice,
         closed: r.status === "closed",
       }),
   });
@@ -64,4 +69,37 @@ export async function runDemoMirror() {
       { ...result },
     );
   return result;
+}
+
+/**
+ * Демо-сброс (решение пользователя 2026-10-11): закрыть по рынку открытые демо-позиции эксперимента
+ * (id) или всех (null) и начать его демо-статистику заново (experiments.demo_reset_at). Paper-сделки
+ * не трогаются; зеркало продолжает работать для отмеченных экспериментов. Не закрывшиеся позиции —
+ * close_failed, их повторит крон зеркала.
+ */
+export async function resetDemo(
+  experimentId: string | null,
+): Promise<DemoResetResult> {
+  const db = getDb();
+  let closed = 0;
+  let failed = 0;
+  for (const m of await claimOpenMirrors(db, experimentId)) {
+    const r = await closeDemoPosition(m);
+    await updateMirror(db, m.tradeId, {
+      status: r.status === "closed" ? "closed" : "close_failed",
+      message: `Демо-сброс: ${r.message}`,
+      steps: r.steps,
+      exitPrice: r.exitPrice,
+      closed: r.status === "closed",
+    });
+    if (r.status === "closed") closed++;
+    else failed++;
+  }
+  await markDemoReset(db, experimentId);
+  log.info(
+    "mirror.reset",
+    `Демо-сброс ${experimentId ?? "всех экспериментов"}: закрыто ${closed}, не закрылось ${failed}`,
+    { experimentId, closed, failed },
+  );
+  return { closed, failed, settings: await getLabSettings() };
 }

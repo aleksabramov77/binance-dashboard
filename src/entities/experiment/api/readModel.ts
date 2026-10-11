@@ -17,8 +17,13 @@ import type {
   ExperimentDetailResponse,
   ExperimentsResponse,
 } from "../model/view";
+import { countedTrade } from "./accounting";
 import { toTrade } from "./dbStore";
-import { mirrorStatuses, mirrorSummaries } from "./mirrorDb";
+import {
+  emptyMirrorSummary,
+  mirrorStatuses,
+  mirrorSummaries,
+} from "./mirrorDb";
 
 // Чтение для страниц лаборатории (только сервер): эксперименты и сделки текущей эпохи
 // со статистикой. Эпоха — runs с наибольшим id; сид и создание первой эпохи — ensureEngineReady.
@@ -49,6 +54,7 @@ async function runTrades(
         experimentId === undefined
           ? undefined
           : eq(paperTradesTable.experimentId, experimentId),
+        countedTrade(),
       ),
     )
     .orderBy(asc(paperTradesTable.openedAt));
@@ -65,7 +71,7 @@ export async function readExperimentsOverview(
   const [rows, trades, demo] = await Promise.all([
     db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
     runTrades(db, run.id),
-    mirrorSummaries(db, run.id),
+    mirrorSummaries(db),
   ]);
   const byExperiment = new Map<string, PaperTrade[]>();
   for (const t of trades) {
@@ -88,13 +94,7 @@ export async function readExperimentsOverview(
         enabled: e.enabled,
         demoMirror: e.demoMirror,
         stats: computeStats(byExperiment.get(e.id) ?? [], e.initialBudget),
-        demo: demo.get(e.id) ?? {
-          trades: 0,
-          open: 0,
-          closed: 0,
-          rejected: 0,
-          pnl: 0,
-        },
+        demo: demo.get(e.id) ?? emptyMirrorSummary(),
       };
     }),
   };
@@ -116,10 +116,13 @@ export async function readExperimentDetail(
   const run = await currentRun(db);
   const trades = await runTrades(db, run.id, id);
   const shown = trades.slice(-limit).reverse();
-  const mirrors = await mirrorStatuses(
-    db,
-    shown.map((t) => t.id),
-  );
+  const [mirrors, demo] = await Promise.all([
+    mirrorStatuses(
+      db,
+      shown.map((t) => t.id),
+    ),
+    mirrorSummaries(db),
+  ]);
   return {
     run,
     engineEnabled,
@@ -128,6 +131,7 @@ export async function readExperimentDetail(
     equity: equityCurve(trades, experiment.initialBudget, run.startedAt),
     trades: shown,
     mirrors: Object.fromEntries(mirrors),
+    demo: demo.get(id) ?? emptyMirrorSummary(),
   };
 }
 

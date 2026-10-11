@@ -3,6 +3,7 @@ import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type { BudgetInputs } from "../lib/budgets";
 import { experimentsTable, paperTradesTable } from "../model/db";
 import { directionSchema, marketSchema } from "../model/schema";
+import { countedTrade } from "./accounting";
 import { ensureRun } from "./dbStore";
 
 type Db = PgDatabase<PgQueryResultHKT>;
@@ -30,6 +31,7 @@ export async function loadBudgetInputs(
         and(
           eq(paperTradesTable.runId, runId),
           isNotNull(paperTradesTable.closedAt),
+          countedTrade(),
         ),
       )
       .groupBy(paperTradesTable.market),

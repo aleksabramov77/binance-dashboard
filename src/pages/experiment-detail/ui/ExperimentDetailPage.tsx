@@ -3,6 +3,7 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import {
+  type DemoSummary,
   describeConfig,
   EquityChart,
   type ExitReason,
@@ -94,6 +95,35 @@ function Metrics({ s }: { s: TradeStatsView }) {
       />
       <Metric label="Комиссии" value={formatUsd(s.fees)} />
     </div>
+  );
+}
+
+/** Демо-счёт Binance эксперимента (spec 008): отдельно от paper, с последнего демо-сброса. */
+function DemoMetrics({ d, mirrored }: { d: DemoSummary; mirrored: boolean }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-medium text-muted-foreground">
+        Демо-счёт Binance{" "}
+        {mirrored ? "· торговля включена" : "· торговля выключена"}
+      </h2>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <Metric
+          label="PnL демо"
+          value={d.closed ? formatSignedUsd(d.pnl) : "—"}
+          tone={pnlTone(d.pnl)}
+        />
+        <Metric
+          label="Сделки демо"
+          value={d.open ? `${d.closed} + ${d.open}` : String(d.closed)}
+        />
+        <Metric
+          label="Win rate демо"
+          value={d.closed ? formatRate(d.wins / d.closed) : "—"}
+        />
+        <Metric label="В плюс / в минус" value={`${d.wins} / ${d.losses}`} />
+        <Metric label="Не открылись" value={String(d.rejected)} />
+      </div>
+    </section>
   );
 }
 
@@ -340,6 +370,7 @@ export function ExperimentDetailPage({ id }: { id: string }) {
           </header>
 
           <Metrics s={data.stats} />
+          <DemoMetrics d={data.demo} mirrored={data.experiment.demoMirror} />
 
           <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
             <Card>
