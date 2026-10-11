@@ -107,3 +107,20 @@ export function validateTrade(
     },
   };
 }
+
+/**
+ * Остаток, который биржа не даст продать: меньше minQty или дешевле minNotional (фильтры
+ * LOT_SIZE / NOTIONAL, ошибка -1013). Например, хвост монет после комиссии, когда позицию уже
+ * закрыл TP/SL на бирже. Такую позицию считаем закрытой.
+ */
+export function isDust(
+  quantity: number,
+  price: number,
+  rules: Pick<SymbolRules, "minQty" | "minNotional">,
+): boolean {
+  return (
+    quantity <= 0 ||
+    quantity < rules.minQty ||
+    quantity * price < rules.minNotional
+  );
+}

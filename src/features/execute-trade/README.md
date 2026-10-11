@@ -11,6 +11,8 @@
 - `closeDemoPosition({ market, symbol, direction, quantity })` — закрыть демо-позицию по рынку: снять все
   ордера символа (spot — в т.ч. OCO; futures — обычные и algo), затем futures — `reduceOnly` на весь размер
   позиции, spot — продажа min(купленное, на балансе). Позиции уже нет — только снимает ордера, статус `closed`.
+  Остаток дешевле `minNotional` или меньше `minQty` (`lib/validateTrade.ts → isDust`: хвост монет после комиссии,
+  когда спот закрыл OCO на бирже) — пыль, биржа его не продаст (-1013 NOTIONAL): тоже `closed`, без ордера.
   Вызывает demo-зеркало (spec 008, `src/app/server/demoMirror.ts`).
 - `getTradeHistory()` — история демо-сделок с биржи (`GET /api/trade/history`), локально не хранится.
 

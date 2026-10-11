@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TradeRequest } from "@/entities/trade";
 import {
   floorToStep,
+  isDust,
   roundToTick,
   stepDecimals,
   type TradeContext,
@@ -120,5 +121,19 @@ describe("validateTrade", () => {
       expect(result.errors).toContain(
         "Нужно $400.00 маржи, а на USDⓈ-M Futures свободно $300.00.",
       );
+  });
+});
+
+describe("isDust", () => {
+  const rules = { minQty: 0.1, minNotional: 5 };
+  it("хвост дешевле минимального ордера — пыль", () => {
+    expect(isDust(0.1, 5.7, rules)).toBe(true);
+  });
+  it("меньше minQty или ноль — пыль", () => {
+    expect(isDust(0.05, 1000, rules)).toBe(true);
+    expect(isDust(0, 5, rules)).toBe(true);
+  });
+  it("нормальный остаток продаём", () => {
+    expect(isDust(8.6, 5.7, rules)).toBe(false);
   });
 });

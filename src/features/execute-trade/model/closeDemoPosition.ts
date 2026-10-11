@@ -4,12 +4,13 @@ import {
   demoFuturesPosition,
   demoFuturesReduceMarket,
   demoSpotMarketOrder,
+  fetchDemoPrice,
   fetchDemoSpotHoldings,
   fetchDemoSymbolRules,
 } from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
-import { floorToStep } from "../lib/validateTrade";
+import { floorToStep, isDust } from "../lib/validateTrade";
 
 export interface CloseDemoRequest {
   market: "spot" | "futures";
@@ -105,11 +106,14 @@ export async function closeDemoPosition(
     const baseAsset = req.symbol.replace(/USDT$/, "");
     const held = (await fetchDemoSpotHoldings(creds)).get(baseAsset) ?? 0;
     const qty = floorToStep(Math.min(held, req.quantity), rules.stepSize);
-    if (Number(qty) <= 0 || Number(qty) < rules.minQty) {
+    const price = await fetchDemoPrice("spot", req.symbol);
+    // Хвост после комиссии дешевле минимального ордера биржа не продаст (-1013 NOTIONAL):
+    // позиция по сути закрыта её TP/SL — иначе зеркало повторяло бы продажу каждую минуту.
+    if (isDust(Number(qty), price, rules)) {
       steps.push({
         label: "Остаток",
         ok: true,
-        detail: `${baseAsset}: ${held} — продавать нечего`,
+        detail: `${baseAsset}: ${held} (~$${(Number(qty) * price).toFixed(2)}) — меньше минимального ордера, продавать нечего`,
       });
       return finish("closed", "Монеты уже проданы (сработал TP/SL на бирже).");
     }
