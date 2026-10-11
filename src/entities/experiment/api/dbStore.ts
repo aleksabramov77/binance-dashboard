@@ -12,6 +12,7 @@ import {
   paperTradesTable,
   runsTable,
 } from "../model/db.ts";
+import { countedTrade } from "./accounting.ts";
 import type { ExperimentDb } from "./tickLock.ts";
 
 // Хранилище лаборатории на Drizzle. Структурно совпадает с ExperimentStore движка
@@ -116,6 +117,7 @@ export function createDbExperimentStore(db: Db) {
           and(
             eq(paperTradesTable.runId, runId),
             isNotNull(paperTradesTable.closedAt),
+            countedTrade(),
           ),
         )
         .groupBy(paperTradesTable.experimentId);

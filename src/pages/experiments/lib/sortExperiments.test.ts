@@ -14,7 +14,15 @@ const summary = (
   initialBudget: 1000,
   enabled: true,
   demoMirror: false,
-  demo: { trades: 0, open: 0, closed: 0, rejected: 0, pnl: 0 },
+  demo: {
+    trades: 0,
+    open: 0,
+    closed: 0,
+    wins: 0,
+    losses: 0,
+    rejected: 0,
+    pnl: 0,
+  },
   stats: computeStats(
     pnls.map((pnl, i) => ({
       openedAt: "2026-10-10T00:00:00Z",
@@ -65,11 +73,27 @@ describe("sortExperiments", () => {
     const a = { ...summary("S01", "spot", []), demoMirror: true };
     const b = {
       ...summary("S02", "spot", []),
-      demo: { trades: 3, open: 1, closed: 2, rejected: 0, pnl: -4 },
+      demo: {
+        trades: 3,
+        open: 1,
+        closed: 2,
+        wins: 0,
+        losses: 2,
+        rejected: 0,
+        pnl: -4,
+      },
     };
     const c = {
       ...summary("S03", "spot", []),
-      demo: { trades: 1, open: 0, closed: 1, rejected: 0, pnl: 2 },
+      demo: {
+        trades: 1,
+        open: 0,
+        closed: 1,
+        wins: 1,
+        losses: 0,
+        rejected: 0,
+        pnl: 2,
+      },
     };
     expect(
       sortExperiments([b, c, a], "all", "demo", "desc").map((e) => e.id),

@@ -50,6 +50,7 @@ export interface MirrorDeps {
     status: "closed" | "failed";
     message: string;
     steps: MirrorStep[];
+    exitPrice: number | null;
   }>;
   saveClose: (
     tradeId: string,

@@ -98,17 +98,30 @@ const COLUMNS: {
   },
   {
     key: "demo",
-    label: "Демо-счёт",
+    label: "Демо: торговля",
     numeric: false,
     description:
-      "Галочка — эксперимент торгует и на демо-счёте Binance (demo.binance.com, виртуальные деньги): каждый новый вход повторяется на бирже с тем же объёмом, стопом и тейком. Включение и выключение — с подтверждением. Под галочкой — сделок на демо за эпоху (открыто сейчас).",
+      "Галочка — эксперимент торгует и на демо-счёте Binance (demo.binance.com, виртуальные деньги): каждый новый вход повторяется на бирже с тем же объёмом, стопом и тейком. Включение и выключение — с подтверждением.",
+  },
+  {
+    key: "demoTrades",
+    label: "Демо: сделки",
+    numeric: true,
+    description:
+      "Сделки на демо-счёте с последнего демо-сброса: закрытые (+ открытые сейчас). «отказ» — входы, которые биржа не приняла (мин. объём, устаревшие уровни) или зеркало пропустило.",
+  },
+  {
+    key: "demoWinRate",
+    label: "Демо: win rate",
+    numeric: true,
+    description: "Доля прибыльных среди закрытых сделок на демо-счёте.",
   },
   {
     key: "demoPnl",
-    label: "PnL демо ≈",
+    label: "Демо: PnL",
     numeric: true,
     description:
-      "Оценка результата закрытых сделок на демо-счёте: (цена выхода − цена входа на бирже) × количество, без комиссий. Отличается от paper-PnL проскальзыванием и минимальными объёмами биржи. Точная история — на странице «Сигналы» → «Демо-сделки».",
+      "Плюс или минус на демо-счёте по эксперименту с последнего демо-сброса, $, без комиссий: (цена выхода − цена входа на бирже) × количество. Выход — фактическая цена, если позицию закрыло зеркало, иначе (TP/SL биржи) — цена выхода paper-сделки. Точная история ордеров — «Сигналы» → «Демо-сделки».",
   },
 ];
 
@@ -137,7 +150,7 @@ function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
   );
 }
 
-function DemoCell({
+function DemoCells({
   e,
   demoConfigured,
 }: {
@@ -146,20 +159,39 @@ function DemoCell({
 }) {
   const d = e.demo;
   return (
-    <TableCell className="text-center">
-      <div className="flex flex-col items-center gap-1">
+    <>
+      <TableCell className="text-center">
         <DemoMirrorToggle experiment={e} demoConfigured={demoConfigured} />
-        {(d.trades > 0 || d.rejected > 0) && (
-          <span
-            className="text-xs whitespace-nowrap text-muted-foreground"
-            title={`Сделок на демо: ${d.trades}, открыто: ${d.open}, не открылись: ${d.rejected}`}
-          >
-            {d.trades} сд.{d.open > 0 && ` · ${d.open} откр.`}
-            {d.rejected > 0 && ` · ${d.rejected} отказ`}
-          </span>
+      </TableCell>
+      <TableCell className="text-right font-mono tabular-nums">
+        {d.trades || d.rejected ? (
+          <>
+            {d.closed}
+            {d.open > 0 && (
+              <span className="text-muted-foreground"> +{d.open}</span>
+            )}
+            {d.rejected > 0 && (
+              <span className="block text-xs text-muted-foreground">
+                {d.rejected} отказ
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="text-muted-foreground">—</span>
         )}
-      </div>
-    </TableCell>
+      </TableCell>
+      <TableCell className="text-right font-mono tabular-nums">
+        {d.closed ? formatRate(d.wins / d.closed) : "—"}
+      </TableCell>
+      <TableCell
+        className={cn(
+          "text-right font-mono font-semibold tabular-nums",
+          pnlTone(d.pnl),
+        )}
+      >
+        {d.closed ? formatSignedUsd(d.pnl) : "—"}
+      </TableCell>
+    </>
   );
 }
 
@@ -219,12 +251,7 @@ function ExperimentRow({
       <TableCell className="text-right font-mono tabular-nums">
         {formatUsd(s.equity)}
       </TableCell>
-      <DemoCell e={e} demoConfigured={demoConfigured} />
-      <TableCell
-        className={cn("text-right font-mono tabular-nums", pnlTone(e.demo.pnl))}
-      >
-        {e.demo.closed ? formatSignedUsd(e.demo.pnl) : "—"}
-      </TableCell>
+      <DemoCells e={e} demoConfigured={demoConfigured} />
     </TableRow>
   );
 }

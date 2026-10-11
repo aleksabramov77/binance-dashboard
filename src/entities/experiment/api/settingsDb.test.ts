@@ -7,6 +7,7 @@ import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
 import {
   getEpoch,
   type ResetRunInput,
+  resetExperimentRun,
   resetRun,
   setExperimentEnabled,
 } from "./settingsDb";
@@ -205,5 +206,46 @@ describe("эпоха и тумблеры", () => {
       .from(experimentsTable)
       .where(eq(experimentsTable.id, "F01"));
     expect(row.enabled).toBe(false);
+  });
+});
+
+describe("отдельный сброс paper-капитала эксперимента", () => {
+  it("закрывает его сделки, обнуляет учёт и ставит метку свечи; эпоха та же", async () => {
+    const { runId, store } = await setup();
+    await store.setState("bars", { F01: 1, F02: 2 });
+    expect(await store.realizedPnl(runId)).toEqual({ F01: 3.9 });
+
+    const r = await resetExperimentRun(db, {
+      runId,
+      experimentId: "F01",
+      closes: [{ id: "open-1", close: manual(5, 105), noPrice: false }],
+      bar: 777,
+      barsKey: "bars",
+    });
+    expect(r).toEqual({ found: true, closed: 1, closedWithoutPrice: 0 });
+    expect(await store.currentRunId()).toBe(runId);
+    // Сделки до сброса в учёт не идут: PnL эксперимента с нуля.
+    expect(await store.realizedPnl(runId)).toEqual({});
+    expect(await store.getState("bars")).toEqual({ F01: 777, F02: 2 });
+
+    const later = {
+      ...trade("after", runId, true),
+      openedAt: new Date(Date.now() + 60_000).toISOString(),
+      closedAt: new Date(Date.now() + 120_000).toISOString(),
+    };
+    await store.insertTrade(later);
+    expect(await store.realizedPnl(runId)).toEqual({ F01: 3.9 });
+  });
+
+  it("неизвестный эксперимент — found: false", async () => {
+    const { runId } = await setup();
+    expect(
+      await resetExperimentRun(db, {
+        runId,
+        experimentId: "nope",
+        closes: [],
+        barsKey: "bars",
+      }),
+    ).toEqual({ found: false, closed: 0, closedWithoutPrice: 0 });
   });
 });

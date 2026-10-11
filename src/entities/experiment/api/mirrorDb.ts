@@ -143,6 +143,7 @@ export async function updateMirror(
     demoRef?: string;
     entryPrice?: number | null;
     quantity?: number | null;
+    exitPrice?: number | null;
     closed?: boolean;
   },
 ): Promise<void> {
@@ -224,7 +225,7 @@ export async function mirrorStatuses(
   );
 }
 
-/** Демо-торговля эксперимента за эпоху (spec 008): по строкам demo_mirror_orders её сделок. */
+/** Демо-торговля эксперимента (spec 008): по строкам demo_mirror_orders с момента демо-сброса. */
 export interface MirrorSummary {
   /** Сделок, вход которых исполнен на демо (открытые и закрытые). */
   trades: number;
@@ -232,18 +233,35 @@ export interface MirrorSummary {
   open: number;
   /** Закрыто на демо. */
   closed: number;
+  /** Закрытые в плюс / в минус. */
+  wins: number;
+  losses: number;
   /** Не открылись (отказ биржи) или пропущены. */
   rejected: number;
   /**
-   * Оценка PnL закрытых демо-сделок, $: (выход paper-сделки − вход на демо) × количество на демо,
-   * без комиссий. Точный результат — в истории демо-счёта на /signals.
+   * PnL закрытых демо-сделок, $, без комиссий: (выход − вход на демо) × количество на демо.
+   * Выход — фактическая цена, если позицию закрыло зеркало по рынку, иначе (TP/SL биржи) —
+   * цена выхода paper-сделки. Точная история — «Демо-сделки» на /signals.
    */
   pnl: number;
 }
 
+export const emptyMirrorSummary = (): MirrorSummary => ({
+  trades: 0,
+  open: 0,
+  closed: 0,
+  wins: 0,
+  losses: 0,
+  rejected: 0,
+  pnl: 0,
+});
+
+/**
+ * Демо-сводка по экспериментам: все зеркала с момента experiments.demo_reset_at (без привязки к
+ * эпохе paper — демо-счёт один на все эпохи).
+ */
 export async function mirrorSummaries(
   db: Db,
-  runId: number,
 ): Promise<Map<string, MirrorSummary>> {
   const rows = await db
     .select({
@@ -252,19 +270,22 @@ export async function mirrorSummaries(
       direction: demoMirrorOrdersTable.direction,
       entryPrice: demoMirrorOrdersTable.entryPrice,
       quantity: demoMirrorOrdersTable.quantity,
-      exitPrice: paperTradesTable.exitPrice,
+      demoExit: demoMirrorOrdersTable.exitPrice,
+      paperExit: paperTradesTable.exitPrice,
     })
     .from(demoMirrorOrdersTable)
     .innerJoin(
       paperTradesTable,
       eq(paperTradesTable.id, demoMirrorOrdersTable.tradeId),
     )
-    .where(eq(paperTradesTable.runId, runId));
+    .where(
+      sql`${demoMirrorOrdersTable.createdAt} >= coalesce((select ${experimentsTable.demoResetAt} from ${experimentsTable} where ${experimentsTable.id} = ${demoMirrorOrdersTable.experimentId}), '-infinity'::timestamptz)`,
+    );
   const out = new Map<string, MirrorSummary>();
   for (const r of rows) {
     let s = out.get(r.experimentId);
     if (!s) {
-      s = { trades: 0, open: 0, closed: 0, rejected: 0, pnl: 0 };
+      s = emptyMirrorSummary();
       out.set(r.experimentId, s);
     }
     const status = r.status as MirrorStatus;
@@ -278,11 +299,56 @@ export async function mirrorSummaries(
       continue;
     }
     s.closed++;
-    if (r.exitPrice !== null && r.entryPrice !== null && r.quantity !== null)
-      s.pnl +=
-        (r.direction === "short" ? -1 : 1) *
-        (r.exitPrice - r.entryPrice) *
-        r.quantity;
+    const exit = r.demoExit ?? r.paperExit;
+    if (exit === null || r.entryPrice === null || r.quantity === null) continue;
+    const pnl =
+      (r.direction === "short" ? -1 : 1) * (exit - r.entryPrice) * r.quantity;
+    s.pnl += pnl;
+    if (pnl > 0) s.wins++;
+    else s.losses++;
   }
   return out;
+}
+
+/**
+ * Захватить открытые демо-позиции эксперимента (или всех, id = null) на закрытие — для демо-сброса.
+ * Тот же переход статуса в closing, что и у крона: строку получит только один из них.
+ */
+export async function claimOpenMirrors(
+  db: Db,
+  experimentId: string | null,
+): Promise<MirrorToClose[]> {
+  const rows = await db
+    .update(demoMirrorOrdersTable)
+    .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
+    .where(
+      and(
+        inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
+        experimentId === null
+          ? undefined
+          : eq(demoMirrorOrdersTable.experimentId, experimentId),
+      ),
+    )
+    .returning();
+  return rows.map((r) => ({
+    tradeId: r.tradeId,
+    market: r.market as MirrorToClose["market"],
+    symbol: r.symbol,
+    direction: r.direction as MirrorToClose["direction"],
+    quantity: r.quantity ?? 0,
+    exitReason: "manual",
+  }));
+}
+
+/** Отметка демо-сброса: статистика эксперимента (или всех) начинается заново. */
+export async function markDemoReset(
+  db: Db,
+  experimentId: string | null,
+): Promise<void> {
+  await db
+    .update(experimentsTable)
+    .set({ demoResetAt: sql`now()`, updatedAt: sql`now()` })
+    .where(
+      experimentId === null ? undefined : eq(experimentsTable.id, experimentId),
+    );
 }

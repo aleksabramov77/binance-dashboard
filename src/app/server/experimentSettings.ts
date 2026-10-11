@@ -1,19 +1,26 @@
 // Композиция /settings лаборатории (spec 003, задача 3d): сброс тестовых капиталов (новая эпоха),
-// стартовый бюджет следующей эпохи, вкл/выкл экспериментов. Только сервер.
+// стартовый бюджет следующей эпохи, вкл/выкл экспериментов, отдельный сброс paper-капитала
+// эксперимента. Демо-сброс — src/app/server/demoMirror.ts. Только сервер.
+import { asc } from "drizzle-orm";
 import {
   budgetFormSchema,
   createDbExperimentStore,
   DEFAULT_INITIAL_BUDGET,
+  type ExperimentResetResult,
+  experimentsTable,
   getEpoch,
   type LabSettings,
   type ResetRequest,
   type ResetResult,
+  readExperimentsOverview,
+  resetExperimentRun,
   resetRun,
   setExperimentDemoMirror,
   setExperimentEnabled,
   withEngineTickLock,
 } from "@/entities/experiment";
 import { ENGINE_KEYS, planReset, priceKey } from "@/features/paper-engine";
+import { fetchDemoUsdtBalances } from "@/shared/api/binance/demo.server";
 import { fetch24hTickers } from "@/shared/api/binance/public.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
@@ -30,26 +37,65 @@ async function readNextBudget(
   return parsed.success ? parsed.data : DEFAULT_INITIAL_BUDGET;
 }
 
+/** Свободные USDT демо-счёта; ключа нет или биржа не ответила — null (страница не падает). */
+async function readDemoBalances(): Promise<LabSettings["demoBalances"]> {
+  const config = getDemoTradingConfig();
+  if (!config) return null;
+  try {
+    return await fetchDemoUsdtBalances(config.credentials);
+  } catch (error) {
+    log.warn("experiments.settings", "Балансы Binance Demo не получены", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 export async function getLabSettings(): Promise<LabSettings> {
   await ensureEngineReady();
   const db = getDb();
   const store = createDbExperimentStore(db);
-  const experiments = await store.listExperiments();
-  const epoch = await getEpoch(db, await store.currentRunId());
+  const demoConfigured = getDemoTradingConfig() !== null;
+  const [rows, epoch, overview, demoBalances, nextBudget] = await Promise.all([
+    db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
+    store.currentRunId().then((runId) => getEpoch(db, runId)),
+    readExperimentsOverview(db, false, demoConfigured),
+    readDemoBalances(),
+    readNextBudget(store),
+  ]);
+  const summaries = new Map(overview.experiments.map((e) => [e.id, e]));
   return {
     epoch,
-    currentBudget: Math.max(0, ...experiments.map((e) => e.initialBudget)),
-    nextBudget: await readNextBudget(store),
-    demoConfigured: getDemoTradingConfig() !== null,
-    experiments: experiments.map((e) => ({
-      id: e.id,
-      market: e.market,
-      name: e.name,
-      hypothesis: e.hypothesis,
-      enabled: e.enabled,
-      demoMirror: e.demoMirror,
-      initialBudget: e.initialBudget,
-    })),
+    currentBudget: Math.max(0, ...rows.map((e) => e.initialBudget)),
+    nextBudget,
+    demoConfigured,
+    demoBalances,
+    experiments: rows.flatMap((r) => {
+      const e = summaries.get(r.id);
+      if (!e) return [];
+      return [
+        {
+          id: e.id,
+          market: e.market,
+          name: e.name,
+          hypothesis: e.hypothesis,
+          enabled: e.enabled,
+          demoMirror: e.demoMirror,
+          initialBudget: e.initialBudget,
+          paper: {
+            equity: e.stats.equity,
+            pnl: e.stats.realizedPnl,
+            closed: e.stats.closed,
+            open: e.stats.open,
+            resetAt: r.resetAt?.toISOString() ?? null,
+          },
+          demo: {
+            ...e.demo,
+            resetAt: r.demoResetAt?.toISOString() ?? null,
+          },
+        },
+      ];
+    }),
   };
 }
 
@@ -177,6 +223,73 @@ export function resetCapitals(input: ResetRequest): Promise<ResetResult> {
         epoch: await getEpoch(db, outcome.runId),
         closed: outcome.closed,
         closedWithoutPrice: outcome.closedWithoutPrice,
+      };
+    }
+    throw new Error(
+      "Сброс не выполнен: блокировку тика держит другой процесс дольше минуты. Повторите позже.",
+    );
+  });
+}
+
+/**
+ * Отдельный сброс paper-капитала эксперимента: под блокировкой тика закрыть его открытые сделки
+ * по последней цене (manual), начать его учёт заново (experiments.reset_at) и пометить текущую
+ * свечу его TF обработанной. Эпоха и другие эксперименты не меняются. null — нет эксперимента.
+ * Демо-позиции закрытых сделок закроет крон зеркала (paper-сделка закрыта → закрыть зеркало).
+ */
+export function resetExperimentCapital(
+  experimentId: string,
+): Promise<ExperimentResetResult | null> {
+  return withTickLock(async () => {
+    await ensureEngineReady();
+    const db = getDb();
+    const store = createDbExperimentStore(db);
+    const experiment = (await store.listExperiments()).find(
+      (e) => e.id === experimentId,
+    );
+    if (!experiment) return null;
+    const runId = await store.currentRunId();
+    const openBefore = (await store.openTrades(runId)).filter(
+      (t) => t.experimentId === experimentId,
+    );
+    const prices = await lastPrices(new Set(openBefore.map((t) => t.market)));
+
+    for (let attempt = 0; attempt < RESET_LOCK_ATTEMPTS; attempt++) {
+      const locked = await withEngineTickLock(db, async (tx) => {
+        const s = createDbExperimentStore(tx);
+        const current = await s.currentRunId();
+        const open = (await s.openTrades(current)).filter(
+          (t) => t.experimentId === experimentId,
+        );
+        const plan = planReset({
+          experiments: [experiment],
+          open,
+          prices,
+          now: Date.now(),
+        });
+        return resetExperimentRun(tx, {
+          runId: current,
+          experimentId,
+          closes: plan.closes,
+          bar: plan.bars[experimentId],
+          barsKey: ENGINE_KEYS.bars,
+        });
+      });
+      if (!locked.acquired) {
+        await new Promise((r) => setTimeout(r, RESET_LOCK_RETRY_MS));
+        continue;
+      }
+      const outcome = locked.value;
+      if (!outcome.found) return null;
+      log.info(
+        "experiments.reset_one",
+        `${experimentId}: paper-капитал сброшен, закрыто сделок ${outcome.closed}`,
+        { experimentId, ...outcome },
+      );
+      return {
+        closed: outcome.closed,
+        closedWithoutPrice: outcome.closedWithoutPrice,
+        settings: await getLabSettings(),
       };
     }
     throw new Error(

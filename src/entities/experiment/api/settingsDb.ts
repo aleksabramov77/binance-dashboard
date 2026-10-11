@@ -74,6 +74,43 @@ export interface ResetRunInput {
   initialBudget?: number;
 }
 
+type Closes = ResetRunInput["closes"];
+
+/** Закрыть открытые сделки эпохи runId по плану (manual); уже закрытые пропускаются. */
+async function applyCloses(
+  tx: Db,
+  runId: number,
+  closes: Closes,
+): Promise<{ closed: number; closedWithoutPrice: number }> {
+  let closed = 0;
+  let closedWithoutPrice = 0;
+  for (const { id, close, noPrice } of closes) {
+    const rows = await tx
+      .update(paperTradesTable)
+      .set({
+        ...close,
+        closedAt: new Date(close.closedAt),
+        ...(noPrice
+          ? {
+              signal: sql`${paperTradesTable.signal} || '{"resetWithoutPrice": true}'::jsonb`,
+            }
+          : {}),
+      })
+      .where(
+        and(
+          eq(paperTradesTable.id, id),
+          eq(paperTradesTable.runId, runId),
+          isNull(paperTradesTable.closedAt),
+        ),
+      )
+      .returning({ id: paperTradesTable.id });
+    if (rows.length === 0) continue;
+    closed++;
+    if (noPrice) closedWithoutPrice++;
+  }
+  return { closed, closedWithoutPrice };
+}
+
 export type ResetRunOutcome =
   | { created: false; runId: number }
   | {
@@ -102,32 +139,11 @@ export async function resetRun(
     if (!last || last.id !== input.fromRunId)
       return { created: false, runId: last?.id ?? 0 };
 
-    let closed = 0;
-    let closedWithoutPrice = 0;
-    for (const { id, close, noPrice } of input.closes) {
-      const rows = await tx
-        .update(paperTradesTable)
-        .set({
-          ...close,
-          closedAt: new Date(close.closedAt),
-          ...(noPrice
-            ? {
-                signal: sql`${paperTradesTable.signal} || '{"resetWithoutPrice": true}'::jsonb`,
-              }
-            : {}),
-        })
-        .where(
-          and(
-            eq(paperTradesTable.id, id),
-            eq(paperTradesTable.runId, input.fromRunId),
-            isNull(paperTradesTable.closedAt),
-          ),
-        )
-        .returning({ id: paperTradesTable.id });
-      if (rows.length === 0) continue;
-      closed++;
-      if (noPrice) closedWithoutPrice++;
-    }
+    const { closed, closedWithoutPrice } = await applyCloses(
+      tx,
+      input.fromRunId,
+      input.closes,
+    );
 
     const [run] = await tx
       .insert(runsTable)
@@ -144,10 +160,56 @@ export async function resetRun(
         });
 
     if (input.initialBudget !== undefined)
-      await tx
-        .update(experimentsTable)
-        .set({ initialBudget: input.initialBudget, updatedAt: sql`now()` });
+      await tx.update(experimentsTable).set({
+        initialBudget: input.initialBudget,
+        resetAt: null,
+        updatedAt: sql`now()`,
+      });
 
     return { created: true, runId: run.id, closed, closedWithoutPrice };
+  });
+}
+
+/**
+ * Отдельный сброс paper-капитала эксперимента (решение пользователя 2026-10-11): закрыть его
+ * открытые сделки текущей эпохи (manual), поставить experiments.reset_at = now — учёт эксперимента
+ * начинается заново со стартового бюджета — и пометить его текущую свечу обработанной
+ * (engine_state.bars[id]). Эпоха и другие эксперименты не меняются. Вызывать под блокировкой тика.
+ */
+export async function resetExperimentRun(
+  db: Db,
+  input: {
+    runId: number;
+    experimentId: string;
+    closes: Closes;
+    /** Метка последней обработанной свечи эксперимента; нет — не трогаем. */
+    bar?: number;
+    barsKey: string;
+  },
+): Promise<{ found: boolean; closed: number; closedWithoutPrice: number }> {
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(experimentsTable)
+      .set({ resetAt: sql`now()`, updatedAt: sql`now()` })
+      .where(eq(experimentsTable.id, input.experimentId))
+      .returning({ id: experimentsTable.id });
+    if (rows.length === 0)
+      return { found: false, closed: 0, closedWithoutPrice: 0 };
+    const result = await applyCloses(tx, input.runId, input.closes);
+    if (input.bar !== undefined)
+      await tx
+        .insert(engineStateTable)
+        .values({
+          key: input.barsKey,
+          value: { [input.experimentId]: input.bar },
+        })
+        .onConflictDoUpdate({
+          target: engineStateTable.key,
+          set: {
+            value: sql`${engineStateTable.value} || ${JSON.stringify({ [input.experimentId]: input.bar })}::jsonb`,
+            updatedAt: sql`now()`,
+          },
+        });
+    return { found: true, ...result };
   });
 }

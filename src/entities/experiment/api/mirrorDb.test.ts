@@ -6,8 +6,11 @@ import {
   activeMirrorSymbols,
   claimMirror,
   claimMirrorsToClose,
+  claimOpenMirrors,
   listMirrorCandidates,
+  markDemoReset,
   mirrorStatuses,
+  mirrorSummaries,
   setExperimentDemoMirror,
   updateMirror,
 } from "./mirrorDb";
@@ -151,5 +154,75 @@ describe("demo-зеркало в БД", () => {
     );
     const [paper] = (await store.openTrades(1)).filter((t) => t.id === "a");
     expect(paper).toBeUndefined();
+  });
+});
+
+describe("демо-сводка и демо-сброс", () => {
+  it("PnL по фактическому выходу зеркала, иначе по paper; сброс обнуляет и закрывает", async () => {
+    const store = await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      entryPrice: 100,
+      quantity: 0.5,
+    });
+    let summary = (await mirrorSummaries(db)).get("F01");
+    expect(summary).toMatchObject({ trades: 1, open: 1, closed: 0 });
+
+    // Демо-сброс: открытая позиция захватывается на закрытие, статистика начинается заново.
+    const claimed = await claimOpenMirrors(db, "F01");
+    expect(claimed.map((m) => m.tradeId)).toEqual(["a"]);
+    expect(await claimOpenMirrors(db, null)).toEqual([]);
+    await updateMirror(db, "a", {
+      status: "closed",
+      message: "сброс",
+      steps: [],
+      exitPrice: 104,
+      closed: true,
+    });
+    summary = (await mirrorSummaries(db)).get("F01");
+    expect(summary).toMatchObject({ closed: 1, wins: 1, pnl: 2 });
+
+    await markDemoReset(db, "F01");
+    expect((await mirrorSummaries(db)).get("F01")).toBeUndefined();
+
+    // Без фактического выхода PnL — по цене выхода paper-сделки.
+    const runId = await ensureRun(db);
+    await store.insertTrade(trade("c", runId, "F01", new Date().toISOString()));
+    const [fresh] = await listMirrorCandidates(
+      db,
+      new Date(Date.now() - 60_000),
+    );
+    await claimMirror(db, fresh);
+    await updateMirror(db, "c", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      entryPrice: 100,
+      quantity: 2,
+    });
+    await store.closeTrade("c", {
+      closedAt: new Date().toISOString(),
+      exitPrice: 99,
+      exitReason: "sl",
+      fees: 0,
+      pnl: -2,
+      rMultiple: -1,
+    });
+    await updateMirror(db, "c", {
+      status: "closed",
+      message: "биржа",
+      steps: [],
+      closed: true,
+    });
+    expect((await mirrorSummaries(db)).get("F01")).toMatchObject({
+      closed: 1,
+      losses: 1,
+      pnl: -2,
+    });
   });
 });

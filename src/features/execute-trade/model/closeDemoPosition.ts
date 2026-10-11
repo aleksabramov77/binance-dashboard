@@ -24,6 +24,8 @@ export interface CloseDemoResult {
   status: "closed" | "failed";
   message: string;
   steps: TradeStep[];
+  /** Средняя цена закрытия по рынку; позицию закрыла биржа (TP/SL) или ошибка — null. */
+  exitPrice: number | null;
 }
 
 const errorText = (error: unknown) =>
@@ -38,12 +40,16 @@ export async function closeDemoPosition(
   req: CloseDemoRequest,
 ): Promise<CloseDemoResult> {
   const steps: TradeStep[] = [];
-  const finish = (status: CloseDemoResult["status"], message: string) => {
-    const data = { ...req, steps };
+  const finish = (
+    status: CloseDemoResult["status"],
+    message: string,
+    exitPrice: number | null = null,
+  ): CloseDemoResult => {
+    const data = { ...req, steps, exitPrice };
     if (status === "closed")
       log.info("trade.closed", `${req.symbol}: ${message}`, data);
     else log.error("trade.close_failed", `${req.symbol}: ${message}`, data);
-    return { status, message, steps };
+    return { status, message, steps, exitPrice };
   };
 
   const config = getDemoTradingConfig();
@@ -87,7 +93,11 @@ export async function closeDemoPosition(
         ok: true,
         detail: `${Math.abs(position.amount)} по ~${order.avgPrice}, ордер #${order.orderId}`,
       });
-      return finish("closed", "Позиция закрыта по рынку.");
+      return finish(
+        "closed",
+        "Позиция закрыта по рынку.",
+        order.avgPrice > 0 ? order.avgPrice : null,
+      );
     }
 
     const rules = await fetchDemoSymbolRules("spot", req.symbol);
@@ -109,7 +119,13 @@ export async function closeDemoPosition(
       ok: true,
       detail: `${order.executedQty} ${baseAsset}, ордер #${order.orderId}`,
     });
-    return finish("closed", "Монеты проданы по рынку.");
+    return finish(
+      "closed",
+      "Монеты проданы по рынку.",
+      order.executedQty > 0
+        ? order.cummulativeQuoteQty / order.executedQty
+        : null,
+    );
   } catch (error) {
     steps.push({ label: "Закрытие", ok: false, detail: errorText(error) });
     return finish(

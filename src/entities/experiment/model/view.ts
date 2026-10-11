@@ -36,11 +36,13 @@ export const runInfoSchema = z.object({
   startedAt: z.string(),
 });
 
-/** Демо-торговля эксперимента за эпоху (spec 008), см. MirrorSummary. */
+/** Демо-торговля эксперимента с последнего демо-сброса (spec 008), см. MirrorSummary. */
 export const demoSummarySchema = z.object({
   trades: z.number().int(),
   open: z.number().int(),
   closed: z.number().int(),
+  wins: z.number().int(),
+  losses: z.number().int(),
   rejected: z.number().int(),
   pnl: z.number(),
 });
@@ -74,6 +76,8 @@ export const experimentDetailResponseSchema = z.object({
   equity: z.array(equityPointSchema),
   /** Сделки эпохи, новые сверху; не больше limit из запроса. */
   trades: z.array(paperTradeSchema),
+  /** Демо-торговля эксперимента с последнего демо-сброса. */
+  demo: demoSummarySchema,
   /** Demo-зеркало показанных сделок: id сделки → статус (spec 008). Нет ключа — не зеркалилась. */
   mirrors: z.record(z.string(), mirrorViewSchema),
 });
