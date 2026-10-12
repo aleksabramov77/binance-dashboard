@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  DemoMisses,
   formatRate,
   formatSignedUsd,
   type LabSettings,
@@ -63,7 +64,7 @@ const HELP: Record<SortKey, string> = {
   trading:
     "Галочка — новые входы эксперимента повторяются на демо-счёте Binance (виртуальные деньги). Включение и выключение — с подтверждением.",
   trades:
-    "Сделки на демо-счёте с последнего демо-сброса: закрытые (+ открытые сейчас); «отказ» — входы, которые биржа не приняла.",
+    "Сделки на демо-счёте с последнего демо-сброса: закрытые (+ открытые сейчас); «отказ» — биржа не приняла вход, «пропуск» — зеркало само не повторяло вход (монета занята другим зеркалом, вход старше 10 минут).",
   winRate: "Доля прибыльных среди закрытых демо-сделок.",
   pnl: "Плюс или минус на демо-счёте по эксперименту с последнего демо-сброса, $, без комиссий.",
   resetAt:
@@ -244,11 +245,7 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
                     {d.open > 0 && (
                       <span className="text-muted-foreground"> +{d.open}</span>
                     )}
-                    {d.rejected > 0 && (
-                      <span className="block text-xs text-muted-foreground">
-                        {d.rejected} отказ
-                      </span>
-                    )}
+                    <DemoMisses d={d} />
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
                     {d.closed ? formatRate(d.wins / d.closed) : "—"}

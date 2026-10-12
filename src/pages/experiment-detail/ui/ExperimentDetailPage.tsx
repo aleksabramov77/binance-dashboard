@@ -121,7 +121,10 @@ function DemoMetrics({ d, mirrored }: { d: DemoSummary; mirrored: boolean }) {
           value={d.closed ? formatRate(d.wins / d.closed) : "—"}
         />
         <Metric label="В плюс / в минус" value={`${d.wins} / ${d.losses}`} />
-        <Metric label="Не открылись" value={String(d.rejected)} />
+        <Metric
+          label="Отказ / пропуск"
+          value={`${d.rejected} / ${d.skipped}`}
+        />
       </div>
     </section>
   );
@@ -178,7 +181,7 @@ function MirrorCell({ mirror }: { mirror: MirrorView | undefined }) {
   const tone =
     mirror.status === "protected" || mirror.status === "closed"
       ? "outline"
-      : mirror.status === "rejected"
+      : mirror.status === "rejected" || mirror.status === "skipped"
         ? "secondary"
         : "destructive";
   return (

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useQueryState } from "nuqs";
 import { Suspense, useMemo } from "react";
 import {
+  DemoMisses,
   type ExperimentSummary,
   formatProfitFactor,
   formatRate,
@@ -108,7 +109,7 @@ const COLUMNS: {
     label: "Демо: сделки",
     numeric: true,
     description:
-      "Сделки на демо-счёте с последнего демо-сброса: закрытые (+ открытые сейчас). «отказ» — входы, которые биржа не приняла (мин. объём, устаревшие уровни) или зеркало пропустило.",
+      "Сделки на демо-счёте с последнего демо-сброса: закрытые (+ открытые сейчас). «отказ» — биржа не приняла вход (монеты нет на демо, мин. объём); «пропуск» — зеркало само не повторяло вход (по монете уже есть позиция другого эксперимента, вход старше 10 минут).",
   },
   {
     key: "demoWinRate",
@@ -164,17 +165,13 @@ function DemoCells({
         <DemoMirrorToggle experiment={e} demoConfigured={demoConfigured} />
       </TableCell>
       <TableCell className="text-right font-mono tabular-nums">
-        {d.trades || d.rejected ? (
+        {d.trades || d.rejected || d.skipped ? (
           <>
             {d.closed}
             {d.open > 0 && (
               <span className="text-muted-foreground"> +{d.open}</span>
             )}
-            {d.rejected > 0 && (
-              <span className="block text-xs text-muted-foreground">
-                {d.rejected} отказ
-              </span>
-            )}
+            <DemoMisses d={d} />
           </>
         ) : (
           <span className="text-muted-foreground">—</span>

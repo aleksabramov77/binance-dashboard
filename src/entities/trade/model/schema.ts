@@ -13,6 +13,17 @@ export const tradeRequestSchema = z.object({
   takeProfit: z.number().positive(),
   leverage: z.number().int().min(1).max(MAX_LEVERAGE),
   setupId: z.string().optional(),
+  /**
+   * Объём чуть ниже минимума символа (после округления количества) — поднять до минимума,
+   * но не больше чем втрое. Для demo-зеркала: $50 у BTCUSDT-фьючерсов округляются до $49,77.
+   */
+  fitMinNotional: z.boolean().optional(),
+  /**
+   * Только стоп, без тейка: spot — STOP_LOSS-ордер вместо OCO, futures — без TAKE_PROFIT.
+   * Для demo-зеркала стратегий без TP (трейлинг, выход по сигналу/времени): «дальний» TP
+   * Binance отклоняет фильтром PERCENT_PRICE_BY_SIDE, а с ним не встаёт и стоп.
+   */
+  stopOnly: z.boolean().optional(),
 });
 
 export const tradeStepSchema = z.object({

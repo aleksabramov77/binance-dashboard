@@ -17,6 +17,7 @@ export {
   demoFuturesReduceMarket,
   demoSpotMarketOrder,
   demoSpotOcoSell,
+  demoSpotStopLossSell,
   fetchDemoFills,
   fetchDemoFuturesPositions,
   fetchDemoOpenSymbols,
