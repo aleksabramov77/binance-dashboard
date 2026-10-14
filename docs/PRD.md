@@ -320,11 +320,13 @@ bStocks, но публичного торгового API для них не н�
 
 ## 7. Процесс разработки (решения пользователя 2026-10-10)
 Подробно — `docs/ai/workflow.md`. Новое требование → `/feature`, баг → `/bug`:
-Analyst (главная сессия: вопросы, PRD, ТЗ в `docs/specs/NNN-slug.md`) → ⏸ ТЗ → Developer (субагент,
-ветка `feat|fix/NNN-slug`, код + тесты) → Tester (субагент, Playwright, скриншоты,
+Analyst (главная сессия: вопросы, PRD, ТЗ в `docs/specs/NNNN-slug.md`) → ⏸ ТЗ → Developer (субагент,
+ветка `feature|bug/NNNN-slug`, код + тесты) → Tester (субагент, Playwright, скриншоты,
 PASS/FAIL по критериям) → ⏸ пользователь по скриншотам → PR → Reviewer (субагент, ревью в PR,
 label `ai-approved`) → ⏸ **мержит пользователь** командой `/merge`. Круги тестов и ревью — до 3, дальше
 к пользователю. CI (GitHub Actions): Biome · Steiger · typecheck · Vitest · build — на каждый PR и push в
 `main`. Ветка по умолчанию — `main` (без develop).
 **Один чат, одна задача за раз** (решение пользователя 2026-10-10, отменяет worktree-режим): без worktree и
 параллельных чатов; ветка задачи в основном checkout → PR → мерж → следующая задача.
+**Номер задачи** (решение пользователя 2026-10-15): сквозной `NNNN` на фичи, баги, hotfix и chore; ветки
+`<тип>/NNNN-slug`, коммиты `NNNN: что сделано`; история задач — `docs/HISTORY.md` (в контекст не подключается).
