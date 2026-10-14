@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import {
   engineStateTable,
   experimentsTable,
   paperTradesTable,
+  seedExperiments,
   withEngineTickLock,
 } from "@/entities/experiment";
 import { ENGINE_KEYS } from "@/features/paper-engine";
@@ -231,5 +232,44 @@ describe("createPerpetualsSource", () => {
     now = 2000;
     expect(await source()).toEqual(new Set(["A"]));
     expect(fetchSymbols).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("prepareEngineDb и приватные эксперименты (spec 0015)", () => {
+  it("сид каталога не удаляет и не меняет строку с id не из каталога", async () => {
+    // Фиктивный приватный эксперимент: записан pnpm lab:private, пользователь выключил его в /settings.
+    await seedExperiments(db, [
+      {
+        id: "PS99",
+        market: "spot",
+        name: "Фиктивный",
+        hypothesis: "Проверка",
+        config: {
+          timeframe: "1h",
+          entry: { type: "hold" },
+          exit: { stop: { type: "none" }, takeProfit: null },
+          universe: { type: "majors" },
+          directions: ["long"],
+          maxOpen: 1,
+        },
+        initialBudget: 777,
+        enabled: true,
+        demoMirror: false,
+      },
+    ]);
+    await db
+      .update(experimentsTable)
+      .set({ enabled: false })
+      .where(eq(experimentsTable.id, "PS99"));
+    const read = () =>
+      db.select().from(experimentsTable).where(eq(experimentsTable.id, "PS99"));
+    const [before] = await read();
+
+    await prepareEngineDb(db);
+    await prepareEngineDb(db);
+
+    expect(await read()).toEqual([before]);
+    expect(before).toMatchObject({ enabled: false, initialBudget: 777 });
+    expect(await db.select().from(experimentsTable)).toHaveLength(41);
   });
 });
