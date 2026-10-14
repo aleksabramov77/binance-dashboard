@@ -1,7 +1,7 @@
 # 007b · Основной хостинг: Supabase (движок + БД) и Vercel (интерфейс)
 
 - **Тип:** feature (задача 5b эпика [spec 003](003-experiments-lab.md))
-- **Статус:** approved
+- **Статус:** done
 - **Раздел PRD:** §3.4 «Авто-бот» → «Лаборатория экспериментов»
 - **Дата:** 2026-10-10
 
@@ -48,12 +48,16 @@
   - 2026-10-10 ✅: функция задеплоена в `binance-lab` (Tokyo), вызов с `?forceFunctionRegion=ap-northeast-1` — `x-sb-edge-region: ap-northeast-1`, Spot ping `200` (17 мс), Futures ping `200` (53 мс). Регион Tokyo подходит, переключение на Mumbai не нужно.
 - [x] AC2. `supabase/functions/engine-tick` выполняет один тик общего движка и пишет сделки и состояние в БД. Повторный вызов в ту же минуту ничего не дублирует.
   - 2026-10-10 ✅ (ветка `feat/007b-engine-tick`): функция вызывает общую композицию `src/app/server/engineTick.ts` (`runEngineTick`, та же на VM) с `runner: "supabase"`; хранилище — Drizzle + `npm:postgres` по `SUPABASE_DB_URL` (`prepare: false`). Код движка и ядра грузится исходниками через import map (`deno.json`). Тик — одна транзакция под `pg_try_advisory_xact_lock`: второй одновременный тик (VM, cron, ручной вызов) получает `locked` и ничего не делает. Запись сделок и неповторение — тесты `engineTick.test.ts` (PGlite). Функция задеплоена; ручной вызов в проде при `runner` ≠ supabase → `foreign-runner`, 137 мс, `x-sb-edge-region: ap-northeast-1`, в БД ничего не записано. Живой тик в проде — после переключения раннера (решение пользователя).
-- [ ] AC3. Миграция `drizzle/` создаёт задание pg_cron `engine-tick-every-minute`; ключ вызова — в Vault. В «Логах» Supabase видны ежеминутные вызовы.
+- [x] AC3. Миграция `drizzle/` создаёт задание pg_cron `engine-tick-every-minute`; ключ вызова — в Vault. В «Логах» Supabase видны ежеминутные вызовы.
   - 2026-10-10 ⏳: SQL готов — `supabase/migrations/20261010120000_engine_tick_cron.sql` (идемпотентный), ставится командой `pnpm engine:supabase cron-install` (Vault `engine_tick_url` + `engine_tick_secret`, затем `cron.schedule`). **Отступление от AC:** не в `drizzle/` — pg_cron и pg_net есть только в Supabase (в PGlite тестов их нет), а drizzle-миграции применяются автоматически (`pnpm dev` с `DATABASE_URL`, `pnpm db:migrate`), то есть ежеминутные вызовы в проде начались бы без решения пользователя. В прод не применено — ждёт команды пользователя.
+  - 2026-10-14 ✅ в проде (`pnpm engine:supabase status`): `runner: supabase`, `enabled: true`, задание
+    `engine-tick-every-minute` активно (`* * * * *`), последние запуски `succeeded`, последний тик `ok` без ошибок.
 - [x] AC4. Переключение раннера `oracle ↔ supabase` описано в `docs/ai/deploy-supabase.md`, тик чужого раннера — no-op.
   - 2026-10-10 ✅: `pnpm engine:supabase runner oracle|supabase` (ждёт конца текущего тика — та же advisory-блокировка) или SQL в разделе 7 `deploy-supabase.md`; no-op чужого раннера — тесты и живой вызов (AC2).
-- [ ] AC5. Vercel: проект из GitHub-репозитория, регион `hnd1`, env (`DATABASE_URL`, `AUTH_*`); страницы лаборатории открываются после входа через GitHub.
+- [x] AC5. Vercel: проект из GitHub-репозитория, регион `hnd1`, env (`DATABASE_URL`, `AUTH_*`); страницы лаборатории открываются после входа через GitHub.
   Сделано 2026-10-10: https://binance-dashboard-gold.vercel.app, функции в `hnd1`, env на месте, вход через OAuth App «Binance Dashboard (prod)» пускает `aleksabramov77`, без входа — `/login` и 401. Осталось: страницы лаборатории (задача 3b) — проверить после их мержа.
+  2026-10-14 ✅: страницы лаборатории смержены (PR #24–#26) и задеплоены — `/experiments`, `/stats`,
+  `/settings` без входа → 307 на `/login`, `GET /api/experiments` → 401. Вид после входа — у владельца.
 - [x] AC6. `docs/ai/deploy-supabase.md` — пошаговая инструкция для пользователя (iPhone/Mac, один шаг — одно действие, точные английские названия кнопок): Supabase-проект в Токио, ключи, Vercel, GitHub OAuth App с callback для домена `*.vercel.app`.
 
 ## Вне scope
@@ -75,3 +79,4 @@
 | 2026-10-10 | AC5/AC6: PR #18 (vercel.json `hnd1`, serverless-режим, инструкция); проект Vercel `binance-dashboard`, адрес https://binance-dashboard-gold.vercel.app, env через API Vercel, OAuth App «Binance Dashboard (prod)»; вход владельца проверен |
 | 2026-10-10 | AC1 ✅: из Tokyo Spot ping 200 (17 мс), Futures 200 (53 мс) |
 | 2026-10-10 | AC2, AC4 ✅, AC3 ⏳: `engine-tick` + advisory lock тика + pg_cron SQL + `pnpm engine:supabase` (ветка `feat/007b-engine-tick`); функция задеплоена, в проде no-op до переключения раннера |
+| 2026-10-14 | AC3, AC5 ✅: раннер `supabase`, pg_cron тика активен; страницы лаборатории в проде за входом. Spec — done (PR #19, #28, #18, #29) |
