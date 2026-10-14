@@ -69,13 +69,16 @@ export function afterFuturesStop(
   return stopOnly ? protectedOutcome(true) : "takeProfit";
 }
 
-/** Фьючерсы: тейк после стопа. Не встал — стоп стоит, но тейка нет: unprotected (тревога). */
+/**
+ * Фьючерсы: тейк после стопа. Не встал — стоп всё равно защищает от убытка, а выйдет позиция вместе с
+ * paper-сделкой: protected, как на споте при снятом биржей тейке (решение пользователя 2026-10-15).
+ */
 export function afterFuturesTakeProfit(placed: boolean): TradeOutcome {
   return placed
     ? protectedOutcome(false)
     : outcome(
-        "unprotected",
-        "Позиция открыта, стоп стоит, но тейк не выставился — проверьте на demo.binance.com.",
+        "protected",
+        "Позиция открыта, стоп стоит, тейк не выставился (выход — вместе с paper-сделкой).",
         true,
       );
 }

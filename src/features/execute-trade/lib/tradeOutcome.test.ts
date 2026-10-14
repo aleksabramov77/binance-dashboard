@@ -58,7 +58,9 @@ describe("фьючерсы", () => {
       message: "Позиция открыта, TP и SL выставлены.",
     });
     expect(afterFuturesTakeProfit(false)).toMatchObject({
-      status: "unprotected",
+      status: "protected",
+      message:
+        "Позиция открыта, стоп стоит, тейк не выставился (выход — вместе с paper-сделкой).",
       withEntry: true,
     });
   });
