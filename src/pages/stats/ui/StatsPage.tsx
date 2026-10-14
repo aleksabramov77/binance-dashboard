@@ -2,7 +2,6 @@
 
 import { ArrowLeft, Ban } from "lucide-react";
 import Link from "next/link";
-import { useQueryState } from "nuqs";
 import { Suspense, useMemo } from "react";
 import {
   blacklistCandidates,
@@ -21,10 +20,12 @@ import {
 } from "@/entities/experiment";
 import {
   cn,
+  defineSortTable,
   formatDateTime,
   formatUsd,
-  saveSort,
-  useRestoreSort,
+  type SavedSort,
+  type SortHeadProps,
+  useTableSort,
 } from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -44,14 +45,20 @@ import {
   TableRow,
 } from "@/shared/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
-import { sortGroups } from "../lib/sortGroups";
 import {
-  DIRECTION_FILTERS,
   GROUP_SORT_KEYS,
   type GroupSortKey,
+  sortGroups,
+} from "../lib/sortGroups";
+import {
+  DIRECTION_FILTERS,
   MARKET_FILTERS,
   useStatsView,
 } from "../model/useStatsView";
+
+const SORT_TABLE = defineSortTable("stats:groups", GROUP_SORT_KEYS);
+/** Без сохранённой сортировки — самые прибыльные группы сверху. */
+const DEFAULT_SORT: SavedSort<GroupSortKey> = { key: "pnl", dir: "desc" };
 
 const GROUP_BY_LABELS: Record<StatsGroupBy, string> = {
   experiment: "Эксперимент",
@@ -132,21 +139,17 @@ const COLUMNS: {
   },
 ];
 
-function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
-  const [{ sort, dir }, setView] = useStatsView();
+function ColumnHead({
+  column,
+  sort,
+}: {
+  column: (typeof COLUMNS)[number];
+  sort: SortHeadProps;
+}) {
   return (
     <SortableHead
       className={cn(column.numeric && "text-right")}
-      active={sort === column.key}
-      dir={dir}
-      onSort={(next) => {
-        void setView({ sort: column.key, dir: next });
-        saveSort("stats", { key: column.key, dir: next });
-      }}
-      onReset={() => {
-        void setView({ sort: null, dir: null });
-        saveSort("stats", null);
-      }}
+      {...sort}
       description={column.description}
     >
       {column.label}
@@ -493,11 +496,7 @@ function GroupRow({
 
 function StatsDashboard() {
   const [view, setView] = useStatsView();
-  // Последняя сортировка из localStorage, если в URL её нет.
-  const [urlSort] = useQueryState("sort");
-  useRestoreSort("stats", GROUP_SORT_KEYS, urlSort !== null, (saved) =>
-    setView({ sort: saved.key, dir: saved.dir }),
-  );
+  const { sort, head } = useTableSort(SORT_TABLE, DEFAULT_SORT);
   const { data, isPending, error, isPlaceholderData } = useTradeStats({
     groupBy: view.groupBy,
     market: view.market ?? undefined,
@@ -509,8 +508,8 @@ function StatsDashboard() {
   });
   const groups = data?.groups;
   const rows = useMemo(
-    () => sortGroups(groups ?? [], view.sort, view.dir),
-    [groups, view.sort, view.dir],
+    () => sortGroups(groups ?? [], sort.key, sort.dir),
+    [groups, sort],
   );
   const ranked = useMemo(() => rankGroups(groups ?? []), [groups]);
   // Подсветка — только когда показан разрез по монете (данные могут быть от прежнего разреза).
@@ -631,7 +630,7 @@ function StatsDashboard() {
                   <TableHeader>
                     <TableRow>
                       {COLUMNS.map((c) => (
-                        <ColumnHead key={c.key} column={c} />
+                        <ColumnHead key={c.key} column={c} sort={head(c.key)} />
                       ))}
                     </TableRow>
                   </TableHeader>

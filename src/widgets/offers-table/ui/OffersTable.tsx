@@ -4,6 +4,7 @@ import { OfferName, TierSummary } from "@/entities/earn-offer";
 import type { RankedOffer } from "@/features/offer-filters";
 import {
   cn,
+  defineSortTable,
   formatAmount,
   formatPercent,
   formatUsd,
@@ -33,6 +34,7 @@ const SORT_KEYS = [
   "tiers",
   "minimum",
 ] as const;
+const SORT_TABLE = defineSortTable("earn:offers", SORT_KEYS);
 const HELP: Record<(typeof SORT_KEYS)[number], string> = {
   product:
     "Монета и тип продукта Simple Earn: Flexible — можно забрать в любой момент, Locked — на срок.",
@@ -71,7 +73,7 @@ const SORT_VALUE: Record<
 
 export function OffersTable({ ranked }: { ranked: RankedOffer[] }) {
   // Без выбранной колонки — порядок ранжирования (лучшая ставка сверху).
-  const { sort, head } = useTableSort("offersSort", SORT_KEYS);
+  const { sort, head } = useTableSort(SORT_TABLE);
   const rows = sort ? sortRows(ranked, SORT_VALUE[sort.key], sort.dir) : ranked;
   if (ranked.length === 0) {
     return (

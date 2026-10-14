@@ -20,6 +20,7 @@ import {
 } from "@/entities/experiment";
 import {
   cn,
+  defineSortTable,
   formatDateTime,
   formatPair,
   formatPrice,
@@ -142,6 +143,11 @@ const TRADE_SORT_KEYS = [
   "r",
   "mirror",
 ] as const;
+// Маршрут без id: одна сортировка сделок на все эксперименты (решение пользователя 2026-10-15).
+const TRADES_TABLE = defineSortTable(
+  "experiments/[id]:trades",
+  TRADE_SORT_KEYS,
+);
 const HELP: Record<(typeof TRADE_SORT_KEYS)[number], string> = {
   openedAt: "Время входа в сделку (по закрытию свечи сигнала).",
   closedAt: "Время выхода. «открыта» — сделка ещё идёт.",
@@ -198,7 +204,7 @@ function TradesTable({
   trades: PaperTrade[];
   mirrors: Record<string, MirrorView>;
 }) {
-  const { sort, head } = useTableSort("tradesSort", TRADE_SORT_KEYS);
+  const { sort, head } = useTableSort(TRADES_TABLE);
   const rows = sort
     ? sortRows(
         trades,

@@ -1,5 +1,18 @@
 import type { StatsGroupView } from "@/entities/experiment";
-import type { GroupSortKey, SortDir } from "../model/useStatsView";
+import type { SortDir } from "@/shared/lib";
+
+export const GROUP_SORT_KEYS = [
+  "key",
+  "trades",
+  "winRate",
+  "pnl",
+  "fees",
+  "profitFactor",
+  "avgR",
+  "maxDrawdown",
+] as const;
+
+export type GroupSortKey = (typeof GROUP_SORT_KEYS)[number];
 
 /** Значение колонки для сортировки; null (нет данных) — всегда в конце. */
 function sortValue(g: StatsGroupView, key: GroupSortKey): number | null {

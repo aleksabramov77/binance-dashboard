@@ -5,9 +5,9 @@ export {
   sortRows,
 } from "./sortRows";
 export {
-  loadSort,
+  defineSortTable,
   type SavedSort,
-  saveSort,
-  useRestoreSort,
+  type SortTable,
+  type SortTableName,
 } from "./sortStorage";
-export { useTableSort } from "./useTableSort";
+export { type SortHeadProps, useTableSort } from "./useTableSort";
