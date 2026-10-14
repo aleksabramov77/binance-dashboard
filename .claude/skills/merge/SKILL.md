@@ -16,8 +16,9 @@ PR: $ARGUMENTS (если пусто — `gh pr list` и спроси, какой
 
 ## Мерж
 1. `gh pr merge <N> --squash` (заголовок — заголовок PR). Без `--delete-branch`: ветка открыта в worktree задачи,
-   gh не сможет удалить её локально и тогда не удалит и на GitHub. Ветку на GitHub удали сам:
-   `git push origin --delete <headRefName>`.
+   gh не сможет удалить её локально и тогда не удалит и на GitHub. Ветку на GitHub удали сам —
+   `git push origin --delete <headRefName>`, но только когда `gh pr view <N> --json state` показывает `MERGED`:
+   удаление ветки открытого PR закрывает его.
 2. Основной checkout (первая строка `git worktree list`) стоит на `main` — там `git pull --ff-only`. Открыта другая
    ветка или есть незакоммиченные изменения — не трогай: `git fetch origin main:main` и сообщи пользователю.
 3. Статусы обновляются ещё в ветке задачи (шаг 6 конвейера), поэтому после мержа проверь в `main`:
