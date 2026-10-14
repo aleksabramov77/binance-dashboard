@@ -20,6 +20,9 @@
 # production
 /build
 
+# приватные эксперименты и анализы — клон binance-dashboard-private (spec 0015)
+/private
+
 # misc
 .DS_Store
 *.pem
