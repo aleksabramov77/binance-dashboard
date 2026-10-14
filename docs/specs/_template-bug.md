@@ -1,4 +1,4 @@
-# NNN · <Короткое описание бага>
+# NNNN · <Короткое описание бага>
 
 - **Тип:** bug
 - **Статус:** draft | approved | in-progress | testing | review | done

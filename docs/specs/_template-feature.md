@@ -1,4 +1,4 @@
-# NNN · <Название фичи>
+# NNNN · <Название фичи>
 
 - **Тип:** feature
 - **Статус:** draft | approved | in-progress | testing | review | done
