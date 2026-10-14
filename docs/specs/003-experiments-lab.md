@@ -1,7 +1,7 @@
 # 003 · Лаборатория торговых экспериментов (эпик)
 
 - **Тип:** feature (эпик, разбит на задачи ниже)
-- **Статус:** in-progress
+- **Статус:** done (все задачи эпика смержены; Oracle VM — резерв, не создавалась)
 - **Раздел PRD:** §3.4 «Авто-бот» → «Лаборатория экспериментов»
 - **Дата:** 2026-10-10
 
@@ -16,19 +16,19 @@
 | 1a | Индикаторы `shared/lib/ta.ts` + схемы `entities/experiment` | `feat/003a-ta-schema` | main | ✅ #7 |
 | 1b | Стратегии входа `features/paper-engine/lib/strategies.ts` + тесты | `feat/003b-strategies` | 1a | ✅ #8 |
 | 1c | Торговое ядро `packages/trading-core` (перенос индикаторов, схем, стратегий) + выходы, sizing 0,5%, исполнение + тесты | `feat/003c-exits-sizing` | 1b | ✅ #13 |
-| 1d | Тик движка, кэш свечей, юниверс, каталог 40 экспериментов, интерфейс хранилища | `feat/003d-engine` | 1c + 2a | PR #20 |
+| 1d | Тик движка, кэш свечей, юниверс, каталог 40 экспериментов, интерфейс хранилища | `feat/003d-engine` | 1c + 2a | ✅ #20 |
 | 2a | БД: Drizzle, PGlite локально / Postgres по `DATABASE_URL`, схема, миграции | `feat/004a-db` | 1a | ✅ #9 |
-| 2b | Репозиторий, сид каталога, движок пишет в БД, старт в `instrumentation.ts` | `feat/004b-db-engine` | 1d | PR #21 (база 1d) |
-| 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | PR #22 |
-| 3b | `/experiments` и `/experiments/[id]`, агрегаты `entities/experiment/lib/stats.ts`, API `GET /api/experiments[/id]` | `feat/005b-experiments-page` | 2b | PR (см. ветку); скриншоты `003-experiments-lab/screens/3b-*.png` |
-| 3c | `/stats` — разрезы эксперимент/рынок/монета/направление, фильтры и сортировка в URL, топ-3 лучших/худших, кандидаты в blacklist; API `GET /api/experiments/stats`, разрезы `entities/experiment/lib/slices.ts` | `feat/005c-stats` | 3b | PR (см. ветку); скриншоты `003-experiments-lab/screens/3c-*.png` |
-| 3d | `/settings` — сброс тестовых капиталов (новая эпоха), стартовый бюджет, вкл/выкл экспериментов | `feat/005d-settings` | 2b | PR #26 |
-| 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | PR #23 |
+| 2b | Репозиторий, сид каталога, движок пишет в БД, старт в `instrumentation.ts` | `feat/004b-db-engine` | 1d | ✅ #21 |
+| 3a | Хедер: тоггл «Автоторговля» + бюджеты Spot/Futures | `feat/005a-header` | 2b | ✅ #22 |
+| 3b | `/experiments` и `/experiments/[id]`, агрегаты `entities/experiment/lib/stats.ts`, API `GET /api/experiments[/id]` | `feat/005b-experiments-page` | 2b | ✅ #24; скриншоты `003-experiments-lab/screens/3b-*.png` |
+| 3c | `/stats` — разрезы эксперимент/рынок/монета/направление, фильтры и сортировка в URL, топ-3 лучших/худших, кандидаты в blacklist; API `GET /api/experiments/stats`, разрезы `entities/experiment/lib/slices.ts` | `feat/005c-stats` | 3b | ✅ #25; скриншоты `003-experiments-lab/screens/3c-*.png` |
+| 3d | `/settings` — сброс тестовых капиталов (новая эпоха), стартовый бюджет, вкл/выкл экспериментов | `feat/005d-settings` | 2b | ✅ #26 |
+| 3e | Удаление старых автосделок spec 002 с `/signals` | `feat/005e-remove-auto-trade` | 3a | ✅ #23 |
 | 4 | Вход через GitHub (Auth.js, allowlist), `CRON_SECRET` | `feat/006-auth` | main | ✅ #10 |
 | 5 | Резерв: деплой на Oracle Cloud Always Free (UAE East, Dubai) | `feat/007-deploy` | main | ✅ #12 (VM не создана) |
-| 5b | **Основной хостинг**: Supabase — `binance-ping`, `engine-tick`, pg_cron, Vault (spec 007b, AC1–AC4) | `feat/007b-supabase`, `feat/007b-engine-tick` | main (ping) / 2b (тик) | spec ✅ #14; БД `binance-lab` (Tokyo) создана, миграции применены; AC1 ✅ #19 (Tokyo: spot 200, futures 200); AC2/AC4 ✅ `engine-tick` задеплоена, вызов при `runner` ≠ supabase — no-op; AC3 ⏳ задание pg_cron готово (`pnpm engine:supabase cron-install`), в прод не применено — решение пользователя |
-| 5c | **Основной хостинг**: Vercel (hnd1) + GitHub OAuth App под `*.vercel.app` (spec 007b, AC5–AC6) | `feat/007c-vercel` | main | ✅ #18 (код); ждёт проект и токен Vercel от пользователя |
-| 6 | Demo-зеркало лучших экспериментов | `feat/008-demo-mirror` | 2b | — |
+| 5b | **Основной хостинг**: Supabase — `binance-ping`, `engine-tick`, pg_cron, Vault (spec 007b, AC1–AC4) | `feat/007b-supabase`, `feat/007b-engine-tick` | main (ping) / 2b (тик) | spec ✅ #14; БД `binance-lab` (Tokyo) создана, миграции применены; AC1 ✅ #19 (Tokyo: spot 200, futures 200); AC2/AC4 ✅ `engine-tick` задеплоена, вызов при `runner` ≠ supabase — no-op; AC3 ✅ #28 — в проде раннер `supabase`, pg_cron тика активен (проверено 2026-10-14) |
+| 5c | **Основной хостинг**: Vercel (hnd1) + GitHub OAuth App под `*.vercel.app` (spec 007b, AC5–AC6) | `feat/007c-vercel` | main | ✅ #18 #29 — https://binance-dashboard-gold.vercel.app |
+| 6 | Demo-зеркало лучших экспериментов | `feat/008-demo-mirror` | 2b | ✅ #38 #39 #41 #42 #43 ([spec 008](008-demo-mirror.md)) |
 
 **Требования к движку (1d, 2b) из резервного хостинга (spec 007b):** тик — среда-независимая функция
 с внедряемыми зависимостями (свечи, хранилище, часы), без `node:*`, `process.env`, `fs` и таймеров: её
