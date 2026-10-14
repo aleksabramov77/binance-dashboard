@@ -1,17 +1,17 @@
 # Документация для AI-агентов
 
 Читать в начале любой задачи. Порядок: этот файл → `architecture.md` → `conventions.md` →
-спецификация задачи (`docs/specs/NNN-*.md`) → README модуля, который меняешь.
+спецификация задачи (`docs/specs/NNNN-*.md`) → README модуля, который меняешь.
 
 | Файл | О чём |
 |---|---|
 | [`../PRD.md`](../PRD.md) | Что за продукт, требования по разделам, решения пользователя, журнал этапов |
 | [`architecture.md`](architecture.md) | FSD-слои, сервер/клиент, данные, логирование, где что лежит |
-| [`conventions.md`](conventions.md) | Нейминг, тесты, коммиты, ветки, PR, Definition of Done |
+| [`conventions.md`](conventions.md) | Нейминг, тесты, номер задачи, коммиты, ветки, PR, Definition of Done |
 | [`workflow.md`](workflow.md) | AI-конвейер: `/feature`, `/bug`, `/merge`, роли агентов |
 | [`deploy-supabase.md`](deploy-supabase.md) | **Основной деплой:** Supabase (БД, тик) + Vercel (интерфейс, регион Tokyo) |
 | [`deploy.md`](deploy.md) | Резервный деплой на Oracle Cloud (Dubai): VM, HTTPS, Supabase, GitHub OAuth, автодеплой, ключи на сервере |
-| [`../specs/`](../specs/) | ТЗ на каждую фичу и баг (`NNN-slug.md`) + шаблоны |
+| [`../specs/`](../specs/) | ТЗ на каждую фичу и баг (`NNNN-slug.md`) + шаблоны |
 
 README внутри сложных модулей (читать перед правкой модуля):
 - `src/shared/api/binance/README.md` — клиенты Binance: публичный, read-only, Demo Trading.

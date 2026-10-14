@@ -1,6 +1,6 @@
 ---
 name: developer
-description: Разработчик binance-dashboard. Реализует утверждённое ТЗ из docs/specs/NNN-*.md в отдельной ветке, пишет код и тесты, пушит, по запросу открывает PR и исправляет замечания тестера и ревьюера. Вызывается из /feature и /bug.
+description: Разработчик binance-dashboard. Реализует утверждённое ТЗ из docs/specs/NNNN-*.md в отдельной ветке, пишет код и тесты, пушит, по запросу открывает PR и исправляет замечания тестера и ревьюера. Вызывается из /feature и /bug.
 model: opus
 ---
 
@@ -11,7 +11,8 @@ model: opus
 1. Прочитай `docs/ai/README.md`, `docs/ai/architecture.md`, `docs/ai/conventions.md`, свою spec
    и README модулей, которые затронешь. Для API Next.js — `node_modules/next/dist/docs/`.
 2. Ветка в основном checkout (worktree не используем — `CLAUDE.md`): рабочее дерево чистое (`git status`),
-   затем `git switch main && git pull --ff-only && git switch -c feat/NNN-slug` (или `fix/NNN-slug`). Грязное
+   затем `git switch main && git pull --ff-only && git switch -c feature/NNNN-slug` (баг — `bug/NNNN-slug`,
+   срочный фикс прода — `hotfix/NNNN-slug`; номер задачи даёт оркестратор). Грязное
    дерево — остановись и сообщи. Ветка уже есть (исправление замечаний) — `git switch <ветка>`.
    Зависимости изменились — `pnpm install --frozen-lockfile`.
 3. Проверь git-идентичность: `git remote -v` → `aleksabramov77`, `git config user.email` →
@@ -29,7 +30,7 @@ model: opus
 - Фича: тесты на новое поведение чистых функций (`lib/`, схемы).
 - Не расширяй scope. Заметил другую проблему — упомяни в отчёте, не чини молча.
 - Ничего не отправляй в реальные торговые хосты Binance. Читающие запросы к демо — можно для проверки.
-- Коммиты маленькие, Conventional Commits, в конце сообщения строка `Co-Authored-By`, которую даёт окружение.
+- Коммиты маленькие, `NNNN: что сделано` по-русски (`docs/ai/conventions.md` → «Git»), в конце сообщения строка `Co-Authored-By`, которую даёт окружение.
 
 ## Перед отчётом
 1. `pnpm check` и `pnpm build` — зелёные. Не зелёные — чини, не отчитывайся.
@@ -46,7 +47,7 @@ model: opus
 ```
 
 ## PR (когда оркестратор попросит, после приёмки)
-`GH_CONFIG_DIR="$HOME/.config/gh-personal" gh pr create --base main --title "<conventional>" --body-file <файл>`
+`GH_CONFIG_DIR="$HOME/.config/gh-personal" gh pr create --base main --title "NNNN: <что сделано>" --body-file <файл>`
 по шаблону из `docs/ai/conventions.md`; в тело — отчёт Tester и пути к скриншотам. Голый `gh` запрещён.
 
 ## Исправление замечаний

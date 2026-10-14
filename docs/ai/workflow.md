@@ -6,9 +6,9 @@
 ```
 /feature <требование>   |   /bug <описание>
  │
- ├─1. ANALYST — главная сессия (нужен диалог)            → docs/PRD.md + docs/specs/NNN-slug.md
+ ├─1. ANALYST — главная сессия (нужен диалог)            → номер NNNN, docs/PRD.md + docs/specs/NNNN-slug.md
  │     ⏸ пользователь подтверждает ТЗ
- ├─2. DEVELOPER — субагент `developer`                    → ветка feat|fix/NNN-slug, код + тесты, push
+ ├─2. DEVELOPER — субагент `developer`                    → ветка feature|bug/NNNN-slug, код + тесты, push
  ├─3. TESTER — субагент `tester`                           → скриншоты + отчёт PASS/FAIL по критериям
  │     FAIL → 2 (до 3 кругов, дальше — к пользователю)
  │     ⏸ пользователь смотрит скриншоты: «ок» / «не то: …» (→ 2)
@@ -32,9 +32,10 @@ CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger �
 субагент: свежий контекст, не «помнит», как писался код.
 
 ## Артефакты задачи
-- `docs/specs/NNN-slug.md` — ТЗ (шаблоны `_template-feature.md`, `_template-bug.md`). NNN — следующий
-  свободный номер. В конце spec — «Журнал»: ветка, PR, круги тестов/ревью, статус.
-- `docs/specs/NNN-slug/screens/*.png` — скриншоты приёмки (коммитятся в ветку задачи).
+- Номер задачи `NNNN` — сквозной на все типы, строка в `docs/HISTORY.md` (правила — `conventions.md` → «Git»).
+- `docs/specs/NNNN-slug.md` — ТЗ (шаблоны `_template-feature.md`, `_template-bug.md`). В конце spec —
+  «Журнал»: ветка, PR, круги тестов/ревью, статус.
+- `docs/specs/NNNN-slug/screens/*.png` — скриншоты приёмки (коммитятся в ветку задачи).
 - PR со ссылкой на spec; ревью — комментарием в PR (approve своего PR GitHub не даёт → label `ai-approved`).
 
 ## Защита main
@@ -50,4 +51,6 @@ CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger �
 Субагенты конвейера (Developer, Tester, Reviewer) допустимы только последовательно, в том же checkout.
 
 ## Мелочи без конвейера
-Опечатки, тексты, правки документации можно делать напрямую в ветке `chore/…`/`docs/…` + PR, без spec.
+Опечатки, тексты, правки документации можно делать напрямую в ветке `chore/NNNN-slug` + PR, без spec.
+Номер и строка в `docs/HISTORY.md` нужны и здесь. Срочный фикс прода — `hotfix/NNNN-slug` (можно без spec,
+но с падающим тестом).
