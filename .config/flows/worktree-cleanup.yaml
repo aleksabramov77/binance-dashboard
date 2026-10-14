@@ -1,0 +1,22 @@
+# /flow worktree-cleanup — навести порядок в worktree: удалить те, чьи задачи давно влиты (с остановкой их локального
+# сервера), и показать забытые. Тот же прогон без вопросов делает хук SessionStart при старте каждой сессии
+# (.claude/settings.json → `pnpm wt prune --quiet`). Правила — .claude/skills/worktree/SKILL.md.
+description: Удалить worktree давно влитых задач (с остановкой локального сервера) и разобрать забытые.
+stages:
+  - id: list
+    run: pnpm -s wt list
+
+  - id: prune
+    note: >
+      Удаляет worktree, чей PR влит больше суток назад, если в нём всё закоммичено и запушено. Текущий worktree и
+      основной checkout не трогает.
+    run: pnpm -s wt prune --older-than 24h
+    produces: отчёт об очистке
+
+  - id: leftovers
+    uses: [prune]
+    note: >
+      Пропустить, если в отчёте нет раздела «Worktree требуют решения». Иначе покажи пользователю каждый такой worktree
+      (PR закрыт без мержа, влит, но есть изменения, нет PR больше 14 дней) и спроси, что делать: удалить
+      (`pnpm wt remove <ветка> --force`) или оставить. Без ответа ничего не удалять.
+    gate: user-approval

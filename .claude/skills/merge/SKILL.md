@@ -24,10 +24,10 @@ PR: $ARGUMENTS (если пусто — `gh pr list` и спроси, какой
 
 ## Уборка
 - Локальная ветка PR: `git branch -D <headRefName>`, если осталась; `git fetch --prune`.
-- Старые worktree (новые не создаём — `CLAUDE.md`): для каждого из `git worktree list`, кроме
-  основного, чья ветка смержена в `main` (`git branch --merged main`) или удалена на remote, —
-  `git worktree remove <путь>` (незакоммиченные изменения внутри → не удаляй, спроси пользователя),
-  затем `git worktree prune`. Worktree с несмерженными ветками не трогай.
+- Worktree задачи (`pnpm wt list`): удаляется после выкатки — `pnpm wt remove <headRefName>` (этап `cleanup`
+  в `/flow feature|bug`; при мерже без `/flow` — сразу после выкатки). Есть незакоммиченные изменения или
+  незапушенные коммиты — не удаляй, спроси пользователя. Забытые worktree других влитых задач —
+  `pnpm wt prune` (его же запускает хук `SessionStart`).
 
 ## Отчёт пользователю
 Что смержено (заголовок, коммит в main), что убрано (ветки, worktree), что обновлено в PRD/spec.

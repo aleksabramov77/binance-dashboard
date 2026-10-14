@@ -1,22 +1,78 @@
-# /flow bug "<что сломалось>" — баг целиком: конвейер /bug (падающий тест → фикс) до готового PR, мерж по команде
-# пользователя и выкатка (/flow release). Исполняет скилл flow (~/.claude-second/skills/flow).
-description: Баг целиком — воспроизведение и ТЗ, фикс через падающий тест, приёмка, PR и ревью, мерж по команде, выкатка.
+# /flow bug "<что сломалось>" — баг целиком, как feature: свой worktree, падающий тест → фикс, проверка на локальном
+# сервере worktree до PR и после правок по ревью, мерж по команде пользователя, выкатка, удаление worktree.
+# Как выполнять этапы — .claude/skills/bug/SKILL.md (Analyst бага) и .claude/skills/feature/SKILL.md (остальные шаги).
+description: Баг целиком — воспроизведение и ТЗ, worktree, фикс через падающий тест, проверка на локальном сервере, PR и ревью с перепроверкой, мерж по команде, выкатка, удаление worktree.
 stages:
-  - id: build
-    skills: [bug]
+  - id: spec
     note: >
-      Скилл bug ведёт исправление до PR с зелёным CI и label ai-approved, со своими остановками. В конце покажи
-      пользователю PR и спроси, мержить ли.
+      Шаг «1. Analyst (баг)» из .claude/skills/bug/SKILL.md: факты из журнала и кода, docs/specs/NNN-slug.md по шаблону
+      бага, утверждение.
+    produces: путь к spec
+    gate: user-approval
+
+  - id: worktree
+    uses: [spec]
+    note: >
+      Из основного checkout: `pnpm wt new fix/NNN-slug`. Все следующие этапы — в этом worktree; в основном checkout
+      ветки не переключать.
+    produces: путь к worktree
+
+  - id: develop
+    uses: [spec, worktree]
+    note: >
+      Субагент developer в worktree: сначала тест, который воспроизводит баг и падает, потом фикс; раздел «Причина»
+      в spec (.claude/skills/bug/SKILL.md → «Особенности для Developer»).
+    produces: ветка задачи
+
+  - id: check
+    uses: [worktree]
+    note: В worktree. Красное — назад в develop.
+    run: pnpm check && pnpm build
+
+  - id: serve
+    uses: [worktree]
+    note: В worktree. Сервер работает на своей PGlite и без входа — прод не трогается.
+    run: pnpm wt serve
+    produces: адрес локального сервера
+
+  - id: test
+    uses: [spec, serve]
+    note: >
+      Субагент tester на адресе из serve: все AC и исходные шаги воспроизведения — баг не повторяется. FAIL → develop →
+      check → test, до 3 кругов, потом — к пользователю. PASS → таблица AC и скриншоты пользователю.
+    gate: user-approval
+
+  - id: pr
+    uses: [spec]
+    note: >
+      Developer открывает PR: описание — что исправлено, сначала кратко, потом подробнее.
     produces: номер PR
+
+  - id: review
+    uses: [pr, spec, serve]
+    note: >
+      Субагент reviewer. CHANGES REQUESTED → developer правит → check → tester снова проходит AC и шаги
+      воспроизведения на локальном сервере worktree → снова reviewer. До 3 кругов. Итог — label ai-approved.
+
+  - id: ready
+    uses: [pr]
+    note: >
+      Статусы spec и PRD последним коммитом, зелёный CI. Покажи пользователю PR и спроси, мержить ли.
+    run: GH_CONFIG_DIR="$HOME/.config/gh-personal" gh pr checks --watch
     gate: user-approval
 
   - id: merge
-    uses: [build]
+    uses: [pr]
     note: >
-      Мерж по команде пользователя из этапа build («мерж»): выполни .claude/skills/merge/SKILL.md для этого PR.
-      Скилл merge вызывает только пользователь, поэтому этап идёт по его тексту.
+      Мерж по команде пользователя («мерж»): из основного checkout выполни .claude/skills/merge/SKILL.md для этого PR.
     produces: коммит в main
 
   - id: release
     flow: release
     uses: [merge]
+
+  - id: cleanup
+    uses: [worktree]
+    note: >
+      После мержа и выкатки, из основного checkout: `pnpm wt remove <ветка задачи>` — остановит сервер, удалит worktree
+      и локальную ветку.

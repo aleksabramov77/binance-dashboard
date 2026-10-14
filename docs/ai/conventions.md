@@ -25,7 +25,8 @@
 - Имена тестов — по-русски, описывают поведение («складывает fills одного ордера…»).
 
 ## Git
-- Ветки: `feat/NNN-slug`, `fix/NNN-slug`, `chore/slug`, `docs/slug` (NNN — номер spec).
+- Ветки: `feat/NNN-slug`, `fix/NNN-slug`, `chore/slug`, `docs/slug` (NNN — номер spec). Каждая ветка задачи живёт
+  в своём worktree (`pnpm wt new <ветка>`, скилл `worktree`); основной checkout — только `main`.
 - Коммиты — Conventional Commits на английском: `feat: …`, `fix: …`, `chore: …`, `docs: …`, `test: …`, `refactor: …`.
 - В `main` — только через PR и `/merge` (squash). Прямой push в `main` блокирует pre-push хук.
 - Автор — `Aleksandr Abramov <aleksabramov77@gmail.com>`, remote — `git@github-personal:aleksabramov77/…`.

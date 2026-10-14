@@ -1,23 +1,80 @@
-# /flow feature "<требование>" — новое требование целиком: конвейер /feature до готового PR, мерж по команде
-# пользователя и выкатка (/flow release). Исполняет скилл flow (~/.claude-second/skills/flow). Правила CLAUDE.md
-# главнее этого файла: мерж — только по явной команде пользователя.
-description: Новое требование целиком — ТЗ, разработка, приёмка, PR и ревью, мерж по команде, выкатка.
+# /flow feature "<требование>" — новое требование целиком. Каждая задача — в своём worktree (скилл worktree,
+# `pnpm wt`); проверка на локальном сервере worktree агентом-тестировщиком до PR и ещё раз после правок по ревью;
+# мерж — только по команде пользователя; после мержа — выкатка и удаление worktree.
+# Как выполнять этапы (Analyst, задания агентам) — .claude/skills/feature/SKILL.md. Правила CLAUDE.md главнее.
+description: Новое требование целиком — ТЗ, worktree, разработка, проверка на локальном сервере, PR и ревью с перепроверкой, мерж по команде, выкатка, удаление worktree.
 stages:
-  - id: build
-    skills: [feature]
+  - id: spec
     note: >
-      Скилл feature ведёт задачу до PR с зелёным CI и label ai-approved, со своими остановками (утверждение ТЗ,
-      приёмка по скриншотам). В конце покажи пользователю PR и спроси, мержить ли.
+      Шаг «1. Analyst» из .claude/skills/feature/SKILL.md: PRD и docs/specs/NNN-slug.md, утверждение ТЗ.
+    produces: путь к spec
+    gate: user-approval
+
+  - id: worktree
+    uses: [spec]
+    note: >
+      Из основного checkout: `pnpm wt new feat/NNN-slug` (номер и slug — из spec). Все следующие этапы задачи —
+      в этом worktree; в основном checkout ветки не переключать. Spec и правка PRD переезжают первым коммитом ветки.
+    produces: путь к worktree
+
+  - id: develop
+    uses: [spec, worktree]
+    note: >
+      Субагент developer реализует spec в worktree (шаг «2. Developer» в SKILL.md); вопросы — пользователю.
+    produces: ветка задачи
+
+  - id: check
+    uses: [worktree]
+    note: В worktree. Красное — назад в develop.
+    run: pnpm check && pnpm build
+
+  - id: serve
+    uses: [worktree]
+    note: В worktree. Сервер работает на своей PGlite и без входа — прод не трогается.
+    run: pnpm wt serve
+    produces: адрес локального сервера
+
+  - id: test
+    uses: [spec, serve]
+    note: >
+      Субагент tester проверяет все критерии приёмки на адресе из serve (шаг «3. Tester» в SKILL.md), свой сервер не
+      запускает. FAIL → develop → check → test, до 3 кругов, потом — к пользователю. PASS → таблица AC и скриншоты
+      пользователю: «на экране то, что заказывал?».
+    gate: user-approval
+
+  - id: pr
+    uses: [spec]
+    note: >
+      Developer открывает PR (шаг «4. PR»): описание — что сделано, сначала кратко, потом подробнее.
     produces: номер PR
+
+  - id: review
+    uses: [pr, spec, serve]
+    note: >
+      Субагент reviewer (шаг «5. Reviewer»). CHANGES REQUESTED → developer правит → check → tester снова проходит все
+      AC на локальном сервере worktree (перезапуск — `pnpm wt serve`), чтобы правки ничего не сломали → снова
+      reviewer. До 3 кругов, потом — к пользователю. Итог — label ai-approved.
+
+  - id: ready
+    uses: [pr]
+    note: >
+      Шаг «6. Финал»: статусы spec и PRD последним коммитом, зелёный CI. Покажи пользователю PR и спроси, мержить ли.
+    run: GH_CONFIG_DIR="$HOME/.config/gh-personal" gh pr checks --watch
     gate: user-approval
 
   - id: merge
-    uses: [build]
+    uses: [pr]
     note: >
-      Мерж по команде пользователя из этапа build («мерж»): выполни .claude/skills/merge/SKILL.md для этого PR.
+      Мерж по команде пользователя («мерж»): из основного checkout выполни .claude/skills/merge/SKILL.md для этого PR.
       Скилл merge вызывает только пользователь, поэтому этап идёт по его тексту.
     produces: коммит в main
 
   - id: release
     flow: release
     uses: [merge]
+
+  - id: cleanup
+    uses: [worktree]
+    note: >
+      После мержа и выкатки, из основного checkout: `pnpm wt remove <ветка задачи>` — остановит локальный сервер,
+      удалит worktree и локальную ветку.
