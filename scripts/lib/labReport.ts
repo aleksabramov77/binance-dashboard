@@ -1,10 +1,13 @@
 // Отчёт лаборатории для разбора экспериментов (`pnpm lab:report`, flow lab). Чистые функции: на входе —
-// эксперименты и сделки эпохи, на выходе — метрики, разрезы и диагностика для скилла trading-lab
-// (.claude/skills/trading-lab). Агрегаты PnL/PF/просадки — общие с /stats (entities/experiment).
-import type {
-  Experiment,
-  ExperimentMarket,
-  PaperTrade,
+// эксперименты и сделки эпохи (+ контекст рынка), на выходе — метрики, разрезы, семейства, подсказки и
+// markdown/CSV для агента quant и скилла trading-lab (.claude/skills/trading-lab). Агрегаты PnL/PF/просадки —
+// общие с /stats (entities/experiment).
+import {
+  type EntryRule,
+  type Experiment,
+  type ExperimentMarket,
+  type PaperTrade,
+  TIMEFRAME_MS,
 } from "@binance-dashboard/trading-core";
 import {
   type ConfigLine,
@@ -14,6 +17,7 @@ import {
   groupStats,
   type TradeStats,
 } from "@/entities/experiment";
+import { describeMarket, type MarketContext } from "./labMarket";
 
 const DAY = 86_400_000;
 const MINUTE = 60_000;
@@ -34,11 +38,73 @@ export const SAMPLE_THRESHOLDS = {
   confident: 200,
 } as const;
 
+/** Пороги механических подсказок о причине результата (trading-lab → references/failure-modes.md). */
+export const HINT_RULES = {
+  /** Меньше закрытых сделок — подсказки о выходах/направлении/концентрации не считаются. */
+  minClosed: 10,
+  /** Доля убыточных со стопом, побывавших в плюсе ≥ 1R. */
+  giveBackShare: 0.25,
+  /** Прибыльные удерживают меньше этой доли своего MFE (реализованный R / MFE в R). */
+  cutWinnersKeepShare: 0.5,
+  /** Доля стопов, сработавших раньше одной свечи ТФ. */
+  stopInNoiseShare: 0.5,
+  /** Доля PnL от одной монеты или одной сделки. */
+  concentrationShare: 0.5,
+  /** Дней до 30 закрытых при текущем темпе — сигнал редкий. */
+  rareSignalDays: 30,
+  /** |t| ниже — перевес неотличим от нуля. */
+  noEdgeT: 1,
+} as const;
+
 export type SampleLevel =
   | "insufficient"
   | "preliminary"
   | "decidable"
   | "confident";
+
+export type Archetype = "trend" | "breakout" | "meanReversion" | "control";
+
+export const ARCHETYPE_LABEL: Record<Archetype, string> = {
+  trend: "тренд",
+  breakout: "пробой",
+  meanReversion: "возврат к среднему",
+  control: "контроль",
+};
+
+const ARCHETYPE_OF: Record<EntryRule["type"], Archetype> = {
+  emaCross: "trend",
+  supertrend: "trend",
+  macd: "trend",
+  emaPullback: "trend",
+  momentum: "trend",
+  donchian: "breakout",
+  bbSqueeze: "breakout",
+  volumeSpike: "breakout",
+  rsi2: "meanReversion",
+  bbReversion: "meanReversion",
+  counterTrend: "meanReversion",
+  funding: "meanReversion",
+  random: "control",
+  hold: "control",
+};
+
+/** Архетип входа: продолжение пампа — ставка на тренд, остальной сканер — контртренд. */
+export function archetypeOf(entry: EntryRule): Archetype {
+  if (entry.type === "counterTrend" && entry.mode === "pumpContinuation")
+    return "trend";
+  return ARCHETYPE_OF[entry.type];
+}
+
+export type Hint =
+  | "no-edge"
+  | "exit-cuts-winners"
+  | "exit-gives-back"
+  | "stop-in-noise"
+  | "costs"
+  | "direction"
+  | "rare-signal"
+  | "concentration"
+  | "engine";
 
 export interface LabDataset {
   run: { id: number; startedAt: string };
@@ -53,6 +119,8 @@ export interface LabReportOptions {
   experimentIds?: string[];
   /** Начало периода, мс; null — вся эпоха. */
   since?: number | null;
+  /** Контекст рынка; null — не загружен (`--no-market` или сеть). */
+  market?: MarketContext | null;
 }
 
 /** Компактная строка разреза. */
@@ -77,6 +145,8 @@ export interface MfeStats {
   /** Средний MFE в R прибыльных и убыточных закрытых сделок со стопом. */
   winnersAvgR: number | null;
   losersAvgR: number | null;
+  /** Реализованный средний R прибыльных — для сравнения с их MFE. */
+  winnersRealizedAvgR: number | null;
   /** Убыточные сделки, которые были в плюсе на ≥ 1R (отданная прибыль). */
   losersReached1R: number;
   losersWithStop: number;
@@ -89,8 +159,11 @@ export interface ExperimentReport {
   hypothesis: string;
   enabled: boolean;
   demoMirror: boolean;
+  archetype: Archetype;
   config: ConfigLine[];
   stats: TradeStats;
+  /** PnL до вычета комиссий, USD — сколько съели издержки. */
+  pnlBeforeFees: number;
   sample: SampleLevel;
   /** Ожидание в R по закрытым сделкам со стопом. */
   r: MeanStat;
@@ -102,14 +175,20 @@ export interface ExperimentReport {
   /** Дней до 30 и 100 закрытых при текущем темпе; 0 — уже есть; null — темп 0. */
   daysTo: { preliminary: number | null; decidable: number | null };
   avgHoldMinutes: number | null;
+  /** То же в свечах таймфрейма эксперимента. */
+  avgHoldBars: number | null;
+  /** Доля стопов, сработавших раньше одной свечи ТФ. */
+  stopsInFirstBarShare: number | null;
   mfe: MfeStats;
-  /** Доля PnL от лучшей монеты и ожидание доходности без неё. */
+  /** Доля PnL от лучшей монеты и от крупнейшей сделки; ожидание без лучшей монеты. */
   concentration: {
     topSymbol: string | null;
     /** PnL лучшей монеты, USD. */
     topPnl: number | null;
     /** Её доля в общем PnL; null — общий PnL ≤ 0. */
     topShare: number | null;
+    /** Доля крупнейшей прибыльной сделки в общем PnL; null — общий PnL ≤ 0. */
+    topTradeShare: number | null;
     avgReturnPctWithoutTop: number | null;
   };
   /** Разница средней доходности сделки с контролем «случайный вход» своего рынка, п. п. */
@@ -118,11 +197,47 @@ export interface ExperimentReport {
   byExitReason: SliceRow[];
   /** Час открытия UTC, блоками по 4 часа: «00–04» … «20–24». */
   byHourUtc: SliceRow[];
+  /** UTC-день закрытия. */
+  byDay: SliceRow[];
+  /** Будни / выходные по дню открытия (UTC). */
+  byWeekpart: SliceRow[];
   /** Лучшие и худшие монеты по PnL (до 5 каждой стороны). */
   bestSymbols: SliceRow[];
   worstSymbols: SliceRow[];
   /** Подозрительные метрики — сначала искать ошибку (references/metrics.md). */
   flags: string[];
+  /** Механические подсказки о причине результата — агент проверяет, а не повторяет. */
+  hints: Hint[];
+}
+
+export interface FamilyMember {
+  id: string;
+  market: ExperimentMarket;
+  name: string;
+  /** Чем отличается от остальных в семействе: строки конфига, которые не совпадают. */
+  variant: string;
+  closed: number;
+  pnl: number;
+  avgR: number | null;
+  tR: number | null;
+  avgReturnPct: number | null;
+}
+
+/** Эксперименты с одним входом и таймфреймом, но разными выходами, юниверсом, направлением или рынком. */
+export interface Family {
+  key: string;
+  label: string;
+  members: FamilyMember[];
+}
+
+export interface ArchetypeRow {
+  market: ExperimentMarket;
+  archetype: Archetype;
+  experiments: number;
+  closed: number;
+  pnl: number;
+  avgReturnPct: number | null;
+  avgR: number | null;
 }
 
 export interface LabReport {
@@ -130,6 +245,9 @@ export interface LabReport {
   run: { id: number; startedAt: string };
   periodStart: string;
   periodDays: number;
+  market: MarketContext | null;
+  archetypes: ArchetypeRow[];
+  families: Family[];
   experiments: ExperimentReport[];
 }
 
@@ -190,6 +308,9 @@ export function mfeR(t: PaperTrade): number | null {
   return best / risk;
 }
 
+const holdMs = (t: ClosedTrade) =>
+  Date.parse(t.closedAt) - Date.parse(t.openedAt);
+
 const avg = (values: number[]): number | null =>
   values.length ? values.reduce((s, v) => s + v, 0) / values.length : null;
 
@@ -217,6 +338,13 @@ const hourBucket = (iso: string): string => {
   return `${pad(from)}–${pad(from + 4)}`;
 };
 
+const dayOf = (iso: string): string => iso.slice(0, 10);
+
+const weekpart = (iso: string): string => {
+  const day = new Date(iso).getUTCDay();
+  return day === 0 || day === 6 ? "выходные" : "будни";
+};
+
 function mfeStats(closed: ClosedTrade[]): MfeStats {
   const withMfe = closed
     .map((t) => ({ t, mfe: mfeR(t) }))
@@ -226,6 +354,9 @@ function mfeStats(closed: ClosedTrade[]): MfeStats {
   return {
     winnersAvgR: avg(winners.map((x) => x.mfe)),
     losersAvgR: avg(losers.map((x) => x.mfe)),
+    winnersRealizedAvgR: avg(
+      winners.map((x) => x.t.rMultiple).filter((r): r is number => r !== null),
+    ),
     losersReached1R: losers.filter((x) => x.mfe >= 1).length,
     losersWithStop: losers.length,
   };
@@ -237,17 +368,21 @@ function concentration(
   const rows = sliceRows(closed, (t) => t.symbol);
   const top = rows[0];
   const total = closed.reduce((s, t) => s + t.pnl, 0);
+  const share = (part: number) => (total > 0 ? part / total : null);
+  const topTrade = Math.max(0, ...closed.map((t) => t.pnl));
   if (!top || top.pnl <= 0)
     return {
       topSymbol: null,
       topPnl: null,
       topShare: null,
+      topTradeShare: topTrade > 0 ? share(topTrade) : null,
       avgReturnPctWithoutTop: null,
     };
   return {
     topSymbol: top.key,
     topPnl: top.pnl,
-    topShare: total > 0 ? top.pnl / total : null,
+    topShare: share(top.pnl),
+    topTradeShare: share(topTrade),
     avgReturnPctWithoutTop: avg(
       closed.filter((t) => t.symbol !== top.key).map(returnPct),
     ),
@@ -295,9 +430,166 @@ function suspiciousFlags(
   return flags;
 }
 
+type HintInput = Pick<
+  ExperimentReport,
+  | "archetype"
+  | "stats"
+  | "pnlBeforeFees"
+  | "returnPct"
+  | "vsRandomPct"
+  | "mfe"
+  | "stopsInFirstBarShare"
+  | "byDirection"
+  | "daysTo"
+  | "concentration"
+  | "flags"
+>;
+
+/** Подсказки по порогам HINT_RULES; порядок — от причины во входе к причинам в учёте. */
+export function hintsOf(r: HintInput): Hint[] {
+  const hints: Hint[] = [];
+  const { stats, mfe } = r;
+  const enough = stats.closed >= HINT_RULES.minClosed;
+  if (
+    stats.closed >= SAMPLE_THRESHOLDS.preliminary &&
+    r.returnPct.t !== null &&
+    r.returnPct.t < HINT_RULES.noEdgeT &&
+    (r.vsRandomPct === null || r.vsRandomPct <= 0)
+  )
+    hints.push("no-edge");
+  if (
+    enough &&
+    mfe.winnersAvgR !== null &&
+    mfe.winnersAvgR > 0 &&
+    mfe.winnersRealizedAvgR !== null &&
+    mfe.winnersRealizedAvgR / mfe.winnersAvgR < HINT_RULES.cutWinnersKeepShare
+  )
+    hints.push("exit-cuts-winners");
+  if (
+    mfe.losersWithStop >= HINT_RULES.minClosed &&
+    mfe.losersReached1R / mfe.losersWithStop >= HINT_RULES.giveBackShare
+  )
+    hints.push("exit-gives-back");
+  if (
+    enough &&
+    r.stopsInFirstBarShare !== null &&
+    r.stopsInFirstBarShare >= HINT_RULES.stopInNoiseShare
+  )
+    hints.push("stop-in-noise");
+  if (enough && r.pnlBeforeFees > 0 && stats.realizedPnl <= 0)
+    hints.push("costs");
+  const sides = r.byDirection.filter((d) => d.closed >= HINT_RULES.minClosed);
+  if (sides.length === 2 && sides[0].pnl > 0 && sides[1].pnl < 0)
+    hints.push("direction");
+  // Контроль hold (S20/F20) не закрывает сделок по определению — редкость сигнала к нему не относится.
+  if (
+    r.archetype !== "control" &&
+    stats.closed < SAMPLE_THRESHOLDS.preliminary &&
+    (r.daysTo.preliminary === null ||
+      r.daysTo.preliminary > HINT_RULES.rareSignalDays)
+  )
+    hints.push("rare-signal");
+  const c = r.concentration;
+  if (
+    enough &&
+    stats.realizedPnl > 0 &&
+    ((c.topShare ?? 0) >= HINT_RULES.concentrationShare ||
+      (c.topTradeShare ?? 0) >= HINT_RULES.concentrationShare)
+  )
+    hints.push("concentration");
+  if (r.flags.length) hints.push("engine");
+  return hints;
+}
+
 function daysTo(target: number, closed: number, perDay: number): number | null {
   if (closed >= target) return 0;
   return perDay > 0 ? (target - closed) / perDay : null;
+}
+
+const CONSTANT_LABELS = new Set(["Таймфрейм", "Вход"]);
+
+/** Семейства: одинаковые вход и таймфрейм; в `variant` — только строки конфига, которые различаются. */
+export function buildFamilies(experiments: ExperimentReport[]): Family[] {
+  const byKey = new Map<string, ExperimentReport[]>();
+  for (const e of experiments) {
+    const tf = e.config.find((c) => c.label === "Таймфрейм")?.value ?? "";
+    const entry = e.config.find((c) => c.label === "Вход")?.value ?? "";
+    const key = `${tf}|${entry}`;
+    byKey.set(key, [...(byKey.get(key) ?? []), e]);
+  }
+  const families: Family[] = [];
+  for (const [key, members] of byKey) {
+    if (members.length < 2) continue;
+    const labels = [
+      ...new Set(members.flatMap((m) => m.config.map((c) => c.label))),
+    ].filter((l) => !CONSTANT_LABELS.has(l));
+    const differing = labels.filter(
+      (label) =>
+        new Set(
+          members.map(
+            (m) => m.config.find((c) => c.label === label)?.value ?? "—",
+          ),
+        ).size > 1,
+    );
+    const [tf, entry] = key.split("|");
+    families.push({
+      key,
+      label: `${entry}, ${tf}`,
+      members: members.map((m) => ({
+        id: m.id,
+        market: m.market,
+        name: m.name,
+        variant: differing
+          .map(
+            (label) =>
+              `${label}: ${m.config.find((c) => c.label === label)?.value ?? "—"}`,
+          )
+          .join("; "),
+        closed: m.stats.closed,
+        pnl: m.stats.realizedPnl,
+        avgR: m.r.mean,
+        tR: m.r.t,
+        avgReturnPct: m.returnPct.mean,
+      })),
+    });
+  }
+  return families.sort((a, b) => b.members.length - a.members.length);
+}
+
+export function buildArchetypes(
+  experiments: ExperimentReport[],
+  trades: PaperTrade[],
+): ArchetypeRow[] {
+  const archetypeOfId = new Map(experiments.map((e) => [e.id, e.archetype]));
+  const closed = trades
+    .filter(isClosed)
+    .filter((t) => archetypeOfId.has(t.experimentId));
+  const rows: ArchetypeRow[] = [];
+  for (const market of ["spot", "futures"] as const) {
+    for (const archetype of Object.keys(ARCHETYPE_LABEL) as Archetype[]) {
+      const members = experiments.filter(
+        (e) => e.market === market && e.archetype === archetype,
+      );
+      if (!members.length) continue;
+      const own = closed.filter(
+        (t) =>
+          t.market === market &&
+          archetypeOfId.get(t.experimentId) === archetype,
+      );
+      rows.push({
+        market,
+        archetype,
+        experiments: members.length,
+        closed: own.length,
+        pnl: own.reduce((s, t) => s + t.pnl, 0),
+        avgReturnPct: avg(own.map(returnPct)),
+        avgR: avg(
+          own.map((t) => t.rMultiple).filter((r): r is number => r !== null),
+        ),
+      });
+    }
+  }
+  return rows;
 }
 
 /** Отчёт по экспериментам эпохи (или периоду), отсортированный по средней доходности сделки. */
@@ -336,26 +628,22 @@ export function buildLabReport(
       const perDay = stats.closed / periodDays;
       const randomId = CONTROLS[e.market].random;
       const randomAvg = e.id === randomId ? null : avgReturnOf(randomId);
-      const sortedBySymbol = sliceRows(closed, (t) => t.symbol);
-      return {
-        id: e.id,
-        market: e.market,
-        name: e.name,
-        hypothesis: e.hypothesis,
-        enabled: e.enabled,
-        demoMirror: e.demoMirror,
-        config: describeConfig(e.config),
+      const bySymbol = sliceRows(closed, (t) => t.symbol);
+      const tfMs = TIMEFRAME_MS[e.config.timeframe];
+      const holdMinutes = avg(closed.map((t) => holdMs(t) / MINUTE));
+      const stops = closed.filter((t) => t.exitReason === "sl");
+      const partial = {
+        archetype: archetypeOf(e.config.entry),
         stats,
-        sample: sampleLevel(stats.closed),
-        r: meanStat(
-          closed.map((t) => t.rMultiple).filter((r): r is number => r !== null),
-        ),
+        pnlBeforeFees: stats.realizedPnl + stats.fees,
         returnPct: ret,
-        payoff:
-          avgWin !== null && avgLoss !== null && avgLoss > 0
-            ? avgWin / avgLoss
-            : null,
-        tradesPerDay: perDay,
+        vsRandomPct:
+          ret.mean !== null && randomAvg !== null ? ret.mean - randomAvg : null,
+        mfe: mfeStats(closed),
+        stopsInFirstBarShare: stops.length
+          ? stops.filter((t) => holdMs(t) < tfMs).length / stops.length
+          : null,
+        byDirection: sliceRows(closed, (t) => t.direction),
         daysTo: {
           preliminary: daysTo(
             SAMPLE_THRESHOLDS.preliminary,
@@ -364,26 +652,44 @@ export function buildLabReport(
           ),
           decidable: daysTo(SAMPLE_THRESHOLDS.decidable, stats.closed, perDay),
         },
-        avgHoldMinutes: avg(
-          closed.map(
-            (t) => (Date.parse(t.closedAt) - Date.parse(t.openedAt)) / MINUTE,
-          ),
-        ),
-        mfe: mfeStats(closed),
         concentration: concentration(closed),
-        vsRandomPct:
-          ret.mean !== null && randomAvg !== null ? ret.mean - randomAvg : null,
-        byDirection: sliceRows(closed, (t) => t.direction),
+        flags: suspiciousFlags(e, stats, closed),
+      };
+      return {
+        id: e.id,
+        market: e.market,
+        name: e.name,
+        hypothesis: e.hypothesis,
+        enabled: e.enabled,
+        demoMirror: e.demoMirror,
+        config: describeConfig(e.config),
+        ...partial,
+        sample: sampleLevel(stats.closed),
+        r: meanStat(
+          closed.map((t) => t.rMultiple).filter((r): r is number => r !== null),
+        ),
+        payoff:
+          avgWin !== null && avgLoss !== null && avgLoss > 0
+            ? avgWin / avgLoss
+            : null,
+        tradesPerDay: perDay,
+        avgHoldMinutes: holdMinutes,
+        avgHoldBars:
+          holdMinutes === null ? null : (holdMinutes * MINUTE) / tfMs,
         byExitReason: sliceRows(closed, (t) => t.exitReason ?? "—"),
         byHourUtc: sliceRows(closed, (t) => hourBucket(t.openedAt)).sort(
           (a, b) => a.key.localeCompare(b.key),
         ),
-        bestSymbols: sortedBySymbol.filter((r) => r.pnl > 0).slice(0, 5),
-        worstSymbols: sortedBySymbol
+        byDay: sliceRows(closed, (t) => dayOf(t.closedAt)).sort((a, b) =>
+          a.key.localeCompare(b.key),
+        ),
+        byWeekpart: sliceRows(closed, (t) => weekpart(t.openedAt)),
+        bestSymbols: bySymbol.filter((r) => r.pnl > 0).slice(0, 5),
+        worstSymbols: bySymbol
           .filter((r) => r.pnl < 0)
           .slice(-5)
           .reverse(),
-        flags: suspiciousFlags(e, stats, closed),
+        hints: hintsOf(partial),
       };
     })
     .sort(
@@ -397,8 +703,58 @@ export function buildLabReport(
     run: data.run,
     periodStart: new Date(start).toISOString(),
     periodDays,
+    market: opts.market ?? null,
+    archetypes: buildArchetypes(experiments, trades),
+    families: buildFamilies(experiments),
     experiments,
   };
+}
+
+// --- CSV сделок для ad-hoc анализа агентом ---
+
+const CSV_COLUMNS = [
+  "id",
+  "experimentId",
+  "market",
+  "symbol",
+  "direction",
+  "openedAt",
+  "closedAt",
+  "entryPrice",
+  "exitPrice",
+  "quantity",
+  "initialStop",
+  "takeProfit",
+  "atr",
+  "extreme",
+  "exitReason",
+  "fees",
+  "pnl",
+  "rMultiple",
+  "mfeR",
+  "returnPct",
+  "holdMinutes",
+] as const;
+
+/** Все сделки периода (и открытые) — для своих расчётов поверх отчёта. */
+export function renderTradesCsv(trades: PaperTrade[]): string {
+  const cell = (v: unknown): string =>
+    v === null || v === undefined
+      ? ""
+      : typeof v === "number"
+        ? String(Number.isInteger(v) ? v : Number(v.toPrecision(10)))
+        : String(v);
+  const rows = trades.map((t) => {
+    const closed = isClosed(t);
+    const values: Record<(typeof CSV_COLUMNS)[number], unknown> = {
+      ...t,
+      mfeR: mfeR(t),
+      returnPct: closed ? returnPct(t) : null,
+      holdMinutes: closed ? holdMs(t) / MINUTE : null,
+    };
+    return CSV_COLUMNS.map((c) => cell(values[c])).join(",");
+  });
+  return [CSV_COLUMNS.join(","), ...rows].join("\n");
 }
 
 // --- Markdown ---
@@ -415,6 +771,8 @@ const num = (v: number | null, digits = 2): string =>
 const pct = (v: number | null, digits = 0): string =>
   v === null ? "—" : `${(v * 100).toFixed(digits)}%`;
 const usd = (v: number): string => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+const signedPct = (v: number | null, digits = 3): string =>
+  v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
 const days = (v: number | null): string =>
   v === null ? "∞" : v === 0 ? "есть" : `${Math.ceil(v)} дн.`;
 
@@ -433,6 +791,24 @@ function sliceTable(title: string, rows: SliceRow[]): string[] {
   ];
 }
 
+function dayLine(e: ExperimentReport): string {
+  if (!e.byDay.length) return "";
+  const byPnl = [...e.byDay].sort((a, b) => b.pnl - a.pnl);
+  const best = byPnl[0];
+  const worst = byPnl[byPnl.length - 1];
+  const weekend = e.byWeekpart.find((w) => w.key === "выходные");
+  const parts = [
+    `По дням: лучший ${best.key} (${usd(best.pnl)} $), худший ${worst.key} (${usd(worst.pnl)} $)`,
+    weekend
+      ? `выходные — ${weekend.closed} сделок, ${usd(weekend.pnl)} $`
+      : "выходных сделок нет",
+    e.concentration.topTradeShare === null
+      ? "доля крупнейшей сделки — при PnL ≤ 0 не считается"
+      : `крупнейшая сделка — ${pct(e.concentration.topTradeShare)} PnL`,
+  ];
+  return `${parts.join("; ")}.`;
+}
+
 function experimentSection(e: ExperimentReport): string[] {
   const s = e.stats;
   const head = `### ${e.id} · ${e.name}${e.enabled ? "" : " (выключен)"}${e.demoMirror ? " · демо-зеркало" : ""}`;
@@ -442,7 +818,7 @@ function experimentSection(e: ExperimentReport): string[] {
       "",
       `Гипотеза: ${e.hypothesis}`,
       "",
-      `Закрытых сделок нет (открыто ${s.open}).`,
+      `Архетип: ${ARCHETYPE_LABEL[e.archetype]}. Закрытых сделок нет (открыто ${s.open}).`,
       "",
     ];
   return [
@@ -450,15 +826,18 @@ function experimentSection(e: ExperimentReport): string[] {
     "",
     `Гипотеза: ${e.hypothesis}`,
     "",
+    `- Архетип: ${ARCHETYPE_LABEL[e.archetype]}`,
     ...e.config.map((c) => `- ${c.label}: ${c.value}`),
     "",
     `Выборка: ${s.closed} закрытых (${SAMPLE_LABEL[e.sample]}), открыто ${s.open}; ${num(e.tradesPerDay, 1)} сделок/день; до 30 — ${days(e.daysTo.preliminary)}, до 100 — ${days(e.daysTo.decidable)}.`,
-    `Результат: PnL ${usd(s.realizedPnl)} $, win rate ${pct(s.winRate)}, PF ${num(s.profitFactor)}, payoff ${num(e.payoff)}, просадка ${pct(s.maxDrawdownPct, 1)}.`,
-    `Ожидание: R ${num(e.r.mean)} (sd ${num(e.r.sd)}, t ${num(e.r.t)}, n ${e.r.n}); доходность ${num(e.returnPct.mean, 3)}% (t ${num(e.returnPct.t)}); к случайному входу рынка ${e.vsRandomPct === null ? "—" : `${e.vsRandomPct >= 0 ? "+" : ""}${e.vsRandomPct.toFixed(3)} п. п.`}`,
-    `Удержание: ${e.avgHoldMinutes === null ? "—" : `${Math.round(e.avgHoldMinutes)} мин`}. MFE: прибыльные ${num(e.mfe.winnersAvgR)}R, убыточные ${num(e.mfe.losersAvgR)}R; убыточных с MFE ≥ 1R — ${e.mfe.losersReached1R} из ${e.mfe.losersWithStop}.`,
+    `Результат: PnL ${usd(s.realizedPnl)} $ (до комиссий ${usd(e.pnlBeforeFees)} $), win rate ${pct(s.winRate)}, PF ${num(s.profitFactor)}, payoff ${num(e.payoff)}, просадка ${pct(s.maxDrawdownPct, 1)}.`,
+    `Ожидание: R ${num(e.r.mean)} (sd ${num(e.r.sd)}, t ${num(e.r.t)}, n ${e.r.n}); доходность ${signedPct(e.returnPct.mean)}% (t ${num(e.returnPct.t)}); к случайному входу рынка ${e.vsRandomPct === null ? "—" : `${signedPct(e.vsRandomPct)} п. п.`}`,
+    `Удержание: ${e.avgHoldMinutes === null ? "—" : `${Math.round(e.avgHoldMinutes)} мин (${num(e.avgHoldBars, 1)} свечей ТФ)`}; стопов раньше одной свечи — ${pct(e.stopsInFirstBarShare)}. MFE: прибыльные ${num(e.mfe.winnersAvgR)}R при реализованных ${num(e.mfe.winnersRealizedAvgR)}R, убыточные ${num(e.mfe.losersAvgR)}R; убыточных с MFE ≥ 1R — ${e.mfe.losersReached1R} из ${e.mfe.losersWithStop}.`,
     e.concentration.topSymbol
-      ? `Концентрация: ${e.concentration.topSymbol} — ${usd(e.concentration.topPnl ?? 0)} $ (${e.concentration.topShare === null ? "при общем PnL ≤ 0" : `${pct(e.concentration.topShare)} PnL`}); без неё доходность ${num(e.concentration.avgReturnPctWithoutTop, 3)}%.`
+      ? `Концентрация: ${e.concentration.topSymbol} — ${usd(e.concentration.topPnl ?? 0)} $ (${e.concentration.topShare === null ? "при общем PnL ≤ 0" : `${pct(e.concentration.topShare)} PnL`}); без неё доходность ${signedPct(e.concentration.avgReturnPctWithoutTop)}%.`
       : "Концентрация: прибыльных монет нет.",
+    dayLine(e),
+    ...(e.hints.length ? [`Подсказки: ${e.hints.join(", ")}.`] : []),
     ...(e.flags.length ? ["", `⚠️ Подозрительно: ${e.flags.join("; ")}.`] : []),
     "",
     ...sliceTable("Направление", e.byDirection),
@@ -469,24 +848,78 @@ function experimentSection(e: ExperimentReport): string[] {
   ];
 }
 
+function marketSection(m: MarketContext | null): string[] {
+  if (!m)
+    return ["Контекст рынка не загружен (`--no-market` или нет сети).", ""];
+  const daily = m.daily
+    .map((d) => `${d.date.slice(5)} ${signedPct(d.returnPct, 1)}%`)
+    .join(" · ");
+  return [
+    `**Рынок.** ${describeMarket(m)}`,
+    ...(daily ? [`BTC по дням: ${daily}.`] : []),
+    "",
+  ];
+}
+
+function archetypesSection(rows: ArchetypeRow[]): string[] {
+  if (!rows.length) return [];
+  return [
+    "## Архетипы",
+    "",
+    "Тренд и возврат к среднему обычно антикоррелированы по режимам: минус у обеих групп — смотри комиссии и частоту сделок.",
+    "",
+    "| Рынок | Архетип | Эксп. | Закрыто | PnL $ | Доходн. % | avg R |",
+    "|---|---|---|---|---|---|---|",
+    ...rows.map(
+      (r) =>
+        `| ${r.market} | ${ARCHETYPE_LABEL[r.archetype]} | ${r.experiments} | ${r.closed} | ${usd(r.pnl)} | ${signedPct(r.avgReturnPct)} | ${num(r.avgR)} |`,
+    ),
+    "",
+  ];
+}
+
+function familiesSection(families: Family[]): string[] {
+  if (!families.length) return [];
+  return [
+    "## Семейства: один вход, разные выходы и юниверс",
+    "",
+    "Плато — соседи по параметрам дают похожий результат; пик — хорош только один вариант (скорее шум).",
+    "",
+    ...families.flatMap((f) => [
+      `**${f.label}**`,
+      "",
+      "| id | Рынок | Отличия | Закрыто | PnL $ | avg R | t(R) | Доходн. % |",
+      "|---|---|---|---|---|---|---|---|",
+      ...f.members.map(
+        (m) =>
+          `| ${m.id} | ${m.market} | ${m.variant || "—"} | ${m.closed} | ${usd(m.pnl)} | ${num(m.avgR)} | ${num(m.tR)} | ${signedPct(m.avgReturnPct)} |`,
+      ),
+      "",
+    ]),
+  ];
+}
+
 export function renderLabReport(report: LabReport): string {
   const rows = report.experiments.map(
     (e) =>
-      `| ${e.id} | ${e.name} | ${e.market} | ${e.stats.closed} | ${SAMPLE_LABEL[e.sample]} | ${usd(e.stats.realizedPnl)} | ${pct(e.stats.winRate)} | ${num(e.stats.profitFactor)} | ${num(e.r.mean)} | ${num(e.r.t)} | ${num(e.returnPct.mean, 3)} | ${e.flags.length ? "⚠️" : ""} |`,
+      `| ${e.id} | ${e.name} | ${e.market} | ${ARCHETYPE_LABEL[e.archetype]} | ${e.stats.closed} | ${SAMPLE_LABEL[e.sample]} | ${usd(e.stats.realizedPnl)} | ${pct(e.stats.winRate)} | ${num(e.stats.profitFactor)} | ${num(e.r.mean)} | ${num(e.r.t)} | ${signedPct(e.returnPct.mean)} | ${[...(e.flags.length ? ["⚠️"] : []), ...e.hints].join(" ")} |`,
   );
   return [
     "# Отчёт лаборатории",
     "",
     `Сформирован ${report.generatedAt}. Эпоха #${report.run.id} с ${report.run.startedAt}; период с ${report.periodStart} (${num(report.periodDays, 1)} дн.).`,
-    "Только закрытые сделки текущего учёта; PnL — за вычетом комиссий и слиппеджа. Как читать — скилл trading-lab.",
+    "Только закрытые сделки текущего учёта; PnL — за вычетом комиссий и слиппеджа. Как читать — скилл trading-lab; подсказки — references/failure-modes.md.",
     `Контроль: spot — ${CONTROLS.spot.random} (случайный вход), ${CONTROLS.spot.hold} (hold BTC); futures — ${CONTROLS.futures.random}, ${CONTROLS.futures.hold}.`,
     "",
+    ...marketSection(report.market),
     "## Сводка (по средней доходности сделки)",
     "",
-    "| id | Эксперимент | Рынок | Закрыто | Выборка | PnL $ | Win | PF | avg R | t(R) | Доходн. % | |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|",
+    "| id | Эксперимент | Рынок | Архетип | Закрыто | Выборка | PnL $ | Win | PF | avg R | t(R) | Доходн. % | Подсказки |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ...rows,
     "",
+    ...archetypesSection(report.archetypes),
+    ...familiesSection(report.families),
     "## Эксперименты",
     "",
     ...report.experiments.flatMap(experimentSection),

@@ -1,6 +1,7 @@
 import {
   type Experiment,
   experimentSchema,
+  marketSchema,
   type PaperTrade,
 } from "@binance-dashboard/trading-core";
 import { and, asc, desc, eq } from "drizzle-orm";
@@ -177,6 +178,27 @@ export async function readLabDataset(db: Db): Promise<{
     experiments: rows.map((r) => experimentSchema.parse(r)),
     trades,
   };
+}
+
+/** Тумблеры всех экспериментов — для `pnpm lab:apply` (сравнить «было → стало» перед записью). */
+export async function readExperimentFlags(
+  db: Db,
+): Promise<
+  Pick<Experiment, "id" | "name" | "market" | "enabled" | "demoMirror">[]
+> {
+  return db
+    .select({
+      id: experimentsTable.id,
+      name: experimentsTable.name,
+      market: experimentsTable.market,
+      enabled: experimentsTable.enabled,
+      demoMirror: experimentsTable.demoMirror,
+    })
+    .from(experimentsTable)
+    .orderBy(asc(experimentsTable.id))
+    .then((rows) =>
+      rows.map((r) => ({ ...r, market: marketSchema.parse(r.market) })),
+    );
 }
 
 export async function readTradeStats(

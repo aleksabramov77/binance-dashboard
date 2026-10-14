@@ -35,7 +35,7 @@ CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger �
 | `/flow bug "<описание>"` | то же со скиллом `bug` |
 | `/flow release` | выкатка влитого в main: `db:migrate` → Edge Function `engine-tick` → кроны → ⏸ env на Vercel (`!`-командой пользователя) → ожидание деплоя Vercel → смоук-проверки |
 | `/flow worktree-cleanup` | удалить worktree давно влитых задач (с остановкой их сервера) и разобрать забытые |
-| `/flow lab ["<фокус>"]` | лаборатория экспериментов: `pnpm lab:report` (read-only отчёт эпохи из БД) → разбор удачных и неудачных экспериментов (скилл `trading-lab`) ⏸ → карточки новых гипотез ⏸ выбор одной → новый эксперимент через `flow feature`. Фокус — id («F06 F07»), группа, вопрос или своя идея |
+| `/flow lab ["<фокус>"]` | лаборатория экспериментов (worktree `chore/NNNN-lab-<дата>`): `pnpm lab:report` → отчёт по сделкам эпохи с контекстом рынка → субагент `quant` разбирает (review.md: подозрительное, решения keep/mirror/tune/pivot/kill, команда `lab:apply`) ⏸ → `pnpm lab:apply` только подтверждённое → `quant` пишет карточки гипотез (ideas.md) ⏸ выбор одной → журнал `docs/lab/` (journal.md, hypotheses.md) → PR → `reviewer` → ⏸ мерж → `pnpm wt remove` → выбранная карточка в `flow feature`. Фокус — id («F06 F07»), группа, вопрос или своя идея |
 | `/flow status` | незавершённые прогоны: этап, ветка, PR |
 
 Этап выкатки выполняется, только если выполнено условие из его `note` (например, миграции — только при
@@ -50,6 +50,7 @@ Claude запускать из папки проекта (`~/Projects/my/binance
 | Developer | `.claude/agents/developer.md` | код, тесты, git, push, PR | мержить, менять spec без согласования |
 | Tester | `.claude/agents/tester.md` | Playwright MCP на локальном сервере worktree, скриншоты | править код |
 | Reviewer | `.claude/agents/reviewer.md` | читать код, комментировать PR, ставить label | править код, мержить |
+| Quant | `.claude/agents/quant.md` (из `/flow lab`) | читать отчёт и сделки прогона, считать поверх `trades.csv`, писать `review.md` и `ideas.md` | менять БД (`lab:apply`), код, журнал `docs/lab`, git |
 
 Почему Analyst не субагент: субагенты не ведут диалог с пользователем. Почему Reviewer — отдельный
 субагент: свежий контекст, не «помнит», как писался код.

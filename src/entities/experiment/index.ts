@@ -19,6 +19,7 @@ export {
 // Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
 export {
   readExperimentDetail,
+  readExperimentFlags,
   readExperimentsOverview,
   readLabDataset,
   readTradeStats,
