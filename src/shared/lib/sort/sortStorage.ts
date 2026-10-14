@@ -42,7 +42,11 @@ export function saveSort(name: string, value: SavedSort<string> | null): void {
 }
 
 /**
- * Один раз после монтирования: если в URL сортировки нет — применить сохранённую.
+ * При каждом показе таблицы: если в URL сортировки нет — применить сохранённую.
+ * Показ — это монтирование и возврат на страницу: с `cacheComponents` Next 16 не размонтирует ушедшую
+ * страницу, а прячет её в `<Activity>`; при возврате эффекты запускаются заново, а useRef сохраняет
+ * значение — флаг «уже применили» в нём не дал бы восстановить сортировку (spec 009).
+ * Повторный запуск (StrictMode в dev: запуск → очистка → запуск) безвреден: та же сортировка ещё раз.
  * apply вызывается вне рендера (в эффекте), поэтому может менять URL.
  */
 export function useRestoreSort<K extends string>(
@@ -51,12 +55,9 @@ export function useRestoreSort<K extends string>(
   inUrl: boolean,
   apply: (saved: SavedSort<K>) => void,
 ): void {
-  const done = useRef(false);
   const latest = useRef({ keys, inUrl, apply });
   latest.current = { keys, inUrl, apply };
   useEffect(() => {
-    if (done.current) return;
-    done.current = true;
     const { keys: k, inUrl: present, apply: run } = latest.current;
     if (present) return;
     const saved = loadSort(name, k);

@@ -40,13 +40,23 @@ URL — `/experiments` без параметров, порядок по умол
 | `/signals` | рост / падение | `gainersSort` / `losersSort` |
 
 ## Причина
-Предварительно (Analyst, проверено на проде); Developer подтверждает тестом и уточняет.
+Найдена Analyst на проде, подтверждена тестом (Developer, 2026-10-15).
 
 В `next.config.ts` включено `cacheComponents: true`. С ним Next 16 при уходе со страницы не размонтирует её,
 а прячет в React `<Activity>` (до 3 маршрутов, `node_modules/next/dist/docs/01-app/02-guides/preserving-ui-state.md`).
 На проде после перехода на `/stats` заголовок «Эксперименты» остаётся в DOM скрытым. При возврате эффекты
 запускаются заново, а `useRef` сохраняет значение. `useRestoreSort` (`src/shared/lib/sort/sortStorage.ts`)
 при первом запуске ставит `done.current = true` и при повторном показе страницы сразу выходит.
+
+Хватает убрать флаг: nuqs 2.10.2 сверяет состояние с URL прямо в рендере, когда страница снова на своём пути
+(`useQueryStates`: `onCommittedPathname` → `reconcile()`), поэтому к запуску эффекта после возврата `inUrl` уже
+отражает URL без сортировки. Хук общий для всех таблиц: `/experiments` и `/stats` вызывают `useRestoreSort`
+напрямую, остальные — через `useTableSort`.
+
+Что изменено: в `useRestoreSort` убран флаг `done` — эффект применяет сохранённую сортировку при каждом показе
+таблицы (монтирование и возврат из `<Activity>`), если в URL её нет. Повторный запуск эффекта в StrictMode (dev)
+безвреден: применяется та же сортировка. Тест — `src/shared/lib/sort/useRestoreSort.test.tsx` (happy-dom +
+Testing Library): показ → `<Activity mode="hidden">` → показ и StrictMode; до фикса оба падали.
 
 ## Критерии приёмки
 - [ ] AC1. `/experiments`: «PnL» → «По убыванию» → через меню на `/stats` → через меню назад на `/experiments`:
@@ -79,3 +89,4 @@ URL — `/experiments` без параметров, порядок по умол
 |---|---|
 | 2026-10-15 | Баг заведён: воспроизведён на проде, причина — `<Activity>` (`cacheComponents`) + флаг в `useRef` в `useRestoreSort` |
 | 2026-10-15 | ТЗ утверждено пользователем |
+| 2026-10-15 | Developer, ветка `fix/009-table-sort-restore`: тест `useRestoreSort.test.tsx` воспроизвёл баг (падал до фикса), в `useRestoreSort` убран флаг `done`; devDependencies — `@testing-library/react`, `@testing-library/dom`, `happy-dom` |
