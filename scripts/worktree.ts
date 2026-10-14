@@ -2,6 +2,7 @@
 // с репозиторием: ~/Projects/my/binance-dashboard_<метка>. Неотслеживаемые файлы из .claude/worktree-links.json
 // (.env.local) — ссылками на основной checkout; у каждого worktree свой локальный сервер, своя PGlite и свой порт.
 //
+//   pnpm wt next                                               номер новой задачи: журнал main + невлитые ветки задач
 //   pnpm wt new <ветка> [--name <метка>] [--from <commit-ish>]  создать (ветка от свежего origin/main) и подготовить
 //   pnpm wt link                                               внутри worktree: создать или починить ссылки
 //   pnpm wt serve [--path <worktree>]                          запустить локальный сервер (PGlite, без входа)
@@ -18,11 +19,13 @@ import path from "node:path";
 import {
   BRANCH_PATTERN,
   latestPrByBranch,
+  nextTaskNumber,
   normalizeLinks,
   type PullRequestInfo,
   parseDuration,
   parseWorktreeList,
   planPrune,
+  usedTaskNumbers,
   type WorktreeEntry,
   worktreeFolderName,
 } from "./lib/worktreePlan";
@@ -322,12 +325,29 @@ function pullRequests(main: string): Map<string, PullRequestInfo> | null {
   }
 }
 
+/** Занятые номера задач: журнал `docs/HISTORY.md` в `origin/main` и ветки задач — локальные и на GitHub. */
+function taskNumbers(main: string): Set<number> {
+  const history = tryGit(["show", "origin/main:docs/HISTORY.md"], main) ?? "";
+  const branches = git(
+    ["branch", "--all", "--format=%(refname:short)"],
+    main,
+  ).split("\n");
+  return usedTaskNumbers(history, branches);
+}
+
 // --- команды ---
+
+function cmdNext(): void {
+  const main = mainRoot();
+  // Без сети — по последнему известному состоянию GitHub.
+  tryGit(["fetch", "--prune", "origin"], main);
+  console.log(nextTaskNumber(taskNumbers(main)));
+}
 
 function cmdNew(args: string[], flags: Flags): void {
   const branch = args[0];
-  if (!branch || !BRANCH_PATTERN.test(branch))
-    fail("ветка вида feat/NNN-slug (feat|fix|chore|docs|test|refactor)");
+  if (!branch)
+    fail("укажите ветку: pnpm wt new feature/NNNN-slug (номер — pnpm wt next)");
   const main = mainRoot();
   const dir = path.join(
     workspaceRoot(main),
@@ -345,8 +365,18 @@ function cmdNew(args: string[], flags: Flags): void {
       ["worktree", "add", "--track", "-b", branch, dir, `origin/${branch}`],
       main,
     );
-  // --no-track: иначе upstream станет origin/main, и git status будет сравнивать ветку с main.
-  else
+  else {
+    // Имя проверяем только у новой ветки: существующие (и старого вида, fix/009-…) открываются как есть.
+    const number = BRANCH_PATTERN.exec(branch)?.[2];
+    if (!number)
+      fail(
+        "новая ветка — вида feature/NNNN-slug: тип feature|bug|hotfix|chore, номер — pnpm wt next",
+      );
+    if (taskNumbers(main).has(Number(number)))
+      fail(
+        `номер ${number} уже занят (журнал main или другая ветка) — свободный: pnpm wt next`,
+      );
+    // --no-track: иначе upstream станет origin/main, и git status будет сравнивать ветку с main.
     git(
       [
         "worktree",
@@ -359,6 +389,7 @@ function cmdNew(args: string[], flags: Flags): void {
       ],
       main,
     );
+  }
   console.log(`worktree ${dir} (ветка ${branch})`);
   link(dir, main);
   execFileSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
@@ -532,6 +563,8 @@ async function main(): Promise<void> {
   const root = () =>
     flags.path ? resolveTarget(flags.path).path : resolveTarget(undefined).path;
   switch (command) {
+    case "next":
+      return cmdNext();
     case "new":
       return cmdNew(args, flags);
     case "link": {
@@ -551,7 +584,7 @@ async function main(): Promise<void> {
       return cmdPrune(flags);
     default:
       fail(
-        "команды: new, link, serve, stop, list, remove, prune (см. .claude/skills/worktree/SKILL.md)",
+        "команды: next, new, link, serve, stop, list, remove, prune (см. .claude/skills/worktree/SKILL.md)",
       );
   }
 }

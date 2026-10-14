@@ -1,27 +1,29 @@
 # /flow bug "<что сломалось>" — баг целиком, как feature: свой worktree, падающий тест → фикс, проверка на локальном
 # сервере worktree до PR и после правок по ревью, мерж по команде пользователя, выкатка, удаление worktree.
 # Как выполнять этапы — .claude/skills/bug/SKILL.md (Analyst бага) и .claude/skills/feature/SKILL.md (остальные шаги).
-description: Баг целиком — воспроизведение и ТЗ, worktree, фикс через падающий тест, проверка на локальном сервере, PR и ревью с перепроверкой, мерж по команде, выкатка, удаление worktree.
+description: Баг целиком — worktree, воспроизведение и ТЗ, фикс через падающий тест, проверка на локальном сервере, PR и ревью с перепроверкой, мерж по команде, выкатка, удаление worktree.
 stages:
-  - id: spec
+  - id: worktree
     note: >
-      Шаг «1. Analyst (баг)» из .claude/skills/bug/SKILL.md: факты из журнала и кода, docs/specs/NNN-slug.md по шаблону
-      бага, утверждение.
+      Номер задачи — `pnpm -s wt next`, slug — kebab-case по описанию бага; из основного checkout
+      `pnpm wt new bug/NNNN-slug` (срочный фикс прода — `hotfix/NNNN-slug`). Все следующие этапы — в этом worktree;
+      в основном checkout ветки не переключать и файлов не создавать.
+    produces: номер задачи и путь к worktree
+
+  - id: spec
+    uses: [worktree]
+    note: >
+      Шаг «1. Analyst (баг)» из .claude/skills/bug/SKILL.md, в worktree: факты из журнала и кода,
+      docs/specs/NNNN-slug.md по шаблону бага, строка docs/HISTORY.md «в работе», утверждение.
     produces: путь к spec
     gate: user-approval
-
-  - id: worktree
-    uses: [spec]
-    note: >
-      Из основного checkout: `pnpm wt new fix/NNN-slug`. Все следующие этапы — в этом worktree; в основном checkout
-      ветки не переключать.
-    produces: путь к worktree
 
   - id: develop
     uses: [spec, worktree]
     note: >
-      Субагент developer в worktree: сначала тест, который воспроизводит баг и падает, потом фикс; раздел «Причина»
-      в spec (.claude/skills/bug/SKILL.md → «Особенности для Developer»).
+      Утверждённое ТЗ — первым коммитом ветки (`NNNN: ТЗ — <название>`). Затем субагент developer в worktree: сначала
+      тест, который воспроизводит баг и падает, потом фикс; раздел «Причина» в spec (.claude/skills/bug/SKILL.md →
+      «Особенности для Developer»).
     produces: ветка задачи
 
   - id: check
@@ -45,7 +47,8 @@ stages:
   - id: pr
     uses: [spec]
     note: >
-      Developer открывает PR: описание — что исправлено, сначала кратко, потом подробнее.
+      Developer открывает PR: заголовок `NNNN: что исправлено`, в описании — что исправлено, сначала кратко, потом
+      подробнее.
     produces: номер PR
 
   - id: review
@@ -57,7 +60,8 @@ stages:
   - id: ready
     uses: [pr]
     note: >
-      Статусы spec и PRD последним коммитом, зелёный CI. Покажи пользователю PR и спроси, мержить ли.
+      Последним коммитом — статусы spec и PRD, строка docs/HISTORY.md (✅, PR); зелёный CI. Покажи пользователю PR и
+      спроси, мержить ли.
     run: GH_CONFIG_DIR="$HOME/.config/gh-personal" gh pr checks --watch
     gate: user-approval
 

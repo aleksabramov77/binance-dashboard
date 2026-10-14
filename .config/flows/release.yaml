@@ -6,8 +6,8 @@ inputs: [merge]
 stages:
   - id: sync
     note: >
-      Рабочее дерево должно быть чистым (неотслеживаемый .claude/settings.json не мешает). Если в checkout открыта
-      ветка другой задачи — остановись и спроси, не переключай.
+      Рабочее дерево должно быть чистым. Если в checkout открыта ветка другой задачи — остановись и спроси, не
+      переключай.
     run: git switch main && git pull --ff-only && git fetch --prune
 
   - id: changes

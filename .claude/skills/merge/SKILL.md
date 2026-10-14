@@ -15,15 +15,19 @@ PR: $ARGUMENTS (если пусто — `gh pr list` и спроси, какой
 3. `gh pr checks <N>` — все проверки зелёные (идут — `--watch` и дождись).
 
 ## Мерж
-1. `gh pr merge <N> --squash --delete-branch` (заголовок — заголовок PR).
-2. В основном checkout (путь — первая строка `git worktree list`): `git switch main && git pull --ff-only`.
-   Если там незакоммиченные изменения — не трогай, только сообщи.
+1. `gh pr merge <N> --squash` (заголовок — заголовок PR). Без `--delete-branch`: ветка открыта в worktree задачи,
+   gh не сможет удалить её локально и тогда не удалит и на GitHub. Ветку на GitHub удали сам:
+   `git push origin --delete <headRefName>`.
+2. Основной checkout (первая строка `git worktree list`) стоит на `main` — там `git pull --ff-only`. Открыта другая
+   ветка или есть незакоммиченные изменения — не трогай: `git fetch origin main:main` и сообщи пользователю.
 3. Статусы обновляются ещё в ветке задачи (шаг 6 конвейера), поэтому после мержа проверь в `main`:
-   spec из тела PR — статус `done`, требование в `docs/PRD.md` — ✅ и строка в «Журнале работ».
-   Если забыли — сообщи пользователю, предложи `docs/`-PR; сам в `main` не пушь.
+   spec из тела PR — статус `done`, требование в `docs/PRD.md` — ✅ и строка в «Журнале работ»,
+   строка задачи в `docs/HISTORY.md` — ✅ и номер PR (номер задачи — из заголовка PR `NNNN: …`).
+   Если забыли — сообщи пользователю, предложи `chore/NNNN-…`-PR; сам в `main` не пушь.
 
 ## Уборка
-- Локальная ветка PR: `git branch -D <headRefName>`, если осталась; `git fetch --prune`.
+- `git fetch --prune`. Локальную ветку PR удаляет `pnpm wt remove` вместе с worktree (ниже); ветку без worktree —
+  `git branch -D <headRefName>`.
 - Worktree задачи (`pnpm wt list`): удаляется после выкатки — `pnpm wt remove <headRefName>` (этап `cleanup`
   в `/flow feature|bug`; при мерже без `/flow` — сразу после выкатки). Есть незакоммиченные изменения или
   незапушенные коммиты — не удаляй, спроси пользователя. Забытые worktree других влитых задач —

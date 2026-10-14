@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   BRANCH_PATTERN,
   latestPrByBranch,
+  nextTaskNumber,
   normalizeLinks,
   type PruneInput,
   parseDuration,
   parseWorktreeList,
   planPrune,
+  usedTaskNumbers,
   worktreeFolderName,
 } from "./worktreePlan";
 
@@ -22,7 +24,7 @@ describe("parseWorktreeList", () => {
       "",
       "worktree /p/binance-dashboard_012-sort",
       "HEAD bbb",
-      "branch refs/heads/feat/012-sort",
+      "branch refs/heads/feature/0012-sort",
       "",
       "worktree /p/binance-dashboard_probe",
       "HEAD ccc",
@@ -33,7 +35,7 @@ describe("parseWorktreeList", () => {
       { path: "/p/binance-dashboard", branch: "main", main: true },
       {
         path: "/p/binance-dashboard_012-sort",
-        branch: "feat/012-sort",
+        branch: "feature/0012-sort",
         main: false,
       },
       { path: "/p/binance-dashboard_probe", branch: null, main: false },
@@ -74,18 +76,54 @@ describe("parseDuration", () => {
 describe("worktreeFolderName и BRANCH_PATTERN", () => {
   it("метка — последний сегмент ветки или своя", () => {
     expect(
-      worktreeFolderName("binance-dashboard", "feat/012-sort-memory"),
-    ).toBe("binance-dashboard_012-sort-memory");
+      worktreeFolderName("binance-dashboard", "feature/0012-sort-memory"),
+    ).toBe("binance-dashboard_0012-sort-memory");
     expect(
       worktreeFolderName("binance-dashboard", "chore/flows", "Flow Skill"),
     ).toBe("binance-dashboard_flow-skill");
   });
 
-  it("ветки по соглашению проекта", () => {
-    expect(BRANCH_PATTERN.test("feat/012-sort-memory")).toBe(true);
-    expect(BRANCH_PATTERN.test("fix/mirror")).toBe(true);
+  it("новая ветка — <тип>/NNNN-slug по соглашению проекта", () => {
+    expect(BRANCH_PATTERN.test("feature/0012-sort-memory")).toBe(true);
+    expect(BRANCH_PATTERN.test("bug/0009-table-sort-restore")).toBe(true);
+    expect(BRANCH_PATTERN.test("hotfix/0013-mirror")).toBe(true);
+    expect(BRANCH_PATTERN.test("chore/0011-flows")).toBe(true);
+    expect(BRANCH_PATTERN.test("feat/012-sort-memory")).toBe(false);
+    expect(BRANCH_PATTERN.test("fix/mirror")).toBe(false);
+    expect(BRANCH_PATTERN.test("feature/012-sort")).toBe(false);
+    expect(BRANCH_PATTERN.test("feature/0012-Sort")).toBe(false);
     expect(BRANCH_PATTERN.test("main")).toBe(false);
-    expect(BRANCH_PATTERN.test("feature/Sort")).toBe(false);
+  });
+});
+
+describe("номер задачи", () => {
+  const history = [
+    "| № | Дата | Тип | Задача | Spec | PR | Статус |",
+    "| 0009 | 2026-10-15 | bug | Сортировка | [009](specs/009-x.md) | — | в работе |",
+    "| 0010 | 2026-10-15 | chore | Нумерация | — | #46 | ✅ |",
+    "",
+    "| Дата | PR | Что сделано |",
+    "| 2026-10-11 | #41 | Раздельные сбросы |",
+  ].join("\n");
+
+  it("следующий — после последнего в журнале, даты архива не считаются номерами", () => {
+    expect(nextTaskNumber(usedTaskNumbers(history, ["main"]))).toBe("0011");
+  });
+
+  it("номера ещё не влитых веток, локальных и на GitHub, заняты", () => {
+    const used = usedTaskNumbers(history, [
+      "main",
+      "origin/feature/0012-chart",
+      "bug/0013-sort",
+      "fix/009-table-sort-restore",
+      "origin/chore/flows",
+    ]);
+    expect([...used].sort((a, b) => a - b)).toEqual([9, 10, 12, 13]);
+    expect(nextTaskNumber(used)).toBe("0014");
+  });
+
+  it("пустой журнал — 0001", () => {
+    expect(nextTaskNumber(usedTaskNumbers("", []))).toBe("0001");
   });
 });
 
@@ -93,35 +131,35 @@ describe("latestPrByBranch", () => {
   it("на ветку — PR с наибольшим номером", () => {
     const map = latestPrByBranch([
       {
-        headRefName: "feat/a",
+        headRefName: "feature/0001-a",
         number: 10,
         state: "CLOSED",
         mergedAt: null,
         closedAt: "x",
       },
       {
-        headRefName: "feat/a",
+        headRefName: "feature/0001-a",
         number: 12,
         state: "MERGED",
         mergedAt: "y",
         closedAt: "y",
       },
       {
-        headRefName: "feat/b",
+        headRefName: "feature/0002-b",
         number: 11,
         state: "OPEN",
         mergedAt: null,
         closedAt: null,
       },
     ]);
-    expect(map.get("feat/a")?.number).toBe(12);
-    expect(map.get("feat/b")?.state).toBe("OPEN");
+    expect(map.get("feature/0001-a")?.number).toBe(12);
+    expect(map.get("feature/0002-b")?.state).toBe("OPEN");
   });
 });
 
 describe("planPrune", () => {
   const base: PruneInput = {
-    branch: "feat/012-sort",
+    branch: "feature/0012-sort",
     dirty: false,
     unpushed: 0,
     current: false,

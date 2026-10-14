@@ -7,9 +7,10 @@
 ```
 /feature <требование>   |   /bug <описание>
  │
- ├─1. ANALYST — главная сессия (нужен диалог)            → docs/PRD.md + docs/specs/NNN-slug.md
- │     ⏸ пользователь подтверждает ТЗ
- ├─2. WORKTREE `pnpm wt new feat|fix/NNN-slug` + DEVELOPER (субагент) → ветка, код + тесты, push
+ ├─1. ANALYST — главная сессия (нужен диалог)  → номер `pnpm wt next`, worktree `pnpm wt new feature|bug/NNNN-slug`,
+ │     в нём docs/PRD.md + docs/specs/NNNN-slug.md + строка docs/HISTORY.md
+ │     ⏸ пользователь подтверждает ТЗ → первый коммит ветки
+ ├─2. DEVELOPER — субагент `developer` в worktree задачи  → код + тесты, push
  ├─3. `pnpm check && build` → `pnpm wt serve` (локальный сервер worktree: PGlite, без входа)
  │     TESTER (субагент) проходит AC на этом сервере → скриншоты + PASS/FAIL
  │     FAIL → 2 (до 3 кругов, дальше — к пользователю)
@@ -18,7 +19,7 @@
  ├─5. REVIEWER — субагент `reviewer`                       → ревью-комментарий в PR
  │     есть замечания → DEVELOPER правит → TESTER снова все AC на локальном сервере → REVIEWER
  │     (до 3 кругов, дальше — к пользователю); замечаний нет → label `ai-approved`
- ├─6. статусы в PRD/spec, зелёный CI → ⏸ пользователь: «мерж» → squash-merge
+ ├─6. статусы в PRD, spec и docs/HISTORY.md, зелёный CI → ⏸ пользователь: «мерж» → squash-merge
  └─7. выкатка (`/flow release`) → `pnpm wt remove <ветка>` (сервер остановлен, worktree удалён)
 CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger · typecheck · Vitest · build.
 ```
@@ -44,18 +45,19 @@ Claude запускать из папки проекта (`~/Projects/my/binance
 ## Роли
 | Роль | Где | Может | Не может |
 |---|---|---|---|
-| Analyst | главная сессия (скиллы `/feature`, `/bug`) | спрашивать пользователя, писать PRD и spec | писать код |
+| Analyst | главная сессия (скиллы `/feature`, `/bug`) | спрашивать пользователя, заводить worktree задачи, писать PRD и spec | писать код |
 | Developer | `.claude/agents/developer.md` | код, тесты, git, push, PR | мержить, менять spec без согласования |
-| Tester | `.claude/agents/tester.md` | запускать приложение, Playwright MCP, скриншоты | править код |
+| Tester | `.claude/agents/tester.md` | Playwright MCP на локальном сервере worktree, скриншоты | править код |
 | Reviewer | `.claude/agents/reviewer.md` | читать код, комментировать PR, ставить label | править код, мержить |
 
 Почему Analyst не субагент: субагенты не ведут диалог с пользователем. Почему Reviewer — отдельный
 субагент: свежий контекст, не «помнит», как писался код.
 
 ## Артефакты задачи
-- `docs/specs/NNN-slug.md` — ТЗ (шаблоны `_template-feature.md`, `_template-bug.md`). NNN — следующий
-  свободный номер. В конце spec — «Журнал»: ветка, PR, круги тестов/ревью, статус.
-- `docs/specs/NNN-slug/screens/*.png` — скриншоты приёмки (коммитятся в ветку задачи).
+- Номер задачи `NNNN` — сквозной на все типы, строка в `docs/HISTORY.md` (правила — `conventions.md` → «Git»).
+- `docs/specs/NNNN-slug.md` — ТЗ (шаблоны `_template-feature.md`, `_template-bug.md`). В конце spec —
+  «Журнал»: ветка, PR, круги тестов/ревью, статус.
+- `docs/specs/NNNN-slug/screens/*.png` — скриншоты приёмки (коммитятся в ветку задачи).
 - PR со ссылкой на spec; ревью — комментарием в PR (approve своего PR GitHub не даёт → label `ai-approved`).
 
 ## Защита main
@@ -68,7 +70,7 @@ Claude запускать из папки проекта (`~/Projects/my/binance
 Решение пользователя 2026-10-15 (отменяет «один чат, без worktree» от 2026-10-10): каждая задача — своя ветка в
 своём worktree `~/Projects/my/binance-dashboard_<метка>`, созданном `pnpm wt new` (скилл `worktree`): ветка от
 свежего `main`, ссылка на `.env.local` по списку `.claude/worktree-links.json`, зависимости. Основной checkout всегда
-на чистом `main` — в нём только мерж и выкатка. У каждого worktree свой локальный сервер (`pnpm wt serve`, свой порт
+на чистом `main` — в нём только мерж и выкатка; spec и строка журнала задачи пишутся уже в её worktree. У каждого worktree свой локальный сервер (`pnpm wt serve`, свой порт
 и своя PGlite): на нём Tester проверяет задачу до PR и после каждого круга правок по ревью.
 
 Каждая задача заканчивается удалением своего worktree: после мержа и выкатки — `pnpm wt remove <ветка>` (останавливает сервер,
@@ -78,4 +80,7 @@ Claude запускать из папки проекта (`~/Projects/my/binance
 `EnterWorktree`/`--worktree` и голый `git worktree add` не использовать — они не готовят worktree.
 
 ## Мелочи без конвейера
-Опечатки, тексты, правки документации можно делать напрямую в ветке `chore/…`/`docs/…` + PR, без spec.
+Опечатки, тексты, правки документации можно делать напрямую в ветке `chore/NNNN-slug` (тоже в своём worktree) + PR,
+без spec.
+Номер и строка в `docs/HISTORY.md` нужны и здесь. Срочный фикс прода — `hotfix/NNNN-slug` (можно без spec,
+но с падающим тестом).

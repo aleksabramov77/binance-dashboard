@@ -1,7 +1,7 @@
 ---
 name: worktree
 description: Worktree на задачу binance-dashboard через `pnpm wt` — создать (ветка от свежего main, ссылка на .env.local, зависимости), поднять локальный сервер worktree для проверки, удалить после мержа, найти и убрать забытые. Используй, когда начинаешь задачу, проверяешь её на локальном сервере, мержишь или наводишь порядок в worktree; никогда не создавай worktree встроенными командами.
-argument-hint: "[new <ветка> | serve | stop | list | remove <ветка> | prune]"
+argument-hint: "[next | new <ветка> | serve | stop | list | remove <ветка> | prune]"
 ---
 
 # Worktree на задачу
@@ -13,8 +13,10 @@ argument-hint: "[new <ветка> | serve | stop | list | remove <ветка> | 
 ## Где и как называются
 
 Плоско рядом с основным checkout: `~/Projects/my/binance-dashboard_<метка>`. Метка — последний сегмент ветки
-(`feat/012-sort-memory` → `binance-dashboard_012-sort-memory`) или своя через `--name`: несколько слов, чтобы потом
-узнать задачу. Ветка — по соглашению `feat|fix|chore|docs|test|refactor/<NNN-slug>` (`docs/ai/conventions.md`).
+(`feature/0012-sort-memory` → `binance-dashboard_0012-sort-memory`) или своя через `--name`: несколько слов, чтобы
+потом узнать задачу. Новая ветка — по соглашению `feature|bug|hotfix|chore/NNNN-slug` (`docs/ai/conventions.md` →
+«Git»), номер — `pnpm -s wt next`; другое имя или занятый номер `pnpm wt new` не примет. Уже существующую ветку
+(локально или на GitHub) откроет с любым именем.
 
 **Не создавать worktree встроенными командами** — `EnterWorktree`, `claude --worktree`, режимом worktree агентов или
 голым `git worktree add`: они кладут worktree в `.claude/worktrees/` основного репозитория и не готовят его (нет
@@ -23,14 +25,15 @@ argument-hint: "[new <ветка> | serve | stop | list | remove <ветка> | 
 ## Команды
 
 ```bash
-pnpm wt new feat/012-sort-memory           # из любого места репозитория: ветка от свежего origin/main, ссылки, pnpm install
-pnpm wt new fix/013-x --from origin/fix/…  # от другой базы; существующая ветка (локально или на GitHub) — просто откроется
-pnpm wt serve                              # внутри worktree: локальный сервер, печатает адрес http://localhost:<порт>
-pnpm wt stop                               # остановить его
-pnpm wt list                               # все worktree: ветка, изменения, незапушенное, PR, адрес сервера
-pnpm wt link                               # внутри worktree: создать или починить ссылки (после git worktree move)
-pnpm wt remove feat/012-sort-memory        # остановить сервер и удалить worktree; после мержа — и локальную ветку
-pnpm wt prune [--older-than 24h] [--dry-run]  # удалить worktree задач, влитых давно; показать забытые
+pnpm -s wt next                              # номер новой задачи: журнал main + ещё не влитые ветки задач
+pnpm wt new feature/0012-sort-memory         # из любого места репозитория: ветка от свежего origin/main, ссылки, pnpm install
+pnpm wt new bug/0013-x --from origin/bug/…   # от другой базы; существующая ветка (локально или на GitHub) — просто откроется
+pnpm wt serve                                # внутри worktree: локальный сервер, печатает адрес http://localhost:<порт>
+pnpm wt stop                                 # остановить его
+pnpm wt list                                 # все worktree: ветка, изменения, незапушенное, PR, адрес сервера
+pnpm wt link                                 # внутри worktree: создать или починить ссылки (после git worktree move)
+pnpm wt remove feature/0012-sort-memory      # остановить сервер и удалить worktree; после мержа — и локальную ветку
+pnpm wt prune [--older-than 24h] [--dry-run] # удалить worktree задач, влитых давно; показать забытые
 ```
 
 `serve`, `stop`, `remove` без аргумента работают с worktree, в котором запущены; `--path <worktree>` — с другим.

@@ -202,6 +202,32 @@ export function worktreeFolderName(
   return `${repo}_${tail}`;
 }
 
-/** Ветка задачи по соглашению проекта: `feat|fix|chore|docs|test|refactor/<slug>`. */
+/** Новая ветка задачи (`docs/ai/conventions.md` → «Git»): `feature|bug|hotfix|chore/NNNN-slug`. */
 export const BRANCH_PATTERN =
-  /^(feat|fix|chore|docs|test|refactor)\/[a-z0-9][a-z0-9._-]*$/;
+  /^(feature|bug|hotfix|chore)\/(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+const HISTORY_ROW = /^\| (\d{4}) \|/gm;
+const TASK_BRANCH = /^(?:origin\/)?[a-z]+\/(\d{4})-/;
+
+/**
+ * Занятые номера задач: строки журнала `docs/HISTORY.md` ветки `main` и номера в именах веток задач — локальных
+ * и на GitHub (`origin/…`). Ветки нужны, потому что строка журнала попадает в `main` только с мержем: без них
+ * два параллельных worktree получили бы один номер.
+ */
+export function usedTaskNumbers(
+  history: string,
+  branches: string[],
+): Set<number> {
+  const used = new Set<number>();
+  for (const match of history.matchAll(HISTORY_ROW)) used.add(Number(match[1]));
+  for (const branch of branches) {
+    const match = TASK_BRANCH.exec(branch);
+    if (match) used.add(Number(match[1]));
+  }
+  return used;
+}
+
+/** Следующий номер задачи — на 1 больше всех занятых, четыре цифры. */
+export function nextTaskNumber(used: Set<number>): string {
+  return String(Math.max(0, ...used) + 1).padStart(4, "0");
+}
