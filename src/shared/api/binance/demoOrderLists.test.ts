@@ -45,6 +45,30 @@ describe("spotEntryListRequest", () => {
     });
     expect(params).not.toHaveProperty("pendingAboveType");
   });
+
+  it("свои id списка и ордеров — чтобы перечитать заявку с неизвестным исходом", () => {
+    const clientIds = {
+      list: "bd1-L",
+      working: "bd1-W",
+      stop: "bd1-S",
+      takeProfit: "bd1-T",
+    };
+    expect(
+      spotEntryListRequest({ ...base, takeProfit: "0.2200", clientIds }).params,
+    ).toMatchObject({
+      listClientOrderId: "bd1-L",
+      workingClientOrderId: "bd1-W",
+      pendingAboveClientOrderId: "bd1-T",
+      pendingBelowClientOrderId: "bd1-S",
+    });
+    const oto = spotEntryListRequest({ ...base, takeProfit: null, clientIds });
+    expect(oto.params).toMatchObject({
+      listClientOrderId: "bd1-L",
+      workingClientOrderId: "bd1-W",
+      pendingClientOrderId: "bd1-S",
+    });
+    expect(oto.params).not.toHaveProperty("pendingAboveClientOrderId");
+  });
 });
 
 describe("summarizeSpotEntryList", () => {
