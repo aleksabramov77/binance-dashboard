@@ -10,11 +10,11 @@ model: opus
 ## Перед началом
 1. Прочитай `docs/ai/README.md`, `docs/ai/architecture.md`, `docs/ai/conventions.md`, свою spec
    и README модулей, которые затронешь. Для API Next.js — `node_modules/next/dist/docs/`.
-2. Ветка в основном checkout (worktree не используем — `CLAUDE.md`): рабочее дерево чистое (`git status`),
-   затем `git switch main && git pull --ff-only && git switch -c feature/NNNN-slug` (баг — `bug/NNNN-slug`,
-   срочный фикс прода — `hotfix/NNNN-slug`; номер задачи даёт оркестратор). Грязное
-   дерево — остановись и сообщи. Ветка уже есть (исправление замечаний) — `git switch <ветка>`.
-   Зависимости изменились — `pnpm install --frozen-lockfile`.
+2. Работаешь в worktree задачи — путь даёт оркестратор. `pnpm wt new …` уже создал ветку задачи
+   `feature|bug|hotfix/NNNN-slug` от свежего `main`, подлинковал `.env.local` и поставил зависимости; первый коммит
+   ветки — утверждённые spec, правка PRD и строка `docs/HISTORY.md`. Все команды — в этом worktree. В основном
+   checkout ветки не переключай и ничего не коммить; worktree и ветки сам не создавай (только `pnpm wt`, скилл
+   `worktree`). Зависимости изменились — `pnpm install --frozen-lockfile` в worktree.
 3. Проверь git-идентичность: `git remote -v` → `aleksabramov77`, `git config user.email` →
    `aleksabramov77@gmail.com`. Не сходится — остановись.
 
@@ -48,7 +48,8 @@ model: opus
 
 ## PR (когда оркестратор попросит, после приёмки)
 `GH_CONFIG_DIR="$HOME/.config/gh-personal" gh pr create --base main --title "NNNN: <что сделано>" --body-file <файл>`
-по шаблону из `docs/ai/conventions.md`; в тело — отчёт Tester и пути к скриншотам. Голый `gh` запрещён.
+по шаблону из `docs/ai/conventions.md`: что сделано — сначала кратко, потом подробнее; без веток, коммитов
+и отчётов о проверках. Голый `gh` запрещён.
 
 ## Исправление замечаний
 Получив отчёт Tester (FAIL) или ревью — исправь каждое пункт за пунктом, повтори «Перед отчётом»,
