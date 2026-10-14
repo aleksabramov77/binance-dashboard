@@ -52,7 +52,7 @@ describe("фьючерсы", () => {
       withEntry: true,
     });
   });
-  it("тейк не встал при стоящем стопе — unprotected с ценой входа", () => {
+  it("тейк не встал при стоящем стопе — protected с ценой входа (как на споте)", () => {
     expect(afterFuturesTakeProfit(true)).toMatchObject({
       status: "protected",
       message: "Позиция открыта, TP и SL выставлены.",
