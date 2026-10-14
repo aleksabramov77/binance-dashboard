@@ -32,6 +32,12 @@
   (`toFuturesSymbolOrders` / `toSpotSymbolOrders`: чем исполнился выход — algo TP/SL у futures по
   `actualOrderId`, ликвидация по `clientOrderId` `autoclose-…`, тип ордера OCO у spot; активные стопы
   со стороной). Тесты разбора — `demoOrders.test.ts`.
+- `demoRules.ts` — чистый разбор фильтров exchangeInfo в `SymbolRules`: шаги, минимумы, коридор цены
+  `priceBand` (спот: `PERCENT_PRICE_BY_SIDE` или `PERCENT_PRICE`; у фьючерсов null — algo-триггеры фильтр не
+  ограничивает), `otoAllowed`/`ocoAllowed`. Тесты — `demoRules.test.ts`.
+- `demoOrderLists.ts` — спот-вход одной заявкой (spec 0012): параметры OTOCO/OTO (`spotEntryListRequest`,
+  рабочий `LIMIT BUY FOK`) и разбор ответа (`summarizeSpotEntryList`); сеть — `demoSpotBuyProtected`,
+  статус отложенного ордера — `fetchDemoSpotOrderStatus`. Тесты — `demoOrderLists.test.ts`.
 - `*Schemas.ts` — Zod-схемы ответов. Числа Binance приходят строками → `z.coerce.number()`.
 
 ## Подводные камни
