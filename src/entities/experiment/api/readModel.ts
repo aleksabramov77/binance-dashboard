@@ -161,6 +161,24 @@ function groupLabel(
  * Разрезы /stats: сделки выбранной (по умолчанию текущей) эпохи под фильтры, сгруппированные
  * по эксперименту, рынку, монете или направлению. null — нет такой эпохи.
  */
+/** Все эксперименты и учтённые сделки текущей эпохи — для отчёта лаборатории (`pnpm lab:report`). */
+export async function readLabDataset(db: Db): Promise<{
+  run: ExperimentsResponse["run"];
+  experiments: Experiment[];
+  trades: PaperTrade[];
+}> {
+  const run = await currentRun(db);
+  const [rows, trades] = await Promise.all([
+    db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
+    runTrades(db, run.id),
+  ]);
+  return {
+    run,
+    experiments: rows.map((r) => experimentSchema.parse(r)),
+    trades,
+  };
+}
+
 export async function readTradeStats(
   db: Db,
   query: StatsQuery,

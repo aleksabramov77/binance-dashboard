@@ -31,6 +31,7 @@ README внутри сложных модулей (читать перед пр�
 | `pnpm test` | Vitest |
 | `pnpm lint` / `pnpm lint:fsd` | Biome / Steiger (FSD) |
 | `pnpm format` | автоформат Biome |
+| `pnpm lab:report` | read-only отчёт лаборатории по текущей эпохе из БД: метрики, t, MFE, разрезы (`--experiment F06`, `--since 7d`, `--out <каталог>`) — вход для `/flow lab` |
 | `pnpm hooks:install` | включить pre-push хук (запрет push в main + `pnpm check`) |
 
 Ключи — только в `.env.local` (пример — `.env.example`), в git не попадают. Без ключей приложение

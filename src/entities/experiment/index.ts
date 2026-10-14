@@ -20,6 +20,7 @@ export {
 export {
   readExperimentDetail,
   readExperimentsOverview,
+  readLabDataset,
   readTradeStats,
 } from "./api/readModel";
 // /settings лаборатории (задача 3d): атомарный сброс эпохи, тумблеры, контракт и хуки.
