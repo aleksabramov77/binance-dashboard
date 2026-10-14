@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
@@ -224,5 +226,38 @@ describe("демо-сводка и демо-сброс", () => {
       losses: 1,
       pnl: -2,
     });
+  });
+});
+
+describe("data-fix drizzle/0005 (spec 0012, AC2)", () => {
+  it("отказы «нет в Binance Demo Trading» переносятся в пропуски, прочие отказы остаются", async () => {
+    await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    await setExperimentDemoMirror(db, "F02", true);
+    const [a, b] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, a);
+    await claimMirror(db, b);
+    await updateMirror(db, "a", {
+      status: "rejected",
+      message: "ETHUSDT нет в Binance Demo Trading (Futures).",
+      steps: [],
+    });
+    await updateMirror(db, "b", {
+      status: "rejected",
+      message: "Биржа отклонила вход — позиция не открыта.",
+      steps: [],
+    });
+    const fix = readFileSync(
+      "drizzle/0005_mirror_missing_symbols_skipped.sql",
+      "utf8",
+    );
+    await db.execute(sql.raw(fix));
+    await db.execute(sql.raw(fix));
+    const statuses = await mirrorStatuses(db, ["a", "b"]);
+    expect(statuses.get("a")).toEqual({
+      status: "skipped",
+      message: "ETHUSDT: нет на демо-фьючерсах.",
+    });
+    expect(statuses.get("b")?.status).toBe("rejected");
   });
 });
