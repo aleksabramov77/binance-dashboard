@@ -1,0 +1,22 @@
+# /flow bug "<что сломалось>" — баг целиком: конвейер /bug (падающий тест → фикс) до готового PR, мерж по команде
+# пользователя и выкатка (/flow release). Исполняет скилл flow (~/.claude-second/skills/flow).
+description: Баг целиком — воспроизведение и ТЗ, фикс через падающий тест, приёмка, PR и ревью, мерж по команде, выкатка.
+stages:
+  - id: build
+    skills: [bug]
+    note: >
+      Скилл bug ведёт исправление до PR с зелёным CI и label ai-approved, со своими остановками. В конце покажи
+      пользователю PR и спроси, мержить ли.
+    produces: номер PR
+    gate: user-approval
+
+  - id: merge
+    uses: [build]
+    note: >
+      Мерж по команде пользователя из этапа build («мерж»): выполни .claude/skills/merge/SKILL.md для этого PR.
+      Скилл merge вызывает только пользователь, поэтому этап идёт по его тексту.
+    produces: коммит в main
+
+  - id: release
+    flow: release
+    uses: [merge]

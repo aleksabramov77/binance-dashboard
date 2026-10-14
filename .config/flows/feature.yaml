@@ -1,0 +1,23 @@
+# /flow feature "<требование>" — новое требование целиком: конвейер /feature до готового PR, мерж по команде
+# пользователя и выкатка (/flow release). Исполняет скилл flow (~/.claude-second/skills/flow). Правила CLAUDE.md
+# главнее этого файла: мерж — только по явной команде пользователя.
+description: Новое требование целиком — ТЗ, разработка, приёмка, PR и ревью, мерж по команде, выкатка.
+stages:
+  - id: build
+    skills: [feature]
+    note: >
+      Скилл feature ведёт задачу до PR с зелёным CI и label ai-approved, со своими остановками (утверждение ТЗ,
+      приёмка по скриншотам). В конце покажи пользователю PR и спроси, мержить ли.
+    produces: номер PR
+    gate: user-approval
+
+  - id: merge
+    uses: [build]
+    note: >
+      Мерж по команде пользователя из этапа build («мерж»): выполни .claude/skills/merge/SKILL.md для этого PR.
+      Скилл merge вызывает только пользователь, поэтому этап идёт по его тексту.
+    produces: коммит в main
+
+  - id: release
+    flow: release
+    uses: [merge]
