@@ -3,9 +3,11 @@ import {
   ceilToTick,
   chooseSpotEntry,
   pendingOutcome,
+  spotClientIds,
+  spotEntryFromQuery,
   spotEntryLimitPrice,
-  spotSellQuantity,
 } from "./spotEntry";
+import { spotSellQuantity } from "./validateTrade";
 
 describe("chooseSpotEntry", () => {
   const all = { otoAllowed: true, ocoAllowed: true };
@@ -35,17 +37,81 @@ describe("цена и объём составной заявки", () => {
   });
 });
 
+const stop = (status: string) => ({ type: "STOP_LOSS", status });
+const tp = (status: string) => ({ type: "LIMIT_MAKER", status });
+
 describe("pendingOutcome", () => {
   it("сразу после заявки — PENDING_NEW, потом NEW", () => {
-    expect(pendingOutcome(["PENDING_NEW", "PENDING_NEW"])).toBe("waiting");
-    expect(pendingOutcome(["NEW", "NEW"])).toBe("placed");
+    expect(pendingOutcome([tp("PENDING_NEW"), stop("PENDING_NEW")])).toBe(
+      "waiting",
+    );
+    expect(pendingOutcome([tp("NEW"), stop("NEW")])).toBe("placed");
+    expect(pendingOutcome([stop("NEW")])).toBe("placed");
   });
   it("стоп уже сработал — тейк снят биржей, но это не отказ защиты", () => {
-    expect(pendingOutcome(["FILLED", "EXPIRED"])).toBe("placed");
+    expect(pendingOutcome([stop("FILLED"), tp("EXPIRED")])).toBe("placed");
   });
-  it("биржа сняла отложенные ордера — монеты без защиты", () => {
-    expect(pendingOutcome(["EXPIRED", "EXPIRED"])).toBe("failed");
-    expect(pendingOutcome(["REJECTED"])).toBe("failed");
+  it("тейк снят биржей, стоп стоит — защита есть, повторно не защищаем (ревью #48)", () => {
+    expect(pendingOutcome([tp("EXPIRED"), stop("NEW")])).toBe("stopOnly");
+    expect(pendingOutcome([tp("CANCELED"), stop("NEW")])).toBe("stopOnly");
+    // Стоп ещё не подтверждён — ждём его, а не объявляем отказ.
+    expect(pendingOutcome([tp("EXPIRED"), stop("PENDING_NEW")])).toBe(
+      "waiting",
+    );
+  });
+  it("биржа сняла стоп — монеты без защиты", () => {
+    expect(pendingOutcome([tp("EXPIRED"), stop("EXPIRED")])).toBe("failed");
+    expect(pendingOutcome([tp("NEW"), stop("CANCELED")])).toBe("failed");
+    expect(pendingOutcome([stop("REJECTED")])).toBe("failed");
     expect(pendingOutcome([])).toBe("waiting");
+  });
+  it("стопа в списке нет — любой снятый ордер считается потерей защиты", () => {
+    expect(pendingOutcome([tp("EXPIRED")])).toBe("failed");
+  });
+});
+
+describe("заявка с неизвестным исходом", () => {
+  it("свои clientOrderId: короткие, из id сделки, разные у ордеров", () => {
+    const ids = spotClientIds("3f2a9c1e-7b4d-4e8f-9a01-23456789abcd");
+    expect(ids).toEqual({
+      list: "bd3f2a9c1e7b4d4e8f9a012345-L",
+      working: "bd3f2a9c1e7b4d4e8f9a012345-W",
+      stop: "bd3f2a9c1e7b4d4e8f9a012345-S",
+      takeProfit: "bd3f2a9c1e7b4d4e8f9a012345-T",
+      market: "bd3f2a9c1e7b4d4e8f9a012345-M",
+    });
+    for (const id of Object.values(ids))
+      expect(id).toMatch(/^[A-Za-z0-9_-]{1,36}$/);
+  });
+  it("перечитанная заявка — в виде ответа биржи, комиссия по ставке 0,1%", () => {
+    // Демо 2026-10-15: OTO по BATUSDT, перечитано GET /api/v3/order по clientOrderId.
+    const working = {
+      orderId: 98433430,
+      orderListId: 4284769,
+      type: "LIMIT",
+      side: "BUY" as const,
+      status: "FILLED",
+      executedQty: 31,
+      cummulativeQuoteQty: 5.2514,
+    };
+    const pending = {
+      ...working,
+      orderId: 98433431,
+      type: "STOP_LOSS",
+      side: "SELL" as const,
+      status: "NEW",
+      executedQty: 0,
+      cummulativeQuoteQty: 0,
+    };
+    const list = spotEntryFromQuery(working, [pending]);
+    expect(list).toMatchObject({
+      orderListId: 4284769,
+      workingStatus: "FILLED",
+      workingOrderId: 98433430,
+      filled: 31,
+      quoteQty: 5.2514,
+      pending: [{ orderId: 98433431, type: "STOP_LOSS", status: "NEW" }],
+    });
+    expect(list.baseCommission).toBeCloseTo(0.031);
   });
 });

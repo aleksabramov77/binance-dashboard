@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { TradeRequest } from "@/entities/trade";
 import {
+  fitSpotStopToMinNotional,
   fitToMinNotional,
   fitToPriceBand,
   floorToStep,
   isDust,
   roundToTick,
+  spotSellQuantity,
+  spotStopNotional,
   stepDecimals,
   type TradeContext,
   validateTrade,
@@ -288,5 +291,95 @@ describe("стоп и тейк в пределах фильтра цены би�
       expect(result.value.stopLoss).toBe("1000.00");
       expect(result.value.adjustments).toEqual([]);
     }
+  });
+});
+
+describe("спот: деньги на LIMIT FOK и минимум стопа (ревью #48)", () => {
+  // Реальные правила BATUSDT на demo-api.binance.com 2026-10-15.
+  const bat = {
+    tickSize: "0.00010000",
+    stepSize: "1.00000000",
+    minQty: 1,
+    minNotional: 5,
+    priceBand: null,
+    otoAllowed: true,
+    ocoAllowed: true,
+  };
+  const batLong: TradeRequest = {
+    symbol: "BATUSDT",
+    market: "spot",
+    direction: "long",
+    quantity: 100,
+    stopLoss: 0.16,
+    takeProfit: 0.2,
+    leverage: 1,
+  };
+  const batCtx = (patch: Partial<TradeContext> = {}) =>
+    ctx({ price: 0.17, rules: bat, availableUsd: 1000, ...patch });
+
+  it("баланс на грани: нужно объём +0,5% (биржа блокирует USDT по лимитной цене FOK)", () => {
+    // 100 BAT × 0,17 = $17; с +0,5% — $17,085: $17,05 раньше проходило, а биржа отклонила бы FOK.
+    // Риск здесь не проверяем (maxRiskPct 100%).
+    expect(
+      validateTrade(batLong, batCtx({ availableUsd: 17.09, maxRiskPct: 1 })).ok,
+    ).toBe(true);
+    const result = validateTrade(
+      batLong,
+      batCtx({ availableUsd: 17.05, maxRiskPct: 1 }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        "Нужно $17.08 USDT (с запасом 0,5% на цену покупки), а на Spot свободно $17.05.",
+      ],
+    });
+  });
+
+  it("стоп после комиссии дешевле minNotional — понятная ошибка до отправки", () => {
+    // Демо 2026-10-15: 31 BAT, стоп продаёт 30 × 0,16 = $4,80 < $5 → биржа отклонила OTO целиком.
+    const result = validateTrade({ ...batLong, quantity: 31 }, batCtx());
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        "Стоп продаст 30 (куплено минус комиссия 0,1%) по 0.1600 — это $4.80, меньше минимального ордера ($5): биржа отклонит заявку. Увеличьте количество.",
+      ],
+    });
+    // Ручная сделка ровно на минимуме по цене: покупка проходит, стоп — нет.
+    expect(
+      validateTrade({ ...batLong, quantity: 30 }, batCtx({ price: 1 / 6 })).ok,
+    ).toBe(false);
+    // Со стопом 0,167: 30 × 0,167 = $5,01 — биржа приняла (демо 2026-10-15).
+    expect(
+      validateTrade({ ...batLong, quantity: 31, stopLoss: 0.167 }, batCtx()).ok,
+    ).toBe(true);
+  });
+
+  it("на фьючерсах комиссия из маржи — минимум стопа не проверяем", () => {
+    const result = validateTrade(
+      { ...batLong, market: "futures", quantity: 30 },
+      batCtx(),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("spotStopNotional: продажа после комиссии вниз к шагу × цена стопа", () => {
+    expect(spotStopNotional(31, 0.16, "1")).toBeCloseTo(4.8, 9);
+    expect(spotSellQuantity(40, "1.00000000")).toBe("39");
+  });
+
+  it("fitMinNotional (зеркало): объём поднимается, чтобы и стоп прошёл минимум", () => {
+    const q = fitSpotStopToMinNotional(31, 0.17, 0.16, bat);
+    expect(q).toBe(33);
+    expect(spotStopNotional(q, 0.16, "1")).toBeGreaterThanOrEqual(5);
+    // Дальше лимита ×3 или выше maxNotional не поднимаем.
+    expect(fitSpotStopToMinNotional(5, 0.17, 0.16, bat)).toBe(5);
+    expect(fitSpotStopToMinNotional(31, 0.17, 0.16, bat, 5.5)).toBe(31);
+
+    const result = validateTrade(
+      { ...batLong, quantity: 30, fitMinNotional: true },
+      batCtx(),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.quantity).toBe("33");
   });
 });
