@@ -67,8 +67,56 @@ export class HttpError extends Error {
   }
 }
 
+// Пауза после 429/418 (spec 0014): лимит веса Binance считается на IP, а повтор во время бана удлиняет бан
+// (от минут до 3 суток). Поэтому после такого ответа к тому же хосту не ходим, пока пауза не кончится. Пауза живёт
+// в памяти процесса (на Vercel — экземпляра функции).
+
+/** Пауза, если Binance не сказал срок (ни Retry-After, ни «banned until»). */
+export const DEFAULT_COOLDOWN_MS = 60_000;
+
+const COOLDOWN_STATUSES = new Set([418, 429]);
+
+const cooldowns = new Map<string, { until: number; status: number }>();
+
+/** Сбросить все паузы (тесты). */
+export function resetBinanceCooldowns() {
+  cooldowns.clear();
+}
+
+/** Конец паузы: Retry-After (сек), для бана — «banned until <ms>» из тела, если позже; иначе 60 с. */
+export function cooldownEnd(
+  now: number,
+  retryAfter: string | null,
+  body: unknown,
+): number {
+  const seconds = Number(retryAfter);
+  let until =
+    retryAfter && Number.isFinite(seconds) && seconds > 0
+      ? now + seconds * 1000
+      : now + DEFAULT_COOLDOWN_MS;
+  const msg = (body as { msg?: unknown } | null)?.msg;
+  const banned =
+    typeof msg === "string" ? /banned until (\d{13})/.exec(msg) : null;
+  if (banned) until = Math.max(until, Number(banned[1]));
+  return until;
+}
+
+const hhmmss = (ms: number) => new Date(ms).toISOString().slice(11, 19);
+
 /** GET JSON с повторами: и обрыв соединения, и обрыв тела (битый JSON) повторяются. */
-export function getJsonWithRetry(url: string, label: string): Promise<unknown> {
+export async function getJsonWithRetry(
+  url: string,
+  label: string,
+): Promise<unknown> {
+  const host = new URL(url).host;
+  const pause = cooldowns.get(host);
+  if (pause && Date.now() < pause.until)
+    throw new HttpError(
+      `${label}: пауза до ${hhmmss(pause.until)} UTC после ответа ${pause.status}`,
+      pause.status,
+    );
+  if (pause) cooldowns.delete(host);
+
   return withRetry(label, async () => {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) {
@@ -78,6 +126,19 @@ export function getJsonWithRetry(url: string, label: string): Promise<unknown> {
         status: res.status,
         body,
       });
+      if (COOLDOWN_STATUSES.has(res.status)) {
+        const until = cooldownEnd(
+          Date.now(),
+          res.headers.get("retry-after"),
+          body,
+        );
+        cooldowns.set(host, { until, status: res.status });
+        log.warn(
+          "binance.cooldown",
+          `${label}: пауза запросов к ${host} до ${hhmmss(until)} UTC`,
+          { host, status: res.status, until: new Date(until).toISOString() },
+        );
+      }
       throw new HttpError(`${label}: ответ ${res.status}`, res.status, body);
     }
     return res.json();

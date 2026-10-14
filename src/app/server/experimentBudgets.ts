@@ -7,7 +7,7 @@ import {
   loadBudgetInputs,
   type PriceLookup,
 } from "@/entities/experiment";
-import { fetch24hTickers } from "@/shared/api/binance/public.server";
+import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { ensureEngineReady } from "./experimentEngine";
@@ -28,9 +28,7 @@ async function lastPrices(
   g[key] ??= new Map();
   const cached = g[key].get(market);
   if (cached && Date.now() - cached.at < PRICES_TTL_MS) return cached.prices;
-  const prices = new Map(
-    (await fetch24hTickers(market)).map((t) => [t.symbol, t.lastPrice]),
-  );
+  const prices = await fetchTickerPrices(market);
   g[key].set(market, { at: Date.now(), prices });
   return prices;
 }

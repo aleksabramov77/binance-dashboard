@@ -1,7 +1,7 @@
 # 0014 · Binance банит IP Vercel за запрос цен для шапки лаборатории
 
 - **Тип:** bug
-- **Статус:** approved
+- **Статус:** testing
 - **Серьёзность:** major
 - **Дата:** 2026-10-15
 
@@ -26,10 +26,15 @@
 - После каждого: `experiments.budgets` «Цены для нереализованного PnL недоступны» — шапка без нереализованного PnL.
 
 ## Причина
-Заполняет Developer после диагностики. Предварительно: шапка и сброс лаборатории
-(`src/app/server/experimentBudgets.ts`, `lastPrices` в `src/app/server/experimentSettings.ts`) берут цены из тяжёлого
-`ticker/24hr`, хотя им нужна только последняя цена. `getJsonWithRetry` (`src/shared/lib/fetchRetry.ts`) не повторяет
-HTTP-ошибки, но и не помнит о бане: следующий опрос через 30 с снова идёт в Binance.
+Цены для шапки (`lastPrices` в `src/app/server/experimentBudgets.ts`) и для сброса лаборатории (`lastPrices` в
+`src/app/server/experimentSettings.ts`) брались из `ticker/24hr` без символа: вес 80 (спот) и 40 (фьючерсы), хотя
+нужна только последняя цена. Кэш на 20 с живёт в одном экземпляре функции Vercel, поэтому опрос раз в 30 с с каждой
+вкладки почти всегда шёл в Binance. Лимит 6000/мин считается на исходящий IP Vercel, общий с чужими приложениями.
+`getJsonWithRetry` (`src/shared/lib/fetchRetry.ts`) не помнил о 429/418, и следующий опрос во время бана снова шёл в
+Binance, хотя повтор во время бана его удлиняет.
+
+**Фикс:** `fetchTickerPrices(market)` (`ticker/price`, вес 4/2) для обоих потребителей; в `getJsonWithRetry` — пауза
+на хост после 429/418 (`Retry-After` → «banned until» → 60 с) с записью `binance.cooldown`.
 
 ## Критерии приёмки
 - [ ] AC1. Цены для шапки (`experimentBudgets.ts`) и для сброса лаборатории (`experimentSettings.ts`) берутся из
