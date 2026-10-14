@@ -32,6 +32,7 @@ README внутри сложных модулей (читать перед пр�
 | `pnpm lint` / `pnpm lint:fsd` | Biome / Steiger (FSD) |
 | `pnpm format` | автоформат Biome |
 | `pnpm hooks:install` | включить pre-push хук (запрет push в main + `pnpm check`) |
+| `pnpm lab:private [--dry-run] [--file <path>]` | записать приватные эксперименты из `private/experiments.json` в БД (`architecture.md` → «Приватные эксперименты») |
 
 Ключи — только в `.env.local` (пример — `.env.example`), в git не попадают. Без ключей приложение
 работает частично: соответствующие блоки показывают «не настроено». CI ключей не имеет.

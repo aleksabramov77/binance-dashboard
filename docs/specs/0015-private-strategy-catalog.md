@@ -88,3 +88,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-15 | ТЗ утверждено |
+| 2026-10-15 | Разработка, ветка `feature/0015-private-strategy-catalog`: приватный репозиторий и `/private` в `.gitignore` (AC1, AC10 — оркестратор); `pnpm lab:private` (`--dry-run`, `--file`) — `scripts/lab-private.ts`, разбор и проверки в `scripts/lib/labPrivate.ts` с тестами; тест «сид каталога не трогает приватную строку» (AC8); ссылка `private` в worktree (AC9); `/experiments/[id]` для id вне каталога — без изменений поведения (cacheComponents рендерит по запросу), комментарий; документация (AC11); AC12 — в «Открытые вопросы» PRD (PR #47 не влит) |
