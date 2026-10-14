@@ -22,6 +22,7 @@ function deps(over: Partial<MirrorDeps> = {}): MirrorDeps {
     configured: true,
     listCandidates: async () => [],
     busySymbols: async () => new Set(),
+    hasSymbol: async () => true,
     claim: async () => true,
     open: async () => ({
       id: "r1",
@@ -107,5 +108,30 @@ describe("runMirror", () => {
     ]);
     expect(r.skipped).toBe(1);
     expect(d.markSkipped).toHaveBeenCalledWith("old", expect.any(String));
+  });
+
+  it("монеты нет на демо — пропуск без запроса на вход; сбой проверки — сделку не захватываем", async () => {
+    const open = vi.fn();
+    const claim = vi.fn(async () => true);
+    const d = deps({
+      listCandidates: async () => [
+        trade({ tradeId: "chip", symbol: "CHIPUSDT" }),
+        trade({ tradeId: "net", symbol: "PUMPUSDT" }),
+      ],
+      hasSymbol: async (_market, symbol) => {
+        if (symbol === "PUMPUSDT") throw new Error("сеть");
+        return false;
+      },
+      claim,
+      open,
+    });
+    const r = await runMirror(d);
+    expect(open).not.toHaveBeenCalled();
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(r.skipped).toBe(1);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "chip",
+      "CHIPUSDT: нет на демо-фьючерсах.",
+    );
   });
 });

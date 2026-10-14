@@ -13,6 +13,7 @@ import {
 } from "@/entities/experiment";
 import { runMirror } from "@/features/demo-mirror";
 import { closeDemoPosition, placeTrade } from "@/features/execute-trade";
+import { fetchDemoSymbolRules } from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
@@ -31,6 +32,10 @@ export async function runDemoMirror() {
       return list;
     },
     busySymbols: () => activeMirrorSymbols(db),
+    // null — символа нет на демо; сетевой сбой — исключение (кандидат подождёт). Фьючерсный
+    // справочник кэшируется на 10 минут, спот — запрос на символ.
+    hasSymbol: async (market, symbol) =>
+      (await fetchDemoSymbolRules(market, symbol)) !== null,
     claim: async (tradeId) => {
       const c = byId.get(tradeId);
       return c ? claimMirror(db, c) : false;
