@@ -23,6 +23,16 @@ export function describeNetworkError(error: unknown): string {
 
 export class NetworkError extends Error {}
 
+/** Запрос оборван по REQUEST_TIMEOUT_MS (AbortSignal.timeout → DOMException «TimeoutError»). */
+export const isTimeoutError = (error: unknown) =>
+  error instanceof Error && error.name === "TimeoutError";
+
+/**
+ * Сколько раз повторять запрос после таймаута: каждый таймаут — уже 15 с ожидания, четыре попытки
+ * подвесили бы один GET на ~65 с. Остальные сетевые сбои повторяются все RETRY_DELAYS_MS.
+ */
+export const TIMEOUT_RETRIES = 1;
+
 /**
  * Повторяет операцию при сетевом сбое или обрыве тела ответа.
  * Только для идемпотентных запросов (чтение): ордера так повторять нельзя.
@@ -33,6 +43,7 @@ export async function withRetry<T>(
   delays: readonly number[] = RETRY_DELAYS_MS,
 ): Promise<T> {
   let lastError: unknown;
+  let timeouts = 0;
   const attempts = delays.length + 1;
   for (const [i, delay] of [0, ...delays].entries()) {
     if (delay) await sleep(delay);
@@ -48,6 +59,15 @@ export async function withRetry<T>(
       // HTTP-ошибки с ответом сервера не повторяем — повтор их не исправит.
       if (error instanceof HttpError) throw error;
       lastError = error;
+      if (isTimeoutError(error) && ++timeouts > TIMEOUT_RETRIES) {
+        log.warn(
+          "net.retry",
+          `${label}: снова таймаут ${REQUEST_TIMEOUT_MS / 1000} с, больше не повторяем`,
+          { label, attempt: i + 1, attempts },
+          error,
+        );
+        break;
+      }
       log.warn(
         "net.retry",
         `${label}: сбой сети, попытка ${i + 1}/${attempts}`,

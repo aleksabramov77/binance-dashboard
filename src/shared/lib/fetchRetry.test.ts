@@ -8,6 +8,7 @@ import {
   NetworkError,
   REQUEST_TIMEOUT_MS,
   resetBinanceCooldowns,
+  TIMEOUT_RETRIES,
   withRetry,
 } from "./fetchRetry";
 
@@ -57,6 +58,33 @@ describe("withRetry", () => {
       .mockResolvedValue("ok");
     await expect(withRetry("Binance", run, [0])).resolves.toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("withRetry: таймаут повторяется не больше одного раза", () => {
+  const timeout = () =>
+    new DOMException(
+      "The operation was aborted due to timeout",
+      "TimeoutError",
+    );
+
+  it("два таймаута подряд — сразу сетевая ошибка, без остальных попыток", async () => {
+    const run = vi.fn().mockRejectedValue(timeout());
+    await expect(withRetry("Binance", run, [0, 0, 0])).rejects.toBeInstanceOf(
+      NetworkError,
+    );
+    expect(run).toHaveBeenCalledTimes(1 + TIMEOUT_RETRIES);
+  });
+
+  it("таймаут и обрыв сокета: сокет повторяется как раньше", async () => {
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(timeout())
+      .mockRejectedValueOnce(socketError())
+      .mockRejectedValueOnce(socketError())
+      .mockResolvedValue("ok");
+    await expect(withRetry("Binance", run, [0, 0, 0])).resolves.toBe("ok");
+    expect(run).toHaveBeenCalledTimes(4);
   });
 });
 
