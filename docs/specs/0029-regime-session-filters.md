@@ -1,7 +1,7 @@
 # 0029 · Фильтры режима BTC и торговых часов в экспериментах; строгая схема конфига; юниверс без акций и металлов
 
 - **Тип:** feature
-- **Статус:** approved
+- **Статус:** testing
 - **Раздел PRD:** §3.4 Лаборатория; «5a. Очередь задач», строка 2
 - **Дата:** 2026-10-15
 
@@ -29,25 +29,25 @@
    своими выходами, как обычно.
 
 ## Критерии приёмки
-- [ ] AC1. `experimentConfigSchema` (`packages/trading-core/src/experiment.ts`) — новые необязательные поля:
+- [x] AC1. `experimentConfigSchema` (`packages/trading-core/src/experiment.ts`) — новые необязательные поля:
   `marketFilter` { `symbol` (по умолчанию `BTCUSDT`), `timeframe`, `ema` (период), `minAdx?`, `long`: `above|below|any`,
   `short`: `above|below|any` } и `sessionFilter` { `hoursUtc?`: [from, to), `days?`: 0–6 (UTC) }. Старые конфиги без
   полей работают без изменений (тест на каталог).
-- [ ] AC2. Схема конфига строгая (`.strict()` на объектах конфига, входа, выхода, юниверса, фильтров): неизвестное
+- [x] AC2. Схема конфига строгая (`.strict()` на объектах конфига, входа, выхода, юниверса, фильтров): неизвестное
   поле — ошибка валидации с путём. Сид каталога, чтение `experiments` из БД и `lab:private` проходят на текущих данных
   (прод-формат), тест на «опечатку в поле → ошибка».
-- [ ] AC3. Чистые функции в `trading-core` с тестами: `marketRegimeAllows(btcCandles, filter, direction)` (EMA и ADX
+- [x] AC3. Чистые функции в `trading-core` с тестами: `marketRegimeAllows(btcCandles, filter, direction)` (EMA и ADX
   по закрытым свечам, без заглядывания вперёд) и `sessionAllows(time, filter)` (включая окно через полночь и дни).
-- [ ] AC4. Движок (`src/features/paper-engine/model/runTick.ts`): фильтры применяются к входу рядом с `trendAllows`;
+- [x] AC4. Движок (`src/features/paper-engine/model/runTick.ts`): фильтры применяются к входу рядом с `trendAllows`;
   свечи BTC старшего ТФ берутся из кэша тика (один запрос на тик на ТФ, не на эксперимент); Edge Function
   `engine-tick` собирается (`pnpm check:edge`).
-- [ ] AC5. `describeConfig` — строки «Режим рынка» и «Часы/дни» на русском; глоссарий/справка — если там описаны поля
+- [x] AC5. `describeConfig` — строки «Режим рынка» и «Часы/дни» на русском; глоссарий/справка — если там описаны поля
   конфига.
-- [ ] AC6. Юниверс: `isEligibleSymbol` / `pickUniverse` (`src/features/paper-engine/lib/universe.ts`) исключают
+- [x] AC6. Юниверс: `isEligibleSymbol` / `pickUniverse` (`src/features/paper-engine/lib/universe.ts`) исключают
   не-крипто: futures — по `exchangeInfo` (`underlyingType !== "COIN"` или подтип `RWA`); spot — по списку
   `NON_CRYPTO` в `config/engine.ts` (как `STABLECOINS`), в него — известные токенизированные акции и металлы.
   Тест: тикеры с такими символами не попадают ни в `top`, ни в `movers`.
-- [ ] AC7. README движка и `trading-core` — абзац о фильтрах и исключении не-крипто.
+- [x] AC7. README движка и `trading-core` — абзац о фильтрах и исключении не-крипто.
 
 ## Вне scope
 - Выбор параметров фильтров для конкретных экспериментов — приватно, после выкатки (`/flow lab`).
@@ -65,3 +65,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-15 | ТЗ утверждено сессией лаборатории по решению пользователя (очередь до эпохи 2 ведётся без промежуточных гейтов) |
+| 2026-10-15 | Реализовано в ветке `feature/0029-regime-session-filters`: строгая схема конфига и фильтры `marketFilter`/`sessionFilter` в `trading-core` (`filters.ts`), фильтры во входе движка (свечи режима — общий кэш тика), `describeConfig` и глоссарий, юниверс без не-крипто (spot — `NON_CRYPTO`, futures — `underlyingType`/`RWA`), `lab:private` называет путь лишнего поля; на прод-БД все строки `experiments` проходят строгую схему, `lab:private --dry-run` — «без изменений». Статус → testing |
