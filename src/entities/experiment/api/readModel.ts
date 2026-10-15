@@ -191,6 +191,13 @@ function groupLabel(
 /** Эксперимент каталога плюс дата его отдельного сброса paper-учёта (null — не сбрасывался). */
 export type LabExperiment = Experiment & { resetAt: string | null };
 
+/** Сколько отсечённых сигналов эксперимента с этой причиной записано в эпохе. */
+export interface LabSkippedCount {
+  experimentId: string;
+  reason: string;
+  count: number;
+}
+
 /** Эпоха отчёта лаборатории: endedAt — начало следующей эпохи; null — эпоха текущая. */
 export interface LabRun {
   id: number;
@@ -215,6 +222,8 @@ export async function readLabDataset(
   experiments: LabExperiment[];
   trades: PaperTrade[];
   skipped: SkippedSignal[];
+  /** Записано отсечённых сигналов за всю эпоху по эксперименту и причине — без учёта сброса: так считает лимит движка. */
+  skippedCounts: LabSkippedCount[];
 }> {
   const runs = await db.select().from(runsTable).orderBy(asc(runsTable.id));
   if (!runs.length) throw new Error("Эпоха учёта не создана");
@@ -278,6 +287,19 @@ export async function readLabDataset(
         });
         return parsed.success ? [parsed.data] : [];
       }),
+    skippedCounts: [
+      ...skippedRows
+        .reduce((counts, r) => {
+          const key = `${r.experimentId}:${r.reason}`;
+          counts.set(key, {
+            experimentId: r.experimentId,
+            reason: r.reason,
+            count: (counts.get(key)?.count ?? 0) + 1,
+          });
+          return counts;
+        }, new Map<string, LabSkippedCount>())
+        .values(),
+    ],
   };
 }
 

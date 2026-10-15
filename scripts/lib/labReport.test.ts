@@ -793,6 +793,26 @@ describe("buildLabReport: spec 0030", () => {
       { now: NOW },
     ).experiments[0];
     expect(capped.skipped.capped).toBe(true);
+    // Лимит — по всей эпохе: после --since строк мало, но в эпохе причина упёрлась в лимит.
+    const cappedEpoch = buildLabReport(
+      {
+        ...data,
+        skippedCounts: [
+          {
+            experimentId: "F04",
+            reason: "max-open",
+            count: ENGINE.skippedSignalsCap,
+          },
+        ],
+      },
+      { now: NOW, since: Date.parse("2026-10-03T00:00:00Z") },
+    ).experiments[0];
+    expect(cappedEpoch.skipped.total).toBe(2);
+    expect(cappedEpoch.skipped.capped).toBe(true);
+    expect(
+      buildLabReport({ ...data, skippedCounts: [] }, { now: NOW })
+        .experiments[0].skipped.capped,
+    ).toBe(false);
     const md = renderLabReport(buildLabReport(data, { now: NOW }));
     expect(md).toContain(
       "Отсечённые сигналы: 3 (лимит позиций 2, символ занят 0, нет денег 1).",

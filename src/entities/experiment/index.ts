@@ -22,6 +22,7 @@ export {
 export {
   type LabExperiment,
   type LabRun,
+  type LabSkippedCount,
   readExperimentDetail,
   readExperimentFlags,
   readExperimentsOverview,

@@ -337,6 +337,9 @@ describe("данные для отчёта лаборатории (pnpm lab:repo
     expect(past.experiments.find((e) => e.id === "F02")?.resetAt).toBeNull();
     expect(past.trades.map((t) => t.id)).toEqual(["old"]);
     expect(past.skipped.map((s) => s.id)).toEqual(["s1"]);
+    expect(past.skippedCounts).toEqual([
+      { experimentId: "F02", reason: "max-open", count: 1 },
+    ]);
 
     const current = await readLabDataset(db);
     expect(current.run).toMatchObject({ id: second.id, endedAt: null });

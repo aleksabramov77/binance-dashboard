@@ -23,6 +23,7 @@ import {
   filterTrades,
   groupStats,
   type LabExperiment,
+  type LabSkippedCount,
   type TradeStats,
 } from "@/entities/experiment";
 import { ENGINE } from "@/features/paper-engine";
@@ -137,6 +138,11 @@ export interface LabDataset {
   trades: PaperTrade[];
   /** Отсечённые сигналы эпохи (spec 0030). */
   skipped?: SkippedSignal[];
+  /**
+   * Записано отсечённых за всю эпоху по эксперименту и причине (без --since и сброса) — для `capped`: лимит движка
+   * считается по эпохе. Нет — считается по `skipped`.
+   */
+  skippedCounts?: LabSkippedCount[];
 }
 
 export interface LabReportOptions {
@@ -688,6 +694,7 @@ function contextSlices(closed: ClosedTrade[]): ContextSlices {
 
 function skippedStats(
   skipped: SkippedSignal[],
+  epochCounts: LabSkippedCount[] | null,
   klines: KlineSet | null,
   e: LabExperiment,
 ): SkippedStats {
@@ -700,7 +707,14 @@ function skippedStats(
   return {
     total: skipped.length,
     byReason,
-    capped: SKIP_REASONS.some((r) => byReason[r] >= ENGINE.skippedSignalsCap),
+    // Лимит движка — на (эпоха, эксперимент, причина), поэтому и «упёрлись» — по всей эпохе, а не по периоду отчёта.
+    capped:
+      epochCounts === null
+        ? SKIP_REASONS.some((r) => byReason[r] >= ENGINE.skippedSignalsCap)
+        : epochCounts.some(
+            (c) =>
+              c.experimentId === e.id && c.count >= ENGINE.skippedSignalsCap,
+          ),
     outcome:
       klines === null
         ? null
@@ -958,6 +972,7 @@ interface ReportContext {
   /** Дрейф BTC за период, % в день; null — нет контекста рынка. */
   marketDriftPctPerDay: number | null;
   klines: KlineSet | null;
+  skippedCounts: LabSkippedCount[] | null;
 }
 
 /**
@@ -1047,7 +1062,7 @@ function experimentReport(
       ctx.klines === null
         ? null
         : afterExitStats(closed, ctx.klines, e.config.timeframe),
-    skipped: skippedStats(skipped, ctx.klines, e),
+    skipped: skippedStats(skipped, ctx.skippedCounts, ctx.klines, e),
     sample: sampleLevel(stats.closed),
     r: meanStat(
       closed.map((t) => t.rMultiple).filter((r): r is number => r !== null),
@@ -1145,6 +1160,7 @@ export function buildLabReport(
     marketDriftPctPerDay:
       periodReturn === null ? null : periodReturn / periodDays,
     klines: opts.klines ?? null,
+    skippedCounts: data.skippedCounts ?? null,
   };
 
   const experiments = data.experiments
