@@ -124,6 +124,8 @@ export const skippedSignalsTable = pgTable(
   },
   (t) => [
     index("skipped_signals_run_experiment_idx").on(t.runId, t.experimentId),
+    // Срок хранения: движок удаляет записи старше N дней по at — без индекса это полный проход таблицы.
+    index("skipped_signals_at_idx").on(t.at),
   ],
 );
 

@@ -1,5 +1,5 @@
 {
-  "id": "f8147c92-ad3d-4263-9253-b84a9e393c1d",
+  "id": "ed3b0a49-d6b3-4357-99d0-8cd41dc71abc",
   "prevId": "8f9ae695-2832-4d3b-ac34-b6b4702815a1",
   "version": "7",
   "dialect": "postgresql",
@@ -665,6 +665,21 @@
             },
             {
               "expression": "experiment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "skipped_signals_at_idx": {
+          "name": "skipped_signals_at_idx",
+          "columns": [
+            {
+              "expression": "at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

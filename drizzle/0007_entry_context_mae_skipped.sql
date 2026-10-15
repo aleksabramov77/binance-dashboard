@@ -27,4 +27,5 @@ DO $$ BEGIN
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "skipped_signals_run_experiment_idx" ON "skipped_signals" USING btree ("run_id","experiment_id");
+CREATE INDEX IF NOT EXISTS "skipped_signals_run_experiment_idx" ON "skipped_signals" USING btree ("run_id","experiment_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "skipped_signals_at_idx" ON "skipped_signals" USING btree ("at");
