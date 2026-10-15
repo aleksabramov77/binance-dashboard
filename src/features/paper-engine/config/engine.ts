@@ -4,8 +4,14 @@ export const ENGINE = {
   signalCandles: 300,
   /** Свечей при дозагрузке, когда кэш уже есть (новые свечи + перекрытие). */
   refreshCandles: 10,
-  /** Максимум 1m-свечей за один запрос Binance (больший разрыв дочитается следующими тиками). */
+  /** Максимум 1m-свечей за один запрос Binance (лимит API). */
   maxMinuteCandles: 1000,
+  /**
+   * Страниц 1m-свечей на символ за тик при догрузке после простоя: 3 × 1000 мин ≈ 50 ч. Больший разрыв
+   * дочитывается следующими тиками (раз в минуту) — бережём вес API: на фьючерсах запрос 1000 свечей
+   * весит 5 при лимите 2400 в минуту, а символов с открытыми сделками бывают десятки.
+   */
+  maxMinutePages: 3,
   /** Одновременных запросов к Binance — бережём rate limit. */
   concurrency: 8,
   /** Минимальный оборот за 24 ч для movers — отсекаем неликвид. */
@@ -53,4 +59,23 @@ export const STABLECOINS = new Set([
   "EUR",
   "EURI",
   "AEUR",
+]);
+
+/**
+ * Не-крипто активы (spec 0029) — исключаем из юниверса: в нём только крипта. Spot `exchangeInfo` не
+ * отличает токенизированные акции и металлы от монет, поэтому список явный: металлы и индексы, затем
+ * токенизированные акции и ETF Binance (база с суффиксом B — снимок spot `exchangeInfo` на 2026-10-15,
+ * новые листинги дописывать сюда). Futures дополнительно фильтрует поставщик тикеров по `underlyingType`.
+ */
+export const NON_CRYPTO = new Set([
+  // Металлы и индексы.
+  "PAXG",
+  "XAUT",
+  "XAU",
+  "XAG",
+  "BTCDOM",
+  // Токенизированные акции и ETF.
+  ..."AAOIB AAPLB ADBEB AGPUB ALABB AMATB AMCB AMDB AMZNB ARMB ASMLB ASTSB AVGOB AXTIB BABAB BBB BEB BMNRB BNCB CBRSB COHRB COINB CRCLB CRDOB CRMB CRWDB CRWVB CYPHB DELLB DJTB DRAMB EWYB FLNCB FWDIB GLWB GMEB GOOGLB GPROB GSB HIMSB HOODB HPEB IBMB INTCB INTWB IRENB JPMB KORUB LITEB LLYB MDBB METAB MRNAB MRVLB MSFTB MSTRB MUB MUUB MVLLB NBISB NFLXB NOKB NVDAB ORCLB PDDB PENGB PLTRB PYPLB QCOMB QNTB QQQB RDDTB RKLBB SECZB SHAZB SKHYB SMCIB SMHB SNDKB SNXXB SOXLB SOXSB SPCXB SPYB SQQQB STXB TQQQB TSLAB TSMB USARB USDEB UVXYB WDCB WENB ZMB".split(
+    " ",
+  ),
 ]);

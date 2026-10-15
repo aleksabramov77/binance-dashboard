@@ -3,8 +3,9 @@ import type {
   Experiment,
   ExperimentConfig,
 } from "@binance-dashboard/trading-core";
-import { TIMEFRAME_MS } from "@binance-dashboard/trading-core";
+import { exitFill, TIMEFRAME_MS } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
+import { ENGINE } from "../config/engine.ts";
 import type { MarketTicker } from "../lib/universe.ts";
 import { createMemoryStore } from "./memoryStore.ts";
 import { planReset, priceKey } from "./planReset.ts";
@@ -48,20 +49,45 @@ const MS: Record<Interval, number> = { ...TIMEFRAME_MS, "1m": MIN };
 
 /**
  * Синтетический рынок: цена 100, у каждой свечи high/low ±0,5 (ATR = 1).
- * minute(openTime) меняет отдельные 1m-свечи (касание стопа/тейка).
+ * minute(openTime) меняет отдельные 1m-свечи (касание стопа/тейка), bar — свечи остальных TF.
  */
 function market(
   symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
   minute: (openTime: number) => Partial<Candle> = () => ({}),
+  bar: (
+    symbol: string,
+    interval: Interval,
+    openTime: number,
+    current: number,
+  ) => Partial<Candle> = () => ({}),
 ) {
-  const calls: { symbol: string; interval: Interval; limit: number }[] = [];
+  const calls: {
+    symbol: string;
+    interval: Interval;
+    limit: number;
+    startTime?: number;
+  }[] = [];
   let now = T0;
-  const candles: TickDeps["candles"] = async (_m, symbol, interval, limit) => {
-    calls.push({ symbol, interval, limit });
+  // Как Binance: без startTime — последние limit свечей, со startTime — до limit свечей от него,
+  // но не дальше текущей (незакрытой); больше 1000 за запрос не отдаёт.
+  const candles = async (
+    _m: Parameters<TickDeps["candles"]>[0],
+    symbol: string,
+    interval: Interval,
+    limit: number,
+    startTime?: number,
+  ): Promise<Candle[]> => {
+    calls.push({ symbol, interval, limit, startTime });
     const ms = MS[interval];
     const current = Math.floor(now / ms) * ms;
-    return Array.from({ length: limit }, (_, i) => {
-      const openTime = current - (limit - 1 - i) * ms;
+    const size = Math.min(limit, 1000);
+    const first =
+      startTime === undefined
+        ? current - (size - 1) * ms
+        : Math.ceil(startTime / ms) * ms;
+    const length = Math.max(0, Math.min(size, (current - first) / ms + 1));
+    return Array.from({ length }, (_, i) => {
+      const openTime = first + i * ms;
       return {
         openTime,
         open: 100,
@@ -69,7 +95,9 @@ function market(
         low: 99.5,
         close: 100,
         volume: 1,
-        ...(interval === "1m" ? minute(openTime) : {}),
+        ...(interval === "1m"
+          ? minute(openTime)
+          : bar(symbol, interval, openTime, current)),
       };
     });
   };
@@ -217,6 +245,160 @@ describe("runTick: входы", () => {
   });
 });
 
+describe("runTick: фильтры режима рынка и часов (spec 0029)", () => {
+  const H4 = TIMEFRAME_MS["4h"];
+  /** BTC на 4h: рост (close = 100 + номер свечи) или падение; незакрытая свеча — отдельно. */
+  const btc4h =
+    (trend: "up" | "down", unclosedClose?: number) =>
+    (symbol: string, interval: Interval, openTime: number, current: number) => {
+      if (symbol !== "BTCUSDT" || interval !== "4h") return {};
+      if (openTime === current && unclosedClose !== undefined)
+        return { close: unclosedClose };
+      const i = openTime / H4 - Math.floor(T0 / H4);
+      const close = trend === "up" ? 1000 + i : 1000 - i;
+      return { open: close, high: close + 1, low: close - 1, close };
+    };
+  const regime = {
+    marketFilter: {
+      symbol: "BTCUSDT",
+      timeframe: "4h",
+      ema: 50,
+      long: "above",
+      short: "below",
+    },
+  } satisfies Partial<ExperimentConfig>;
+  const eth = {
+    universe: { type: "symbols", symbols: ["ETHUSDT"] },
+  } satisfies Partial<ExperimentConfig>;
+
+  it("long — только когда BTC выше EMA на старшем TF", async () => {
+    const up = enabledStore([exp("A", { ...ALWAYS_LONG, ...eth, ...regime })]);
+    expect(
+      (await runTick(market(undefined, undefined, btc4h("up")).deps(up), T0))
+        .opened,
+    ).toBe(1);
+    const down = enabledStore([
+      exp("A", { ...ALWAYS_LONG, ...eth, ...regime }),
+    ]);
+    expect(
+      (
+        await runTick(
+          market(undefined, undefined, btc4h("down")).deps(down),
+          T0,
+        )
+      ).opened,
+    ).toBe(0);
+  });
+
+  it("незакрытая свеча BTC не учитывается: скачок в текущей 4h-свече не открывает long", async () => {
+    const store = enabledStore([
+      exp("A", { ...ALWAYS_LONG, ...eth, ...regime }),
+    ]);
+    const m = market(undefined, undefined, btc4h("down", 5000));
+    expect((await runTick(m.deps(store), T0)).opened).toBe(0);
+  });
+
+  it("свечи BTC режима — один запрос на TF за тик для всех экспериментов", async () => {
+    const store = enabledStore([
+      exp("A", { ...ALWAYS_LONG, ...eth, ...regime }),
+      exp("B", {
+        ...ALWAYS_LONG,
+        universe: { type: "symbols", symbols: ["ETHUSDT", "SOLUSDT"] },
+        ...regime,
+      }),
+    ]);
+    const m = market(undefined, undefined, btc4h("up"));
+    const r = await runTick(m.deps(store), T0);
+    expect(r.opened).toBe(3);
+    expect(
+      m.calls.filter((c) => c.symbol === "BTCUSDT" && c.interval === "4h"),
+    ).toHaveLength(1);
+  });
+
+  it("нет данных BTC — входа нет, одна ошибка тика на (символ, TF), а не на эксперимент", async () => {
+    const store = enabledStore([
+      exp("A", { ...ALWAYS_LONG, ...eth, ...regime }),
+      exp("B", { ...ALWAYS_LONG, ...eth, ...regime }),
+    ]);
+    const m = market();
+    const deps = m.deps(store);
+    const r = await runTick(
+      {
+        ...deps,
+        candles: (mk, symbol, interval, limit, startTime) =>
+          symbol === "BTCUSDT" && interval === "4h"
+            ? Promise.reject(new Error("нет сети"))
+            : deps.candles(mk, symbol, interval, limit, startTime),
+      },
+      T0,
+    );
+    expect(r.opened).toBe(0);
+    expect(r.errors.filter((e) => e.includes("режим рынка"))).toEqual([
+      "режим рынка futures BTCUSDT 4h: нет сети",
+    ]);
+  });
+
+  it("истории BTC меньше периода EMA — входа нет, ошибка «мало свечей режима» один раз", async () => {
+    const store = enabledStore([
+      exp("A", { ...ALWAYS_LONG, ...eth, ...regime }),
+      exp("B", { ...ALWAYS_LONG, ...eth, ...regime }),
+    ]);
+    const m = market(undefined, undefined, btc4h("up"));
+    const deps = m.deps(store);
+    const r = await runTick(
+      {
+        ...deps,
+        // Binance отдал только 21 свечу (новый листинг): 20 закрытых при EMA(50).
+        candles: (mk, symbol, interval, limit, startTime) =>
+          deps.candles(
+            mk,
+            symbol,
+            interval,
+            symbol === "BTCUSDT" && interval === "4h" ? 21 : limit,
+            startTime,
+          ),
+      },
+      T0,
+    );
+    expect(r.opened).toBe(0);
+    expect(r.errors.filter((e) => e.includes("режим рынка"))).toEqual([
+      "режим рынка futures BTCUSDT 4h: мало свечей режима: 20 из 50",
+    ]);
+  });
+
+  it("строка эксперимента не прошла схему — тик идёт для остальных, ошибка с id и путём поля", async () => {
+    const base = enabledStore([exp("A")]);
+    const store: TickDeps["store"] = {
+      ...base,
+      listExperiments: async (onInvalid) => {
+        onInvalid?.({ id: "BAD", problem: "config.marketFiltr — лишнее поле" });
+        return base.listExperiments();
+      },
+    };
+    const r = await runTick(market().deps(store), T0);
+    expect(r.opened).toBe(1);
+    expect(r.errors).toEqual([
+      "эксперимент BAD пропущен: конфиг не проходит схему: config.marketFiltr — лишнее поле",
+    ]);
+  });
+
+  it("часы UTC: вне окна входа нет, окно через полночь пропускает", async () => {
+    // T0 — суббота 12:00 UTC.
+    const outside = enabledStore([
+      exp("A", { sessionFilter: { hoursUtc: [13, 20] } }),
+    ]);
+    expect((await runTick(market().deps(outside), T0)).opened).toBe(0);
+    const overnight = enabledStore([
+      exp("A", { sessionFilter: { hoursUtc: [22, 13], days: [6] } }),
+    ]);
+    expect((await runTick(market().deps(overnight), T0)).opened).toBe(1);
+    const weekdays = enabledStore([
+      exp("A", { sessionFilter: { days: [1, 2, 3, 4, 5] } }),
+    ]);
+    expect((await runTick(market().deps(weekdays), T0)).opened).toBe(0);
+  });
+});
+
 describe("runTick: устаревшие сигналы", () => {
   it("первый тик после включения: свеча сигнала закрылась 2 ч назад — метка ставится, входа нет", async () => {
     // TF 4h: в 14:00 последняя закрытая свеча — 08:00–12:00, она закрылась 2 ч назад (окно 4h — 12 мин).
@@ -331,6 +513,87 @@ describe("runTick: выходы по 1m-свечам", () => {
     const [t] = store.trades();
     expect(t.closedAt).toBeNull();
     expect(t.checkedUntil).toBe(T0 + 3 * MIN);
+  });
+
+  it("после простоя 1500 минут закрывает по стопу, задетому на 300-й минуте простоя (баг 0028)", async () => {
+    // Стоп long ≈ 98,05: на 300-й минуте простоя свеча проваливается до 97, потом цена возвращается.
+    const hit = T0 + 300 * MIN;
+    const m = market(["BTCUSDT"], (t) => (t === hit ? { low: 97 } : {}));
+    const store = enabledStore([exp("A", ALWAYS_LONG)]);
+    expect((await runTick(m.deps(store), T0)).opened).toBe(1);
+    const [opened] = store.trades();
+    const later = T0 + 1500 * MIN;
+    m.setNow(later);
+    const r = await runTick(m.deps(store), later);
+    expect(r.closed).toBe(1);
+    const t = store.trades().find((x) => x.id === opened.id);
+    expect(t?.exitReason).toBe("sl");
+    expect(t?.closedAt).toBe(new Date(hit).toISOString());
+    expect(t?.exitPrice).toBeCloseTo(
+      exitFill(opened.initialStop ?? 0, "long", "sl"),
+    );
+  });
+
+  it("разрыв ≤ 1000 минут — одна страница 1m-свечей от checkedUntil", async () => {
+    const m = market(["BTCUSDT"]);
+    const store = enabledStore([exp("A", ALWAYS_LONG)]);
+    await runTick(m.deps(store), T0);
+    const [opened] = store.trades();
+    const later = T0 + 1000 * MIN;
+    m.setNow(later);
+    const before = m.calls.length;
+    await runTick(m.deps(store), later);
+    const minuteCalls = m.calls
+      .slice(before)
+      .filter((c) => c.interval === "1m");
+    expect(minuteCalls).toHaveLength(1);
+    expect(minuteCalls[0].startTime).toBe(opened.checkedUntil);
+    // Незакрытая минута отброшена: проверено всё до текущей минуты.
+    const t = store.trades().find((x) => x.id === opened.id);
+    expect(t?.checkedUntil).toBe(later);
+  });
+
+  it("долгий простой — не больше maxMinutePages страниц за тик, warn и догрузка следующими тиками", async () => {
+    // Стоп задет на 5000-й минуте простоя — дальше, чем дочитывает один тик (3 × 1000 минут).
+    const hit = T0 + 5000 * MIN;
+    const m = market(["BTCUSDT"], (t) => (t === hit ? { low: 97 } : {}));
+    const store = enabledStore([exp("A", ALWAYS_LONG)]);
+    await runTick(m.deps(store), T0);
+    const [opened] = store.trades();
+    const logs: { level: string; event: string; data?: unknown }[] = [];
+    const log: TickDeps["log"] = (level, event, _message, data) => {
+      logs.push({ level, event, data });
+    };
+    const later = T0 + 7 * 24 * HOUR;
+    m.setNow(later);
+
+    const before = m.calls.length;
+    const r1 = await runTick({ ...m.deps(store), log }, later);
+    const pages = m.calls.slice(before).filter((c) => c.interval === "1m");
+    expect(pages).toHaveLength(ENGINE.maxMinutePages);
+    expect(pages.map((c) => c.startTime)).toEqual([
+      T0 + MIN,
+      T0 + 1001 * MIN,
+      T0 + 2001 * MIN,
+    ]);
+    expect(r1.closed).toBe(0);
+    const progressed = store.trades().find((x) => x.id === opened.id);
+    expect(progressed?.checkedUntil).toBe(T0 + 3001 * MIN);
+    const gap = logs.find((l) => l.event === "engine.minute-gap");
+    expect(gap?.level).toBe("warn");
+    expect(gap?.data).toMatchObject({
+      symbol: "BTCUSDT",
+      gapMinutes: 7 * 24 * 60 - 1,
+    });
+
+    // Следующий тик продолжает с прочитанного и находит стоп по той свече, где он был задет.
+    const next = later + MIN;
+    m.setNow(next);
+    const r2 = await runTick({ ...m.deps(store), log }, next);
+    expect(r2.closed).toBe(1);
+    const t = store.trades().find((x) => x.id === opened.id);
+    expect(t?.exitReason).toBe("sl");
+    expect(t?.closedAt).toBe(new Date(hit).toISOString());
   });
 
   it("выход по сигналу стратегии на закрытии свечи TF", async () => {
