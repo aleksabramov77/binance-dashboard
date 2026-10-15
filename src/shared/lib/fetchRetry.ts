@@ -77,9 +77,12 @@ export class CooldownError extends HttpError {}
 /** Пауза, если Binance не сказал срок (ни Retry-After, ни «banned until»). */
 export const DEFAULT_COOLDOWN_MS = 60_000;
 
+/** Продление паузы меньше этого не пишется в журнал: это параллельные ответы на одну и ту же перегрузку. */
+export const COOLDOWN_LOG_STEP_MS = 5_000;
+
 const COOLDOWN_STATUSES = new Set([418, 429]);
 
-const cooldowns = new Map<string, { until: number; status: number }>();
+const cooldowns = new Map<string, Cooldown>();
 
 /** Сбросить все паузы (тесты). */
 export function resetBinanceCooldowns() {
@@ -102,6 +105,31 @@ export function cooldownEnd(
     typeof msg === "string" ? /banned until (\d{13})/.exec(msg) : null;
   if (banned) until = Math.max(until, Number(banned[1]));
   return until;
+}
+
+type Cooldown = { until: number; status: number };
+
+/**
+ * Совместить действующую паузу с новым ответом 429/418. Параллельные запросы получают их с разницей в миллисекунды,
+ * и у каждого свой срок «сейчас + Retry-After». Срок — максимум (поздний 429 не сокращает бан), бан 418 не
+ * понижается до 429. changed — писать ли в журнал: новая пауза, переход на 418 или продление больше
+ * COOLDOWN_LOG_STEP_MS.
+ */
+export function mergeCooldown(
+  current: Cooldown | undefined,
+  incoming: Cooldown,
+  now: number,
+): { next: Cooldown; changed: boolean } {
+  const active = current && current.until > now ? current : undefined;
+  if (!active) return { next: incoming, changed: true };
+  const next = {
+    until: Math.max(active.until, incoming.until),
+    status: active.status === 418 ? 418 : incoming.status,
+  };
+  const changed =
+    next.status !== active.status ||
+    next.until - active.until > COOLDOWN_LOG_STEP_MS;
+  return { next, changed };
 }
 
 const hhmmss = (ms: number) => new Date(ms).toISOString().slice(11, 19);
@@ -135,17 +163,22 @@ export async function getJsonWithRetry(
           res.headers.get("retry-after"),
           body,
         );
-        // Параллельные запросы получают 429/418 почти одновременно: пауза только удлиняется (поздний 429 без
-        // срока не сокращает бан), а в журнал попадает одна запись на новую или продлённую паузу.
-        const current = cooldowns.get(host);
-        if (!current || current.until <= Date.now() || until > current.until) {
-          cooldowns.set(host, { until, status: res.status });
+        const { next, changed } = mergeCooldown(
+          cooldowns.get(host),
+          { until, status: res.status },
+          Date.now(),
+        );
+        cooldowns.set(host, next);
+        if (changed)
           log.warn(
             "binance.cooldown",
-            `${label}: пауза запросов к ${host} до ${hhmmss(until)} UTC`,
-            { host, status: res.status, until: new Date(until).toISOString() },
+            `${label}: пауза запросов к ${host} до ${hhmmss(next.until)} UTC`,
+            {
+              host,
+              status: next.status,
+              until: new Date(next.until).toISOString(),
+            },
           );
-        }
       }
       throw new HttpError(`${label}: ответ ${res.status}`, res.status, body);
     }

@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  COOLDOWN_LOG_STEP_MS,
   CooldownError,
   getJsonWithRetry,
   HttpError,
+  mergeCooldown,
   NetworkError,
   resetBinanceCooldowns,
   withRetry,
 } from "./fetchRetry";
-import { log } from "./logger.server";
 
 const socketError = () =>
   Object.assign(new TypeError("fetch failed"), {
@@ -89,7 +90,7 @@ describe("getJsonWithRetry: пауза после 429/418 (0014)", () => {
     const error = (await getJsonWithRetry(SPOT, "Binance").catch(
       (e: unknown) => e,
     )) as HttpError;
-    expect(error).toBeInstanceOf(HttpError);
+    expect(error).toBeInstanceOf(CooldownError);
     expect(error.message).toBe(
       "Binance: пауза до 18:35:01 UTC после ответа 418",
     );
@@ -139,34 +140,6 @@ describe("getJsonWithRetry: пауза после 429/418 (0014)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("параллельные 429/418: пауза не сокращается, в журнале одна запись", async () => {
-    const warn = vi.spyOn(log, "warn");
-    const bannedUntil = T0 + 4 * 60_000;
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        reply(418, { code: -1003, msg: `IP banned until ${bannedUntil}.` }),
-      )
-      .mockResolvedValueOnce(reply(429, { code: -1003 }))
-      .mockImplementation(async () => reply(200, []));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await Promise.all([
-      getJsonWithRetry(SPOT, "Binance").catch(() => {}),
-      getJsonWithRetry(SPOT, "Binance").catch(() => {}),
-    ]);
-    expect(
-      warn.mock.calls.filter(([event]) => event === "binance.cooldown"),
-    ).toHaveLength(1);
-
-    vi.setSystemTime(T0 + 2 * 60_000);
-    const error = await getJsonWithRetry(SPOT, "Binance").catch(
-      (e: unknown) => e,
-    );
-    expect(error).toBeInstanceOf(CooldownError);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
   it("другие ошибки (400, 500) паузу не ставят", async () => {
     const fetchMock = vi
       .fn()
@@ -176,5 +149,67 @@ describe("getJsonWithRetry: пауза после 429/418 (0014)", () => {
 
     await getJsonWithRetry(SPOT, "Binance").catch(() => {});
     await expect(getJsonWithRetry(SPOT, "Binance")).resolves.toEqual([]);
+  });
+});
+
+describe("mergeCooldown: параллельные 429/418 (0014)", () => {
+  const T = Date.parse("2026-10-14T18:31:01Z");
+  const MIN = 60_000;
+
+  it("новая пауза — пишется", () => {
+    expect(
+      mergeCooldown(undefined, { until: T + MIN, status: 429 }, T),
+    ).toEqual({
+      next: { until: T + MIN, status: 429 },
+      changed: true,
+    });
+  });
+
+  it("ответы с разницей в миллисекунды: срок — максимум, запись одна", () => {
+    const first = { until: T + MIN, status: 429 };
+    const r = mergeCooldown(
+      first,
+      { until: T + 50 + MIN, status: 429 },
+      T + 50,
+    );
+    expect(r).toEqual({
+      next: { until: T + 50 + MIN, status: 429 },
+      changed: false,
+    });
+  });
+
+  it("поздний 429 не сокращает бан 418 и не понижает статус", () => {
+    const ban = { until: T + 4 * MIN, status: 418 };
+    expect(mergeCooldown(ban, { until: T + MIN, status: 429 }, T)).toEqual({
+      next: ban,
+      changed: false,
+    });
+  });
+
+  it("переход с 429 на бан 418 — пишется", () => {
+    const r = mergeCooldown(
+      { until: T + MIN, status: 429 },
+      { until: T + 4 * MIN, status: 418 },
+      T,
+    );
+    expect(r).toEqual({
+      next: { until: T + 4 * MIN, status: 418 },
+      changed: true,
+    });
+  });
+
+  it("продление больше порога — пишется; истёкшая пауза считается новой", () => {
+    const old = { until: T + MIN, status: 429 };
+    expect(
+      mergeCooldown(
+        old,
+        { until: T + MIN + COOLDOWN_LOG_STEP_MS + 1, status: 429 },
+        T,
+      ).changed,
+    ).toBe(true);
+    expect(
+      mergeCooldown(old, { until: T + 3 * MIN, status: 429 }, T + 2 * MIN)
+        .changed,
+    ).toBe(true);
   });
 });
