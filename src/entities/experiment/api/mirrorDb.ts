@@ -269,6 +269,66 @@ export async function claimMirrorToClose(
   return toClose(row, paper?.reason ?? null);
 }
 
+/**
+ * Открытые фьючерсные зеркала со своими ссылками — для сверки ног (своя нога сработала — снять вторую).
+ */
+export async function listOpenMirrorLegs(
+  db: Db,
+): Promise<
+  { tradeId: string; symbol: string; protectRefs: MirrorProtectRefs }[]
+> {
+  const rows = await db
+    .select({
+      tradeId: demoMirrorOrdersTable.tradeId,
+      symbol: demoMirrorOrdersTable.symbol,
+      protectRefs: demoMirrorOrdersTable.protectRefs,
+    })
+    .from(demoMirrorOrdersTable)
+    .where(
+      and(
+        inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
+        eq(demoMirrorOrdersTable.market, "futures"),
+        isNotNull(demoMirrorOrdersTable.protectRefs),
+      ),
+    );
+  return rows.flatMap((r) => {
+    const protectRefs = parseProtectRefs(r.protectRefs);
+    return protectRefs
+      ? [{ tradeId: r.tradeId, symbol: r.symbol, protectRefs }]
+      : [];
+  });
+}
+
+/**
+ * Позицию зеркала закрыла биржа его стопом/тейком (вторая нога снята): строка закрыта сразу, не
+ * дожидаясь paper-сделки, с фактической ценой выхода (для демо-PnL). Только из открытых статусов —
+ * захваченную на закрытие строку не трогаем. false — строка уже не открыта.
+ */
+export async function markMirrorClosedByExchange(
+  db: Db,
+  tradeId: string,
+  patch: { message: string; steps: unknown[]; exitPrice: number | null },
+): Promise<boolean> {
+  const rows = await db
+    .update(demoMirrorOrdersTable)
+    .set({
+      status: "closed" satisfies MirrorStatus,
+      message: patch.message,
+      steps: patch.steps,
+      exitPrice: patch.exitPrice,
+      updatedAt: sql`now()`,
+      closedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(demoMirrorOrdersTable.tradeId, tradeId),
+        inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
+      ),
+    )
+    .returning({ tradeId: demoMirrorOrdersTable.tradeId });
+  return rows.length > 0;
+}
+
 /** Статусы зеркала по сделкам — для таблицы сделок эксперимента. */
 export async function mirrorStatuses(
   db: Db,

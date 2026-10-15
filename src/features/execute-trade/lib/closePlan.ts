@@ -159,3 +159,28 @@ export function closeVerdict(
   if (qty > 0) return "close";
   return plan.closedByExchange ? "closedByExchange" : "nothingLeft";
 }
+
+/**
+ * Фьючерсы: своя нога сработала, вторая осталась. TP/SL на свой объём (reduceOnly + quantity, без
+ * closePosition) биржа друг с другом не связывает — демо 2026-10-15: сработал тейк, стоп остался NEW
+ * (и наоборот), а позиции уже нет. Висящий reduceOnly-стоп позже закрыл бы объём соседнего зеркала той
+ * же монеты. Кандидат на снятие — открыта ровно одна своя нога из двух (обе есть в ссылках).
+ */
+export function orphanLegCandidate(
+  refs: { stop: StoredAlgoRef | null; takeProfit: StoredAlgoRef | null },
+  openAlgos: { algoId: number; clientAlgoId: string | null }[],
+): { missing: "stop" | "takeProfit"; remaining: "stop" | "takeProfit" } | null {
+  if (!refs.stop || !refs.takeProfit) return null;
+  const isOpen = (r: StoredAlgoRef) =>
+    openAlgos.some(
+      (a) =>
+        (r.algoId !== null && a.algoId === r.algoId) ||
+        (r.clientAlgoId !== null && a.clientAlgoId === r.clientAlgoId),
+    );
+  const stopOpen = isOpen(refs.stop);
+  const tpOpen = isOpen(refs.takeProfit);
+  if (stopOpen === tpOpen) return null;
+  return stopOpen
+    ? { missing: "takeProfit", remaining: "stop" }
+    : { missing: "stop", remaining: "takeProfit" };
+}

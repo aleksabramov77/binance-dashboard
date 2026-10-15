@@ -61,6 +61,11 @@ export interface MirrorDeps<
   /** Отметить захваченную сделку пропущенной (не открывалась). */
   markSkipped: (tradeId: string, reason: string) => Promise<void>;
   saveOpen: (tradeId: string, result: R) => Promise<void>;
+  /**
+   * Сверка своих ног открытых зеркал: своя нога сработала — вторая снимается, строка закрыта биржей
+   * (не дожидаясь paper-сделки). Возвращает такие зеркала; сбой — пусто (повтор на следующем прогоне).
+   */
+  sweepLegs: () => Promise<{ tradeId: string; symbol: string }[]>;
   /** id демо-позиций на закрытие (без захвата). */
   listToClose: () => Promise<string[]>;
   /** Захват одной позиции на закрытие; null — её уже взял другой прогон. */
@@ -85,6 +90,8 @@ export interface MirrorRunResult {
   deferred: number;
   /** Закрытия, не начатые из-за бюджета времени, — следующему прогону. */
   deferredCloses: number;
+  /** Закрыты биржей своей ногой (вторая нога снята) до закрытия paper-сделки. */
+  swept: { tradeId: string; symbol: string }[];
   closed: { tradeId: string; symbol: string; status: string }[];
 }
 
@@ -103,11 +110,15 @@ export async function runMirror<
     skipped: 0,
     deferred: 0,
     deferredCloses: 0,
+    swept: [],
     closed: [],
   };
   if (!deps.configured) return result;
   const startedAt = deps.now();
   const overBudget = () => deps.now() - startedAt > MIRROR.runBudgetMs;
+
+  // Сначала свои ноги: висящий reduceOnly-ордер сработавшего зеркала закрыл бы объём соседнего.
+  result.swept = await deps.sweepLegs();
 
   // Захват по одному: после бюджета строки не уходят в closing и достаются следующему прогону.
   const toClose = await deps.listToClose();

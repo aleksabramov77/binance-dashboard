@@ -76,6 +76,7 @@ describe("ownPosition", () => {
 const algo = (side: "BUY" | "SELL", positionSide: string, algoId: number) => ({
   algoId,
   clientAlgoId: null,
+  symbol: "ADAUSDT",
   side,
   positionSide,
   orderType: "STOP_MARKET",

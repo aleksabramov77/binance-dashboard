@@ -163,6 +163,7 @@ export const futuresOpenAlgoOrdersSchema = z.array(
     .object({
       algoId: z.number(),
       clientAlgoId: z.string().nullable().catch(null),
+      symbol: z.string().catch(""),
       side: z.enum(["BUY", "SELL"]),
       positionSide: z.string().catch("BOTH"),
       orderType: z.string(),
@@ -262,6 +263,8 @@ export const algoOrderQuerySchema = z
     algoId: z.number(),
     algoStatus: z.string(),
     actualOrderId: actualOrderIdSchema,
+    // Средняя цена исполнения сработавшего ордера; не срабатывал — 0.
+    actualPrice: decimal.catch(0),
   })
   .loose();
 export type AlgoOrderQuery = z.infer<typeof algoOrderQuerySchema>;

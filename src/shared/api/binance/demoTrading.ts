@@ -501,6 +501,22 @@ export async function fetchDemoFuturesSymbolState(
   };
 }
 
+/**
+ * Открытые algo-ордера (TP/SL) всего фьючерсного счёта одним запросом — для сверки своих ног
+ * зеркал за прогон (spec 0012, PR 2d).
+ */
+export async function fetchDemoOpenAlgoOrders(
+  creds: BinanceCredentials,
+): Promise<FuturesSymbolState["algos"]> {
+  return signedRequest(
+    DEMO_URL.futures,
+    creds,
+    "GET",
+    "/fapi/v1/openAlgoOrders",
+    futuresOpenAlgoOrdersSchema,
+  );
+}
+
 /** Отменить обычный ордер фьючерсов. false — отменять нечего (-2011). */
 export async function demoFuturesCancelOrder(
   creds: BinanceCredentials,

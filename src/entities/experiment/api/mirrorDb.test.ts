@@ -12,8 +12,10 @@ import {
   claimOpenMirrors,
   listMirrorCandidates,
   listMirrorsToClose,
+  listOpenMirrorLegs,
   type MirrorCandidate,
   markDemoReset,
+  markMirrorClosedByExchange,
   mirrorStatuses,
   mirrorSummaries,
   setExperimentDemoMirror,
@@ -339,6 +341,53 @@ describe("data-fix drizzle/0005 (spec 0012, AC2)", () => {
 });
 
 describe("protect_refs", () => {
+  it("своя нога сработала: строка закрыта биржей сразу, с ценой выхода; paper-сделка ещё открыта", async () => {
+    await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    const protectRefs = {
+      market: "futures" as const,
+      entryOrderId: 1,
+      stop: { algoId: 21, clientAlgoId: "bd1-S" },
+      takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
+    };
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      entryPrice: 100,
+      quantity: 0.5,
+      protectRefs,
+    });
+    expect(await listOpenMirrorLegs(db)).toEqual([
+      { tradeId: "a", symbol: "ETHUSDT", protectRefs },
+    ]);
+    expect(
+      await markMirrorClosedByExchange(db, "a", {
+        message: "Позиция закрыта биржей",
+        steps: [],
+        exitPrice: 104,
+      }),
+    ).toBe(true);
+    // Повтор и захват на закрытие — уже не трогают закрытую строку.
+    expect(
+      await markMirrorClosedByExchange(db, "a", {
+        message: "x",
+        steps: [],
+        exitPrice: 1,
+      }),
+    ).toBe(false);
+    expect(await listOpenMirrorLegs(db)).toEqual([]);
+    expect(await activeMirrors(db)).toEqual([]);
+    // Демо-PnL — по фактической цене выхода, хотя paper-сделка не закрыта.
+    expect((await mirrorSummaries(db)).get("F01")).toMatchObject({
+      closed: 1,
+      wins: 1,
+      pnl: 2,
+    });
+  });
+
   it("старые строки без ссылок и битый jsonb — null (закрытие по-старому)", async () => {
     const store = await setup();
     await setExperimentDemoMirror(db, "F01", true);

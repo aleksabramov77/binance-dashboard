@@ -8,12 +8,18 @@ import {
   type DemoResetResult,
   listMirrorCandidates,
   listMirrorsToClose,
+  listOpenMirrorLegs,
   type MirrorCandidate,
   markDemoReset,
+  markMirrorClosedByExchange,
   updateMirror,
 } from "@/entities/experiment";
 import { mirrorLogEntry, runMirror } from "@/features/demo-mirror";
-import { closeDemoPosition, placeTrade } from "@/features/execute-trade";
+import {
+  closeDemoPosition,
+  placeTrade,
+  sweepTriggeredLegs,
+} from "@/features/execute-trade";
 import {
   fetchDemoPositionMode,
   fetchDemoSymbolRules,
@@ -79,6 +85,20 @@ export async function runDemoMirror() {
       if (c && r.status === "rejected")
         writeMirrorLog(mirrorLogEntry("rejected", c, r.message));
     },
+    sweepLegs: async () => {
+      const swept = await sweepTriggeredLegs(await listOpenMirrorLegs(db));
+      const closed: { tradeId: string; symbol: string }[] = [];
+      for (const m of swept)
+        if (
+          await markMirrorClosedByExchange(db, m.tradeId, {
+            message: m.message,
+            steps: m.steps,
+            exitPrice: m.exitPrice,
+          })
+        )
+          closed.push({ tradeId: m.tradeId, symbol: m.symbol });
+      return closed;
+    },
     listToClose: () => listMirrorsToClose(db),
     claimToClose: (tradeId) => claimMirrorToClose(db, tradeId),
     close: (req) => closeDemoPosition(req),
@@ -96,11 +116,12 @@ export async function runDemoMirror() {
     result.closed.length ||
     result.skipped ||
     result.deferred ||
-    result.deferredCloses
+    result.deferredCloses ||
+    result.swept.length
   )
     log.info(
       "mirror.run",
-      `Зеркало: открыто ${result.opened.length}, закрыто ${result.closed.length}, пропущено ${result.skipped}${result.deferred ? `, входов отложено до следующего прогона ${result.deferred}` : ""}${result.deferredCloses ? `, закрытий отложено ${result.deferredCloses}` : ""}`,
+      `Зеркало: открыто ${result.opened.length}, закрыто ${result.closed.length}, пропущено ${result.skipped}${result.deferred ? `, входов отложено до следующего прогона ${result.deferred}` : ""}${result.deferredCloses ? `, закрытий отложено ${result.deferredCloses}` : ""}${result.swept.length ? `, закрыто биржей (вторая нога снята) ${result.swept.length}` : ""}`,
       { ...result },
     );
   return result;

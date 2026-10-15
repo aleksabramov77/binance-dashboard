@@ -35,6 +35,7 @@ function deps(over: Partial<MirrorDeps> = {}): MirrorDeps {
     }),
     markSkipped: vi.fn(async () => {}),
     saveOpen: vi.fn(async () => {}),
+    sweepLegs: async () => [],
     listToClose: async () => [],
     claimToClose: async () => null,
     close: async () => ({
@@ -208,5 +209,23 @@ describe("runMirror", () => {
     expect(claimToClose).not.toHaveBeenCalledWith("c3");
     expect(open).not.toHaveBeenCalled();
     expect(r.deferred).toBe(1);
+  });
+
+  it("сначала сверка своих ног: закрытые биржей зеркала — в результате, до закрытий и входов", async () => {
+    const order: string[] = [];
+    const r = await runMirror(
+      deps({
+        sweepLegs: async () => {
+          order.push("sweep");
+          return [{ tradeId: "m1", symbol: "ADAUSDT" }];
+        },
+        listToClose: async () => {
+          order.push("list");
+          return [];
+        },
+      }),
+    );
+    expect(order).toEqual(["sweep", "list"]);
+    expect(r.swept).toEqual([{ tradeId: "m1", symbol: "ADAUSDT" }]);
   });
 });

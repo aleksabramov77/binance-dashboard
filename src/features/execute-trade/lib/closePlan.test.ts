@@ -5,6 +5,7 @@ import {
   algoLookup,
   averagePrice,
   closeVerdict,
+  orphanLegCandidate,
   ownCloseQuantity,
   planOwnClose,
   spotLeg,
@@ -169,5 +170,36 @@ describe("closeVerdict", () => {
     );
     expect(closeVerdict({ closedByExchange: false }, 0)).toBe("nothingLeft");
     expect(closeVerdict({ closedByExchange: false }, 1)).toBe("close");
+  });
+});
+
+describe("orphanLegCandidate (вторая нога после срабатывания первой, PR 2d)", () => {
+  const refs = {
+    stop: { algoId: 1, clientAlgoId: "bda-S" },
+    takeProfit: { algoId: 2, clientAlgoId: "bda-T" },
+  };
+  it("тейк пропал из открытых, стоп висит — кандидат снять стоп", () => {
+    expect(
+      orphanLegCandidate(refs, [{ algoId: 1, clientAlgoId: "bda-S" }]),
+    ).toEqual({ missing: "takeProfit", remaining: "stop" });
+  });
+  it("стоп пропал (ссылка без algoId — по clientAlgoId), тейк висит", () => {
+    expect(
+      orphanLegCandidate(
+        { ...refs, takeProfit: { algoId: null, clientAlgoId: "bda-T" } },
+        [{ algoId: 99, clientAlgoId: "bda-T" }],
+      ),
+    ).toEqual({ missing: "stop", remaining: "takeProfit" });
+  });
+  it("обе стоят, обеих нет или ноги одной (stopOnly) — ничего", () => {
+    const both = [
+      { algoId: 1, clientAlgoId: "bda-S" },
+      { algoId: 2, clientAlgoId: "bda-T" },
+    ];
+    expect(orphanLegCandidate(refs, both)).toBeNull();
+    expect(orphanLegCandidate(refs, [])).toBeNull();
+    expect(
+      orphanLegCandidate({ ...refs, takeProfit: null }, [both[0]]),
+    ).toBeNull();
   });
 });

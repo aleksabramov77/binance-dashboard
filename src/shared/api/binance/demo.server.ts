@@ -44,6 +44,7 @@ export {
   fetchDemoFuturesOrder,
   fetchDemoFuturesPositions,
   fetchDemoFuturesSymbolState,
+  fetchDemoOpenAlgoOrders,
   fetchDemoOpenSymbols,
   fetchDemoPositionMode,
   fetchDemoPrice,
