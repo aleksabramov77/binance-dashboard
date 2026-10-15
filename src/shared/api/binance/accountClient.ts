@@ -2,11 +2,15 @@ import type { z } from "zod";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import {
   type FlexiblePosition,
+  type FlexibleReward,
   type FundingAsset,
   flexiblePositionsSchema,
+  flexibleRewardsSchema,
   fundingAssetsSchema,
   type LockedPosition,
+  type LockedReward,
   lockedPositionsSchema,
+  lockedRewardsSchema,
   type SpotAccount,
   spotAccountSchema,
   type WalletBalance,
@@ -102,6 +106,45 @@ export async function fetchLockedPositions(
         current,
         size: PAGE_SIZE,
       },
+    ),
+  );
+}
+
+/** Окно истории начислений, мс; Binance принимает не больше 30 дней. */
+export type RewardsWindow = { startTime: number; endTime: number };
+
+/**
+ * Вид начислений Flexible: `BONUS` — бонусная ступень ставки, `REALTIME` — базовая ставка, `REWARDS` — старая
+ * история, `ALL` — все сразу (одним запросом вместо трёх: вес у каждого 150). Параметр обязателен.
+ */
+export type FlexibleRewardsType = "ALL" | "BONUS" | "REALTIME" | "REWARDS";
+
+export async function fetchFlexibleRewards(
+  creds: BinanceCredentials,
+  { startTime, endTime, type }: RewardsWindow & { type: FlexibleRewardsType },
+): Promise<FlexibleReward[]> {
+  return fetchAllPages((current) =>
+    signedRequest(
+      creds,
+      "GET",
+      "/sapi/v1/simple-earn/flexible/history/rewardsRecord",
+      flexibleRewardsSchema,
+      { startTime, endTime, type, current, size: PAGE_SIZE },
+    ),
+  );
+}
+
+export async function fetchLockedRewards(
+  creds: BinanceCredentials,
+  { startTime, endTime }: RewardsWindow,
+): Promise<LockedReward[]> {
+  return fetchAllPages((current) =>
+    signedRequest(
+      creds,
+      "GET",
+      "/sapi/v1/simple-earn/locked/history/rewardsRecord",
+      lockedRewardsSchema,
+      { startTime, endTime, current, size: PAGE_SIZE },
     ),
   );
 }

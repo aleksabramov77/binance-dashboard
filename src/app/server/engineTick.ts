@@ -114,6 +114,13 @@ export function buildTickDeps(
     tickers: async (market) => {
       if (market === "spot") return env.market.fetch24hTickers("spot");
       const perps = await env.perpetuals(market);
+      // Справочник только крипты пуст (Binance сменил underlyingType?) — юниверс группы пуст молча (spec 0029).
+      if (perps.size === 0)
+        env.log?.(
+          "warn",
+          "engine.perpetuals",
+          `справочник бессрочных ${market} пуст после фильтра только крипты: эксперименты группы без юниверса`,
+        );
       if (market === "usdm")
         return (await env.market.fetch24hTickers("usdm")).filter((t) =>
           perps.has(t.symbol),

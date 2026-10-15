@@ -27,7 +27,11 @@ import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
-import { ensureEngineReady, withTickLock } from "./experimentEngine";
+import {
+  ensureEngineReady,
+  warnInvalidExperiment,
+  withTickLock,
+} from "./experimentEngine";
 
 /** Бюджет следующей эпохи из engine_state; нет или мусор — по умолчанию. */
 async function readNextBudget(
@@ -61,7 +65,7 @@ export async function getLabSettings(): Promise<LabSettings> {
   const [rows, epoch, overview, demoBalances, nextBudget] = await Promise.all([
     db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
     store.currentRunId().then((runId) => getEpoch(db, runId)),
-    readExperimentsOverview(db, false, demoConfigured),
+    readExperimentsOverview(db, false, demoConfigured, warnInvalidExperiment),
     readDemoBalances(),
     readNextBudget(store),
   ]);

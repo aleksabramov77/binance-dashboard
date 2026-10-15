@@ -62,7 +62,7 @@ function MoversTable({
   const { sort, head } = useTableSort(table);
   const rows = sort ? sortRows(movers, SORT_VALUE[sort.key], sort.dir) : movers;
   return (
-    <Card className="min-w-0">
+    <Card className="w-fit max-w-full min-w-0">
       <CardHeader>
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
@@ -175,7 +175,7 @@ export function MarketMovers({
   losers: Mover[];
 }) {
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <MoversTable
         title="Лидеры роста за 24 ч"
         movers={gainers}

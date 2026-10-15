@@ -4,6 +4,7 @@ import {
   isEligibleSymbol,
   type MarketTicker,
   pickUniverse,
+  symbolInMarket,
 } from "./universe.ts";
 
 const t = (
@@ -71,6 +72,58 @@ describe("юниверс", () => {
     ).toEqual(["DOGEUSDT", "BTCUSDT", "ETHUSDT"]);
   });
 
+  it("без токенизированных акций и металлов: не попадают ни в top, ни в movers (spec 0029)", () => {
+    const market = [
+      ...tickers,
+      t("SNDKBUSDT", 9e9, 40),
+      t("SOXLBUSDT", 8e9, -40),
+      t("CRCLBUSDT", 7e9, 35),
+      t("SPCXBUSDT", 6e9, -35),
+      t("PAXGUSDT", 6e9, 2),
+      t("XAUTUSDT", 6e9, -2),
+      t("XAUUSDT", 6e9, 1),
+    ];
+    expect(isEligibleSymbol("PAXGUSDT", "spot")).toBe(false);
+    expect(isEligibleSymbol("TSLABUSDT", "spot")).toBe(false);
+    // Крипта с B на конце — не акция.
+    expect(isEligibleSymbol("BNBUSDT", "spot")).toBe(true);
+    expect(isEligibleSymbol("ARBUSDT", "spot")).toBe(true);
+    expect(pickUniverse({ type: "top", n: 3 }, market, "spot")).toEqual([
+      "BTCUSDT",
+      "ETHUSDT",
+      "DOGEUSDT",
+    ]);
+    expect(pickUniverse({ type: "movers", n: 1 }, market, "spot")).toEqual([
+      "PIXELUSDT",
+      "OPUSDT",
+    ]);
+    expect(
+      pickUniverse(
+        { type: "symbols", symbols: ["PAXG", "BTC"] },
+        market,
+        "spot",
+      ),
+    ).toEqual(["BTCUSDT"]);
+  });
+
+  it("USDⓈ-M: PAXG и XAUT (COIN с подтипом RWA проходят справочник) отсекает NON_CRYPTO, монета RWA-сектора остаётся", () => {
+    // Тикеры USDⓈ-M после fetchPerpetualSymbols({ cryptoOnly: true }): подтип RWA там не фильтруется.
+    const futures = [
+      t("BTCUSDT", 5e9, 1),
+      t("PAXGUSDT", 4e9, 3),
+      t("XAUTUSDT", 3e9, -3),
+      t("MANTRAUSDT", 2e9, 2),
+    ];
+    expect(pickUniverse({ type: "top", n: 4 }, futures, "usdm")).toEqual([
+      "BTCUSDT",
+      "MANTRAUSDT",
+    ]);
+    expect(pickUniverse({ type: "movers", n: 1 }, futures, "usdm")).toEqual([
+      "MANTRAUSDT",
+      "BTCUSDT",
+    ]);
+  });
+
   describe("COIN-M (spec 0023)", () => {
     const coin = (
       symbol: string,
@@ -95,6 +148,16 @@ describe("юниверс", () => {
       expect(isEligibleSymbol("BTCUSD_251226", "coinm")).toBe(false);
       expect(isEligibleSymbol("BTCUSDT", "coinm")).toBe(false);
       expect(isEligibleSymbol("BTCUSD_PERP", "usdm")).toBe(false);
+      // NON_CRYPTO — во всех группах (spec 0029).
+      expect(isEligibleSymbol("PAXGUSD_PERP", "coinm")).toBe(false);
+    });
+
+    it("символ режима рынка — в формате группы: BTCUSDT ↔ BTCUSD_PERP", () => {
+      expect(symbolInMarket("BTCUSDT", "coinm")).toBe("BTCUSD_PERP");
+      expect(symbolInMarket("BTCUSD_PERP", "coinm")).toBe("BTCUSD_PERP");
+      expect(symbolInMarket("BTCUSD_PERP", "usdm")).toBe("BTCUSDT");
+      expect(symbolInMarket("BTCUSDT", "spot")).toBe("BTCUSDT");
+      expect(symbolInMarket("eth", "coinm")).toBe("ETHUSD_PERP");
     });
 
     it("оборот в $ = контракты × размер контракта; размер контракта — в тикере", () => {

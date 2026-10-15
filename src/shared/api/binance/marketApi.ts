@@ -41,12 +41,32 @@ const PERPETUAL_QUOTE: Record<FuturesMarket, string> = {
 /** Бессрочный контракт в торговле: символ → размер контракта в USD (COIN-M) или null (USDⓈ-M: в монете). */
 export type Perpetuals = Map<string, number | null>;
 
+export interface PerpetualsOptions {
+  /** Только контракты на монеты (underlyingType COIN): юниверс лаборатории — только крипта (spec 0029). */
+  cryptoOnly?: boolean;
+}
+
+/**
+ * Базовый актив фьючерса — криптовалюта: underlyingType COIN (не индекс INDEX и не пре-маркет PREMARKET).
+ * Подтип RWA не учитываем: его носят и монеты RWA-сектора (MANTRA, CFG); токены золота PAXG и XAUT — тоже
+ * COIN, их отсекает список не-крипто потребителя. Акции и сырьё — отдельный contractType TRADIFI_PERPETUAL.
+ */
+function isCryptoUnderlying(contract: {
+  underlyingType?: string | null;
+}): boolean {
+  return contract.underlyingType === "COIN";
+}
+
 export function createMarketApi(getJson: GetJson) {
   /**
    * Бессрочные контракты рынка, по которым идёт торговля (USDⓈ-M — к USDT, COIN-M — к USD),
-   * с размером контракта COIN-M. У dapi статус — contractStatus.
+   * с размером контракта COIN-M. У dapi статус — contractStatus; underlyingType у dapi тоже есть
+   * (все бессрочные COIN-M — COIN), поэтому cryptoOnly работает для обоих рынков.
    */
-  async function fetchPerpetuals(market: FuturesMarket): Promise<Perpetuals> {
+  async function fetchPerpetuals(
+    market: FuturesMarket,
+    options: PerpetualsOptions = {},
+  ): Promise<Perpetuals> {
     const info = futuresExchangeInfoSchema.parse(
       await getJson(`${BASE[market]}/exchangeInfo`),
     );
@@ -55,7 +75,8 @@ export function createMarketApi(getJson: GetJson) {
       if (
         s.contractType === "PERPETUAL" &&
         s.quoteAsset === PERPETUAL_QUOTE[market] &&
-        (s.status ?? s.contractStatus) === "TRADING"
+        (s.status ?? s.contractStatus) === "TRADING" &&
+        (!options.cryptoOnly || isCryptoUnderlying(s))
       )
         out.set(s.symbol, market === "coinm" ? (s.contractSize ?? null) : null);
     return out;
@@ -108,9 +129,14 @@ export function createMarketApi(getJson: GetJson) {
       }));
     },
 
-    /** Символы бессрочных USDT-фьючерсов (USDⓈ-M), по которым идёт торговля. */
-    async fetchPerpetualSymbols(): Promise<Set<string>> {
-      return new Set((await fetchPerpetuals("usdm")).keys());
+    /**
+     * Символы бессрочных USDT-фьючерсов (USDⓈ-M), по которым идёт торговля. cryptoOnly — только контракты на
+     * монеты: без индексов (BTCDOMUSDT) и пре-маркета — isCryptoUnderlying.
+     */
+    async fetchPerpetualSymbols(
+      options: PerpetualsOptions = {},
+    ): Promise<Set<string>> {
+      return new Set((await fetchPerpetuals("usdm", options)).keys());
     },
 
     /** Текущие ставки funding бессрочных фьючерсов рынка (доля за период): { BTCUSDT: 0.0001 }. */

@@ -91,8 +91,15 @@ export function parsePrivateExperiments(
     const who = label(index, id);
     const parsed = privateExperimentSchema.safeParse(item);
     if (!parsed.success) {
-      for (const issue of parsed.error.issues)
-        errors.push(`${who}: поле ${fieldPath(issue.path)} — ${issue.message}`);
+      for (const issue of parsed.error.issues) {
+        // Лишние поля строгой схемы — по ошибке на каждое, с путём до самого поля (config.marketFiltr).
+        const paths =
+          issue.code === "unrecognized_keys"
+            ? issue.keys.map((key) => [...issue.path, key])
+            : [issue.path];
+        for (const path of paths)
+          errors.push(`${who}: поле ${fieldPath(path)} — ${issue.message}`);
+      }
       return;
     }
     const e = parsed.data;

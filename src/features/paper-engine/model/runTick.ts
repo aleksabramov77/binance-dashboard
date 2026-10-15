@@ -10,7 +10,11 @@ import {
   exitFill,
   FEE_RATE,
   isFuturesMarket,
+  type MarketFilter,
+  marketRegimeAllows,
   type PaperTrade,
+  regimeMinCandles,
+  sessionAllows,
   settle,
   sizePosition,
   TIMEFRAME_MS,
@@ -30,7 +34,11 @@ import {
 } from "../lib/candles.ts";
 import { computeLevels } from "../lib/levels.ts";
 import { createLimiter } from "../lib/limiter.ts";
-import { type MarketTicker, pickUniverse } from "../lib/universe.ts";
+import {
+  type MarketTicker,
+  pickUniverse,
+  symbolInMarket,
+} from "../lib/universe.ts";
 import {
   DEFAULT_RUNNER,
   ENGINE_KEYS,
@@ -144,7 +152,9 @@ export async function runTick(
 
   const limit = createLimiter(ENGINE.concurrency);
   const cache: CandleCache = deps.cache ?? new Map();
-  const experiments = await store.listExperiments();
+  const experiments = await store.listExperiments(({ id, problem }) =>
+    fail(`эксперимент ${id} пропущен: конфиг не проходит схему`, problem),
+  );
   const byId = new Map(experiments.map((e) => [e.id, e]));
   const runId = await store.currentRunId();
   const open = await store.openTrades(runId);
@@ -213,6 +223,41 @@ export async function runTick(
       candleMemo.set(key, p);
     }
     return p;
+  };
+
+  // Свечи режима рынка (spec 0029) — через signalCandles: общий кэш, один запрос на (рынок, символ, TF).
+  // Сбой загрузки и короткая история — одна ошибка тика на (рынок, символ, TF), а не на каждый эксперимент.
+  // Нет данных — вход запрещён (как у trendFilter); выходы идут как обычно.
+  const regimeMemo = new Map<string, Promise<Candle[] | null>>();
+  const regimeReported = new Set<string>();
+  const regimeAllows = async (
+    market: ExperimentMarket,
+    filter: MarketFilter,
+    direction: TradeDirection,
+  ) => {
+    // Символ режима — в формате группы: BTCUSDT у COIN-M — BTCUSD_PERP (свечи dapi).
+    const symbol = symbolInMarket(filter.symbol, market);
+    const key = candleKey(market, symbol, filter.timeframe);
+    const where = `режим рынка ${market} ${symbol} ${filter.timeframe}`;
+    let p = regimeMemo.get(key);
+    if (!p) {
+      p = signalCandles(market, symbol, filter.timeframe).catch((error) => {
+        fail(where, error);
+        return null;
+      });
+      regimeMemo.set(key, p);
+    }
+    const candles = await p;
+    if (candles === null) return false;
+    const need = regimeMinCandles(filter);
+    if (candles.length < need) {
+      if (!regimeReported.has(`${key}:${need}`)) {
+        regimeReported.add(`${key}:${need}`);
+        fail(where, `мало свечей режима: ${candles.length} из ${need}`);
+      }
+      return false;
+    }
+    return marketRegimeAllows(candles, filter, direction);
   };
 
   const closeTrade = async (
@@ -437,6 +482,9 @@ export async function runTick(
     );
     const hold = config.entry.type === "hold";
     const fresh = hold || now - (bar + tfMs) <= maxAge;
+    // Торговые часы — по времени входа (тика), одно решение на эксперимент.
+    const inSession =
+      !config.sessionFilter || sessionAllows(now, config.sessionFilter);
 
     for (const { symbol, candles } of ready) {
       const t = ticker.get(symbol);
@@ -456,10 +504,15 @@ export async function runTick(
 
       const entry = signal.entry;
       if (!entry || !fresh || !inUniverse.has(symbol)) continue;
-      if (!allowed(exp, entry.direction)) continue;
+      if (!allowed(exp, entry.direction) || !inSession) continue;
       const current = mine();
       if (current.length >= config.maxOpen) continue;
       if (current.some((x) => x.symbol === symbol)) continue;
+      if (
+        config.marketFilter &&
+        !(await regimeAllows(market, config.marketFilter, entry.direction))
+      )
+        continue;
       if (!(await trendAllows(exp, symbol, entry.direction, price))) continue;
 
       const atr = atrSeries(candles, ENGINE.atrPeriod).at(-1) ?? Number.NaN;

@@ -40,6 +40,8 @@ export const futuresExchangeInfoSchema = z.object({
       contractStatus: z.string().optional(),
       /** COIN-M: размер контракта в USD (BTC — 100, остальные — 10). */
       contractSize: z.number().optional(),
+      /** COIN — монета; INDEX, PREMARKET и прочее — индексы, пре-маркет, акции, сырьё. У dapi тоже есть. */
+      underlyingType: z.string().nullish(),
     }),
   ),
 });

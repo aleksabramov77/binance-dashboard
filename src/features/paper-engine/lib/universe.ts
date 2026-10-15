@@ -6,6 +6,7 @@ import {
 import {
   ENGINE,
   LEVERAGED_TOKEN,
+  NON_CRYPTO,
   STABLECOINS,
   SYMBOL_SUFFIX,
 } from "../config/engine.ts";
@@ -29,14 +30,18 @@ const SYMBOL: Record<ExperimentMarket, RegExp> = {
   coinm: /^[A-Z0-9]+USD_PERP$/,
 };
 
-/** Торгуемый символ группы: по шаблону символа, не стейбл и не плечевой токен. */
+/**
+ * Торгуемый символ группы: по шаблону символа группы (без поставочных фьючерсов), не стейбл, не плечевой
+ * токен и не токенизированная акция, металл или индекс (NON_CRYPTO) — во всех группах, включая COIN-M.
+ */
 export function isEligibleSymbol(
   symbol: string,
   market: ExperimentMarket,
 ): boolean {
   if (!SYMBOL[market].test(symbol) || LEVERAGED_TOKEN.test(symbol))
     return false;
-  return !STABLECOINS.has(symbol.slice(0, -SYMBOL_SUFFIX[market].length));
+  const base = symbol.slice(0, -SYMBOL_SUFFIX[market].length);
+  return !STABLECOINS.has(base) && !NON_CRYPTO.has(base);
 }
 
 /** PIXEL → PIXELUSDT (COIN-M: BTC → BTCUSD_PERP): blacklist и symbols в каталоге можно писать базой. */
@@ -44,6 +49,20 @@ export const toSymbol = (s: string, market: ExperimentMarket) => {
   const upper = s.toUpperCase();
   const suffix = SYMBOL_SUFFIX[market];
   return upper.endsWith(suffix) ? upper : `${upper}${suffix}`;
+};
+
+/**
+ * Символ той же монеты в формате группы: BTCUSDT ↔ BTCUSD_PERP. Для конфигов, где символ задан одним
+ * для всех групп (режим рынка marketFilter.symbol — по умолчанию BTCUSDT): у COIN-M свечи грузятся с dapi.
+ */
+export const symbolInMarket = (symbol: string, market: ExperimentMarket) => {
+  const upper = symbol.toUpperCase();
+  const own = SYMBOL_SUFFIX[market];
+  if (upper.endsWith(own)) return upper;
+  const other = Object.values(SYMBOL_SUFFIX).find((suffix) =>
+    upper.endsWith(suffix),
+  );
+  return toSymbol(other ? upper.slice(0, -other.length) : upper, market);
 };
 
 /** Тикер COIN-M для движка: оборот в $ = контракты за 24 ч × размер контракта. */

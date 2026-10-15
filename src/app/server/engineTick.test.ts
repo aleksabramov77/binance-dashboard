@@ -253,6 +253,24 @@ describe("buildTickDeps: свечи", () => {
       ["spot", "BTCUSDT", "1h", 301, undefined],
     ]);
   });
+
+  it("пустой справочник фьючерсов (после фильтра только крипты) — warn в журнал (spec 0029)", async () => {
+    const log = vi.fn();
+    const deps = buildTickDeps(
+      env({ perpetuals: async () => new Map(), log }),
+      createDbExperimentStore(db),
+    );
+    expect(await deps.tickers("usdm")).toEqual([]);
+    expect(await deps.tickers("coinm")).toEqual([]);
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      "engine.perpetuals",
+      expect.stringContaining("пуст"),
+    );
+    log.mockClear();
+    await deps.tickers("spot");
+    expect(log).not.toHaveBeenCalled();
+  });
 });
 
 describe("createPerpetualsSource", () => {

@@ -1,3 +1,4 @@
+import { CooldownError } from "@/shared/lib/fetchRetry";
 import { BinanceApiError } from "./signed";
 
 /**
@@ -15,8 +16,10 @@ export const UNKNOWN_OUTCOME_CODES: readonly number[] = [-1006, -1007];
  * UNKNOWN» (Spot, «HTTP Return Codes»). У фьючерсов часть 503 («Service Unavailable») — отказ,
  * но по тексту их не различаем: лишняя проверка безопаснее ложного «отклонено».
  * Обрыв сети и нераспознанный ответ 2xx (`NetworkError`, `ResponseFormatError`) — `unknown`.
+ * Пауза после 429/418 (`CooldownError`) — `rejected`: запрос на биржу не отправлялся.
  */
 export function orderErrorOutcome(error: unknown): "rejected" | "unknown" {
+  if (error instanceof CooldownError) return "rejected";
   if (!(error instanceof BinanceApiError)) return "unknown";
   if (error.code !== undefined && UNKNOWN_OUTCOME_CODES.includes(error.code))
     return "unknown";

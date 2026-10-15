@@ -58,61 +58,61 @@ export const TIMEFRAME_MS: Record<Timeframe, number> = {
 /** Сигнал входа: тип и параметры. Логика — в ./strategies.ts. */
 export const entrySchema = z.discriminatedUnion("type", [
   /** Сканер дашборда: отскок после падения / шорт после пампа / продолжение пампа. */
-  z.object({
+  z.strictObject({
     type: z.literal("counterTrend"),
     mode: z.enum(["rebound", "overheat", "both", "pumpContinuation"]),
   }),
-  z.object({
+  z.strictObject({
     type: z.literal("emaCross"),
     fast: z.number().int(),
     slow: z.number().int(),
   }),
-  z.object({
+  z.strictObject({
     type: z.literal("donchian"),
     period: z.number().int(),
     volumeMult: z.number().optional(),
   }),
-  z.object({
+  z.strictObject({
     type: z.literal("rsi2"),
     threshold: z.number(),
     trendSma: z.number().int(),
   }),
-  z.object({ type: z.literal("bbReversion"), rsiMax: z.number() }),
-  z.object({ type: z.literal("bbSqueeze"), maxWidth: z.number() }),
-  z.object({ type: z.literal("macd"), minAdx: z.number().optional() }),
-  z.object({
+  z.strictObject({ type: z.literal("bbReversion"), rsiMax: z.number() }),
+  z.strictObject({ type: z.literal("bbSqueeze"), maxWidth: z.number() }),
+  z.strictObject({ type: z.literal("macd"), minAdx: z.number().optional() }),
+  z.strictObject({
     type: z.literal("supertrend"),
     period: z.number().int(),
     mult: z.number(),
   }),
-  z.object({ type: z.literal("volumeSpike"), mult: z.number() }),
-  z.object({ type: z.literal("emaPullback") }),
-  z.object({
+  z.strictObject({ type: z.literal("volumeSpike"), mult: z.number() }),
+  z.strictObject({ type: z.literal("emaPullback") }),
+  z.strictObject({
     type: z.literal("momentum"),
     lookbackBars: z.number().int(),
     topK: z.number().int(),
   }),
-  z.object({ type: z.literal("random"), probability: z.number() }),
-  z.object({ type: z.literal("hold") }),
-  z.object({ type: z.literal("funding"), threshold: z.number() }),
+  z.strictObject({ type: z.literal("random"), probability: z.number() }),
+  z.strictObject({ type: z.literal("hold") }),
+  z.strictObject({ type: z.literal("funding"), threshold: z.number() }),
 ]);
 export type EntryRule = z.infer<typeof entrySchema>;
 export type EntryType = EntryRule["type"];
 
-export const exitSchema = z.object({
+export const exitSchema = z.strictObject({
   /** atr — mult × ATR; pct — % от входа; signal — уровень от сигнала (swing); none — без стопа. */
   stop: z.discriminatedUnion("type", [
-    z.object({ type: z.literal("atr"), mult: z.number() }),
-    z.object({ type: z.literal("pct"), pct: z.number() }),
-    z.object({ type: z.literal("signal") }),
-    z.object({ type: z.literal("none") }),
+    z.strictObject({ type: z.literal("atr"), mult: z.number() }),
+    z.strictObject({ type: z.literal("pct"), pct: z.number() }),
+    z.strictObject({ type: z.literal("signal") }),
+    z.strictObject({ type: z.literal("none") }),
   ]),
   /** rr — r × риск; pct; signal — цель от сигнала (средняя BB, EMA20). null — без TP. */
   takeProfit: z
     .discriminatedUnion("type", [
-      z.object({ type: z.literal("rr"), r: z.number() }),
-      z.object({ type: z.literal("pct"), pct: z.number() }),
-      z.object({ type: z.literal("signal") }),
+      z.strictObject({ type: z.literal("rr"), r: z.number() }),
+      z.strictObject({ type: z.literal("pct"), pct: z.number() }),
+      z.strictObject({ type: z.literal("signal") }),
     ])
     .nullable(),
   /** Трейлинг-стоп (chandelier): экстремум с входа ∓ mult × ATR на входе. */
@@ -129,7 +129,7 @@ export type ExitRule = z.infer<typeof exitSchema>;
 /** Базы мейджоров: символ — по формату группы (BTCUSDT, BTCUSD_PERP). */
 export const MAJOR_BASES = ["BTC", "ETH", "SOL", "BNB", "XRP"];
 
-export const universeSchema = z.object({
+export const universeSchema = z.strictObject({
   /** majors; top — top-N по обороту за 24 ч; movers — N лидеров роста и N падения; symbols — список. */
   type: z.enum(["majors", "top", "movers", "symbols"]),
   n: z.number().int().optional(),
@@ -138,7 +138,56 @@ export const universeSchema = z.object({
 });
 export type Universe = z.infer<typeof universeSchema>;
 
-export const experimentConfigSchema = z.object({
+/** Где цена закрытия относительно EMA: выше, ниже или не важно. */
+const regimeSideSchema = z.enum(["above", "below", "any"]);
+export type RegimeSide = z.infer<typeof regimeSideSchema>;
+
+/** Символ по умолчанию для режима рынка: весь рынок крипты идёт за BTC. */
+const REGIME_SYMBOL = "BTCUSDT";
+
+/**
+ * Наибольший период EMA фильтра режима. Движок держит ENGINE.signalCandles (300) закрытых свечей на
+ * (рынок, символ, TF) — с запасом на ADX и на свечи, которые Binance ещё не отдал; период больше
+ * истории молча запрещал бы все входы, поэтому схема его не пропускает.
+ */
+export const REGIME_MAX_EMA = 250;
+
+/**
+ * Фильтр режима рынка: вход разрешён, только если на последней закрытой свече timeframe символа
+ * (по умолчанию BTCUSDT) close по отношению к EMA(ema) совпадает с условием направления сделки,
+ * а при minAdx — ещё и ADX(14) ≥ minAdx. Нет данных — вход запрещён.
+ */
+export const marketFilterSchema = z.strictObject({
+  symbol: z.string().min(1).default(REGIME_SYMBOL),
+  timeframe: timeframeSchema,
+  ema: z.number().int().positive().max(REGIME_MAX_EMA),
+  minAdx: z.number().positive().optional(),
+  long: regimeSideSchema,
+  short: regimeSideSchema,
+});
+export type MarketFilter = z.infer<typeof marketFilterSchema>;
+
+const hourSchema = z.number().int().min(0);
+
+/**
+ * Фильтр торговых часов (UTC): hoursUtc — окно [from, to) по часу входа, from > to — через полночь
+ * ([22, 6) — с 22:00 до 06:00); days — дни недели UTC (0 — воскресенье … 6 — суббота).
+ */
+export const sessionFilterSchema = z
+  .strictObject({
+    hoursUtc: z
+      .tuple([hourSchema.max(23), hourSchema.max(24)])
+      .refine(([from, to]) => from !== to, "пустое окно: from = to")
+      .optional(),
+    days: z.array(z.number().int().min(0).max(6)).min(1).optional(),
+  })
+  .refine(
+    (f) => f.hoursUtc !== undefined || f.days !== undefined,
+    "нужно hoursUtc или days",
+  );
+export type SessionFilter = z.infer<typeof sessionFilterSchema>;
+
+export const experimentConfigSchema = z.strictObject({
   timeframe: timeframeSchema,
   entry: entrySchema,
   exit: exitSchema,
@@ -146,8 +195,12 @@ export const experimentConfigSchema = z.object({
   directions: z.array(directionSchema).min(1),
   /** Фильтр тренда старшего ТФ: long только выше EMA(period), short — ниже. */
   trendFilter: z
-    .object({ timeframe: timeframeSchema, period: z.number().int() })
+    .strictObject({ timeframe: timeframeSchema, period: z.number().int() })
     .optional(),
+  /** Фильтр режима рынка по BTC (или другому символу) на старшем ТФ — ./filters.ts. */
+  marketFilter: marketFilterSchema.optional(),
+  /** Фильтр торговых часов и дней недели (UTC) — ./filters.ts. */
+  sessionFilter: sessionFilterSchema.optional(),
   maxOpen: z.number().int().positive(),
 });
 export type ExperimentConfig = z.infer<typeof experimentConfigSchema>;

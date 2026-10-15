@@ -2,6 +2,9 @@ import type {
   EntryRule,
   ExitRule,
   ExperimentConfig,
+  MarketFilter,
+  RegimeSide,
+  SessionFilter,
   Universe,
 } from "@binance-dashboard/trading-core";
 
@@ -95,6 +98,48 @@ export function describeUniverse(u: Universe): string {
   return u.blacklist?.length ? `${base}; без ${u.blacklist.join(", ")}` : base;
 }
 
+const REGIME_SIDE: Record<RegimeSide, string> = {
+  above: "выше",
+  below: "ниже",
+  any: "",
+};
+
+/** «лонг — BTCUSDT выше EMA 100 на 1d; шорт — при любом; ADX ≥ 30 на 1d». */
+function describeMarketFilter(f: MarketFilter): string {
+  const side = (label: string, s: RegimeSide) =>
+    s === "any"
+      ? `${label} — при любом`
+      : `${label} — ${f.symbol} ${REGIME_SIDE[s]} EMA ${f.ema} на ${f.timeframe}`;
+  const parts = [side("лонг", f.long), side("шорт", f.short)];
+  if (f.minAdx !== undefined)
+    parts.push(`ADX ≥ ${num(f.minAdx)} на ${f.timeframe}`);
+  return parts.join("; ");
+}
+
+const WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const hour = (h: number) => `${String(h).padStart(2, "0")}:00`;
+
+/** Строки «Часы» и «Дни» фильтра торговых часов (UTC). */
+function describeSessionFilter(f: SessionFilter): ConfigLine[] {
+  const lines: ConfigLine[] = [];
+  if (f.hoursUtc) {
+    const [from, to] = f.hoursUtc;
+    lines.push({
+      label: "Часы",
+      value: `${hour(from)}–${hour(to)} UTC${from > to ? " (через полночь)" : ""}`,
+    });
+  }
+  if (f.days)
+    lines.push({
+      label: "Дни",
+      value: `${[...f.days]
+        .sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7))
+        .map((d) => WEEKDAYS[d])
+        .join(", ")} (UTC)`,
+    });
+  return lines;
+}
+
 export interface ConfigLine {
   label: string;
   value: string;
@@ -128,6 +173,12 @@ export function describeConfig(c: ExperimentConfig): ConfigLine[] {
       label: "Фильтр тренда",
       value: `по EMA ${c.trendFilter.period} на ${c.trendFilter.timeframe}`,
     });
+  if (c.marketFilter)
+    lines.push({
+      label: "Режим рынка",
+      value: describeMarketFilter(c.marketFilter),
+    });
+  if (c.sessionFilter) lines.push(...describeSessionFilter(c.sessionFilter));
   if (exit.breakevenAtR)
     lines.push({
       label: "Безубыток",

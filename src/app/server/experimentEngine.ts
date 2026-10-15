@@ -5,6 +5,7 @@ import {
   createDbExperimentStore,
   type EngineStatus,
   engineTickSchema,
+  type OnInvalidExperiment,
   readExperimentDetail,
   readExperimentsOverview,
   readTradeStats,
@@ -70,8 +71,9 @@ function engine(): EngineProcess {
     exclusive: null,
     ready: null,
     cache: new Map(),
+    // Юниверс лаборатории — только крипта: без индексов и токенов реальных активов (spec 0029).
     perpetuals: createPerpetualsSources(
-      fetchPerpetuals,
+      (m) => fetchPerpetuals(m, { cryptoOnly: true }),
       PERPETUALS_TTL_MS,
       Date.now,
     ),
@@ -247,6 +249,14 @@ export async function setEngineEnabled(
   return getEngineStatus();
 }
 
+/** Строка experiments не прошла строгую схему (spec 0029): страницы показывают остальные, строку — в журнал. */
+export const warnInvalidExperiment: OnInvalidExperiment = ({ id, problem }) =>
+  log.warn(
+    "experiment.invalid",
+    `эксперимент ${id} пропущен: конфиг не проходит схему`,
+    { id, problem },
+  );
+
 /** Страница /experiments: каталог со статистикой текущей эпохи. */
 export async function getExperimentsOverview() {
   await ensureEngineReady();
@@ -254,17 +264,24 @@ export async function getExperimentsOverview() {
     getDb(),
     await readEnabled(store()),
     getDemoTradingConfig() !== null,
+    warnInvalidExperiment,
   );
 }
 
 /** Страница /experiments/[id]; null — эксперимента нет в каталоге. */
 export async function getExperimentDetail(id: string, limit: number) {
   await ensureEngineReady();
-  return readExperimentDetail(getDb(), id, await readEnabled(store()), limit);
+  return readExperimentDetail(
+    getDb(),
+    id,
+    await readEnabled(store()),
+    limit,
+    warnInvalidExperiment,
+  );
 }
 
 /** Страница /stats: разрезы сделок эпохи; null — нет такой эпохи. */
 export async function getTradeStats(query: StatsQuery) {
   await ensureEngineReady();
-  return readTradeStats(getDb(), query, Date.now());
+  return readTradeStats(getDb(), query, Date.now(), warnInvalidExperiment);
 }

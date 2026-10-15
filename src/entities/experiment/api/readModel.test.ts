@@ -116,6 +116,28 @@ describe("чтение для страниц лаборатории", () => {
     expect(detail?.equity.map((p) => p.equity)).toEqual([1000, 1010, 1006]);
     expect(await readExperimentDetail(db, "NOPE", false, 10)).toBeNull();
   });
+
+  it("строка с незнакомым полем конфига не роняет страницы: пропускается и уходит в onInvalid (spec 0029)", async () => {
+    await seedExperiments(db, [exp("F01"), exp("F02")]);
+    await ensureRun(db);
+    await db
+      .update(experimentsTable)
+      .set({ config: { ...exp("F02").config, marketFiltr: {} } as never })
+      .where(eq(experimentsTable.id, "F02"));
+    const invalid: { id: string; problem: string }[] = [];
+    const onInvalid = (row: { id: string; problem: string }) =>
+      invalid.push(row);
+
+    const overview = await readExperimentsOverview(db, true, false, onInvalid);
+    expect(overview.experiments.map((e) => e.id)).toEqual(["F01"]);
+    expect(await readExperimentDetail(db, "F02", true, 10, onInvalid)).toBe(
+      null,
+    );
+    expect((await readLabDataset(db, onInvalid)).experiments).toHaveLength(1);
+    expect(invalid).toHaveLength(3);
+    expect(invalid[0].id).toBe("F02");
+    expect(invalid[0].problem).toMatch(/^config\.marketFiltr — /);
+  });
 });
 
 describe("разрезы /stats", () => {

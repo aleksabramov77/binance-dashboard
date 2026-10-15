@@ -58,9 +58,10 @@ const market = createMarketApi(getJson);
 // кэш свечей, справочники фьючерсов, признак сида каталога.
 let client: ReturnType<typeof postgres> | null = null;
 const cache: CandleCache = new Map();
-// Справочники бессрочных контрактов USDⓈ-M и COIN-M (spec 0023) — у каждого свой кэш.
+// Справочники бессрочных контрактов USDⓈ-M и COIN-M (spec 0023) — у каждого свой кэш. Юниверс
+// лаборатории — только крипта: без индексов и токенов реальных активов (spec 0029).
 const perpetuals = createPerpetualsSources(
-  (m) => market.fetchPerpetuals(m),
+  (m) => market.fetchPerpetuals(m, { cryptoOnly: true }),
   PERPETUALS_TTL_MS,
   Date.now,
 );

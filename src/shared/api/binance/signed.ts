@@ -2,10 +2,13 @@ import { createHmac } from "node:crypto";
 import type { z } from "zod";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import {
+  assertNoCooldown,
+  CooldownError,
   describeNetworkError,
   HttpError,
   NetworkError,
   REQUEST_TIMEOUT_MS,
+  recordCooldown,
   withRetry,
 } from "@/shared/lib/fetchRetry";
 import { log } from "@/shared/lib/logger.server";
@@ -39,7 +42,12 @@ export async function signedRequest<T extends z.ZodType>(
   schema: T,
   params: SignedParams = {},
 ): Promise<z.infer<T>> {
+  const host = new URL(baseUrl).host;
+  const label = `Binance ${path}`;
   const attempt = async () => {
+    // Пауза после 429/418 (spec 0014) — общая с публичными запросами: лимит веса Binance считается на IP, повтор во
+    // время бана его удлиняет. На паузе — сразу CooldownError, запрос не уходит (spec 0022).
+    assertNoCooldown(host, label);
     // Подпись и timestamp — заново на каждую попытку.
     // recvWindow по умолчанию 10 с; ордера входа задают своё (ORDER_RECV_WINDOW_MS, orderOutcome.ts).
     const query = new URLSearchParams({
@@ -63,10 +71,13 @@ export async function signedRequest<T extends z.ZodType>(
       cache: "no-store",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    const body: unknown = await res.json();
+    // Тело ошибки может быть не JSON (418 от балансировщика) — пауза всё равно ставится.
+    const body: unknown = res.ok
+      ? await res.json()
+      : await res.json().catch(() => null);
     // Параметры запроса — без подписи и ключа (они не в params).
     const meta = {
-      host: new URL(baseUrl).host,
+      host,
       method,
       path,
       status: res.status,
@@ -74,6 +85,7 @@ export async function signedRequest<T extends z.ZodType>(
       params,
     };
     if (!res.ok) {
+      recordCooldown(host, label, res, body);
       const error = binanceErrorSchema.safeParse(body);
       log.warn("binance.error", `${method} ${path} → ${res.status}`, {
         ...meta,
@@ -115,13 +127,15 @@ export async function signedRequest<T extends z.ZodType>(
   };
 
   // Чтение повторяем при сбоях сети; ордера — нет, чтобы не открыть позицию дважды.
-  if (method === "GET") return withRetry(`Binance ${path}`, attempt);
+  if (method === "GET") return withRetry(label, attempt);
   try {
     return await attempt();
   } catch (error) {
+    // Пауза — запрос не отправлялся, это не обрыв сети.
     if (
       error instanceof BinanceApiError ||
-      error instanceof ResponseFormatError
+      error instanceof ResponseFormatError ||
+      error instanceof CooldownError
     )
       throw error;
     const failure = new NetworkError(
