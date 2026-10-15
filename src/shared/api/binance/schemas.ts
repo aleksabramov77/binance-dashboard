@@ -45,3 +45,28 @@ export const tickerPricesSchema = z.array(
 
 export type EarnProduct = z.infer<typeof earnProductSchema>;
 export type EarnProductDetail = z.infer<typeof earnProductDetailSchema>;
+
+/** Одна строка публичной сводки Earn по виду продукта (APR — доли: 0.0361 = 3,61 %). */
+export const earnOverviewProductSchema = z.object({
+  productType: z.string(),
+  maxApr: nullableDecimal,
+  minApr: nullableDecimal,
+  /** "FLEXIBLE" и/или "FIXED". */
+  duration: z.array(z.string()).nullable().catch(null),
+  lowRisk: z.boolean().nullable().catch(null),
+  soldOut: z.boolean().nullable().catch(null),
+});
+
+export const earnOverviewAssetSchema = z.object({
+  asset: z.string(),
+  productSummary: z.array(earnOverviewProductSchema).nullable().catch(null),
+});
+
+/** Сводка главной страницы Earn (`homepage/overview`, без ключа): ~12 топ-активов. */
+export const earnOverviewResponseSchema = z.object({
+  code: z.string(),
+  data: z.object({ list: z.array(earnOverviewAssetSchema) }),
+});
+
+export type EarnOverviewAsset = z.infer<typeof earnOverviewAssetSchema>;
+export type EarnOverviewProduct = z.infer<typeof earnOverviewProductSchema>;
