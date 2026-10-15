@@ -14,6 +14,7 @@ const fill = (over: Partial<DemoFill>): DemoFill => ({
   commission: 0.001,
   commissionAsset: "USDT",
   realizedPnl: 0,
+  positionSide: "BOTH",
   ...over,
 });
 

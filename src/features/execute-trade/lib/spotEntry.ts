@@ -40,6 +40,8 @@ export function chooseSpotEntry(
  */
 export function tradeClientIds(tradeId: string): SpotEntryClientIds & {
   market: string;
+  /** Своё закрытие по рынку (откат, продажа при отказе защиты, закрытие зеркала). */
+  close: string;
   protectList: string;
   protectStop: string;
   protectTakeProfit: string;
@@ -51,6 +53,7 @@ export function tradeClientIds(tradeId: string): SpotEntryClientIds & {
     stop: `${prefix}-S`,
     takeProfit: `${prefix}-T`,
     market: `${prefix}-M`,
+    close: `${prefix}-C`,
     protectList: `${prefix}-L2`,
     protectStop: `${prefix}-S2`,
     protectTakeProfit: `${prefix}-T2`,

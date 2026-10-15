@@ -10,6 +10,7 @@ export type {
   DemoProtectiveStop,
   DemoSymbolOrders,
 } from "./demoOrders";
+export { clientIdGroup } from "./demoOrders";
 export type { PriceBand, SymbolRules } from "./demoRules";
 export type {
   AlgoOrderQuery,

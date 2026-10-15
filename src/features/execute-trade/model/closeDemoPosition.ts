@@ -1,5 +1,6 @@
 import type { TradeStep } from "@/entities/trade";
 import {
+  clientIdGroup,
   type DemoProtectRefs,
   demoCancelAlgoOrder,
   demoFuturesCancelOrder,
@@ -268,6 +269,16 @@ async function cancelOwn(
 
 const LEG_LABEL = { stop: "стоп", takeProfit: "тейк" } as const;
 
+/** clientOrderId своего закрытия: группа сделки из своего стопа/тейка + `-C`; нет — без id. */
+function ownCloseId(refs: DemoProtectRefs): string | undefined {
+  const ids =
+    refs.market === "futures"
+      ? [refs.stop?.clientAlgoId, refs.takeProfit?.clientAlgoId]
+      : [refs.stop?.clientOrderId, refs.takeProfit?.clientOrderId];
+  const group = ids.map(clientIdGroup).find((g) => g !== null);
+  return group ? `${group}-C` : undefined;
+}
+
 /**
  * Закрытие по своим ордерам (PR 2b): ордера других зеркал и ручные ордера по символу не трогаем,
  * позицию докрываем только на свой объём.
@@ -279,6 +290,8 @@ async function closeOwn(
   steps: TradeStep[],
   finish: CloseFinish,
 ): Promise<CloseDemoResult> {
+  // Своё закрытие — с id своей сделки (`bd…-C`): в «Демо-сделках» оно попадёт в свою сделку.
+  const closeId = ownCloseId(refs);
   let plan: ClosePlan;
   try {
     plan = await readOwnLegs(creds, req.symbol, refs);
@@ -351,6 +364,7 @@ async function closeOwn(
         req.direction === "long" ? "SELL" : "BUY",
         qty,
         side,
+        closeId,
       );
       const exitPrice =
         order.avgPrice ||
@@ -381,7 +395,13 @@ async function closeOwn(
       return nothingToClose(
         `${baseAsset}: к продаже ${qty} (~$${(Number(qty) * price).toFixed(2)}) — меньше минимального ордера`,
       );
-    const order = await demoSpotMarketOrder(creds, req.symbol, "SELL", qty);
+    const order = await demoSpotMarketOrder(
+      creds,
+      req.symbol,
+      "SELL",
+      qty,
+      closeId,
+    );
     steps.push({
       label: "Продать свой объём по рынку",
       ok: true,

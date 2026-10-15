@@ -214,6 +214,7 @@ export const algoHistorySchema = z.array(
       triggerPrice: decimal.catch(0),
       // id рыночного ордера, которым исполнился TP/SL; не срабатывал — null.
       actualOrderId: actualOrderIdSchema,
+      clientAlgoId: z.string().nullable().catch(null),
     })
     .loose(),
 );
@@ -239,6 +240,7 @@ export const spotAllOrdersSchema = z.array(
       side: z.enum(["BUY", "SELL"]),
       status: z.string(),
       stopPrice: decimal.catch(0),
+      clientOrderId: z.string().catch(""),
     })
     .loose(),
 );
@@ -318,6 +320,7 @@ export const futuresUserTradesSchema = z.array(
       commission: decimal,
       commissionAsset: z.string(),
       time: z.number(),
+      positionSide: z.string().catch("BOTH"),
     })
     .loose(),
 );

@@ -376,6 +376,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
         entryPrice,
         filled,
         stopRef: stop.ref,
+        closeId: ids.close,
         steps,
         done,
       });
@@ -528,6 +529,8 @@ async function rollbackFutures(c: {
   entryPrice: number;
   filled: number;
   stopRef: StoredAlgoRef | null;
+  /** Свой clientOrderId закрытия (`bd…-C`) — для истории «Демо-сделки». */
+  closeId: string;
   steps: TradeStep[];
   done: Done;
 }): Promise<TradeResult> {
@@ -536,7 +539,14 @@ async function rollbackFutures(c: {
   try {
     const qty = floorToStep(c.filled, c.rules.stepSize);
     const order = await withPositionRetry(() =>
-      demoFuturesReduceMarket(creds, req.symbol, c.exitSide, qty, c.side),
+      demoFuturesReduceMarket(
+        creds,
+        req.symbol,
+        c.exitSide,
+        qty,
+        c.side,
+        c.closeId,
+      ),
     );
     steps.push({
       label,

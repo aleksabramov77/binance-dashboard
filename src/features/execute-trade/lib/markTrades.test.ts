@@ -14,12 +14,14 @@ const order = (over: Partial<OrderAggregate>): OrderAggregate => ({
   quoteQty: 100,
   commissions: [],
   realizedPnl: 0,
+  positionSide: "BOTH",
   ...over,
 });
 
 const state = (over: Partial<SymbolState> = {}): SymbolState => ({
   closeKinds: new Map(),
   openStops: [],
+  groups: new Map(),
   position: null,
   ...over,
 });
@@ -84,7 +86,9 @@ describe("markTrades — futures", () => {
       [entry],
       state({
         position: { amount: -100, entryPrice: 0.0139, unrealizedPnl: 2.4 },
-        openStops: [{ side: "BUY", triggerPrice: 0.0147, trailing: false }],
+        openStops: [
+          { side: "BUY", triggerPrice: 0.0147, trailing: false, group: null },
+        ],
       }),
     );
     expect(marks.get(entry.orderId)).toMatchObject({
@@ -104,7 +108,9 @@ describe("markTrades — futures", () => {
       [entry],
       state({
         position,
-        openStops: [{ side: "BUY", triggerPrice: 0.95, trailing: false }],
+        openStops: [
+          { side: "BUY", triggerPrice: 0.95, trailing: false, group: null },
+        ],
       }),
     );
     expect(statusOf(trailing, entry)).toBe("open-trailing");
@@ -112,7 +118,9 @@ describe("markTrades — futures", () => {
       [entry],
       state({
         position,
-        openStops: [{ side: "BUY", triggerPrice: 1.2, trailing: true }],
+        openStops: [
+          { side: "BUY", triggerPrice: 1.2, trailing: true, group: null },
+        ],
       }),
     );
     expect(statusOf(trailingOrder, entry)).toBe("open-trailing");
@@ -139,7 +147,9 @@ describe("markTrades — futures", () => {
       [entry],
       state({
         position: { amount: 100, entryPrice: 1, unrealizedPnl: 0 },
-        openStops: [{ side: "BUY", triggerPrice: 1.3, trailing: false }],
+        openStops: [
+          { side: "BUY", triggerPrice: 1.3, trailing: false, group: null },
+        ],
       }),
     );
     expect(marks.get(entry.orderId)).toMatchObject({
@@ -155,8 +165,8 @@ describe("markTrades — futures", () => {
       state({
         position: { amount: 100, entryPrice: 1, unrealizedPnl: 0 },
         openStops: [
-          { side: "SELL", triggerPrice: 0.9, trailing: false },
-          { side: "SELL", triggerPrice: 0.95, trailing: false },
+          { side: "SELL", triggerPrice: 0.9, trailing: false, group: null },
+          { side: "SELL", triggerPrice: 0.95, trailing: false, group: null },
         ],
       }),
     );
@@ -172,7 +182,9 @@ describe("markTrades — futures", () => {
       [entry],
       state({
         position: { amount: -100, entryPrice: 1, unrealizedPnl: 0 },
-        openStops: [{ side: "BUY", triggerPrice: 0, trailing: true }],
+        openStops: [
+          { side: "BUY", triggerPrice: 0, trailing: true, group: null },
+        ],
       }),
     );
     expect(marks.get(entry.orderId)).toMatchObject({
@@ -190,7 +202,9 @@ describe("markTrades — futures", () => {
       state({
         closeKinds: new Map([[x1.orderId, "sl"]]),
         position: { amount: -100, entryPrice: 1, unrealizedPnl: 0 },
-        openStops: [{ side: "BUY", triggerPrice: 1.1, trailing: false }],
+        openStops: [
+          { side: "BUY", triggerPrice: 1.1, trailing: false, group: null },
+        ],
       }),
     );
     expect(statusOf(marks, e1)).toBe("sl");
@@ -205,7 +219,9 @@ describe("markTrades — futures", () => {
       [entry, part],
       state({
         position: { amount: -60, entryPrice: 1, unrealizedPnl: 1 },
-        openStops: [{ side: "BUY", triggerPrice: 1.1, trailing: false }],
+        openStops: [
+          { side: "BUY", triggerPrice: 1.1, trailing: false, group: null },
+        ],
       }),
     );
     expect(marks.get(part.orderId)).toMatchObject({
@@ -228,7 +244,9 @@ describe("markTrades — futures", () => {
       [short, flip],
       state({
         position: { amount: 5, entryPrice: 1, unrealizedPnl: 0 },
-        openStops: [{ side: "SELL", triggerPrice: 0.9, trailing: false }],
+        openStops: [
+          { side: "SELL", triggerPrice: 0.9, trailing: false, group: null },
+        ],
       }),
     );
     expect(statusOf(marks, short)).toBe("manual-loss");
@@ -311,9 +329,93 @@ describe("markTrades — spot", () => {
       [buy],
       state({
         position: { amount: 0.999, entryPrice: null, unrealizedPnl: null },
-        openStops: [{ side: "SELL", triggerPrice: 95, trailing: false }],
+        openStops: [
+          { side: "SELL", triggerPrice: 95, trailing: false, group: null },
+        ],
       }),
     );
     expect(statusOf(marks, buy)).toBe("open");
+  });
+});
+
+describe("markTrades — несколько сделок дашборда по одной монете (spec 0012, PR 2d)", () => {
+  it("два зеркала-лонга одной монеты не склеиваются: у каждого свой выход и статус", () => {
+    const a1 = order({ side: "BUY", time: 1, quantity: 40 });
+    const b1 = order({ side: "BUY", time: 2, quantity: 30 });
+    const aTp = order({ side: "SELL", time: 3, quantity: 40, realizedPnl: 2 });
+    const marks = markTrades(
+      [a1, b1, aTp],
+      state({
+        groups: new Map([
+          [a1.orderId, "bda"],
+          [b1.orderId, "bdb"],
+          [aTp.orderId, "bda"],
+        ]),
+        closeKinds: new Map([[aTp.orderId, "tp"]]),
+        openStops: [
+          { side: "SELL", triggerPrice: 0.9, trailing: false, group: "bdb" },
+        ],
+        position: { amount: 30, entryPrice: 1, unrealizedPnl: 0 },
+      }),
+    );
+    expect(statusOf(marks, a1)).toBe("tp");
+    expect(statusOf(marks, aTp)).toBe("tp");
+    // Вторая сделка открыта и защищена своим стопом.
+    expect(statusOf(marks, b1)).toBe("open");
+    expect(marks.get(b1.orderId)?.stopPrice).toBe(0.9);
+  });
+
+  it("чужой стоп соседнего зеркала не считается защитой своей сделки", () => {
+    const a1 = order({ side: "BUY", time: 1, quantity: 40 });
+    const marks = markTrades(
+      [a1],
+      state({
+        groups: new Map([[a1.orderId, "bda"]]),
+        openStops: [
+          { side: "SELL", triggerPrice: 0.9, trailing: false, group: "bdb" },
+        ],
+        position: { amount: 70, entryPrice: 1, unrealizedPnl: 0 },
+      }),
+    );
+    expect(statusOf(marks, a1)).toBe("open-unprotected");
+  });
+
+  it("выход без своего id (закрытие до PR 2d) закрывает открытую сделку дашборда, а не висит отдельно", () => {
+    const a1 = order({ side: "BUY", time: 1, quantity: 40 });
+    const manual = order({
+      side: "SELL",
+      time: 2,
+      quantity: 40,
+      realizedPnl: -1,
+    });
+    const marks = markTrades(
+      [a1, manual],
+      state({ groups: new Map([[a1.orderId, "bda"]]) }),
+    );
+    expect(statusOf(marks, a1)).toBe("manual-loss");
+    expect(marks.get(manual.orderId)?.role).toBe("exit");
+  });
+
+  it("Hedge: лонг и шорт одной монеты — разные сделки, позиция по своей стороне", () => {
+    const l = order({ side: "BUY", time: 1, positionSide: "LONG" });
+    const sh = order({ side: "SELL", time: 2, positionSide: "SHORT" });
+    const marks = markTrades(
+      [l, sh],
+      state({
+        position: {
+          amount: 0,
+          entryPrice: 1,
+          unrealizedPnl: 0,
+          bySide: { LONG: 100, SHORT: -100 },
+        },
+        openStops: [
+          { side: "SELL", triggerPrice: 0.9, trailing: false, group: null },
+          { side: "BUY", triggerPrice: 1.1, trailing: false, group: null },
+        ],
+      }),
+    );
+    expect(statusOf(marks, l)).toBe("open");
+    expect(statusOf(marks, sh)).toBe("open");
+    expect(marks.get(sh.orderId)?.role).toBe("entry");
   });
 });

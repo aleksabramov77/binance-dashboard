@@ -14,6 +14,8 @@ export interface OrderAggregate {
   commissions: { asset: string; amount: number }[];
   /** Только фьючерсы: realized PnL от Binance. */
   realizedPnl: number | null;
+  /** Сторона позиции ордера: Hedge — LONG/SHORT, иначе BOTH. */
+  positionSide: string;
 }
 
 export const orderKey = (
@@ -38,6 +40,7 @@ export function groupFills(fills: DemoFill[]): OrderAggregate[] {
         quoteQty: 0,
         commissions: [],
         realizedPnl: f.realizedPnl === null ? null : 0,
+        positionSide: f.positionSide,
       };
       byOrder.set(key, order);
     }
