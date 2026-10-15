@@ -38,6 +38,7 @@ import {
   symbolRowsSchema,
 } from "./demoSchemas";
 import type { Market } from "./market";
+import { ORDER_RECV_WINDOW_MS } from "./orderOutcome";
 import { BinanceApiError, signedRequest } from "./signed";
 
 /** Binance Demo Trading — виртуальные деньги, реальные котировки. */
@@ -163,6 +164,7 @@ export async function demoSpotMarketOrder(
       type: "MARKET",
       quantity,
       newOrderRespType: "FULL",
+      recvWindow: ORDER_RECV_WINDOW_MS,
       ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
     },
   );
@@ -233,7 +235,7 @@ export async function demoSpotBuyProtected(
     "POST",
     path,
     orderListReportsSchema,
-    params,
+    { ...params, recvWindow: ORDER_RECV_WINDOW_MS },
   );
   return summarizeSpotEntryList(res, p.symbol.replace(/USDT$/, ""));
 }
@@ -321,7 +323,14 @@ export async function demoFuturesMarketOrder(
     "POST",
     "/fapi/v1/order",
     futuresOrderSchema,
-    { symbol, side, type: "MARKET", quantity, newOrderRespType: "RESULT" },
+    {
+      symbol,
+      side,
+      type: "MARKET",
+      quantity,
+      newOrderRespType: "RESULT",
+      recvWindow: ORDER_RECV_WINDOW_MS,
+    },
   );
 }
 

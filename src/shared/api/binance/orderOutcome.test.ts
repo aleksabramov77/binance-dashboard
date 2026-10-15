@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { NetworkError } from "@/shared/lib/fetchRetry";
-import { orderErrorOutcome, UNKNOWN_OUTCOME_CODES } from "./orderOutcome";
+import {
+  nextRecheckDelay,
+  ORDER_RECV_WINDOW_MS,
+  orderErrorOutcome,
+  UNKNOWN_MIN_WAIT_MS,
+  UNKNOWN_OUTCOME_CODES,
+  unknownOutcomeDeadline,
+} from "./orderOutcome";
 import { BinanceApiError, ResponseFormatError } from "./signed";
 
 describe("orderErrorOutcome", () => {
@@ -50,5 +57,26 @@ describe("orderErrorOutcome", () => {
       orderErrorOutcome(new ResponseFormatError("не распознан", 200, {})),
     ).toBe("unknown");
     expect(orderErrorOutcome("что-то странное")).toBe("unknown");
+  });
+});
+
+describe("ожидание при неизвестном исходе", () => {
+  it("дедлайн — отправка + recvWindow + запас на часы, но не меньше паузы после ответа", () => {
+    // Обрыв сети сразу после отправки: ждём, пока истечёт окно заявки.
+    expect(unknownOutcomeDeadline(0, 200)).toBe(ORDER_RECV_WINDOW_MS + 1500);
+    // -1007 через 10 с: окно уже прошло, но движок мог исполнить заявку чуть позже ответа.
+    expect(unknownOutcomeDeadline(0, 10_000)).toBe(
+      10_000 + UNKNOWN_MIN_WAIT_MS,
+    );
+  });
+
+  it("проверки раз в секунду, последняя — начата после дедлайна", () => {
+    const deadline = 6500;
+    expect(nextRecheckDelay(300, deadline, 200)).toBe(1000);
+    expect(nextRecheckDelay(6000, deadline, 5900)).toBe(501);
+    // Проверка начата в 6501 — после дедлайна: её ответ окончательный.
+    expect(nextRecheckDelay(6700, deadline, 6501)).toBeNull();
+    // Проверка, начатая до дедлайна, но закончившаяся после, не окончательна.
+    expect(nextRecheckDelay(6700, deadline, 6400)).toBe(1);
   });
 });

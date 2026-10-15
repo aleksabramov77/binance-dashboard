@@ -38,5 +38,11 @@ export {
   fetchDemoTradedSymbols,
   fetchDemoUsdtBalances,
 } from "./demoTrading";
-export { orderErrorOutcome, UNKNOWN_OUTCOME_CODES } from "./orderOutcome";
+export {
+  nextRecheckDelay,
+  ORDER_RECV_WINDOW_MS,
+  orderErrorOutcome,
+  UNKNOWN_OUTCOME_CODES,
+  unknownOutcomeDeadline,
+} from "./orderOutcome";
 export { BinanceApiError, ResponseFormatError } from "./signed";

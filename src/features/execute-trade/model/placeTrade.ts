@@ -23,10 +23,12 @@ import {
   fetchDemoSpotOrderStatus,
   fetchDemoSymbolRules,
   fetchDemoUsdtBalances,
+  nextRecheckDelay,
   orderErrorOutcome,
   type SpotEntryListResult,
   type SpotOrderQuery,
   type SymbolRules,
+  unknownOutcomeDeadline,
 } from "@/shared/api/binance/demo.server";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
@@ -253,6 +255,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   const entryLabel = `${req.direction === "long" ? "Лонг" : "Шорт"} по рынку`;
   let entryPrice: number;
   let filled: number;
+  const sentAt = Date.now();
   try {
     const order = await demoFuturesMarketOrder(
       creds,
@@ -281,7 +284,11 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     });
     let position: { amount: number; entryPrice: number } | null = null;
     try {
-      position = await demoFuturesPositionAfterUnknown(creds, req.symbol);
+      position = await recheckUntil(
+        unknownOutcomeDeadline(sentAt, Date.now()),
+        () => demoFuturesPosition(creds, req.symbol),
+        (p) => p.amount !== 0,
+      );
     } catch (checkError) {
       steps.push({
         label: "Проверка позиции",
@@ -366,26 +373,26 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   return done(afterFuturesTakeProfit(tpPlaced), entryPrice, filled);
 }
 
-/** Паузы перед перечитыванием заявки с неизвестным исходом: биржа могла ещё её обрабатывать. */
-const UNKNOWN_RECHECK_DELAYS_MS = [1000, 2000];
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Позиция после входа с неизвестным исходом: нет позиции — смотрим ещё раз через паузу (заявка
- * могла исполниться позже ответа -1007).
+ * Перечитывать, пока не найдётся или пока проверка не будет начата после дедлайна
+ * (unknownOutcomeDeadline: отправка + recvWindow — позже биржа заявку в движок не передаст).
+ * Раньше дедлайна «не найдено» — не вердикт.
  */
-async function demoFuturesPositionAfterUnknown(
-  creds: BinanceCredentials,
-  symbol: string,
-) {
-  let position = await demoFuturesPosition(creds, symbol);
-  for (const delay of UNKNOWN_RECHECK_DELAYS_MS) {
-    if (position.amount !== 0) break;
+async function recheckUntil<T>(
+  deadline: number,
+  read: () => Promise<T>,
+  found: (value: T) => boolean,
+): Promise<T> {
+  for (;;) {
+    const startedAt = Date.now();
+    const value = await read();
+    if (found(value)) return value;
+    const delay = nextRecheckDelay(Date.now(), deadline, startedAt);
+    if (delay === null) return value;
     await sleep(delay);
-    position = await demoFuturesPosition(creds, symbol);
   }
-  return position;
 }
 
 /**
@@ -454,21 +461,19 @@ const PENDING_CHECK_DELAYS_MS = [300, 700, 1500];
 
 /**
  * Перечитать ордер спота по своему clientOrderId после ответа с неизвестным исходом; null —
- * ордера нет и после пауз (заявка до биржи не дошла).
+ * ордера нет и при проверке после дедлайна (заявка до движка не дошла).
  */
-async function recheckSpotOrder(
+const recheckSpotOrder = (
   creds: BinanceCredentials,
   symbol: string,
   clientOrderId: string,
-) {
-  let order = await fetchDemoSpotOrderByClientId(creds, symbol, clientOrderId);
-  for (const delay of UNKNOWN_RECHECK_DELAYS_MS) {
-    if (order) break;
-    await sleep(delay);
-    order = await fetchDemoSpotOrderByClientId(creds, symbol, clientOrderId);
-  }
-  return order;
-}
+  deadline: number,
+) =>
+  recheckUntil(
+    deadline,
+    () => fetchDemoSpotOrderByClientId(creds, symbol, clientOrderId),
+    (order) => order !== null,
+  );
 
 /**
  * Спот, исход OTO/OTOCO неизвестен: перечитать рабочий и отложенные ордера по своим id.
@@ -477,11 +482,17 @@ async function recheckSpotOrder(
 async function recheckSpotList(
   c: SpotContext,
   withTakeProfit: boolean,
+  deadline: number,
 ): Promise<SpotEntryListResult | "missing" | "error"> {
   const { creds, req, ids, steps } = c;
   const label = "Проверка заявки на бирже";
   try {
-    const working = await recheckSpotOrder(creds, req.symbol, ids.working);
+    const working = await recheckSpotOrder(
+      creds,
+      req.symbol,
+      ids.working,
+      deadline,
+    );
     if (!working) {
       steps.push({
         label,
@@ -527,6 +538,7 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
       ? "OTOCO: покупка + тейк + стоп"
       : "OTO: покупка + стоп (без тейка)";
   let list: SpotEntryListResult;
+  const sentAt = Date.now();
   try {
     list = await demoSpotBuyProtected(creds, {
       symbol: req.symbol,
@@ -543,7 +555,11 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
     if (failed !== "recheck") return done(failed);
     // Исход неизвестен (-1007, 5xx, сеть): перечитываем заявку по своему clientOrderId.
     const rechecked = afterSpotRecheck(
-      await recheckSpotList(c, mode === "otoco"),
+      await recheckSpotList(
+        c,
+        mode === "otoco",
+        unknownOutcomeDeadline(sentAt, Date.now()),
+      ),
     );
     if (!("found" in rechecked)) return done(rechecked);
     list = rechecked.found;
@@ -627,6 +643,7 @@ async function placeSpotMarket(c: SpotContext): Promise<TradeResult> {
   let quoteQty: number;
   let fee: number;
   let status: string;
+  const sentAt = Date.now();
   try {
     const order = await demoSpotMarketOrder(
       creds,
@@ -657,7 +674,12 @@ async function placeSpotMarket(c: SpotContext): Promise<TradeResult> {
     let order: SpotOrderQuery | "missing" | "error";
     try {
       order =
-        (await recheckSpotOrder(creds, req.symbol, ids.market)) ?? "missing";
+        (await recheckSpotOrder(
+          creds,
+          req.symbol,
+          ids.market,
+          unknownOutcomeDeadline(sentAt, Date.now()),
+        )) ?? "missing";
     } catch (checkError) {
       steps.push({
         label: recheckLabel,
