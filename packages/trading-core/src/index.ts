@@ -2,11 +2,17 @@
 // стратегии входа, выходы, размер позиции и исполнение paper-сделок. Только чистые функции
 // и Zod-схемы: без UI, Next.js, React, сети, БД и env (правило — в README.md).
 export {
+  computeEntryContext,
+  ENTRY_CONTEXT_VERSION,
+  type EntryContextInput,
+} from "./context.ts";
+export {
   type ExitEvent,
   type ExitPolicy,
   type OpenPosition,
   type WalkResult,
   walkExits,
+  worseMae,
 } from "./exits.ts";
 export * from "./experiment.ts";
 export {

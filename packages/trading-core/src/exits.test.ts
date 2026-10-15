@@ -20,6 +20,7 @@ const long = (patch: Partial<OpenPosition> = {}): OpenPosition => ({
   takeProfit: 104,
   atr: 1,
   extreme: 100,
+  mae: 100,
   openedAt: 0,
   checkedUntil: 0,
   ...patch,
@@ -48,6 +49,7 @@ describe("walkExits: стоп и тейк", () => {
       exit: null,
       stop: 98,
       extreme: 101.5,
+      mae: 99,
       checkedUntil: 2 * MIN,
     });
   });
@@ -158,5 +160,59 @@ describe("walkExits: тайм-стоп", () => {
       policy({ timeStopBars: 2 }),
     );
     expect(r.exit).toEqual({ reason: "time", price: 100.5, at: 2 * HOUR });
+  });
+});
+
+describe("walkExits: MAE — худшая цена с входа (spec 0030)", () => {
+  it("long — минимум low, short — максимум high по всем свечам", () => {
+    const candles = [m(0, 100, 101, 99.2), m(1, 100, 101.8, 98.6)];
+    expect(walkExits(long(), candles, policy()).mae).toBe(98.6);
+    expect(walkExits(short(), candles, policy()).mae).toBe(101.8);
+  });
+
+  it("свеча выхода по тейку учтена своим low/high", () => {
+    const r = walkExits(
+      long(),
+      [m(0, 100, 100.5, 99.5), m(1, 100, 104.5, 98.5)],
+      policy(),
+    );
+    expect(r.exit?.reason).toBe("tp");
+    expect(r.mae).toBe(98.5);
+    const s = walkExits(
+      short(),
+      [m(0, 100, 100.5, 99.5), m(1, 100, 101.5, 95.5)],
+      policy(),
+    );
+    expect(s.exit?.reason).toBe("tp");
+    expect(s.mae).toBe(101.5);
+  });
+
+  it("стоп: MAE — цена срабатывания, а не хвост свечи после выхода; гэп — open", () => {
+    expect(walkExits(long(), [m(0, 99, 99.5, 96)], policy()).mae).toBe(98);
+    expect(walkExits(long(), [m(0, 97, 97.5, 96)], policy()).mae).toBe(97);
+    expect(walkExits(short(), [m(0, 101, 103, 100.5)], policy()).mae).toBe(102);
+  });
+
+  it("тайм-стоп: MAE учитывает open свечи выхода", () => {
+    const r = walkExits(
+      long({ takeProfit: null, initialStop: null, stop: null }),
+      [m(0, 100, 100.5, 99.8), m(60, 99, 99.5, 97)],
+      policy({ timeStopBars: 1 }),
+    );
+    expect(r.exit?.reason).toBe("time");
+    expect(r.mae).toBe(99);
+  });
+
+  it("MAE лучше входа не бывает: начальное значение — цена входа", () => {
+    expect(walkExits(long(), [m(0, 101, 102, 100.5)], policy()).mae).toBe(100);
+  });
+
+  it("MAE не известна (сделка до spec 0030) — остаётся null", () => {
+    expect(
+      walkExits(long({ mae: null }), [m(0, 100, 101, 99)], policy()).mae,
+    ).toBeNull();
+    expect(
+      walkExits(long({ mae: null }), [m(0, 99, 99.5, 96)], policy()).mae,
+    ).toBeNull();
   });
 });

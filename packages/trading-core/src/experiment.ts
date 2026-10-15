@@ -193,6 +193,45 @@ export const EXIT_REASONS = [
 export const exitReasonSchema = z.enum(EXIT_REASONS);
 export type ExitReason = z.infer<typeof exitReasonSchema>;
 
+const contextNumber = z.number().nullable().optional();
+
+/**
+ * Снимок рынка на входе (spec 0030) — по закрытой свече сигнала ТФ эксперимента, без заглядывания вперёд;
+ * расчёт — ./context.ts. null — не хватило истории; поля нет — сделка до spec 0030 (там `{}`). Не строгая
+ * схема: поля, добавленные позже, не ломают чтение старым кодом.
+ */
+export const entryContextSchema = z.object({
+  /** Версия набора полей. */
+  v: z.number().int().optional(),
+  /** ATR(14) / close, %. */
+  atrPct: contextNumber,
+  /** ADX(14) символа. */
+  adx14: contextNumber,
+  /** Ширина Bollinger(20, 2): (upper − lower) / middle, %. */
+  bbWidthPct: contextNumber,
+  /** RSI(14). */
+  rsi14: contextNumber,
+  /** Объём свечи сигнала / SMA20 объёма 20 предыдущих свечей. */
+  volumeRatio: contextNumber,
+  /** close / EMA200 − 1, %. */
+  ema200DistPct: contextNumber,
+  /** Изменение close за 24 ч до свечи сигнала, %. */
+  change24hPct: contextNumber,
+  /** Место символа в юниверсе эксперимента по обороту за 24 ч (1 — самый ликвидный) и размер юниверса. */
+  universeRank: contextNumber,
+  universeSize: contextNumber,
+  /** Режим BTC по закрытым 4h: close выше EMA200, ADX(14), изменение за 24 ч (%). */
+  btcAboveEma200_4h: z.boolean().nullable().optional(),
+  btcAdx14_4h: contextNumber,
+  btcChange24hPct: contextNumber,
+  /** Ставка funding символа на входе (доля, 0,0001 = 0,01 %); spot — null. */
+  funding: contextNumber,
+  /** Час (0–23) и день недели (0 — воскресенье) входа по UTC. */
+  hourUtc: contextNumber,
+  weekday: contextNumber,
+});
+export type EntryContext = z.infer<typeof entryContextSchema>;
+
 export const paperTradeSchema = z.object({
   id: z.string(),
   runId: z.number().int(),
@@ -212,6 +251,11 @@ export const paperTradeSchema = z.object({
   atr: z.number(),
   /** Лучшая цена с момента входа (high для long, low для short). */
   extreme: z.number(),
+  /**
+   * Худшая цена с момента входа (low для long, high для short; свеча выхода учтена) — MAE. null — сделка
+   * открыта до spec 0030: история её цен не известна.
+   */
+  mae: z.number().nullable(),
   /** До какой минуты (openTime 1m-свечи) выходы уже проверены. */
   checkedUntil: z.number(),
   closedAt: z.string().nullable(),
@@ -222,5 +266,37 @@ export const paperTradeSchema = z.object({
   rMultiple: z.number().nullable(),
   demoOrderRef: z.string().nullable(),
   signal: z.record(z.string(), z.unknown()),
+  /** Снимок рынка на входе; `{}` — сделка до spec 0030. */
+  entryContext: entryContextSchema,
 });
 export type PaperTrade = z.infer<typeof paperTradeSchema>;
+
+/**
+ * Почему сигнал не стал сделкой (spec 0030): лимит позиций эксперимента, символ уже в позиции у него,
+ * не хватает свободных денег. Фильтры (направление, часы, режим, тренд) сюда не попадают: такие сигналы
+ * эксперимент и не должен был брать.
+ */
+export const SKIP_REASONS = ["max-open", "symbol-busy", "no-budget"] as const;
+export const skipReasonSchema = z.enum(SKIP_REASONS);
+export type SkipReason = z.infer<typeof skipReasonSchema>;
+
+/** Отсечённый сигнал: что было бы открыто, если бы не лимит. */
+export const skippedSignalSchema = z.object({
+  /** run-эксперимент-символ-свеча-причина: повтор тика на той же свече не дублирует запись. */
+  id: z.string(),
+  runId: z.number().int(),
+  experimentId: z.string(),
+  market: marketSchema,
+  symbol: z.string(),
+  direction: directionSchema,
+  /** openTime свечи сигнала ТФ эксперимента, мс. */
+  bar: z.number(),
+  /** Время тика, ISO. */
+  at: z.string(),
+  reason: skipReasonSchema,
+  /** Цена входа со слиппеджем, стоп и тейк, которые были бы у сделки. */
+  entryPrice: z.number(),
+  stop: z.number().nullable(),
+  takeProfit: z.number().nullable(),
+});
+export type SkippedSignal = z.infer<typeof skippedSignalSchema>;
