@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BRANCH_PATTERN,
+  DEFAULT_LINKS,
   latestPrByBranch,
   nextTaskNumber,
   normalizeLinks,
@@ -60,6 +61,15 @@ describe("normalizeLinks", () => {
       { path: ".env.local", mode: "link" },
       { path: "public/config.json", mode: "copy" },
       { path: "docs", mode: "link" },
+    ]);
+  });
+});
+
+describe("DEFAULT_LINKS", () => {
+  it("worktree получает ссылки на .env.local и папку private основного checkout", () => {
+    expect(normalizeLinks(DEFAULT_LINKS)).toEqual([
+      { path: ".env.local", mode: "link" },
+      { path: "private", mode: "link" },
     ]);
   });
 });

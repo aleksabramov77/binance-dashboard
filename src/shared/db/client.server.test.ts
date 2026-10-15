@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { createMemoryDb } from "./client.server";
 
 describe("createMemoryDb", () => {
-  // Как у остальных тестов с PGlite: старт и миграции под нагрузкой идут дольше 5 с по умолчанию.
   it("поднимает PGlite в памяти и применяет миграции", async () => {
     const { db, close } = await createMemoryDb();
     const applied = await db.execute(
@@ -19,5 +18,6 @@ describe("createMemoryDb", () => {
       n: files.length,
     });
     await close();
+    // Запуск PGlite и все миграции — секунды; под нагрузкой (параллельные воркеры Vitest) больше 5 с по умолчанию.
   }, 30_000);
 });
