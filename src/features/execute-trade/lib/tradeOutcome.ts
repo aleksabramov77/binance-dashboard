@@ -184,6 +184,41 @@ export function afterPending(
 }
 
 /**
+ * Спот: стоп OTOCO снят биржей, перед повторной защитой — свой тейк того же списка (PR 2b).
+ * Он держит купленные монеты: новая защита/продажа упёрлась бы в баланс. Стоит (NEW, PENDING_NEW,
+ * частично исполнен) — снять адресно по своему id; исполнен — монеты проданы тейком, защита не
+ * нужна; снят/нет/не прочитан — защищать сразу (не прочитан: снять нечего найти — защита или
+ * продажа сами упрутся в баланс и уйдут в unprotected).
+ */
+export function afterStopLost(
+  takeProfit: { status: string; executedQty: number } | null,
+): "protect" | "cancelTakeProfit" | TradeOutcome {
+  if (!takeProfit) return "protect";
+  if (takeProfit.status === "FILLED")
+    return outcome(
+      "protected",
+      "Стоп снят биржей, но позиция уже закрыта тейком.",
+      true,
+    );
+  if (["NEW", "PENDING_NEW", "PARTIALLY_FILLED"].includes(takeProfit.status))
+    return "cancelTakeProfit";
+  return "protect";
+}
+
+/** Свой тейк не удалось снять — он мог исполниться: не продаём и не перезащищаем, тревога. */
+export function afterTakeProfitCancel(
+  cancelled: boolean,
+): "protect" | TradeOutcome {
+  return cancelled
+    ? "protect"
+    : outcome(
+        "unprotected",
+        "Стоп снят биржей, а свой тейк снять не удалось — проверьте ордера на demo.binance.com.",
+        true,
+      );
+}
+
+/**
  * Спот: защита купленного (стоп или OCO). Биржа отказала — продать купленное; исход неизвестен —
  * стоп мог встать, продавать нельзя: unprotected.
  */

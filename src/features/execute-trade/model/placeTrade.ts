@@ -15,6 +15,7 @@ import {
   demoFuturesPrepare,
   demoFuturesReduceMarket,
   demoSpotBuyProtected,
+  demoSpotCancelByClientId,
   demoSpotMarketOrder,
   demoSpotOcoSell,
   demoSpotStopLossSell,
@@ -56,6 +57,8 @@ import {
   afterSell,
   afterSpotBuy,
   afterSpotRecheck,
+  afterStopLost,
+  afterTakeProfitCancel,
   type OrderFailure,
   type TradeOutcome,
 } from "../lib/tradeOutcome";
@@ -713,8 +716,52 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
     });
   const afterList = afterPending(pending, req.stopOnly === true);
   if (afterList !== "protect") return done(afterList, entryPrice, filled);
+  // Стоп снят, а свой тейк того же OTOCO может стоять и держать монеты — снять его адресно.
+  let soldByTakeProfit = 0;
+  if (mode === "otoco") {
+    const label = "Снять свой тейк";
+    try {
+      const tp = await fetchDemoSpotOrderByClientId(
+        creds,
+        req.symbol,
+        ids.takeProfit,
+      );
+      const next = afterStopLost(tp);
+      if (typeof next !== "string") {
+        steps.push({ label, ok: true, detail: "Тейк уже исполнен" });
+        return done(next, entryPrice, filled);
+      }
+      if (next === "cancelTakeProfit") {
+        const cancelled = await demoSpotCancelByClientId(
+          creds,
+          req.symbol,
+          ids.takeProfit,
+        );
+        steps.push({
+          label,
+          ok: cancelled,
+          detail: cancelled
+            ? `Тейк ${ids.takeProfit} снят`
+            : `Тейк ${ids.takeProfit} уже не активен`,
+        });
+        const afterCancel = afterTakeProfitCancel(cancelled);
+        if (afterCancel !== "protect")
+          return done(afterCancel, entryPrice, filled);
+        soldByTakeProfit = tp?.executedQty ?? 0;
+      }
+    } catch (error) {
+      // Не прочитали/не сняли тейк — он мог исполниться: без продажи и перезащиты.
+      steps.push({ label, ok: false, detail: errorText(error) });
+      const notCancelled = afterTakeProfitCancel(false);
+      if (notCancelled !== "protect")
+        return done(notCancelled, entryPrice, filled);
+    }
+  }
   return protectOrSell(c, {
-    sellQty: floorToStep(filled - list.baseCommission, rules.stepSize),
+    sellQty: floorToStep(
+      filled - list.baseCommission - soldByTakeProfit,
+      rules.stepSize,
+    ),
     entryPrice,
     filled,
   });

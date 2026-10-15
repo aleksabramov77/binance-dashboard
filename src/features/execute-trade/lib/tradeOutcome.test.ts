@@ -11,6 +11,8 @@ import {
   afterSell,
   afterSpotBuy,
   afterSpotRecheck,
+  afterStopLost,
+  afterTakeProfitCancel,
 } from "./tradeOutcome";
 
 describe("ошибка отправки входа", () => {
@@ -158,5 +160,35 @@ describe("фьючерсы: свой ордер входа после неизв
     );
     expect(afterFuturesOrderCheck(null)).toBe("checkPosition");
     expect(afterFuturesOrderCheck("error")).toBe("checkPosition");
+  });
+});
+
+describe("спот: стоп OTOCO снят биржей, тейк ещё стоит (PR 2b)", () => {
+  it("тейк стоит — снять свой тейк, потом защищать заново", () => {
+    expect(afterStopLost({ status: "NEW", executedQty: 0 })).toBe(
+      "cancelTakeProfit",
+    );
+    expect(afterStopLost({ status: "PARTIALLY_FILLED", executedQty: 10 })).toBe(
+      "cancelTakeProfit",
+    );
+  });
+  it("тейк исполнен — монеты проданы, защита не нужна", () => {
+    expect(afterStopLost({ status: "FILLED", executedQty: 59 })).toMatchObject({
+      status: "protected",
+      withEntry: true,
+    });
+  });
+  it("тейк снят или не найден — защищать сразу", () => {
+    expect(afterStopLost({ status: "EXPIRED", executedQty: 0 })).toBe(
+      "protect",
+    );
+    expect(afterStopLost(null)).toBe("protect");
+  });
+  it("снять тейк не удалось — без продажи и перезащиты, unprotected", () => {
+    expect(afterTakeProfitCancel(true)).toBe("protect");
+    expect(afterTakeProfitCancel(false)).toMatchObject({
+      status: "unprotected",
+      withEntry: true,
+    });
   });
 });
