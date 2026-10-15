@@ -103,12 +103,13 @@ export function buildTickDeps(
   return {
     runner: env.runner,
     store,
-    candles: (market, symbol, interval, limit) =>
+    candles: (market, symbol, interval, limit, startTime) =>
       env.market.fetchKlines(
         market,
         symbol,
         interval,
         Math.min(limit, MAX_KLINES),
+        startTime,
       ),
     tickers: async (market) => {
       if (market === "spot") return env.market.fetch24hTickers("spot");

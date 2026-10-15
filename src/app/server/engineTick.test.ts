@@ -239,6 +239,22 @@ describe.skipIf(!pgUrl)("withEngineTickLock на Postgres: два сеанса",
   });
 });
 
+describe("buildTickDeps: свечи", () => {
+  it("прокидывает startTime в fetchKlines и режет limit до 1000 (баг 0028)", async () => {
+    const fetchKlines = vi.fn(market.fetchKlines);
+    const deps = buildTickDeps(
+      env({ market: { ...market, fetchKlines } }),
+      createDbExperimentStore(db),
+    );
+    await deps.candles("usdm", "BTCUSDT", "1m", 1500, 1_000_000);
+    await deps.candles("spot", "BTCUSDT", "1h", 301);
+    expect(fetchKlines.mock.calls).toEqual([
+      ["usdm", "BTCUSDT", "1m", 1000, 1_000_000],
+      ["spot", "BTCUSDT", "1h", 301, undefined],
+    ]);
+  });
+});
+
 describe("createPerpetualsSource", () => {
   it("кэширует справочник на TTL, при сбое обновления отдаёт старую копию", async () => {
     let now = 0;

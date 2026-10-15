@@ -84,15 +84,18 @@ export function createMarketApi(getJson: GetJson) {
       );
     },
 
+    /** Свечи: без startTime — последние limit, со startTime — до limit штук начиная с него (мс). */
     async fetchKlines(
       market: BinanceMarket,
       symbol: string,
       interval: string,
       limit: number,
+      startTime?: number,
     ): Promise<Candle[]> {
+      const from = startTime === undefined ? "" : `&startTime=${startTime}`;
       const raw = klinesSchema.parse(
         await getJson(
-          `${BASE[market]}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+          `${BASE[market]}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}${from}`,
         ),
       );
       return raw.map(([openTime, open, high, low, close, volume]) => ({
