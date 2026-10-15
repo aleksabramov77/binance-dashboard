@@ -194,7 +194,7 @@ describe("planMirror: несколько зеркал на монету (spec 00
       );
       expect(d.map((x) => x.kind)).toEqual(["open", "skip"]);
       expect(d[1]).toMatchObject({
-        reason: "По ETHUSDT (futures) уже 2 зеркал — лимит на монету 2.",
+        reason: "По ETHUSDT (usdm) уже 2 зеркал — лимит на монету 2.",
       });
     } finally {
       MIRROR.maxPerCoin = saved;
@@ -222,7 +222,7 @@ describe("planMirror: открытые зеркала до PR 2b (без protect
         tradeId: "x",
         kind: "skip",
         reason:
-          "По ETHUSDT (futures) открыто старое зеркало, чьи стоп и тейк закрывают всю позицию, — второе зеркало после его закрытия.",
+          "По ETHUSDT (usdm) открыто старое зеркало, чьи стоп и тейк закрывают всю позицию, — второе зеркало после его закрытия.",
       },
       // Другой рынок той же монеты — не мешает.
       expect.objectContaining({ tradeId: "sp", kind: "open" }),
