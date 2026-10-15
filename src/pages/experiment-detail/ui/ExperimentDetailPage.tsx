@@ -224,7 +224,7 @@ function TradesTable({
       </p>
     );
   return (
-    <div className="overflow-x-auto rounded-xl border bg-card">
+    <div className="overflow-clip rounded-xl border bg-card">
       <Table>
         <TableHeader>
           <TableRow>

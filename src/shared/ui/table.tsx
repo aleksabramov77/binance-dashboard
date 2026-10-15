@@ -1,13 +1,63 @@
 "use client";
 
 import type * as React from "react";
+import { type RefObject, useLayoutEffect, useRef } from "react";
 import { cn } from "@/shared/lib/utils";
+import { fitsWidth, pickTableFit } from "./table-fit";
 
+/**
+ * Режим раскладки — в `data-fit` контейнера (spec 0018): `wide` — помещается и с названиями в одну строку
+ * (ячейкам с переносом названий — класс `group-data-[fit=wide]/table:whitespace-nowrap`), `wrap` — помещается
+ * только с переносом, без атрибута — не помещается и прокручивается вбок. Меряется заново при изменении
+ * размеров рамки или таблицы.
+ */
+function useTableFit(ref: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const frame = ref.current;
+    const table = frame?.firstElementChild;
+    if (!frame || !(table instanceof HTMLTableElement)) return;
+    const apply = () => {
+      const fit = pickTableFit((mode) => {
+        frame.dataset.fit = mode;
+        return fitsWidth(
+          table.getBoundingClientRect().width,
+          frame.clientWidth,
+        );
+      });
+      if (fit === "scroll") delete frame.dataset.fit;
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    // Замер — в следующем кадре: смена режима меняет размеры наблюдаемых элементов, и правка раскладки прямо
+    // в колбэке дала бы ошибку «ResizeObserver loop…» (её ловит журнал ошибок браузера).
+    let raf = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(apply);
+    });
+    observer.observe(frame);
+    observer.observe(table);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(raf);
+    };
+  }, [ref]);
+}
+
+/**
+ * Таблица на всю ширину рамки. Помещается — контейнер `overflow-x: clip`: он не создаёт контейнер прокрутки,
+ * поэтому шапка (`sticky` у TableHead) липнет к верху окна, пока видна таблица. Не помещается — прокрутка вбок
+ * внутри контейнера, шапка тогда липнет к нему, то есть стоит на месте (решение 3 spec 0018). Обёртка с рамкой
+ * вокруг таблицы — `overflow-clip`, не `overflow-*-auto`: контейнер прокрутки снаружи тоже ломает липкую шапку.
+ */
 function Table({ className, ...props }: React.ComponentProps<"table">) {
+  const ref = useRef<HTMLDivElement>(null);
+  useTableFit(ref);
   return (
     <div
+      ref={ref}
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className="group/table relative w-full overflow-x-auto data-fit:overflow-x-clip"
     >
       <table
         data-slot="table"
@@ -22,7 +72,8 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      className={cn("[&_tr]:border-b", className)}
+      // Линию под шапкой рисует тень TableHead: рамка строки при border-collapse не едет за липкой ячейкой.
+      className={cn("[&_tr]:border-b-0", className)}
       {...props}
     />
   );
@@ -68,8 +119,9 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (
     <th
       data-slot="table-head"
+      // Липкая и непрозрачная; заголовок переносится, когда колонке не хватает места (spec 0018).
       className={cn(
-        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "sticky top-0 z-10 h-10 bg-card px-2 text-left align-middle font-medium text-foreground shadow-[inset_0_-1px_0_var(--color-border)] [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className,
       )}
       {...props}
