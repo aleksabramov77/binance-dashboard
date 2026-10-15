@@ -13,9 +13,16 @@ export const holdingSchema = z.object({
   /** Текущая ставка по данным аккаунта (для Spot/Funding — 0). */
   apr: z.number(),
   productId: z.string().nullable(),
+  /** Locked: id позиции — по нему сопоставляются начисления из истории Binance. */
+  positionId: z.string().nullable(),
   durationDays: z.number().nullable(),
   /** Locked: дата, когда деньги вернутся. */
   until: z.string().nullable(),
+  /**
+   * Начислено Binance за вчерашние сутки UTC, в долларах по текущей цене монеты награды (spec 0022).
+   * null — не Earn (Spot/Funding) или история начислений не загрузилась.
+   */
+  yesterdayUsd: z.number().nullable(),
 });
 
 export const walletSchema = z.object({
@@ -45,4 +52,21 @@ export type Portfolio = z.infer<typeof portfolioSchema>;
 
 export function holdingValueUsd(h: Holding): number | null {
   return h.priceUsd === null ? null : (h.amount + h.frozen) * h.priceUsd;
+}
+
+export const INCOME_PERIODS = ["day", "month", "year"] as const;
+export type IncomePeriod = (typeof INCOME_PERIODS)[number];
+const PERIODS_PER_YEAR: Record<IncomePeriod, number> = {
+  day: 365,
+  month: 12,
+  year: 1,
+};
+
+/** Плановый доход за период по текущей ставке: год = USD × ставка, день — /365, месяц — /12. */
+export function plannedIncomeUsd(
+  h: Holding,
+  period: IncomePeriod,
+): number | null {
+  const value = holdingValueUsd(h);
+  return value === null ? null : (value * h.apr) / PERIODS_PER_YEAR[period];
 }
