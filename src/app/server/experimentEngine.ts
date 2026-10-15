@@ -68,8 +68,9 @@ function engine(): EngineProcess {
     exclusive: null,
     ready: null,
     cache: new Map(),
+    // Юниверс лаборатории — только крипта: без индексов и токенов реальных активов (spec 0029).
     perpetuals: createPerpetualsSource(
-      fetchPerpetualSymbols,
+      () => fetchPerpetualSymbols({ cryptoOnly: true }),
       PERPETUALS_TTL_MS,
       Date.now,
     ),

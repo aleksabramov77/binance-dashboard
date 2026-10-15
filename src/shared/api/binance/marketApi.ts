@@ -28,6 +28,20 @@ const BASE: Record<Market, string> = {
   futures: "https://fapi.binance.com/fapi/v1",
 };
 
+/**
+ * Базовый актив фьючерса — криптовалюта: underlyingType COIN и не токен реального актива (подтип RWA:
+ * золото PAXG, XAUT). Акции и сырьё Binance торгует отдельным contractType TRADIFI_PERPETUAL.
+ */
+export function isCryptoUnderlying(contract: {
+  underlyingType?: string | null;
+  underlyingSubType?: readonly string[] | null;
+}): boolean {
+  return (
+    contract.underlyingType === "COIN" &&
+    !(contract.underlyingSubType ?? []).includes("RWA")
+  );
+}
+
 export function createMarketApi(getJson: GetJson) {
   return {
     async fetch24hTickers(market: Market): Promise<Ticker24h[]> {
@@ -66,8 +80,13 @@ export function createMarketApi(getJson: GetJson) {
       }));
     },
 
-    /** Символы бессрочных USDT-фьючерсов, по которым идёт торговля. */
-    async fetchPerpetualSymbols(): Promise<Set<string>> {
+    /**
+     * Символы бессрочных USDT-фьючерсов, по которым идёт торговля. cryptoOnly — только контракты на
+     * монеты: без индексов (BTCDOMUSDT) и токенов реальных активов (PAXGUSDT, XAUTUSDT) — isCryptoUnderlying.
+     */
+    async fetchPerpetualSymbols(
+      options: { cryptoOnly?: boolean } = {},
+    ): Promise<Set<string>> {
       const info = futuresExchangeInfoSchema.parse(
         await getJson(`${BASE.futures}/exchangeInfo`),
       );
@@ -77,7 +96,8 @@ export function createMarketApi(getJson: GetJson) {
             (s) =>
               s.contractType === "PERPETUAL" &&
               s.quoteAsset === "USDT" &&
-              s.status === "TRADING",
+              s.status === "TRADING" &&
+              (!options.cryptoOnly || isCryptoUnderlying(s)),
           )
           .map((s) => s.symbol),
       );

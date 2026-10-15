@@ -36,3 +36,46 @@ describe("fetchKlines", () => {
     ]);
   });
 });
+
+describe("fetchPerpetualSymbols", () => {
+  const contract = (
+    symbol: string,
+    underlyingType: string,
+    underlyingSubType: string[],
+    contractType = "PERPETUAL",
+  ) => ({
+    symbol,
+    baseAsset: symbol.replace(/USDT$/, ""),
+    quoteAsset: "USDT",
+    contractType,
+    status: "TRADING",
+    underlyingType,
+    underlyingSubType,
+  });
+  const market = createMarketApi(async () => ({
+    symbols: [
+      contract("BTCUSDT", "COIN", ["PoW", "Crypto"]),
+      contract("ETHUSDT", "COIN", ["Layer-1", "Crypto"]),
+      contract("BTCDOMUSDT", "INDEX", ["Index", "Crypto"]),
+      contract("PAXGUSDT", "COIN", ["RWA", "Crypto"]),
+      contract("NEWUSDT", "PREMARKET", []),
+      contract("TSLAUSDT", "EQUITY", ["TradFi"], "TRADIFI_PERPETUAL"),
+    ],
+  }));
+
+  it("по умолчанию — все бессрочные USDT-контракты, как раньше", async () => {
+    expect([...(await market.fetchPerpetualSymbols())]).toEqual([
+      "BTCUSDT",
+      "ETHUSDT",
+      "BTCDOMUSDT",
+      "PAXGUSDT",
+      "NEWUSDT",
+    ]);
+  });
+
+  it("cryptoOnly — без индексов, металлов (RWA), пре-маркета и акций", async () => {
+    expect([
+      ...(await market.fetchPerpetualSymbols({ cryptoOnly: true })),
+    ]).toEqual(["BTCUSDT", "ETHUSDT"]);
+  });
+});

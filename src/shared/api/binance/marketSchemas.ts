@@ -36,6 +36,10 @@ export const futuresExchangeInfoSchema = z.object({
       quoteAsset: z.string(),
       contractType: z.string(),
       status: z.string(),
+      /** COIN — монета; INDEX и прочее — индексы, акции, сырьё. */
+      underlyingType: z.string().nullish(),
+      /** Секторы: ["Layer-1", "Crypto"], у токенов реальных активов — "RWA". */
+      underlyingSubType: z.array(z.string()).nullish(),
     }),
   ),
 });
