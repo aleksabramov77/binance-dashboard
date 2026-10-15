@@ -19,6 +19,7 @@ import { log } from "@/shared/lib/logger.server";
 import { createKeyedCache } from "./keyedCache";
 import { aprWithTiers } from "./tierApr";
 import {
+  rewardsCacheTtlMs,
   sumYesterdayRewardsUsd,
   type YesterdayRewards,
   yesterdayUsdFor,
@@ -28,8 +29,9 @@ import {
 const DUST_USD = 0.01;
 
 /**
- * Начисления за прошедшие сутки не меняются — кэш до следующей полуночи UTC (ключ — начало окна): повторные
- * загрузки портфеля не ходят в историю (вес 150 на запрос, IP Vercel уже банили за 429/418 — задача 0014).
+ * Кэш наград за вчера (ключ — начало окна): повторные загрузки портфеля не ходят в историю (вес 150 на запрос, IP
+ * Vercel уже банили за 429/418 — задача 0014). Первые часы суток ответ ещё дозревает — кэш короткий, потом — до
+ * следующей полуночи UTC (`rewardsCacheTtlMs`).
  */
 const rewardsCache = createKeyedCache<number, YesterdayRewards>();
 
@@ -40,18 +42,22 @@ function loadYesterdayRewards(
   const { startTime, endTime } = yesterdayUtcRange(now);
   // endTime у Binance включительно: последняя миллисекунда суток, чтобы не захватить начисления сегодняшней полуночи.
   const window = { startTime, endTime: endTime - 1 };
-  return rewardsCache.get(startTime, async () => {
-    const [flexible, locked] = await Promise.all([
-      fetchFlexibleRewards(creds, { ...window, type: "ALL" }),
-      fetchLockedRewards(creds, window),
-    ]);
-    return { flexible, locked };
-  });
+  return rewardsCache.get(
+    startTime,
+    async () => {
+      const [flexible, locked] = await Promise.all([
+        fetchFlexibleRewards(creds, { ...window, type: "ALL" }),
+        fetchLockedRewards(creds, window),
+      ]);
+      return { flexible, locked };
+    },
+    { now: now.getTime(), ttlMs: rewardsCacheTtlMs(now) },
+  );
 }
 
 export async function loadPortfolio(): Promise<Portfolio> {
   const creds = getBinanceCredentials();
-  // В облаке ключа реального аккаунта нет намеренно (решение владельца 2026-10-10, docs/ai/deploy-supabase.md).
+  // Без ключа — инструкция по подключению; облачный хостинг отличается только полем hosting.
   if (!creds)
     return {
       status: "not-configured",

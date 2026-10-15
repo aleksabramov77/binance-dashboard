@@ -16,6 +16,13 @@ describe("createKeyedCache", () => {
     expect(await cache.get(2, async () => "b")).toBe("b");
   });
 
+  it("срок истёк — загружает заново, до срока — отдаёт кэш", async () => {
+    const cache = createKeyedCache<number, string>();
+    await cache.get(1, async () => "a", { now: 0, ttlMs: 1000 });
+    expect(await cache.get(1, async () => "b", { now: 999 })).toBe("a");
+    expect(await cache.get(1, async () => "c", { now: 1000 })).toBe("c");
+  });
+
   it("ошибка не кэшируется — следующий вызов загружает снова", async () => {
     const cache = createKeyedCache<number, string>();
     await expect(

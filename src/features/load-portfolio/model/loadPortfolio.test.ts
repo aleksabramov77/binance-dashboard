@@ -147,12 +147,35 @@ describe("loadPortfolio: начисления за вчера", () => {
     expect(rows.map((r) => r[2])).toEqual([null, null, null, null]);
   });
 
+  // Текущие сутки теста (beforeEach уже сдвинул day).
+  const today = (hours: number, minutes = 0) =>
+    Date.UTC(2026, 9, day - 1, hours, minutes);
+
   it("повторная загрузка в те же сутки историю не запрашивает", async () => {
     await yesterday();
     await yesterday();
     expect(fetchFlexibleRewards).toHaveBeenCalledTimes(1);
     expect(fetchLockedRewards).toHaveBeenCalledTimes(1);
     expect(fetchSpotAccount).toHaveBeenCalledTimes(2);
+  });
+
+  it("после дозревания (≥ 6 ч UTC) кэш держится до полуночи", async () => {
+    vi.setSystemTime(today(6));
+    await yesterday();
+    vi.setSystemTime(today(23, 59));
+    await yesterday();
+    expect(fetchFlexibleRewards).toHaveBeenCalledTimes(1);
+  });
+
+  it("первые 6 ч UTC ответ дозревает — кэш 15 минут", async () => {
+    vi.setSystemTime(today(2));
+    await yesterday();
+    vi.setSystemTime(today(2, 14));
+    await yesterday();
+    expect(fetchFlexibleRewards).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(today(2, 15));
+    await yesterday();
+    expect(fetchFlexibleRewards).toHaveBeenCalledTimes(2);
   });
 
   it("после сбоя истории следующая загрузка пробует снова", async () => {

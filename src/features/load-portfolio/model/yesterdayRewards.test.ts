@@ -1,9 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { log } from "@/shared/lib/logger.server";
 import {
+  REWARDS_UNSETTLED_TTL_MS,
+  rewardsCacheTtlMs,
   sumYesterdayRewardsUsd,
   yesterdayUsdFor,
   yesterdayUtcRange,
 } from "./yesterdayRewards";
+
+describe("rewardsCacheTtlMs", () => {
+  it("первые 6 ч UTC-суток ответ дозревает — кэш 15 минут", () => {
+    expect(rewardsCacheTtlMs(new Date("2026-10-15T00:00:00Z"))).toBe(
+      REWARDS_UNSETTLED_TTL_MS,
+    );
+    expect(rewardsCacheTtlMs(new Date("2026-10-15T05:59:59Z"))).toBe(
+      REWARDS_UNSETTLED_TTL_MS,
+    );
+  });
+
+  it("с 06:00 UTC — до следующей полуночи UTC", () => {
+    expect(rewardsCacheTtlMs(new Date("2026-10-15T06:00:00Z"))).toBe(
+      18 * 60 * 60 * 1000,
+    );
+    expect(rewardsCacheTtlMs(new Date("2026-10-15T23:30:00Z"))).toBe(
+      30 * 60 * 1000,
+    );
+  });
+});
 
 describe("yesterdayUtcRange", () => {
   it("вчерашние сутки по UTC: от полуночи до полуночи", () => {
@@ -41,6 +64,8 @@ const flex = (
 ) => ({ asset, rewards, type, productId, time: 0 });
 
 describe("sumYesterdayRewardsUsd + yesterdayUsdFor", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   const usdt = {
     asset: "USDT",
     place: "flexible" as const,
@@ -65,6 +90,24 @@ describe("sumYesterdayRewardsUsd + yesterdayUsdFor", () => {
     expect(
       yesterdayUsdFor({ ...usdt, asset: "BTC", productId: "BTC001" }, sums),
     ).toBeCloseTo(0.006);
+  });
+
+  it("неизвестный вид начислений в сумму не идёт и пишется в журнал один раз на вид; REWARDS — молча", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    const rewards = {
+      flexible: [
+        flex("USDT", 0.07, "REALTIME"),
+        flex("USDT", 1, "AIRDROP"),
+        flex("USDT", 2, "AIRDROP"),
+        flex("USDT", 3, "REWARDS"),
+      ],
+      locked: [],
+    };
+    const sums = sumYesterdayRewardsUsd(rewards, price);
+    sumYesterdayRewardsUsd(rewards, price);
+    expect(yesterdayUsdFor(usdt, sums)).toBeCloseTo(0.07);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toBe("portfolio.rewards.type");
   });
 
   it("награда в другой монете — по цене своей монеты", () => {

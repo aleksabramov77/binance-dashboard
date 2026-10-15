@@ -4,18 +4,34 @@ import type {
   LockedReward,
   RewardsWindow,
 } from "@/shared/api/binance/account.server";
+import { log } from "@/shared/lib/logger.server";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Виды начислений Flexible, которые складываем (проба 2026-10-15, spec 0022): `REALTIME` — базовая ставка за сутки,
- * `BONUS` — бонусная ступень; `type=ALL` отдаёт ровно их объединение без повторов. `REWARDS` (старая история)
- * за 30 дней пуст и не учитывается, чтобы не задвоить суммы, если Binance начнёт его заполнять.
+ * `BONUS` — бонусная ступень; `type=ALL` отдаёт ровно их объединение без повторов.
  */
 export const FLEXIBLE_REWARD_TYPES: ReadonlySet<string> = new Set([
   "REALTIME",
   "BONUS",
 ]);
+/**
+ * Известные, но не суммируемые виды: `REWARDS` (старая история) за 30 дней пуст и не учитывается, чтобы не задвоить
+ * суммы, если Binance начнёт его заполнять. Остальные виды — неизвестные: в сумму не идут, но пишутся в журнал.
+ */
+const SKIPPED_FLEXIBLE_REWARD_TYPES: ReadonlySet<string> = new Set(["REWARDS"]);
+/** Неизвестные виды начислений, о которых уже написали в журнал (раз на вид за процесс). */
+const reportedUnknownTypes = new Set<string>();
+
+/**
+ * Сколько с начала UTC-суток ответ истории за вчера ещё «дозревает»: `REALTIME` за вчера пишется задним числом
+ * (`time` 23:59:59), а `BONUS` на пробе пришёл в 04:43 UTC. Пока не прошло 6 ч — кэшируем коротко, чтобы не закрепить
+ * неполный ответ до следующей полуночи.
+ */
+export const REWARDS_SETTLE_MS = 6 * 60 * 60 * 1000;
+/** Срок кэша истории, пока ответ дозревает. */
+export const REWARDS_UNSETTLED_TTL_MS = 15 * 60 * 1000;
 
 /** Вчерашние сутки UTC: [полночь UTC сегодня − 1 сутки, полночь UTC сегодня). Binance начисляет по суткам UTC. */
 export function yesterdayUtcRange(now: Date): RewardsWindow {
@@ -25,6 +41,18 @@ export function yesterdayUtcRange(now: Date): RewardsWindow {
     now.getUTCDate(),
   );
   return { startTime: endTime - DAY_MS, endTime };
+}
+
+/**
+ * Срок кэша наград за вчера: первые `REWARDS_SETTLE_MS` UTC-суток — `REWARDS_UNSETTLED_TTL_MS`, потом — до
+ * следующей полуночи UTC (за прошедшие сутки начисления уже не меняются).
+ */
+export function rewardsCacheTtlMs(now: Date): number {
+  const { endTime: todayStart } = yesterdayUtcRange(now);
+  const sinceMidnight = now.getTime() - todayStart;
+  return sinceMidnight < REWARDS_SETTLE_MS
+    ? REWARDS_UNSETTLED_TTL_MS
+    : todayStart + DAY_MS - now.getTime();
 }
 
 export type YesterdayRewards = {
@@ -70,7 +98,20 @@ export function sumYesterdayRewardsUsd(
     lockedByPosition: new Map(),
   };
   for (const r of rewards.flexible) {
-    if (!FLEXIBLE_REWARD_TYPES.has(r.type)) continue;
+    if (!FLEXIBLE_REWARD_TYPES.has(r.type)) {
+      if (
+        !SKIPPED_FLEXIBLE_REWARD_TYPES.has(r.type) &&
+        !reportedUnknownTypes.has(r.type)
+      ) {
+        reportedUnknownTypes.add(r.type);
+        log.warn(
+          "portfolio.rewards.type",
+          `Неизвестный вид начислений Flexible «${r.type}» — в «Вчера» не учтён`,
+          { type: r.type, asset: r.asset, productId: r.productId },
+        );
+      }
+      continue;
+    }
     const value = usd(r.asset, r.rewards);
     if (r.productId) add(sums.flexibleByProduct, r.productId, value);
     else add(sums.flexibleByAsset, r.asset, value);
