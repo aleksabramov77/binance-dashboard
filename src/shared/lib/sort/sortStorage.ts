@@ -1,65 +1,109 @@
-"use client";
-
-import { useEffect, useRef } from "react";
+import { z } from "zod";
 import { SORT_DIRS, type SortDir } from "./sortRows";
 
-// Последняя сортировка таблицы — в localStorage этого браузера (по просьбе пользователя 2026-10-11:
-// «чтобы не слетало»). URL главнее: ссылка с ?sort=… показывает свою сортировку.
-// Хранилище может быть недоступно (приватный режим, запрет cookies) — тогда просто не запоминаем.
+// Сортировка таблиц — только в localStorage этого браузера, в URL не пишется (решение пользователя
+// 2026-10-15, spec 009). Имя таблицы заводит её слайс через defineSortTable: shared имён не знает,
+// их уникальность во всём src проверяет sortTables.test.ts.
+// localStorage недоступен (приватный режим, запрет) — сортировка живёт в памяти до перезагрузки.
 
 const PREFIX = "binance-dashboard:sort:";
+
+/**
+ * Имя таблицы: `<маршрут>:<таблица>`. Маршрут — шаблон пути без конкретного id (`items/[id]`),
+ * поэтому у таблицы одна сортировка на все страницы маршрута.
+ */
+export type SortTableName = `${string}:${string}`;
+
+export interface SortTable<K extends string> {
+  name: SortTableName;
+  /** Колонки с сортировкой: устаревшая или чужая колонка в хранилище не применяется. */
+  keys: readonly K[];
+}
 
 export interface SavedSort<K extends string> {
   key: K;
   dir: SortDir;
 }
 
-export function loadSort<K extends string>(
-  name: string,
+/** Таблица с сортировкой. Имя — строковым литералом: по нему тест ищет повторы. */
+export function defineSortTable<K extends string>(
+  name: SortTableName,
   keys: readonly K[],
-): SavedSort<K> | null {
+): SortTable<K> {
+  return { name, keys };
+}
+
+const savedSchema = z.object({ key: z.string(), dir: z.enum(SORT_DIRS) });
+
+// Значения, которые не удалось записать в localStorage (null — сброс): главнее него до перезагрузки.
+const memory = new Map<string, string | null>();
+const listeners = new Map<string, Set<() => void>>();
+
+/** Сохранённая сортировка как есть — строка или null, снимок для useSyncExternalStore. */
+export function readSortSnapshot(name: SortTableName): string | null {
+  const key = PREFIX + name;
+  if (memory.has(key)) return memory.get(key) ?? null;
   try {
-    const raw = window.localStorage.getItem(PREFIX + name);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as { key?: unknown; dir?: unknown };
-    const key = keys.find((k) => k === value.key);
-    const dir = SORT_DIRS.find((d) => d === value.dir);
-    return key && dir ? { key, dir } : null;
+    return window.localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
-/** null — сортировка сброшена: забываем сохранённую. */
-export function saveSort(name: string, value: SavedSort<string> | null): void {
+/** Разбор снимка; мусор, неизвестная колонка или направление — нет сортировки. */
+export function parseSort<K extends string>(
+  raw: string | null,
+  keys: readonly K[],
+): SavedSort<K> | null {
+  if (raw === null) return null;
+  let json: unknown;
   try {
-    if (value)
-      window.localStorage.setItem(PREFIX + name, JSON.stringify(value));
-    else window.localStorage.removeItem(PREFIX + name);
+    json = JSON.parse(raw);
   } catch {
-    // Хранилище недоступно — сортировка живёт только в URL.
+    return null;
   }
+  const parsed = savedSchema.safeParse(json);
+  if (!parsed.success) return null;
+  const key = keys.find((k) => k === parsed.data.key);
+  return key ? { key, dir: parsed.data.dir } : null;
 }
 
-/**
- * Один раз после монтирования: если в URL сортировки нет — применить сохранённую.
- * apply вызывается вне рендера (в эффекте), поэтому может менять URL.
- */
-export function useRestoreSort<K extends string>(
-  name: string,
-  keys: readonly K[],
-  inUrl: boolean,
-  apply: (saved: SavedSort<K>) => void,
+/** null — сортировка сброшена. Все экземпляры таблицы узнают об изменении сразу. */
+export function saveSort<K extends string>(
+  table: SortTable<K>,
+  value: SavedSort<K> | null,
 ): void {
-  const done = useRef(false);
-  const latest = useRef({ keys, inUrl, apply });
-  latest.current = { keys, inUrl, apply };
-  useEffect(() => {
-    if (done.current) return;
-    done.current = true;
-    const { keys: k, inUrl: present, apply: run } = latest.current;
-    if (present) return;
-    const saved = loadSort(name, k);
-    if (saved) run(saved);
-  }, [name]);
+  const key = PREFIX + table.name;
+  const raw = value && JSON.stringify({ key: value.key, dir: value.dir });
+  try {
+    if (raw === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, raw);
+    memory.delete(key);
+  } catch {
+    memory.set(key, raw);
+  }
+  for (const notify of listeners.get(key) ?? []) notify();
+}
+
+/** Подписка на сортировку таблицы: изменения из этой вкладки и из других (событие storage). */
+export function subscribeSort(
+  name: SortTableName,
+  onChange: () => void,
+): () => void {
+  const key = PREFIX + name;
+  let own = listeners.get(key);
+  if (!own) {
+    own = new Set();
+    listeners.set(key, own);
+  }
+  own.add(onChange);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === key || event.key === null) onChange();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    own.delete(onChange);
+    if (own.size === 0) listeners.delete(key);
+    window.removeEventListener("storage", onStorage);
+  };
 }

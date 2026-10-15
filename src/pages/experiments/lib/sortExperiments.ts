@@ -1,9 +1,22 @@
 import type { ExperimentSummary } from "@/entities/experiment";
-import type {
-  MarketFilter,
-  SortDir,
-  SortKey,
-} from "../model/useExperimentsView";
+import type { SortDir } from "@/shared/lib";
+import type { MarketFilter } from "../model/useExperimentsView";
+
+export const SORT_KEYS = [
+  "id",
+  "trades",
+  "winRate",
+  "pnl",
+  "profitFactor",
+  "maxDrawdown",
+  "equity",
+  "demo",
+  "demoTrades",
+  "demoWinRate",
+  "demoPnl",
+] as const;
+
+export type SortKey = (typeof SORT_KEYS)[number];
 
 /** Значение колонки для сортировки; null (нет данных) — всегда в конце. */
 function sortValue(e: ExperimentSummary, key: SortKey): number | null {
