@@ -4,7 +4,6 @@ import {
   DUAL_SIDE_LABELS,
   type DualOffer,
   dualScenarios,
-  evaluateDual,
 } from "@/entities/earn-product";
 import {
   formatAmount,
@@ -51,7 +50,7 @@ function ScenarioBody({
   amountUsd: number;
 }) {
   const s = dualScenarios(offer, amountUsd);
-  const e = evaluateDual(offer, amountUsd);
+  const e = s?.evaluation;
   const date = formatDateTime(offer.settleAt);
   const strike = `${formatPrice(offer.strikePrice)} ${offer.stable}`;
   const sellHigh = offer.side === "sell-high";

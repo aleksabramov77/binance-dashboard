@@ -1,9 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { EARN_SUMMARY_TTL_MS } from "../config/cache";
 import { type EarnSummary, earnSummarySchema } from "../model/schema";
 
-export const earnSummaryQueryKey = ["earn-summary"] as const;
+const earnSummaryQueryKey = ["earn-summary"] as const;
 
 async function getEarnSummary(): Promise<EarnSummary> {
   const res = await fetch("/api/earn/summary", { cache: "no-store" });
@@ -16,6 +17,6 @@ export function useEarnSummary() {
   return useQuery({
     queryKey: earnSummaryQueryKey,
     queryFn: getEarnSummary,
-    staleTime: 10 * 60_000,
+    staleTime: EARN_SUMMARY_TTL_MS,
   });
 }

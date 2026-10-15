@@ -1,8 +1,6 @@
-export {
-  advancedCatalogQueryKey,
-  useAdvancedCatalog,
-} from "./api/useAdvancedCatalog";
-export { earnSummaryQueryKey, useEarnSummary } from "./api/useEarnSummary";
+export { useAdvancedCatalog } from "./api/useAdvancedCatalog";
+export { useEarnSummary } from "./api/useEarnSummary";
+export { ADVANCED_CATALOG_TTL_MS, EARN_SUMMARY_TTL_MS } from "./config/cache";
 export {
   EARN_KIND_INFO,
   type EarnKindInfo,
@@ -11,6 +9,7 @@ export {
   RISK_LABELS,
   type RiskLevel,
 } from "./config/kinds";
+export { aprRange } from "./lib/aprRange";
 export {
   type DualEvaluation,
   type DualOutcome,
@@ -32,7 +31,6 @@ export {
 export {
   type AdvancedCatalog,
   advancedCatalogSchema,
-  DUAL_SIDES,
   type DualOffer,
   type DualSide,
   EARN_KINDS,
@@ -40,7 +38,6 @@ export {
   type EarnSummary,
   earnSummarySchema,
   type KindSummary,
-  YIELD_KINDS,
   type YieldKind,
   type YieldProduct,
 } from "./model/schema";

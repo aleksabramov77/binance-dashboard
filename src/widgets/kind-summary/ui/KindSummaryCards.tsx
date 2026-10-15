@@ -1,19 +1,12 @@
 import {
+  aprRange,
   EARN_KIND_INFO,
   type EarnKind,
   type KindSummary,
   RiskDots,
 } from "@/entities/earn-product";
-import { formatPercent } from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
-
-/** «3,61 %» или «3,65–281,48 %». */
-export function aprRange(minApr: number, maxApr: number): string {
-  return Math.abs(maxApr - minApr) < 0.00005
-    ? formatPercent(maxApr)
-    : `${formatPercent(minApr).replace(/\s?%$/, "")}–${formatPercent(maxApr)}`;
-}
 
 /** Карточки «ставки сейчас» по видам из публичной сводки Binance (работает без ключа). */
 export function KindSummaryCards({

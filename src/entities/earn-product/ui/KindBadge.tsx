@@ -7,13 +7,20 @@ export function KindBadge({ kind }: { kind: EarnKind }) {
   return <Badge variant="secondary">{EARN_KIND_INFO[kind].title}</Badge>;
 }
 
-/** «Капитал защищён» / «не защищён» по виду. */
-export function PrincipalBadge({ kind }: { kind: EarnKind }) {
+/** «Защищён» / «не защищён» по виду; `withLabel` — с словом «капитал» (вне колонки «Капитал»). */
+export function PrincipalBadge({
+  kind,
+  withLabel = false,
+}: {
+  kind: EarnKind;
+  withLabel?: boolean;
+}) {
+  const prefix = withLabel ? "капитал " : "";
   return EARN_KIND_INFO[kind].principalProtected ? (
-    <Badge variant="outline">защищён</Badge>
+    <Badge variant="outline">{prefix}защищён</Badge>
   ) : (
     <Badge variant="outline" className="border-destructive/50 text-destructive">
-      не защищён
+      {prefix}не защищён
     </Badge>
   );
 }

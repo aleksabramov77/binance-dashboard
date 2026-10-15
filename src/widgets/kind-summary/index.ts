@@ -1,1 +1,1 @@
-export { aprRange, KindSummaryCards } from "./ui/KindSummaryCards";
+export { KindSummaryCards } from "./ui/KindSummaryCards";

@@ -1,9 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { ADVANCED_CATALOG_TTL_MS } from "../config/cache";
 import { type AdvancedCatalog, advancedCatalogSchema } from "../model/schema";
 
-export const advancedCatalogQueryKey = ["earn-advanced"] as const;
+const advancedCatalogQueryKey = ["earn-advanced"] as const;
 
 async function getAdvancedCatalog(): Promise<AdvancedCatalog> {
   const res = await fetch("/api/earn/advanced", { cache: "no-store" });
@@ -26,7 +27,7 @@ export function useAdvancedCatalog() {
   return useQuery({
     queryKey: advancedCatalogQueryKey,
     queryFn: getAdvancedCatalog,
-    staleTime: 5 * 60_000,
+    staleTime: ADVANCED_CATALOG_TTL_MS,
     refetchOnWindowFocus: false,
   });
 }

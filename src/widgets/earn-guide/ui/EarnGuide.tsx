@@ -1,13 +1,14 @@
 import {
+  aprRange,
   EARN_KIND_INFO,
   EARN_KINDS,
   type EarnKind,
   type KindSummary,
   type KindTab,
+  PrincipalBadge,
   RiskDots,
 } from "@/entities/earn-product";
 import { DIVERSIFICATION_RULES } from "@/features/allocation-advice";
-import { formatPercent } from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
@@ -25,10 +26,7 @@ function liveRange(kind: EarnKind, summary: KindSummary[] | undefined) {
   const min = Math.min(...rows.map((r) => r.minApr));
   const max = Math.max(...rows.map((r) => r.maxApr));
   return {
-    text:
-      Math.abs(max - min) < 0.00005
-        ? formatPercent(max)
-        : `${formatPercent(min)} – ${formatPercent(max)}`,
+    text: aprRange(min, max),
     assets: rows.map((r) => r.asset).join(", "),
   };
 }
@@ -96,16 +94,7 @@ export function EarnGuide({
                     </p>
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Badge variant="outline">{info.liquidity}</Badge>
-                      {info.principalProtected ? (
-                        <Badge variant="outline">капитал защищён</Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="border-destructive/50 text-destructive"
-                        >
-                          капитал не защищён
-                        </Badge>
-                      )}
+                      <PrincipalBadge kind={kind} withLabel />
                       {live && (
                         <Badge variant="secondary" title={live.assets}>
                           сейчас {live.text}

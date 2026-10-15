@@ -153,7 +153,8 @@ const SUMMARY_KINDS: Record<string, EarnKind> = {
 export function normalizeSummary(assets: EarnOverviewAsset[]): KindSummary[] {
   return assets.flatMap(({ asset, productSummary }) =>
     (productSummary ?? []).flatMap((p): KindSummary[] => {
-      if (p.maxApr === null) return [];
+      const { maxApr } = p;
+      if (maxApr === null) return [];
       const kinds: EarnKind[] =
         p.productType === "SIMPLE_EARN"
           ? [
@@ -170,8 +171,8 @@ export function normalizeSummary(assets: EarnOverviewAsset[]): KindSummary[] {
       return kinds.map((kind) => ({
         kind,
         asset,
-        minApr: p.minApr ?? p.maxApr ?? 0,
-        maxApr: p.maxApr ?? 0,
+        minApr: p.minApr ?? maxApr,
+        maxApr,
         lowRisk: p.lowRisk === true,
         soldOut: p.soldOut === true,
       }));

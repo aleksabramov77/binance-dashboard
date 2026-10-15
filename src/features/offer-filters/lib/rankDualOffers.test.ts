@@ -88,4 +88,15 @@ describe("ранжирование Dual", () => {
       "far",
     ]);
   });
+
+  it("предложения без Flexible того же актива — после сравнимых, даже с большим APR", () => {
+    // Flexible есть только у USDT: Sell High (вкладывается BTC) сравнить не с чем.
+    const ranked = rankDualOffers(offers, [flexible("USDT", 0.05)], filters);
+    expect(ranked.map((r) => r.offer.id)).toEqual([
+      "near",
+      "eth",
+      "far",
+      "sell",
+    ]);
+  });
 });

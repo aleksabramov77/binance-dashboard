@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import {
+  ADVANCED_CATALOG_TTL_MS,
   type AdvancedCatalog,
   type EarnKind,
   useAdvancedCatalog,
@@ -86,8 +87,8 @@ export function AdvancedSection({
       )}
       {children(data)}
       <p className="text-xs text-muted-foreground">
-        Каталог Binance от {formatDateTime(data.fetchedAt)} (обновляется раз в 5
-        минут).
+        Каталог Binance от {formatDateTime(data.fetchedAt)} (обновляется раз в{" "}
+        {ADVANCED_CATALOG_TTL_MS / 60_000} мин).
       </p>
     </div>
   );

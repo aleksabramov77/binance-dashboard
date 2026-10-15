@@ -32,7 +32,7 @@ function bestFlexibleApr(offers: Offer[], amountUsd: number) {
 
 /**
  * Фильтры Dual и сравнение с Flexible. Порядок — по превышению над Flexible: столько вы получаете
- * «сверху» за риск остаться не в той валюте.
+ * «сверху» за риск остаться не в той валюте; предложения без Flexible того же актива — в конце.
  */
 export function rankDualOffers(
   offers: DualOffer[],
@@ -42,28 +42,36 @@ export function rankDualOffers(
   const flexible = bestFlexibleApr(simpleOffers, filters.amount);
   const coin = filters.dcoin.trim().toUpperCase();
   const minDistance = filters.minDist / 100;
-  return offers
-    .filter((o) => o.canPurchase)
-    .filter((o) => (coin ? o.coin === coin : true))
-    .filter((o) => (filters.side === "all" ? true : o.side === filters.side))
-    .filter((o) =>
-      filters.maxDays > 0 ? o.durationDays <= filters.maxDays : true,
-    )
-    .map((offer): RankedDual => {
-      const distance = distanceToStrike(offer.strikePrice, offer.price);
-      const flexibleApr = flexible.get(dualInvestAsset(offer)) ?? null;
-      return {
-        offer,
-        evaluation: evaluateDual(offer, filters.amount),
-        distance,
-        flexibleApr,
-        edge: flexibleApr === null ? null : offer.apr - flexibleApr,
-      };
-    })
-    .filter((r) =>
-      minDistance > 0
-        ? r.distance !== null && Math.abs(r.distance) >= minDistance
-        : true,
-    )
-    .sort((a, b) => (b.edge ?? b.offer.apr) - (a.edge ?? a.offer.apr));
+  return (
+    offers
+      .filter((o) => o.canPurchase)
+      .filter((o) => (coin ? o.coin === coin : true))
+      .filter((o) => (filters.side === "all" ? true : o.side === filters.side))
+      .filter((o) =>
+        filters.maxDays > 0 ? o.durationDays <= filters.maxDays : true,
+      )
+      .map((offer): RankedDual => {
+        const distance = distanceToStrike(offer.strikePrice, offer.price);
+        const flexibleApr = flexible.get(dualInvestAsset(offer)) ?? null;
+        return {
+          offer,
+          evaluation: evaluateDual(offer, filters.amount),
+          distance,
+          flexibleApr,
+          edge: flexibleApr === null ? null : offer.apr - flexibleApr,
+        };
+      })
+      .filter((r) =>
+        minDistance > 0
+          ? r.distance !== null && Math.abs(r.distance) >= minDistance
+          : true,
+      )
+      // Без сравнения с Flexible — в конце (между собой — по APR): превышение и сырой APR не смешиваем.
+      .sort((a, b) =>
+        a.edge === null || b.edge === null
+          ? Number(a.edge === null) - Number(b.edge === null) ||
+            b.offer.apr - a.offer.apr
+          : b.edge - a.edge,
+      )
+  );
 }

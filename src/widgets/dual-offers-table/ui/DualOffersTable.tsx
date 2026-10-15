@@ -158,8 +158,16 @@ export function DualOffersTable({
             {rows.slice(0, MAX_ROWS).map((r) => (
               <TableRow
                 key={r.offer.id}
-                className="cursor-pointer"
+                className="cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-none"
+                tabIndex={0}
+                aria-label={`Исходы: ${r.offer.coin} / ${r.offer.stable}, целевая цена ${formatPrice(r.offer.strikePrice)}`}
                 onClick={() => setSelected(r.offer)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelected(r.offer);
+                  }
+                }}
               >
                 <TableCell>
                   <div className="flex items-center gap-2">

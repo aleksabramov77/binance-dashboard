@@ -74,6 +74,8 @@ export interface DualScenarios {
   notExercised: DualOutcome;
   strikePrice: number;
   effectivePrice: number;
+  /** Оценка суммы, из которой посчитаны исходы. */
+  evaluation: DualEvaluation;
 }
 
 /** Два исхода на дату расчёта — виджет превращает их в слова. */
@@ -94,5 +96,6 @@ export function dualScenarios(
     notExercised: { asset: dualInvestAsset(offer), amount: grown },
     strikePrice: offer.strikePrice,
     effectivePrice,
+    evaluation,
   };
 }

@@ -1,4 +1,5 @@
 import {
+  ADVANCED_CATALOG_TTL_MS,
   type AdvancedCatalog,
   type DualOffer,
   normalizeDualProducts,
@@ -23,11 +24,7 @@ import {
   isServerless,
 } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
-import {
-  CATALOG_TTL_MS,
-  DUAL_COINS,
-  DUAL_STABLES,
-} from "../config/dualUniverse";
+import { DUAL_COINS, DUAL_STABLES } from "../config/dualUniverse";
 import { createTtlCache } from "./ttlCache";
 
 /** Сеть и env внедряются — тесты подменяют их без моков модулей. */
@@ -194,7 +191,7 @@ export async function buildAdvancedCatalog(
 }
 
 const cache = createTtlCache<AdvancedCatalog>(
-  CATALOG_TTL_MS,
+  ADVANCED_CATALOG_TTL_MS,
   (catalog) => catalog.status === "ok",
 );
 
