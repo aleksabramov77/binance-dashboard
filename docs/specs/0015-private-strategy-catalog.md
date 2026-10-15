@@ -32,9 +32,9 @@
 
 ## Сценарии
 1. Claude в `/flow lab` предлагает гипотезу → пользователь выбирает → Claude дописывает её в
-   `private/experiments.json`, запускает `pnpm lab:private`, коммитит и пушит приватный репозиторий → эксперимент
+   `private/experiments.json`, запускает `pnpm lab:private --prod`, коммитит и пушит приватный репозиторий → эксперимент
    появляется в `/experiments` и начинает торговать на следующем тике.
-2. Claude меняет параметры приватного эксперимента в JSON и снова запускает `pnpm lab:private` → в БД обновляются
+2. Claude меняет параметры приватного эксперимента в JSON и снова запускает `pnpm lab:private --prod` → в БД обновляются
    `name`, `hypothesis`, `config`; тумблеры, бюджет и сделки не трогаются.
 3. Разбор `/flow lab` сохраняет `report.md`, `review.md`, `ideas.md` в `private/lab/<прогон>/` и пушит их.
 4. Новый компьютер / новый worktree: `pnpm lab:private --clone` (или инструкция в README) клонирует приватный

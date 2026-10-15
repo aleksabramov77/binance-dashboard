@@ -56,3 +56,7 @@ supabase/.branches/
 
 # Deno lock от supabase CLI при деплое функций (версии — в deno.json)
 supabase/functions/**/deno.lock
+
+# Лаборатория: машинные файлы прогонов /flow lab — в репо только report.md, review.md, ideas.md, apply.md
+docs/lab/runs/**/report.json
+docs/lab/runs/**/trades.csv

@@ -210,7 +210,7 @@
 **Приватные эксперименты 🚧** (задача 0015, [spec 0015](specs/0015-private-strategy-catalog.md), решения
 пользователя 2026-10-15) — репозиторий публичный, но новые эксперименты лаборатории, их параметры и анализы
 `/flow lab` — в приватном репозитории `binance-dashboard-private` (клон в игнорируемой `private/`).
-Эксперимент — JSON в `private/experiments.json` (id `PS..`/`PF..`), в БД — командой `pnpm lab:private`;
+Эксперимент — JSON в `private/experiments.json` (id `PS..`/`PF..`), в БД — командой `pnpm lab:private --prod` (без флага в Postgres не пишет);
 дальше он виден и торгует как любой эксперимент каталога. Шифрование в публичном репо отклонено.
 
 ### 3.5 Акции 💡 (позже)
@@ -324,10 +324,12 @@ bStocks, но публичного торгового API для них не н�
   колонка `runs.initial_budget` (миграция).
 - e2e в CI (Playwright с моками Binance).
 - Журнал сигналов (3.3): возможно, его заменяет статистика лаборатории (`/stats`) — решить, нужен ли отдельно.
-- Приватные эксперименты (задача 0015): после мержа PR #47 (`/flow lab`, скилл `trading-lab`) перевести `/flow lab`
-  на приватный репозиторий — report/review/ideas в `private/lab/<run-id>/` с push в `binance-dashboard-private`,
-  этап `experiment` — запись в `private/experiments.json` и `pnpm lab:private` вместо публичной spec. Отдельная
-  задача после 0015.
+- Приватные эксперименты (задача 0015): PR #47 (`/flow lab`, скилл `trading-lab`) влит после разработки 0015 и
+  пишет прогоны в публичный `docs/lab/` (`runs/<дата>-<NNNN>/` с report/review/ideas/apply, `hypotheses.md`,
+  `journal.md`). Перевести `/flow lab` на приватный репозиторий — прогоны и журналы в `private/lab/` с push в
+  `binance-dashboard-private`, этап `experiment` / `lab:apply` — запись в `private/experiments.json` и
+  `pnpm lab:private --prod` вместо `catalog.ts` и публичной spec. Отдельная задача сразу после 0015, **до первого
+  прогона `/flow lab`** (до неё в `docs/lab/` только пустые шаблоны).
 
 ## 7. Процесс разработки (решения пользователя 2026-10-10)
 Подробно — `docs/ai/workflow.md`. Новое требование → `/feature`, баг → `/bug`:
@@ -343,3 +345,7 @@ label `ai-approved`) → ⏸ **мержит пользователь** кома�
 (`.config/flows/*.yaml`).
 **Номер задачи** (решение пользователя 2026-10-15): сквозной `NNNN` на фичи, баги, hotfix и chore; ветки
 `<тип>/NNNN-slug`, коммиты `NNNN: что сделано`; история задач — `docs/HISTORY.md` (в контекст не подключается).
+**Лаборатория как процесс** (решение пользователя 2026-10-15): разбор экспериментов и новые гипотезы — `/flow lab`
+(`.config/flows/lab.yaml`): отчёт по сделкам эпохи `pnpm lab:report` → субагент `quant` (скилл `trading-lab`) →
+⏸ решения → `pnpm lab:apply` только подтверждённое → карточки гипотез ⏸ → журнал `docs/lab/` (PR) → выбранная
+карточка в `/flow feature`. Решения и критерии остановки записываются до того, как появятся данные.
