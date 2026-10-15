@@ -5,6 +5,8 @@ import { ExperimentDetailPage } from "@/pages/experiment-detail";
 
 // id каталога известны при сборке: страницы пререндерятся, и usePathname в хедере не требует
 // Suspense (cacheComponents; иначе неизвестный параметр блокирует статическую оболочку).
+// Приватные эксперименты (PS01, PF01 — spec 0015) живут только в БД: их id рендерятся по запросу.
+// dynamicParams с cacheComponents недоступен — неизвестные id и так открываются, не экспортировать.
 export function generateStaticParams() {
   return EXPERIMENT_CATALOG.map((e) => ({ id: e.id }));
 }

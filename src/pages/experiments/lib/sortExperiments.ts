@@ -1,9 +1,26 @@
 import { ASSET_GROUPS, type ExperimentSummary } from "@/entities/experiment";
-import type {
-  MarketFilter,
-  SortDir,
-  SortKey,
-} from "../model/useExperimentsView";
+import type { SortDir } from "@/shared/lib";
+import type { MarketFilter } from "../model/useExperimentsView";
+
+export const SORT_KEYS = [
+  "id",
+  "ag",
+  "trades",
+  "winRate",
+  "pnl",
+  "profitFactor",
+  "maxDrawdown",
+  "equity",
+  "demo",
+  "demoTrades",
+  "demoWinRate",
+  "demoPnl",
+  "demoProfitFactor",
+  "demoMaxDrawdown",
+  "demoEquity",
+] as const;
+
+export type SortKey = (typeof SORT_KEYS)[number];
 
 /** Порядок групп активов для сортировки по AG: как в карте ASSET_GROUPS (Spot, USDⓈ-M). */
 const AG_ORDER = Object.keys(ASSET_GROUPS);

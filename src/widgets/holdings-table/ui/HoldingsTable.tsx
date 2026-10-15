@@ -6,6 +6,7 @@ import {
   PLACE_LABELS,
 } from "@/entities/holding";
 import {
+  defineSortTable,
   formatAmount,
   formatDateTime,
   formatPercent,
@@ -24,6 +25,7 @@ import {
 } from "@/shared/ui/table";
 
 const SORT_KEYS = ["asset", "place", "amount", "usd", "apr", "yearly"] as const;
+const SORT_TABLE = defineSortTable("portfolio:holdings", SORT_KEYS);
 const HELP: Record<(typeof SORT_KEYS)[number], string> = {
   asset: "Монета на вашем счёте Binance.",
   place:
@@ -50,7 +52,7 @@ const SORT_VALUE: Record<
 };
 
 export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
-  const { sort, head } = useTableSort("holdingsSort", SORT_KEYS);
+  const { sort, head } = useTableSort(SORT_TABLE);
   // По умолчанию — самые крупные позиции сверху.
   const rows = sort
     ? sortRows(holdings, SORT_VALUE[sort.key], sort.dir)

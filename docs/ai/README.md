@@ -36,6 +36,7 @@ README внутри сложных модулей (читать перед пр�
 | `pnpm lab:report` | read-only отчёт лаборатории по текущей эпохе из БД: метрики, t, MFE, контекст рынка BTC, семейства, подсказки (`--experiment F06`, `--since 7d`, `--out <каталог>`, `--no-market`) — вход для `/flow lab` |
 | `pnpm lab:apply` | применить решения разбора: `--disable`/`--enable` эксперимент, `--mirror-on`/`--mirror-off` демо-зеркало, `--dry-run`, `--out <каталог>` (пишет apply.md) — те же тумблеры, что в /settings; печатает, к какой БД подключён, без `DATABASE_URL` отказывается (нужен `--local`); только по подтверждению пользователя |
 | `pnpm hooks:install` | включить pre-push хук (запрет push в main + `pnpm check`) |
+| `pnpm lab:private [--dry-run] [--prod] [--file <path>]` | записать приватные эксперименты из `private/experiments.json` в БД: в прод (Postgres) — только с `--prod`; для локального сервера worktree — `DATABASE_URL= pnpm lab:private` при остановленном сервере (`architecture.md` → «Приватные эксперименты») |
 
 Ключи — только в `.env.local` (пример — `.env.example`), в git не попадают. Без ключей приложение
 работает частично: соответствующие блоки показывают «не настроено». CI ключей не имеет.

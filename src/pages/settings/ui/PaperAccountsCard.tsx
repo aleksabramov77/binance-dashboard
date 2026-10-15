@@ -10,6 +10,7 @@ import {
 } from "@/entities/experiment";
 import {
   cn,
+  defineSortTable,
   formatDateTime,
   formatUsd,
   type SortValue,
@@ -52,6 +53,7 @@ const SORT_KEYS = [
   "resetAt",
 ] as const;
 type SortKey = (typeof SORT_KEYS)[number];
+const SORT_TABLE = defineSortTable("settings:paper", SORT_KEYS);
 
 const SORT_VALUE: Record<SortKey, (e: Experiment) => SortValue> = {
   id: (e) => e.id,
@@ -118,7 +120,7 @@ export function PaperAccountsCard({
 }) {
   const toggle = useSetExperimentEnabled();
   const enabled = experiments.filter((e) => e.enabled).length;
-  const { sort, head } = useTableSort("paperSort", SORT_KEYS);
+  const { sort, head } = useTableSort(SORT_TABLE);
   const rows = sort
     ? sortRows(experiments, SORT_VALUE[sort.key], sort.dir)
     : experiments;

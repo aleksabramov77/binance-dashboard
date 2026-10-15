@@ -1,46 +1,66 @@
 "use client";
 
-import { parseAsStringLiteral, useQueryState } from "nuqs";
-import { SORT_DIRS, type SortDir } from "./sortRows";
-import { saveSort, useRestoreSort } from "./sortStorage";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
+import type { SortDir } from "./sortRows";
+import {
+  parseSort,
+  readSortSnapshot,
+  type SavedSort,
+  type SortTable,
+  saveSort,
+  subscribeSort,
+} from "./sortStorage";
+
+/** Пропсы SortableHead колонки. */
+export interface SortHeadProps {
+  active: boolean;
+  dir: SortDir;
+  onSort: (dir: SortDir) => void;
+  onReset: () => void;
+}
+
+export interface TableSort<K extends string, S> {
+  /** Сохранённая сортировка, иначе порядок по умолчанию. */
+  sort: S;
+  /** Пропсы SortableHead для колонки. */
+  head: (column: K) => SortHeadProps;
+}
+
+// На сервере хранилища нет: «ничего не сохранено», после гидрации — сохранённая сортировка.
+const nothingSaved = () => null;
 
 /**
- * Сортировка таблицы из меню заголовка — в URL: `?<param>=<колонка>&<param>Dir=desc`.
- * Без параметра — исходный порядок данных (`sort` = null). Последний выбор запоминается в
- * localStorage и восстанавливается, если в URL сортировки нет.
- * Разные таблицы одной страницы используют разные `param`.
+ * Сортировка таблицы из меню заголовка — только в localStorage (spec 009), в URL не пишется.
+ * Все экземпляры таблицы показывают одну сортировку: читают её из хранилища при рендере и подписаны
+ * на изменения — в том числе страницы, которые Next держит скрытыми в `<Activity>`.
+ * fallback — порядок по умолчанию, пока ничего не сохранено; его колонка показана активной.
  */
 export function useTableSort<K extends string>(
-  param: string,
-  keys: readonly K[],
-) {
-  const [key, setKey] = useQueryState(param, parseAsStringLiteral(keys));
-  const [dir, setDir] = useQueryState(
-    `${param}Dir`,
-    parseAsStringLiteral(SORT_DIRS).withDefault("asc"),
+  table: SortTable<K>,
+): TableSort<K, SavedSort<K> | null>;
+export function useTableSort<K extends string>(
+  table: SortTable<K>,
+  fallback: SavedSort<K>,
+): TableSort<K, SavedSort<K>>;
+export function useTableSort<K extends string>(
+  table: SortTable<K>,
+  fallback: SavedSort<K> | null = null,
+): TableSort<K, SavedSort<K> | null> {
+  const { name, keys } = table;
+  const subscribe = useCallback(
+    (onChange: () => void) => subscribeSort(name, onChange),
+    [name],
   );
-  const sort = key === null ? null : { key, dir };
+  const snapshot = useCallback(() => readSortSnapshot(name), [name]);
+  const raw = useSyncExternalStore(subscribe, snapshot, nothingSaved);
+  const saved = useMemo(() => parseSort(raw, keys), [raw, keys]);
+  const sort = saved ?? fallback;
 
-  const apply = (column: K | null, next: SortDir) => {
-    void setKey(column);
-    void setDir(column === null || next === "asc" ? null : next);
-  };
-  useRestoreSort(param, keys, key !== null, (saved) =>
-    apply(saved.key, saved.dir),
-  );
-
-  /** Пропсы для SortableHead колонки. */
-  const head = (column: K) => ({
-    active: key === column,
-    dir,
-    onSort: (next: SortDir) => {
-      apply(column, next);
-      saveSort(param, { key: column, dir: next });
-    },
-    onReset: () => {
-      apply(null, "asc");
-      saveSort(param, null);
-    },
+  const head = (column: K): SortHeadProps => ({
+    active: sort?.key === column,
+    dir: sort?.dir ?? "asc",
+    onSort: (dir) => saveSort(table, { key: column, dir }),
+    onReset: () => saveSort(table, null),
   });
 
   return { sort, head };

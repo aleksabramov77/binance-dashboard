@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useQueryState } from "nuqs";
 import { Suspense, useMemo } from "react";
 import {
   ASSET_GROUP_DESCRIPTION,
@@ -19,10 +18,12 @@ import { mirrorLogsHref } from "@/entities/log-entry";
 import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
 import {
   cn,
+  defineSortTable,
   formatDateTime,
   formatUsd,
-  saveSort,
-  useRestoreSort,
+  type SavedSort,
+  type SortHeadProps,
+  useTableSort,
 } from "@/shared/lib";
 import { Badge } from "@/shared/ui/badge";
 import { SortableHead } from "@/shared/ui/sortable-head";
@@ -34,14 +35,20 @@ import {
   TableRow,
 } from "@/shared/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
-import { sortExperiments } from "../lib/sortExperiments";
+import {
+  SORT_KEYS,
+  type SortKey,
+  sortExperiments,
+} from "../lib/sortExperiments";
 import {
   MARKET_FILTERS,
   type MarketFilter,
-  SORT_KEYS,
-  type SortKey,
   useExperimentsView,
 } from "../model/useExperimentsView";
+
+const SORT_TABLE = defineSortTable("experiments:list", SORT_KEYS);
+/** Без сохранённой сортировки — по эксперименту (F01, F02…). */
+const DEFAULT_SORT: SavedSort<SortKey> = { key: "id", dir: "asc" };
 
 const MARKET_LABELS: Record<MarketFilter, string> = {
   all: "Все",
@@ -159,8 +166,13 @@ const COLUMNS: {
 const DEMO_TONE = "bg-sky-500/[0.06]";
 const isDemoColumn = (key: SortKey) => key.startsWith("demo");
 
-function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
-  const [{ sort, dir }, setView] = useExperimentsView();
+function ColumnHead({
+  column,
+  head,
+}: {
+  column: (typeof COLUMNS)[number];
+  head: SortHeadProps;
+}) {
   return (
     <SortableHead
       className={cn(
@@ -168,16 +180,7 @@ function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
         column.key === "demo" && "text-center",
         isDemoColumn(column.key) && DEMO_TONE,
       )}
-      active={sort === column.key}
-      dir={dir}
-      onSort={(next) => {
-        void setView({ sort: column.key, dir: next });
-        saveSort("experiments", { key: column.key, dir: next });
-      }}
-      onReset={() => {
-        void setView({ sort: null, dir: null });
-        saveSort("experiments", null);
-      }}
+      {...head}
       description={column.description}
     >
       {column.label}
@@ -310,15 +313,11 @@ function ExperimentRow({
 
 function ExperimentsDashboard() {
   const { data, isPending, error } = useExperiments();
-  const [{ market, sort, dir }, setView] = useExperimentsView();
-  // Последняя сортировка из localStorage, если в URL её нет.
-  const [urlSort] = useQueryState("sort");
-  useRestoreSort("experiments", SORT_KEYS, urlSort !== null, (saved) =>
-    setView({ sort: saved.key, dir: saved.dir }),
-  );
+  const [{ market }, setView] = useExperimentsView();
+  const { sort, head } = useTableSort(SORT_TABLE, DEFAULT_SORT);
   const rows = useMemo(
-    () => sortExperiments(data?.experiments ?? [], market, sort, dir),
-    [data, market, sort, dir],
+    () => sortExperiments(data?.experiments ?? [], market, sort.key, sort.dir),
+    [data, market, sort],
   );
   const total = data?.experiments.reduce((n, e) => n + e.stats.trades, 0) ?? 0;
 
@@ -379,7 +378,7 @@ function ExperimentsDashboard() {
             <TableHeader>
               <TableRow>
                 {COLUMNS.map((c) => (
-                  <ColumnHead key={c.key} column={c} />
+                  <ColumnHead key={c.key} column={c} head={head(c.key)} />
                 ))}
               </TableRow>
             </TableHeader>

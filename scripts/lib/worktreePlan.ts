@@ -36,6 +36,12 @@ export interface LinkEntry {
 }
 
 /**
+ * Связанные пути, если `.claude/worktree-links.json` нет. `private` — клон приватного репозитория с
+ * экспериментами и анализами лаборатории (spec 0015): одна копия на все worktree, ссылка — если он есть.
+ */
+export const DEFAULT_LINKS = [".env.local", "private"];
+
+/**
  * Записи `.claude/worktree-links.json` (+ `.local.json`): строка — ссылка, `{ path, mode: "copy" }` — копия.
  * Пути вне репозитория и повторы отбрасываются.
  */

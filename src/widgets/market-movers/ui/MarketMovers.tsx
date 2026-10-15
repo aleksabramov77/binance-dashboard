@@ -3,7 +3,9 @@
 import type { Mover } from "@/entities/market-signal";
 import {
   cn,
+  defineSortTable,
   formatPrice,
+  type SortTable,
   type SortValue,
   sortRows,
   useTableSort,
@@ -26,6 +28,9 @@ function rsiTone(value: number | undefined) {
 }
 
 const SORT_KEYS = ["coin", "price", "change", "volume", "rsi", "ema"] as const;
+// На странице две таблицы — у каждой своя сортировка.
+const GAINERS_TABLE = defineSortTable("signals:gainers", SORT_KEYS);
+const LOSERS_TABLE = defineSortTable("signals:losers", SORT_KEYS);
 const HELP: Record<(typeof SORT_KEYS)[number], string> = {
   coin: "Монета и где торгуется: Spot и/или бессрочные фьючерсы (Perp).",
   price: "Последняя цена в USDT.",
@@ -48,14 +53,13 @@ const SORT_VALUE: Record<(typeof SORT_KEYS)[number], (m: Mover) => SortValue> =
 function MoversTable({
   title,
   movers,
-  sortParam,
+  table,
 }: {
   title: string;
   movers: Mover[];
-  /** Параметр URL сортировки: на странице две таблицы, у каждой свой. */
-  sortParam: string;
+  table: SortTable<(typeof SORT_KEYS)[number]>;
 }) {
-  const { sort, head } = useTableSort(sortParam, SORT_KEYS);
+  const { sort, head } = useTableSort(table);
   const rows = sort ? sortRows(movers, SORT_VALUE[sort.key], sort.dir) : movers;
   return (
     <Card>
@@ -175,12 +179,12 @@ export function MarketMovers({
       <MoversTable
         title="Лидеры роста за 24 ч"
         movers={gainers}
-        sortParam="gainersSort"
+        table={GAINERS_TABLE}
       />
       <MoversTable
         title="Лидеры падения за 24 ч"
         movers={losers}
-        sortParam="losersSort"
+        table={LOSERS_TABLE}
       />
     </div>
   );
