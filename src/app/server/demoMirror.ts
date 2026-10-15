@@ -67,10 +67,15 @@ export async function runDemoMirror() {
         closed: r.status === "closed",
       }),
   });
-  if (result.opened.length || result.closed.length || result.skipped)
+  if (
+    result.opened.length ||
+    result.closed.length ||
+    result.skipped ||
+    result.deferred
+  )
     log.info(
       "mirror.run",
-      `Зеркало: открыто ${result.opened.length}, закрыто ${result.closed.length}, пропущено ${result.skipped}`,
+      `Зеркало: открыто ${result.opened.length}, закрыто ${result.closed.length}, пропущено ${result.skipped}${result.deferred ? `, отложено до следующего прогона ${result.deferred}` : ""}`,
       { ...result },
     );
   return result;

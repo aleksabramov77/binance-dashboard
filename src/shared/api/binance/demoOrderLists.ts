@@ -15,6 +15,15 @@ export interface SpotEntryListParams {
   stopLoss: string;
   /** null — только стоп (OTO), иначе тейк + стоп (OTOCO). */
   takeProfit: string | null;
+  /** Свои id списка и ордеров: по ним перечитываем заявку, если исход неизвестен (-1007, 5xx, сеть). */
+  clientIds?: SpotEntryClientIds;
+}
+
+export interface SpotEntryClientIds {
+  list: string;
+  working: string;
+  stop: string;
+  takeProfit: string;
 }
 
 /**
@@ -27,6 +36,7 @@ export function spotEntryListRequest(p: SpotEntryListParams): {
   path: "/api/v3/orderList/otoco" | "/api/v3/orderList/oto";
   params: SignedParams;
 } {
+  const ids = p.clientIds;
   const working = {
     symbol: p.symbol,
     workingType: "LIMIT",
@@ -37,6 +47,9 @@ export function spotEntryListRequest(p: SpotEntryListParams): {
     pendingSide: "SELL",
     pendingQuantity: p.sellQuantity,
     newOrderRespType: "FULL",
+    ...(ids
+      ? { listClientOrderId: ids.list, workingClientOrderId: ids.working }
+      : {}),
   };
   if (p.takeProfit === null)
     return {
@@ -45,6 +58,7 @@ export function spotEntryListRequest(p: SpotEntryListParams): {
         ...working,
         pendingType: "STOP_LOSS",
         pendingStopPrice: p.stopLoss,
+        ...(ids ? { pendingClientOrderId: ids.stop } : {}),
       },
     };
   return {
@@ -55,6 +69,12 @@ export function spotEntryListRequest(p: SpotEntryListParams): {
       pendingAbovePrice: p.takeProfit,
       pendingBelowType: "STOP_LOSS",
       pendingBelowStopPrice: p.stopLoss,
+      ...(ids
+        ? {
+            pendingAboveClientOrderId: ids.takeProfit,
+            pendingBelowClientOrderId: ids.stop,
+          }
+        : {}),
     },
   };
 }
