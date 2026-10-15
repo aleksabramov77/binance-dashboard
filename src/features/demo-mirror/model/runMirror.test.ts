@@ -134,4 +134,38 @@ describe("runMirror", () => {
       "CHIPUSDT: нет на демо-фьючерсах.",
     );
   });
+
+  it("бюджет времени: после 200 с новые входы не начинаются, остаток — следующему прогону", async () => {
+    let clock = NOW;
+    const open = vi.fn(async () => {
+      clock += 120_000; // вход при сбое биржи шёл долго
+      return {
+        id: "r",
+        status: "protected" as const,
+        message: "ok",
+        entryPrice: 100,
+        filledQuantity: 0.5,
+        steps: [],
+      };
+    });
+    const claim = vi.fn(async () => true);
+    const r = await runMirror(
+      deps({
+        now: () => clock,
+        open,
+        claim,
+        listCandidates: async () => [
+          trade({ tradeId: "t1", symbol: "AUSDT" }),
+          trade({ tradeId: "t2", symbol: "BUSDT" }),
+          trade({ tradeId: "t3", symbol: "CUSDT" }),
+        ],
+      }),
+    );
+    // t1 — 120 с, t2 начат (120 ≤ 200) и закончился на 240 с, t3 не начат и не захвачен.
+    expect(r.opened.map((o) => o.tradeId)).toEqual(["t1", "t2"]);
+    expect(r.deferred).toBe(1);
+    expect(r.skipped).toBe(0);
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(claim).not.toHaveBeenCalledWith("t3");
+  });
 });
