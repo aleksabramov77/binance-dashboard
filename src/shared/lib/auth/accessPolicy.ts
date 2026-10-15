@@ -13,8 +13,8 @@ export type AccessDecision =
   | "unauthorized"
   | "unavailable";
 
-/** Пути без проверки сессии: сам вход и cron (у него свой секрет). */
-const PUBLIC_PREFIXES = ["/api/auth/", "/api/cron/"];
+/** Пути без проверки сессии: сам вход, cron и webhook Telegram (у них свои секреты). */
+const PUBLIC_PREFIXES = ["/api/auth/", "/api/cron/", "/api/telegram/"];
 const LOGIN_PATH = "/login";
 
 export const isPublicPath = (pathname: string) =>

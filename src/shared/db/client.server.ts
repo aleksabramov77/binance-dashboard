@@ -82,6 +82,12 @@ export async function closeDb(): Promise<void> {
   await conn?.close();
 }
 
+/** Строки результата db.execute: postgres.js отдаёт массив, PGlite — { rows }. */
+export const rowsOf = <T>(result: unknown): T[] =>
+  Array.isArray(result)
+    ? (result as T[])
+    : ((result as { rows?: T[] }).rows ?? []);
+
 /** Чистая БД в памяти с применёнными миграциями — для тестов. */
 export async function createMemoryDb(): Promise<{
   db: Db;
