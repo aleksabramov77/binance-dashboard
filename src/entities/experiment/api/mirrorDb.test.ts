@@ -376,7 +376,9 @@ describe("protect_refs", () => {
     const [c] = await listMirrorCandidates(db, SINCE);
     await claimMirror(db, c);
     await db.execute(
-      sql.raw("update demo_mirror_orders set market = 'spot' where trade_id = 'a'"),
+      sql.raw(
+        "update demo_mirror_orders set market = 'spot' where trade_id = 'a'",
+      ),
     );
     await updateMirror(db, "a", {
       status: "protected",
