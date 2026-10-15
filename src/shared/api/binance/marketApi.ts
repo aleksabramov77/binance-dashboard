@@ -33,7 +33,7 @@ const BASE: Record<Market, string> = {
  * Подтип RWA не учитываем: его носят и монеты RWA-сектора (MANTRA, CFG); токены золота PAXG и XAUT — тоже
  * COIN, их отсекает список не-крипто потребителя. Акции и сырьё — отдельный contractType TRADIFI_PERPETUAL.
  */
-export function isCryptoUnderlying(contract: {
+function isCryptoUnderlying(contract: {
   underlyingType?: string | null;
 }): boolean {
   return contract.underlyingType === "COIN";

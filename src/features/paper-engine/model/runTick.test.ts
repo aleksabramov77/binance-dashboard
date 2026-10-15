@@ -315,9 +315,10 @@ describe("runTick: фильтры режима рынка и часов (spec 00
     ).toHaveLength(1);
   });
 
-  it("нет данных BTC — входа нет, ошибка в итоге тика", async () => {
+  it("нет данных BTC — входа нет, одна ошибка тика на (символ, TF), а не на эксперимент", async () => {
     const store = enabledStore([
       exp("A", { ...ALWAYS_LONG, ...eth, ...regime }),
+      exp("B", { ...ALWAYS_LONG, ...eth, ...regime }),
     ]);
     const m = market();
     const deps = m.deps(store);
@@ -332,7 +333,53 @@ describe("runTick: фильтры режима рынка и часов (spec 00
       T0,
     );
     expect(r.opened).toBe(0);
-    expect(r.errors.join()).toContain("режим рынка");
+    expect(r.errors.filter((e) => e.includes("режим рынка"))).toEqual([
+      "режим рынка futures BTCUSDT 4h: нет сети",
+    ]);
+  });
+
+  it("истории BTC меньше периода EMA — входа нет, ошибка «мало свечей режима» один раз", async () => {
+    const store = enabledStore([
+      exp("A", { ...ALWAYS_LONG, ...eth, ...regime }),
+      exp("B", { ...ALWAYS_LONG, ...eth, ...regime }),
+    ]);
+    const m = market(undefined, undefined, btc4h("up"));
+    const deps = m.deps(store);
+    const r = await runTick(
+      {
+        ...deps,
+        // Binance отдал только 21 свечу (новый листинг): 20 закрытых при EMA(50).
+        candles: (mk, symbol, interval, limit, startTime) =>
+          deps.candles(
+            mk,
+            symbol,
+            interval,
+            symbol === "BTCUSDT" && interval === "4h" ? 21 : limit,
+            startTime,
+          ),
+      },
+      T0,
+    );
+    expect(r.opened).toBe(0);
+    expect(r.errors.filter((e) => e.includes("режим рынка"))).toEqual([
+      "режим рынка futures BTCUSDT 4h: мало свечей режима: 20 из 50",
+    ]);
+  });
+
+  it("строка эксперимента не прошла схему — тик идёт для остальных, ошибка с id и путём поля", async () => {
+    const base = enabledStore([exp("A")]);
+    const store: TickDeps["store"] = {
+      ...base,
+      listExperiments: async (onInvalid) => {
+        onInvalid?.({ id: "BAD", problem: "config.marketFiltr — лишнее поле" });
+        return base.listExperiments();
+      },
+    };
+    const r = await runTick(market().deps(store), T0);
+    expect(r.opened).toBe(1);
+    expect(r.errors).toEqual([
+      "эксперимент BAD пропущен: конфиг не проходит схему: config.marketFiltr — лишнее поле",
+    ]);
   });
 
   it("часы UTC: вне окна входа нет, окно через полночь пропускает", async () => {

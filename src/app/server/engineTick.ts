@@ -91,6 +91,13 @@ export function buildTickDeps(
       const list = await env.market.fetch24hTickers(market);
       if (market === "spot") return list;
       const perps = await env.perpetuals();
+      // Справочник только крипты пуст (Binance сменил underlyingType?) — futures-юниверс пуст молча (spec 0029).
+      if (perps.size === 0)
+        env.log?.(
+          "warn",
+          "engine.perpetuals",
+          "справочник бессрочных фьючерсов пуст после фильтра только крипты: futures-эксперименты без юниверса",
+        );
       return list.filter((t) => perps.has(t.symbol));
     },
     funding: () => env.market.fetchFundingRates(),

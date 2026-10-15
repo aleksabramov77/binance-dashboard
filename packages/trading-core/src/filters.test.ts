@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { type MarketFilter, marketFilterSchema } from "./experiment.ts";
-import { marketRegimeAllows, sessionAllows } from "./filters.ts";
+import {
+  marketRegimeAllows,
+  regimeMinCandles,
+  sessionAllows,
+} from "./filters.ts";
 import type { Candle } from "./types.ts";
 
 const H4 = 4 * 60 * 60_000;
@@ -67,6 +71,15 @@ describe("marketRegimeAllows", () => {
     expect(marketRegimeAllows(flat, f, "long")).toBe(false);
     expect(marketRegimeAllows(rising, f, "long")).toBe(true);
     expect(marketRegimeAllows(rising.slice(0, 20), f, "long")).toBe(false);
+  });
+
+  it("regimeMinCandles: EMA — период, ADX — 2 × 14, без условий — одна свеча", () => {
+    expect(regimeMinCandles(filter())).toBe(20);
+    expect(regimeMinCandles(filter({ ema: 10, minAdx: 25 }))).toBe(28);
+    expect(regimeMinCandles(filter({ long: "any", short: "any" }))).toBe(1);
+    expect(
+      regimeMinCandles(filter({ long: "any", short: "any", minAdx: 25 })),
+    ).toBe(28);
   });
 
   it("symbol по умолчанию — BTCUSDT", () => {

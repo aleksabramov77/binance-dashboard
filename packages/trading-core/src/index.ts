@@ -21,7 +21,7 @@ export {
 } from "./fills.ts";
 export {
   marketRegimeAllows,
-  REGIME_ADX_PERIOD,
+  regimeMinCandles,
   sessionAllows,
 } from "./filters.ts";
 export * from "./indicators/index.ts";

@@ -55,15 +55,15 @@ describe("describeConfig: фильтры режима рынка и часов",
       ...config,
       marketFilter: {
         symbol: "BTCUSDT",
-        timeframe: "4h",
-        ema: 200,
-        minAdx: 20,
+        timeframe: "1d",
+        ema: 100,
+        minAdx: 30,
         long: "above",
         short: "any",
       },
     });
     expect(lines.find((l) => l.label === "Режим рынка")?.value).toBe(
-      "лонг — BTCUSDT выше EMA 200 на 4h; шорт — при любом; ADX ≥ 20 на 4h",
+      "лонг — BTCUSDT выше EMA 100 на 1d; шорт — при любом; ADX ≥ 30 на 1d",
     );
   });
 

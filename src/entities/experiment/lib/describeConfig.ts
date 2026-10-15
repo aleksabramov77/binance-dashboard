@@ -104,8 +104,8 @@ const REGIME_SIDE: Record<RegimeSide, string> = {
   any: "",
 };
 
-/** «лонг — BTCUSDT выше EMA 200 на 4h; шорт — при любом; ADX ≥ 20 на 4h». */
-export function describeMarketFilter(f: MarketFilter): string {
+/** «лонг — BTCUSDT выше EMA 100 на 1d; шорт — при любом; ADX ≥ 30 на 1d». */
+function describeMarketFilter(f: MarketFilter): string {
   const side = (label: string, s: RegimeSide) =>
     s === "any"
       ? `${label} — при любом`
@@ -120,7 +120,7 @@ const WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
 const hour = (h: number) => `${String(h).padStart(2, "0")}:00`;
 
 /** Строки «Часы» и «Дни» фильтра торговых часов (UTC). */
-export function describeSessionFilter(f: SessionFilter): ConfigLine[] {
+function describeSessionFilter(f: SessionFilter): ConfigLine[] {
   const lines: ConfigLine[] = [];
   if (f.hoursUtc) {
     const [from, to] = f.hoursUtc;

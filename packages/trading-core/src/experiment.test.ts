@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { experimentConfigSchema, experimentSchema } from "./experiment.ts";
+import {
+  experimentConfigSchema,
+  experimentSchema,
+  REGIME_MAX_EMA,
+} from "./experiment.ts";
 
 // Фиктивный эксперимент для тестов схемы (PS99): параметры ничего не значат.
 const config = {
@@ -45,6 +49,16 @@ describe("experimentConfigSchema: фильтры режима рынка и ча
       long: "above",
       short: "any",
     });
+  });
+
+  it("marketFilter: период EMA не больше REGIME_MAX_EMA", () => {
+    const ok = (ema: number) =>
+      experimentConfigSchema.safeParse({
+        ...config,
+        marketFilter: { timeframe: "1d", ema, long: "above", short: "below" },
+      }).success;
+    expect(ok(REGIME_MAX_EMA)).toBe(true);
+    expect(ok(REGIME_MAX_EMA + 1)).toBe(false);
   });
 
   it("sessionFilter: часы 0–24, дни 0–6; пустое окно и пустой фильтр — ошибка", () => {
@@ -94,7 +108,7 @@ describe("строгая схема конфига", () => {
           trailATR: 2,
         },
         universe: { type: "top", n: 10, blaclist: ["PEPE"] },
-        trendFilter: { timeframe: "4h", period: 200, perod: 100 },
+        trendFilter: { timeframe: "1d", period: 100, perod: 50 },
         marketFilter: {
           timeframe: "4h",
           ema: 50,

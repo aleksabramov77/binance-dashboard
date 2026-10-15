@@ -11,7 +11,20 @@ import { adxSeries } from "./indicators/ta.ts";
 import type { Candle } from "./types.ts";
 
 /** Длина ADX фильтра режима рынка — классические 14 свечей. */
-export const REGIME_ADX_PERIOD = 14;
+const REGIME_ADX_PERIOD = 14;
+
+/**
+ * Сколько закрытых свечей нужно фильтру режима: EMA(ema) — ema свечей (если хоть одно направление
+ * сравнивается с EMA), ADX(14) — 2 × 14 (сглаживание TR/DM и самого DX). Меньше — вход запрещён.
+ */
+export function regimeMinCandles(filter: MarketFilter): number {
+  const needEma = filter.long !== "any" || filter.short !== "any";
+  return Math.max(
+    1,
+    needEma ? filter.ema : 0,
+    filter.minAdx !== undefined ? 2 * REGIME_ADX_PERIOD : 0,
+  );
+}
 
 function sideAllows(
   side: Exclude<RegimeSide, "any">,
@@ -34,7 +47,7 @@ export function marketRegimeAllows(
   direction: TradeDirection,
 ): boolean {
   const last = candles.at(-1);
-  if (!last) return false;
+  if (!last || candles.length < regimeMinCandles(filter)) return false;
   const side = filter[direction];
   if (side !== "any") {
     const level =
@@ -53,7 +66,9 @@ export function marketRegimeAllows(
 
 /**
  * Время (мс) попадает в торговые часы фильтра? Час и день недели — по UTC; окно часов [from, to),
- * from > to — через полночь. Не заданное условие (часы или дни) не ограничивает.
+ * from > to — через полночь. Дни проверяются по UTC-дню момента входа: окно через полночь вместе с days
+ * смотрит на день входа, а не на день начала окна ([22, 6) с days [5] пропустит пт 23:00, но не сб 02:00).
+ * Не заданное условие (часы или дни) не ограничивает.
  */
 export function sessionAllows(time: number, filter: SessionFilter): boolean {
   const date = new Date(time);

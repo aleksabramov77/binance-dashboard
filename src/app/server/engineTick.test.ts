@@ -232,6 +232,23 @@ describe("buildTickDeps: свечи", () => {
       ["spot", "BTCUSDT", "1h", 301, undefined],
     ]);
   });
+
+  it("пустой справочник фьючерсов (после фильтра только крипты) — warn в журнал (spec 0029)", async () => {
+    const log = vi.fn();
+    const deps = buildTickDeps(
+      env({ perpetuals: async () => new Set(), log }),
+      createDbExperimentStore(db),
+    );
+    expect(await deps.tickers("futures")).toEqual([]);
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      "engine.perpetuals",
+      expect.stringContaining("пуст"),
+    );
+    log.mockClear();
+    await deps.tickers("spot");
+    expect(log).not.toHaveBeenCalled();
+  });
 });
 
 describe("createPerpetualsSource", () => {

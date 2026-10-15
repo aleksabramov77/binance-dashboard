@@ -102,12 +102,18 @@ export const universeSchema = z.strictObject({
 export type Universe = z.infer<typeof universeSchema>;
 
 /** Где цена закрытия относительно EMA: выше, ниже или не важно. */
-export const REGIME_SIDES = ["above", "below", "any"] as const;
-export const regimeSideSchema = z.enum(REGIME_SIDES);
+const regimeSideSchema = z.enum(["above", "below", "any"]);
 export type RegimeSide = z.infer<typeof regimeSideSchema>;
 
 /** Символ по умолчанию для режима рынка: весь рынок крипты идёт за BTC. */
-export const REGIME_SYMBOL = "BTCUSDT";
+const REGIME_SYMBOL = "BTCUSDT";
+
+/**
+ * Наибольший период EMA фильтра режима. Движок держит ENGINE.signalCandles (300) закрытых свечей на
+ * (рынок, символ, TF) — с запасом на ADX и на свечи, которые Binance ещё не отдал; период больше
+ * истории молча запрещал бы все входы, поэтому схема его не пропускает.
+ */
+export const REGIME_MAX_EMA = 250;
 
 /**
  * Фильтр режима рынка: вход разрешён, только если на последней закрытой свече timeframe символа
@@ -117,7 +123,7 @@ export const REGIME_SYMBOL = "BTCUSDT";
 export const marketFilterSchema = z.strictObject({
   symbol: z.string().min(1).default(REGIME_SYMBOL),
   timeframe: timeframeSchema,
-  ema: z.number().int().positive(),
+  ema: z.number().int().positive().max(REGIME_MAX_EMA),
   minAdx: z.number().positive().optional(),
   long: regimeSideSchema,
   short: regimeSideSchema,
