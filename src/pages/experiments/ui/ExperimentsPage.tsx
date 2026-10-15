@@ -97,8 +97,7 @@ const COLUMNS: {
     key: "maxDrawdown",
     label: "Max DD",
     numeric: true,
-    description:
-      "Наибольшая просадка equity от пика, в % от стартового капитала.",
+    description: "Наибольшая просадка equity от пика, в % от пика.",
   },
   {
     key: "equity",
@@ -133,7 +132,31 @@ const COLUMNS: {
     description:
       "Плюс или минус на демо-счёте по эксперименту с последнего демо-сброса, $, без комиссий: (цена выхода − цена входа на бирже) × количество. Выход — фактическая цена, если позицию закрыло зеркало, иначе (TP/SL биржи) — цена выхода paper-сделки. Точная история ордеров — «Сигналы» → «Демо-сделки».",
   },
+  {
+    key: "demoProfitFactor",
+    label: "Демо: Profit factor",
+    numeric: true,
+    description:
+      "Σ прибылей / Σ убытков закрытых демо-сделок с последнего демо-сброса; ∞ — убытков не было.",
+  },
+  {
+    key: "demoMaxDrawdown",
+    label: "Демо: Max DD",
+    numeric: true,
+    description: "Наибольшая просадка демо-equity от пика, % от пика.",
+  },
+  {
+    key: "demoEquity",
+    label: "Демо: Equity",
+    numeric: true,
+    description:
+      "Стартовый бюджет эксперимента + PnL демо-сделок с последнего демо-сброса (отдельного демо-капитала у эксперимента нет, демо-счёт общий).",
+  },
 ];
+
+/** Оттенок всех колонок «Демо: …» — заголовки и ячейки (AC6; вариант утверждает пользователь). */
+const DEMO_TONE = "bg-sky-500/[0.06]";
+const isDemoColumn = (key: SortKey) => key.startsWith("demo");
 
 function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
   const [{ sort, dir }, setView] = useExperimentsView();
@@ -142,6 +165,7 @@ function ColumnHead({ column }: { column: (typeof COLUMNS)[number] }) {
       className={cn(
         column.numeric && "text-right",
         column.key === "demo" && "text-center",
+        isDemoColumn(column.key) && DEMO_TONE,
       )}
       active={sort === column.key}
       dir={dir}
@@ -170,10 +194,10 @@ function DemoCells({
   const d = e.demo;
   return (
     <>
-      <TableCell className="text-center">
+      <TableCell className={cn("text-center", DEMO_TONE)}>
         <DemoMirrorToggle experiment={e} demoConfigured={demoConfigured} />
       </TableCell>
-      <TableCell className="text-right font-mono tabular-nums">
+      <TableCell className={cn("text-right font-mono tabular-nums", DEMO_TONE)}>
         {d.trades || d.rejected || d.skipped ? (
           <>
             {d.closed}
@@ -186,16 +210,31 @@ function DemoCells({
           <span className="text-muted-foreground">—</span>
         )}
       </TableCell>
-      <TableCell className="text-right font-mono tabular-nums">
+      <TableCell className={cn("text-right font-mono tabular-nums", DEMO_TONE)}>
         {d.closed ? formatRate(d.wins / d.closed) : "—"}
       </TableCell>
       <TableCell
         className={cn(
           "text-right font-mono font-semibold tabular-nums",
           pnlTone(d.pnl),
+          DEMO_TONE,
         )}
       >
         {d.closed ? formatSignedUsd(d.pnl) : "—"}
+      </TableCell>
+      <TableCell className={cn("text-right font-mono tabular-nums", DEMO_TONE)}>
+        {d.closed ? formatProfitFactor(d.profitFactor, d.grossProfit) : "—"}
+      </TableCell>
+      <TableCell
+        className={cn(
+          "text-right font-mono tabular-nums text-muted-foreground",
+          DEMO_TONE,
+        )}
+      >
+        {d.closed ? formatRate(-d.maxDrawdownPct) : "—"}
+      </TableCell>
+      <TableCell className={cn("text-right font-mono tabular-nums", DEMO_TONE)}>
+        {d.closed ? formatUsd(d.equity) : "—"}
       </TableCell>
     </>
   );

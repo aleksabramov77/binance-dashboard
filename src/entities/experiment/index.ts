@@ -14,6 +14,7 @@ export {
   type MirrorToClose,
   markDemoReset,
   setExperimentDemoMirror,
+  toDemoSummary,
   updateMirror,
 } from "./api/mirrorDb";
 // Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
@@ -95,7 +96,9 @@ export {
   sliceStats,
 } from "./lib/slices";
 export {
+  computeDemoStats,
   computeStats,
+  type DemoStats,
   type EquityPoint,
   equityCurve,
   groupStats,

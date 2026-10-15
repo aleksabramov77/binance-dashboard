@@ -40,6 +40,15 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
       return e.demo.closed ? e.demo.wins / e.demo.closed : null;
     case "demoPnl":
       return e.demo.closed ? e.demo.pnl : null;
+    case "demoProfitFactor":
+      return e.demo.closed
+        ? (e.demo.profitFactor ??
+            (e.demo.grossProfit > 0 ? Number.POSITIVE_INFINITY : null))
+        : null;
+    case "demoMaxDrawdown":
+      return e.demo.closed ? e.demo.maxDrawdownPct : null;
+    case "demoEquity":
+      return e.demo.closed ? e.demo.equity : null;
   }
 }
 
