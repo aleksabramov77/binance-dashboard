@@ -182,3 +182,66 @@ export const CLONE_HINT = [
   "  git clone git@github-personal:aleksabramov77/binance-dashboard-private.git private",
   "В worktree задачи после этого: pnpm wt link (создаст ссылку private на основной checkout).",
 ].join("\n");
+
+export const DEFAULT_PRIVATE_FILE = "private/experiments.json";
+
+export interface LabPrivateArgs {
+  dryRun: boolean;
+  prod: boolean;
+  file: string;
+}
+
+/**
+ * Аргументы `pnpm lab:private`: --dry-run, --prod, --file <path> или --file=<path>.
+ * Значение после `--file=` берётся целиком (делим по первому «=»): путь может содержать «=».
+ */
+export function parseLabPrivateArgs(
+  argv: readonly string[],
+): { ok: true; args: LabPrivateArgs } | { ok: false; error: string } {
+  const args: LabPrivateArgs = {
+    dryRun: false,
+    prod: false,
+    file: DEFAULT_PRIVATE_FILE,
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const eq = argv[i].indexOf("=");
+    const key = eq === -1 ? argv[i] : argv[i].slice(0, eq);
+    const inline = eq === -1 ? undefined : argv[i].slice(eq + 1);
+    if ((key === "--dry-run" || key === "--prod") && inline !== undefined)
+      return { ok: false, error: `${key}: флаг без значения` };
+    if (key === "--dry-run") args.dryRun = true;
+    else if (key === "--prod") args.prod = true;
+    else if (key === "--file") {
+      const value = inline ?? argv[++i];
+      if (!value) return { ok: false, error: "--file: нужен путь к JSON" };
+      args.file = value;
+    } else
+      return {
+        ok: false,
+        error: `неизвестный аргумент ${argv[i]} (есть --dry-run, --prod, --file <path>)`,
+      };
+  }
+  return { ok: true, args };
+}
+
+/**
+ * Что делать после печати цели и плана: записать, только показать (--dry-run) или отказать.
+ * Postgres по DATABASE_URL — прод (Supabase; в worktree .env.local — ссылка на основной checkout),
+ * поэтому запись туда — только с явным --prod. Локальная PGlite пишется без флага.
+ */
+export function decideLabPrivateWrite(
+  targetKind: "postgres" | "pglite",
+  args: Pick<LabPrivateArgs, "dryRun" | "prod">,
+): "write" | "dry-run" | "need-prod" {
+  if (args.dryRun) return "dry-run";
+  if (targetKind === "postgres" && !args.prod) return "need-prod";
+  return "write";
+}
+
+/** Отказ записи в Postgres без --prod. */
+export const NEED_PROD_HINT = [
+  "Цель — Postgres (прод), в БД ничего не записано.",
+  "  Для записи в прод добавьте --prod: pnpm lab:private --prod",
+  "  Для локального сервера worktree (data/pglite): DATABASE_URL= pnpm lab:private",
+  "  (сервер worktree остановить: pnpm wt stop → запись → pnpm wt serve)",
+].join("\n");

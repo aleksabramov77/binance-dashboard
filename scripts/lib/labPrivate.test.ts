@@ -2,9 +2,13 @@ import type { Experiment } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
 import { EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import {
+  DEFAULT_PRIVATE_FILE,
+  decideLabPrivateWrite,
   describeDbTarget,
   formatPlanLine,
+  NEED_PROD_HINT,
   type ParseResult,
+  parseLabPrivateArgs,
   parsePrivateExperiments,
   planPrivateSeed,
 } from "./labPrivate";
@@ -161,5 +165,73 @@ describe("describeDbTarget", () => {
     expect(describeDbTarget({ kind: "pglite", dir: "/tmp/x" })).toBe(
       "локальная PGlite (/tmp/x)",
     );
+  });
+});
+
+describe("parseLabPrivateArgs", () => {
+  it("без аргументов — файл по умолчанию, без флагов", () => {
+    expect(parseLabPrivateArgs([])).toEqual({
+      ok: true,
+      args: { dryRun: false, prod: false, file: DEFAULT_PRIVATE_FILE },
+    });
+  });
+
+  it("флаги и --file отдельным аргументом", () => {
+    expect(
+      parseLabPrivateArgs(["--prod", "--dry-run", "--file", "x.json"]),
+    ).toEqual({
+      ok: true,
+      args: { dryRun: true, prod: true, file: "x.json" },
+    });
+  });
+
+  it("--file=… делится по первому «=»: значение с «=» не обрезается", () => {
+    const parsed = parseLabPrivateArgs(["--file=a=b.json"]);
+    expect(parsed).toEqual({
+      ok: true,
+      args: { dryRun: false, prod: false, file: "a=b.json" },
+    });
+  });
+
+  it("ошибки: неизвестный аргумент, --file без пути, флаг со значением", () => {
+    expect(parseLabPrivateArgs(["--force"]).ok).toBe(false);
+    expect(parseLabPrivateArgs(["--file"]).ok).toBe(false);
+    expect(parseLabPrivateArgs(["--file="]).ok).toBe(false);
+    expect(parseLabPrivateArgs(["--prod=yes"]).ok).toBe(false);
+  });
+});
+
+describe("decideLabPrivateWrite", () => {
+  it("Postgres без --prod — отказ, с --prod — запись", () => {
+    expect(
+      decideLabPrivateWrite("postgres", { dryRun: false, prod: false }),
+    ).toBe("need-prod");
+    expect(
+      decideLabPrivateWrite("postgres", { dryRun: false, prod: true }),
+    ).toBe("write");
+  });
+
+  it("--dry-run работает без --prod и никогда не пишет", () => {
+    expect(
+      decideLabPrivateWrite("postgres", { dryRun: true, prod: false }),
+    ).toBe("dry-run");
+    expect(
+      decideLabPrivateWrite("postgres", { dryRun: true, prod: true }),
+    ).toBe("dry-run");
+    expect(decideLabPrivateWrite("pglite", { dryRun: true, prod: false })).toBe(
+      "dry-run",
+    );
+  });
+
+  it("PGlite пишется без --prod", () => {
+    expect(
+      decideLabPrivateWrite("pglite", { dryRun: false, prod: false }),
+    ).toBe("write");
+  });
+
+  it("подсказка называет --prod и запуск для сервера worktree", () => {
+    expect(NEED_PROD_HINT).toContain("--prod");
+    expect(NEED_PROD_HINT).toContain("DATABASE_URL= pnpm lab:private");
+    expect(NEED_PROD_HINT).toContain("pnpm wt stop");
   });
 });
