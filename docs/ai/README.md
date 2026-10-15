@@ -13,7 +13,7 @@
 | [`deploy-supabase.md`](deploy-supabase.md) | **Основной деплой:** Supabase (БД, тик) + Vercel (интерфейс, регион Tokyo) |
 | [`deploy.md`](deploy.md) | Резервный деплой на Oracle Cloud (Dubai): VM, HTTPS, Supabase, GitHub OAuth, автодеплой, ключи на сервере |
 | [`../specs/`](../specs/) | ТЗ на каждую фичу и баг (`NNNN-slug.md`) + шаблоны |
-| [`../lab/`](../lab/) | Память лаборатории: журнал прогонов `/flow lab`, бэклог гипотез, отчёты и разборы по датам |
+| [`../lab/`](../lab/) | Указатель: память лаборатории (журнал, гипотезы, прогоны) — в приватном репозитории `private/lab/` |
 
 README внутри сложных модулей (читать перед правкой модуля):
 - `src/shared/api/binance/README.md` — клиенты Binance: публичный, read-only, Demo Trading.
