@@ -10,6 +10,7 @@ import {
 } from "@/entities/experiment";
 import { mirrorLogsHref } from "@/entities/log-entry";
 import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
+import { DEMO_WALLET_URL } from "@/shared/config";
 import {
   cn,
   defineSortTable,
@@ -171,7 +172,7 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
                 приложение сбросить не может (у Binance нет такого API): чтобы
                 начать и баланс с нуля, нажмите «Сброс» на сайте Binance:{" "}
                 <a
-                  href="https://demo.binance.com/en/my/wallet/demo/main"
+                  href={DEMO_WALLET_URL}
                   target="_blank"
                   rel="noreferrer"
                   className="underline underline-offset-4"

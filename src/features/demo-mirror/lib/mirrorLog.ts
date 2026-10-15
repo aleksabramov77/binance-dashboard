@@ -8,8 +8,6 @@ export interface MirrorLogSubject {
   market: "spot" | "futures";
 }
 
-export const MIRROR_LOG_EVENTS = ["mirror.rejected", "mirror.skipped"] as const;
-
 export function mirrorLogEntry(
   kind: "rejected" | "skipped",
   c: MirrorLogSubject,

@@ -6,7 +6,7 @@ import {
   parseAsStringLiteral,
   useQueryStates,
 } from "nuqs";
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   LOG_DAYS_DEFAULT,
   LOG_DAYS_MAX,
@@ -29,7 +29,24 @@ const LEVEL_LABELS: Record<LogLevel, string> = {
 
 const DAYS_OPTIONS = [LOG_DAYS_DEFAULT, 7, LOG_DAYS_MAX] as const;
 
-const daysLabel = (n: number) => (n < 5 ? `${n} дня` : `${n} дней`);
+/** 1 день, 2–4 дня, 5+ дней (11–14 — «дней»). */
+const daysLabel = (n: number) => {
+  const d10 = n % 10;
+  const d100 = n % 100;
+  if (d10 === 1 && d100 !== 11) return `${n} день`;
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return `${n} дня`;
+  return `${n} дней`;
+};
+
+/** Значение с задержкой: текстовые фильтры не шлют запрос на каждое нажатие клавиши. */
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
 
 // Фильтры — в URL (spec 0016): на них ведёт ссылка из «N отказ · M пропуск» в лаборатории.
 const parsers = {
@@ -44,13 +61,21 @@ function Logs() {
     parsers,
     { clearOnDefault: true },
   );
+  // Текст из полей — с задержкой 300 мс; уровень и период — сразу.
+  const eventQuery = useDebounced(event, 300);
+  const experimentQuery = useDebounced(experiment, 300);
   // Те же правила разбора, что у сервера: события списком, days зажат в 1…14.
   const filters = useMemo(
     () =>
       parseLogFilters(
-        new URLSearchParams({ level, event, experiment, days: String(days) }),
+        new URLSearchParams({
+          level,
+          event: eventQuery,
+          experiment: experimentQuery,
+          days: String(days),
+        }),
       ),
-    [level, event, experiment, days],
+    [level, eventQuery, experimentQuery, days],
   );
   const logs = useLogs(filters);
   const active =

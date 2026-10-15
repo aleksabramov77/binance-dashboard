@@ -3,7 +3,6 @@
 export { MIRROR } from "./config/mirror";
 // Записи журнала об отказах и пропусках (spec 0016) — пишет композиция.
 export {
-  MIRROR_LOG_EVENTS,
   type MirrorLogSubject,
   mirrorLogEntry,
 } from "./lib/mirrorLog";

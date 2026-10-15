@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ASSET_GROUPS,
+  assetGroupOf,
   formatSignedUsd,
   type LabSettings,
   pnlTone,
@@ -37,11 +37,6 @@ import {
 } from "@/shared/ui/table";
 
 type Experiment = LabSettings["experiments"][number];
-
-const MARKET_LABEL = {
-  spot: ASSET_GROUPS.spot.label,
-  futures: ASSET_GROUPS.futures.label,
-} as const;
 
 const SORT_KEYS = [
   "id",
@@ -196,7 +191,7 @@ export function PaperAccountsCard({
                   <div className="font-medium">
                     {e.name}{" "}
                     <span className="text-xs font-normal text-muted-foreground">
-                      {MARKET_LABEL[e.market]}
+                      {assetGroupOf(e.market).label}
                     </span>
                   </div>
                   <div className="line-clamp-1 text-xs text-muted-foreground">
