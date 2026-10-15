@@ -48,7 +48,9 @@ async function main() {
   const database = describeDatabase(getDatabaseConfig());
   console.log(`[lab:report] БД: ${database}`);
   const now = Date.now();
-  const data = await readLabDataset(getDb());
+  const data = await readLabDataset(getDb(), ({ id, problem }) =>
+    console.warn(`[lab:report] эксперимент ${id} пропущен: ${problem}`),
+  );
   const since = values.since ? parseSince(values.since, now) : null;
   const periodStart = Math.max(Date.parse(data.run.startedAt), since ?? 0);
   const market = await marketContext(!values["no-market"], periodStart, now);

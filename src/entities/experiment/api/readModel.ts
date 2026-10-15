@@ -1,6 +1,5 @@
 import {
   type Experiment,
-  experimentSchema,
   marketSchema,
   type PaperTrade,
 } from "@binance-dashboard/trading-core";
@@ -10,6 +9,11 @@ import { filterTrades, periodStart, sliceStats } from "../lib/slices";
 import { computeStats, equityCurve } from "../lib/stats";
 import { ASSET_GROUPS } from "../model/assetGroup";
 import { experimentsTable, paperTradesTable, runsTable } from "../model/db";
+import {
+  type OnInvalidExperiment,
+  parseExperimentRow,
+  parseExperimentRows,
+} from "../model/parseRows";
 import type {
   StatsGroupBy,
   StatsQuery,
@@ -64,11 +68,15 @@ async function runTrades(
   return rows.map(toTrade);
 }
 
-/** Все эксперименты каталога со статистикой текущей эпохи. */
+/**
+ * Все эксперименты каталога со статистикой текущей эпохи. Строки, не прошедшие схему, пропускаются
+ * (onInvalid — в журнал), остальные показываются — так и во всех чтениях ниже.
+ */
 export async function readExperimentsOverview(
   db: Db,
   engineEnabled: boolean,
   demoConfigured = false,
+  onInvalid?: OnInvalidExperiment,
 ): Promise<ExperimentsResponse> {
   const run = await currentRun(db);
   const [rows, trades, demo] = await Promise.all([
@@ -86,39 +94,45 @@ export async function readExperimentsOverview(
     run,
     engineEnabled,
     demoConfigured,
-    experiments: rows.map((r) => {
-      const e = experimentSchema.parse(r);
-      return {
-        id: e.id,
-        market: e.market,
-        name: e.name,
-        hypothesis: e.hypothesis,
-        initialBudget: e.initialBudget,
-        enabled: e.enabled,
-        demoMirror: e.demoMirror,
-        stats: computeStats(byExperiment.get(e.id) ?? [], e.initialBudget),
-        demo: toDemoSummary(
-          demo.get(e.id) ?? emptyMirrorSummary(),
-          e.initialBudget,
-        ),
-      };
-    }),
+    experiments: parseExperimentRows(rows, onInvalid).map(
+      ({ experiment: e }) => {
+        return {
+          id: e.id,
+          market: e.market,
+          name: e.name,
+          hypothesis: e.hypothesis,
+          initialBudget: e.initialBudget,
+          enabled: e.enabled,
+          demoMirror: e.demoMirror,
+          stats: computeStats(byExperiment.get(e.id) ?? [], e.initialBudget),
+          demo: toDemoSummary(
+            demo.get(e.id) ?? emptyMirrorSummary(),
+            e.initialBudget,
+          ),
+        };
+      },
+    ),
   };
 }
 
-/** Эксперимент, статистика, equity-кривая и последние limit сделок эпохи; null — нет такого id. */
+/**
+ * Эксперимент, статистика, equity-кривая и последние limit сделок эпохи; null — нет такого id или
+ * строка не проходит схему (тогда onInvalid).
+ */
 export async function readExperimentDetail(
   db: Db,
   id: string,
   engineEnabled: boolean,
   limit: number,
+  onInvalid?: OnInvalidExperiment,
 ): Promise<ExperimentDetailResponse | null> {
   const [row] = await db
     .select()
     .from(experimentsTable)
     .where(eq(experimentsTable.id, id));
   if (!row) return null;
-  const experiment: Experiment = experimentSchema.parse(row);
+  const experiment = parseExperimentRow(row, onInvalid);
+  if (!experiment) return null;
   const run = await currentRun(db);
   const trades = await runTrades(db, run.id, id);
   const shown = trades.slice(-limit).reverse();
@@ -175,7 +189,10 @@ export type LabExperiment = Experiment & { resetAt: string | null };
  * Сделки уже отфильтрованы по сбросу эксперимента (countedTrade); дата сброса отдаётся, чтобы отчёт
  * считал темп сделок и период эксперимента с неё.
  */
-export async function readLabDataset(db: Db): Promise<{
+export async function readLabDataset(
+  db: Db,
+  onInvalid?: OnInvalidExperiment,
+): Promise<{
   run: ExperimentsResponse["run"];
   experiments: LabExperiment[];
   trades: PaperTrade[];
@@ -187,10 +204,12 @@ export async function readLabDataset(db: Db): Promise<{
   ]);
   return {
     run,
-    experiments: rows.map((r) => ({
-      ...experimentSchema.parse(r),
-      resetAt: r.resetAt?.toISOString() ?? null,
-    })),
+    experiments: parseExperimentRows(rows, onInvalid).map(
+      ({ experiment, row }) => ({
+        ...experiment,
+        resetAt: row.resetAt?.toISOString() ?? null,
+      }),
+    ),
     trades,
   };
 }
@@ -224,6 +243,7 @@ export async function readTradeStats(
   db: Db,
   query: StatsQuery,
   now: number,
+  onInvalid?: OnInvalidExperiment,
 ): Promise<TradeStatsResponse | null> {
   const runs = (
     await db.select().from(runsTable).orderBy(desc(runsTable.id))
@@ -237,7 +257,9 @@ export async function readTradeStats(
     db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
     runTrades(db, run.id),
   ]);
-  const experiments = rows.map((r) => experimentSchema.parse(r));
+  const experiments = parseExperimentRows(rows, onInvalid).map(
+    (x) => x.experiment,
+  );
   const since = periodStart(query.period, now);
   const filtered = filterTrades(trades, {
     market: query.market,
