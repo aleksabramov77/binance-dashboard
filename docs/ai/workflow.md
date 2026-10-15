@@ -71,7 +71,7 @@ Claude запускать из папки проекта (`~/Projects/my/binance
 ## Worktree на задачу
 Решение пользователя 2026-10-15 (отменяет «один чат, без worktree» от 2026-10-10): каждая задача — своя ветка в
 своём worktree `~/Projects/my/binance-dashboard_<метка>`, созданном `pnpm wt new` (скилл `worktree`): ветка от
-свежего `main`, ссылка на `.env.local` по списку `.claude/worktree-links.json`, зависимости. Основной checkout всегда
+свежего `main`, ссылки на `.env.local` и `private/` (если есть) по списку `.claude/worktree-links.json`, зависимости. Основной checkout всегда
 на чистом `main` — в нём только мерж и выкатка; spec и строка журнала задачи пишутся уже в её worktree. У каждого worktree свой локальный сервер (`pnpm wt serve`, свой порт
 и своя PGlite): на нём Tester проверяет задачу до PR и после каждого круга правок по ревью.
 
