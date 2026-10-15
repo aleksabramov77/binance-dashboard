@@ -24,6 +24,12 @@ export {
   formatPrice,
   formatUsd,
 } from "./format";
+export {
+  type Glossary,
+  type GlossarySection,
+  type GlossaryTerm,
+  parseGlossary,
+} from "./glossary";
 export { reportClientError } from "./reportClientError";
 export {
   loadSort,
