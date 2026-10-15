@@ -67,7 +67,7 @@
 
 ## Вне scope
 - Демо-зеркало COIN-M на `demo-dapi.binance.com` — отдельная задача после мержа 0012.
-- Остатки Paper | Demo | Real в шапке и сбросы по группе — задача B (0024); статистика по счетам — задача C.
+- Остатки Paper | Demo | Real в шапке и сбросы по группе — задача B (номер — при запуске, `pnpm -s wt next`); статистика по счетам — задача C.
 - Сигналы, сканер и ручные демо-сделки на COIN-M (`/signals`, тикет сделки) — без изменений.
 - Учёт маржи в монете (курсовая переоценка залога) — бюджет в $ по решению пользователя.
 
@@ -106,3 +106,4 @@
 | 2026-10-15 | Разработка начата: ветка `feature/0023-coinm-asset-group` |
 | 2026-10-15 | Реализовано (Developer): ядро — `MARKETS` spot/usdm/coinm, `MARKET_KIND`, `legacyMarketSchema`, комиссия и размер сделки COIN-M целыми контрактами; `marketApi` — dapi (тикеры, свечи, funding, бессрочные с размером контракта); движок — юниверс `…USD_PERP`, ветвления по виду группы, недоступный рынок пропускается одной записью `warn`; миграция `0007_futures_to_usdm`; шапка, фильтры `/experiments` и `/stats` с COIN-M и чтением `?market=futures`; демо-зеркало COIN-M недоступно (галочка, API 400, `lab:private`); `lab:private` — `PC..`, `lab:report` — COIN-M отдельной группой; глоссарий, архитектура, README. `pnpm check`, `pnpm build`, `pnpm check:edge` зелёные |
 | 2026-10-15 | Слияние main (0019 Earn): конфликты в `shared/api/binance/index.ts` и README, глоссарий пересобран. Приёмка на локальном сервере, круг 1: 10/10 AC PASS (AC9 — юнит-тестами, AC2 — тестом миграции и сервером), скриншоты — `0023-coinm-asset-group/screens/`. Экраны утверждены пользователем. Статус → testing |
+| 2026-10-15 | Ревью PR #61, круг 1 (changes requested) — исправлено: размер COIN-M в контрактах считается от объёма в $ (без потери контракта на плавающей точке, тест на входе 5434 и 95303); `lab:private` читает `market: "futures"` как `usdm`; чтение старого имени группы — одна реализация в `trading-core` (`normalizeMarket`, `withLegacyMarketField`), `mirrorDb` без `as` (`demoMirrorMarketSchema`), текст запрета зеркала в `lab:private` — из `ASSET_GROUPS`; влит main (0025): документация `/flow lab` переведена на `usdm` и `PC..` |
