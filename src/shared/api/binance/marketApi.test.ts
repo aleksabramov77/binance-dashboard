@@ -24,13 +24,7 @@ describe("fetchKlines", () => {
 
   it("со startTime — передаёт его Binance", async () => {
     const { urls, market } = api();
-    await market.fetchKlines(
-      "usdm",
-      "ETHUSDT",
-      "1m",
-      1000,
-      1_700_000_000_000,
-    );
+    await market.fetchKlines("usdm", "ETHUSDT", "1m", 1000, 1_700_000_000_000);
     expect(urls).toEqual([
       "https://fapi.binance.com/fapi/v1/klines?symbol=ETHUSDT&interval=1m&limit=1000&startTime=1700000000000",
     ]);
