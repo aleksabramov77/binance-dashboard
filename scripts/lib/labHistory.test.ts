@@ -13,6 +13,7 @@ import {
   missingRanges,
   monthParts,
   NotCachedError,
+  RateLimitStopError,
 } from "./labHistory";
 
 const MIN = 60_000;
@@ -118,16 +119,45 @@ describe("транспорт: 429/418 и повторы", () => {
     expect(clock.slept).toEqual([7000]);
   });
 
-  it("бан 418 дольше 10 минут — останавливает прогон", async () => {
+  it("бан 418 дольше 10 минут — останов липкий: следующие запросы к хосту без сети", async () => {
     const clock = fakeClock();
+    let calls = 0;
     const get = createTransport({
-      fetch: async () =>
-        json(418, { msg: `IP banned until ${OCT + 3 * HOUR}` }),
+      fetch: async () => {
+        calls++;
+        return json(418, { msg: `IP banned until ${OCT + 3 * HOUR}` });
+      },
       clock,
     });
+    expect(get.stopped()).toBeNull();
     await expect(get("https://api.binance.com/api/v3/x")).rejects.toThrow(
       /418/,
     );
+    await expect(
+      get("https://api.binance.com/api/v3/y"),
+    ).rejects.toBeInstanceOf(RateLimitStopError);
+    expect(calls).toBe(1);
+    expect(get.stopped()).toBeInstanceOf(RateLimitStopError);
+  });
+
+  it("429 после всех пауз — тоже липкий останов", async () => {
+    const clock = fakeClock();
+    let calls = 0;
+    const get = createTransport({
+      fetch: async () => {
+        calls++;
+        return json(429, {}, { "retry-after": "5" });
+      },
+      clock,
+    });
+    await expect(get("https://fapi.binance.com/fapi/v1/a")).rejects.toThrow(
+      /429/,
+    );
+    const before = calls;
+    await expect(
+      get("https://fapi.binance.com/fapi/v1/b"),
+    ).rejects.toBeInstanceOf(RateLimitStopError);
+    expect(calls).toBe(before);
   });
 
   it("сетевой сбой повторяет, 4xx — нет", async () => {

@@ -190,7 +190,23 @@ export function universeSize(u: Universe): number {
   }
 }
 
-/** Точность выходов по умолчанию (AC3): 1m для короткого периода и малого юниверса, иначе 5m. */
+/**
+ * Точность выходов не может быть грубее шага тика: свеча выходов крупнее шага начинается раньше входа, и её high/low
+ * подмешали бы в проверку стопа и тейка цены до сделки. null — подходит, иначе текст ошибки.
+ */
+export function exitIntervalError(
+  exitInterval: ExitInterval,
+  step: Timeframe,
+): string | null {
+  return INTERVAL_MS[exitInterval] > TIMEFRAME_MS[step]
+    ? `--exit-tf ${exitInterval} крупнее шага тика ${step} (самый короткий ТФ прогона): свеча выходов начиналась бы раньше входа — возьмите ${EXIT_INTERVALS.filter((x) => INTERVAL_MS[x] <= TIMEFRAME_MS[step]).join(" или ")}`
+    : null;
+}
+
+/**
+ * Точность выходов по умолчанию (AC3): 1m для короткого периода и малого юниверса, иначе 5m. Юниверс — всех
+ * экспериментов прогона, включая добавленный автоматически контроль: 1m-свечи грузятся и для его символов.
+ */
 export function chooseExitInterval(
   days: number,
   experiments: Experiment[],
@@ -434,10 +450,15 @@ export function createBacktestDeps(ctx: DepsContext): TickDeps {
     const key = `${market}:${symbol}`;
     let p = fundingMemo.get(key);
     if (!p) {
+      // Пустой ответ — у символа нет истории ставок; сбой загрузки (нет в кэше, сеть) — ошибка данных в шапке.
       p = ctx.history
         .funding(market, symbol, ctx.start - DAY, ctx.end)
-        .catch(() => {
-          ctx.fundingMissing.add(key);
+        .then((points) => {
+          if (!points.length) ctx.fundingMissing.add(key);
+          return points;
+        })
+        .catch((error) => {
+          ctx.note(`funding ${market} ${symbol}: ${errorText(error)}`);
           return null;
         });
       fundingMemo.set(key, p);
@@ -498,6 +519,8 @@ export async function runBacktest(
   params: BacktestParams,
 ): Promise<BacktestRun> {
   const step = stepOf(params.experiments);
+  const wrongExit = exitIntervalError(params.exitInterval, step);
+  if (wrongExit) throw new Error(wrongExit);
   const store = backtestStore(params.experiments);
   const series = createSeriesStore(params.history, params.end);
   const errors = new Map<string, number>();
@@ -528,6 +551,10 @@ export async function runBacktest(
   for (const [i, now] of times.entries()) {
     clock.now = now;
     const result = await runTick(deps, now);
+    // Бан Binance: runTick ловит ошибки зависимостей, поэтому проверяем сами — дальше только неполные данные
+    // и новые запросы под баном.
+    const stopped = params.history.stopped?.();
+    if (stopped) throw stopped;
     for (const message of result.errors) note(message);
     params.onTick?.(i + 1, times.length, now, store.trades().length);
   }
@@ -658,8 +685,8 @@ export function limitationsOf(input: {
   ];
   out.push(
     input.exitInterval === "1m"
-      ? "Выходы — по 1m-свечам, как в живом движке."
-      : `Выходы — по ${input.exitInterval}-свечам (приближение): порядок цен внутри свечи неизвестен — стоп и тейк в одной свече засчитываются как стоп; время выхода, тайм-стоп, трейлинг и безубыток — с точностью до свечи ${input.exitInterval}.`,
+      ? "Выходы — по 1m-свечам, как в живом движке: минута входа [вход, вход + 1m) не проверяется — первая проверяемая свеча следующая."
+      : `Выходы — по ${input.exitInterval}-свечам (приближение): порядок цен внутри свечи неизвестен — стоп и тейк в одной свече засчитываются как стоп; время выхода, тайм-стоп, трейлинг и безубыток — с точностью до свечи ${input.exitInterval}; первая свеча включает минуту входа, которую живой движок пропускает.`,
   );
   const ranked = input.experiments.some((e) =>
     ["top", "movers"].includes(e.config.universe.type),
@@ -932,6 +959,11 @@ export function buildBacktestReport(input: BacktestReportInput): {
   const md = renderLabReport(full, {
     title: "Бэктест лаборатории",
     intro: renderBacktestIntro(meta),
+    scope:
+      "Только сделки, закрытые за период бэктеста; PnL — за вычетом комиссий и слиппеджа. Как читать — скилл trading-lab → «Бэктест»; подсказки — references/failure-modes.md.",
+    markets: MARKETS.filter((m) =>
+      input.experiments.some((e) => e.market === m),
+    ),
     sections: [
       "## Ограничения бэктеста",
       "",

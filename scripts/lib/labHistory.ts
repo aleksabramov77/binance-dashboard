@@ -40,6 +40,8 @@ export interface MarketSymbol {
 
 /** Источник истории для бэктеста: диск + Binance (createDiskHistory) или синтетика в тестах. */
 export interface BacktestHistory {
+  /** Загрузка остановлена баном Binance (RateLimitStopError): прогон прерывается; null — всё в порядке. */
+  stopped?(): Error | null;
   /** Символы группы, торгуемые сейчас (без стейблов и не-крипто); snapshotAt — когда снят список. */
   symbols(
     market: ExperimentMarket,
@@ -233,6 +235,12 @@ export class HttpStatusError extends Error {
   }
 }
 
+/**
+ * Binance забанил IP (418) или 429 не прошли после пауз. Состояние липкое: дальше запросы к хосту отклоняются без
+ * сети — каждый новый запрос под баном продлевает его. Прогон бэктеста на этой ошибке прерывается целиком.
+ */
+export class RateLimitStopError extends HttpStatusError {}
+
 export interface TransportOptions {
   fetch: FetchLike;
   clock?: Clock;
@@ -242,11 +250,14 @@ export interface TransportOptions {
 
 /**
  * GET JSON с паузой на 429/418 (общей для хоста: параллельные запросы тоже ждут) и повторами сетевых сбоев и 5xx.
- * Ошибка 4xx (кроме 429/418) не повторяется.
+ * Ошибка 4xx (кроме 429/418) не повторяется. Бан дольше MAX_COOLDOWN_MS или исчерпанные паузы — RateLimitStopError,
+ * липкая для хоста: следующие запросы к нему отклоняются сразу, без fetch (`stopped()` — первая такая ошибка).
  */
 export function createTransport(opts: TransportOptions) {
   const clock = opts.clock ?? realClock;
   const pausedUntil = new Map<string, number>();
+  const stoppedHosts = new Map<string, RateLimitStopError>();
+  let firstStop: RateLimitStopError | null = null;
   const waitPause = async (host: string) => {
     for (;;) {
       const until = pausedUntil.get(host) ?? 0;
@@ -255,12 +266,17 @@ export function createTransport(opts: TransportOptions) {
       await clock.sleep(until - now);
     }
   };
-  return async (url: string): Promise<unknown> => {
+  const get = async (url: string): Promise<unknown> => {
     const host = new URL(url).host;
     let cooldowns = 0;
     let failures = 0;
     for (;;) {
+      const stop = stoppedHosts.get(host);
+      if (stop) throw stop;
       await waitPause(host);
+      // Пока ждали паузу, другой запрос мог получить бан.
+      const late = stoppedHosts.get(host);
+      if (late) throw late;
       let res: HttpResponse;
       try {
         res = await opts.fetch(url);
@@ -280,11 +296,15 @@ export function createTransport(opts: TransportOptions) {
           res.headers.get("retry-after"),
           body,
         );
-        if (wait > MAX_COOLDOWN_MS || ++cooldowns > COOLDOWN_RETRIES)
-          throw new HttpStatusError(
-            `${host}: ответ ${res.status}, пауза ${Math.round(wait / 1000)} с — остановлено, повторите позже`,
+        if (wait > MAX_COOLDOWN_MS || ++cooldowns > COOLDOWN_RETRIES) {
+          const error = new RateLimitStopError(
+            `${host}: ответ ${res.status}, пауза ${Math.round(wait / 1000)} с — запросы к хосту остановлены, повторите позже`,
             res.status,
           );
+          stoppedHosts.set(host, error);
+          firstStop ??= error;
+          throw error;
+        }
         pausedUntil.set(
           host,
           Math.max(pausedUntil.get(host) ?? 0, clock.now() + wait),
@@ -311,6 +331,7 @@ export function createTransport(opts: TransportOptions) {
       return res.json();
     }
   };
+  return Object.assign(get, { stopped: () => firstStop });
 }
 
 // --- Binance: пути, веса, разбор ---
@@ -461,6 +482,7 @@ const closedBy = (fetchedAt: number, ms: number) => (c: HistoryCandle) =>
  */
 export function createDiskHistory(opts: DiskHistoryOptions): BacktestHistory & {
   stats: HistoryStats;
+  stopped(): Error | null;
 } {
   const clock = opts.clock ?? realClock;
   const getJson = createTransport({
@@ -606,6 +628,7 @@ export function createDiskHistory(opts: DiskHistoryOptions): BacktestHistory & {
 
   return {
     stats,
+    stopped: () => getJson.stopped(),
 
     async symbols(market) {
       const file = path.join(opts.root, "symbols", `${market}.json`);

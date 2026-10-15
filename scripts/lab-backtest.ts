@@ -18,6 +18,7 @@ import {
   buildBacktestReport,
   chooseExitInterval,
   DEFAULT_OUT_ROOT,
+  exitIntervalError,
   limitationsOf,
   mergeFileExperiments,
   parseBacktestArgs,
@@ -27,7 +28,7 @@ import {
   splitPoint,
   stepOf,
 } from "./lib/labBacktest";
-import { createDiskHistory } from "./lib/labHistory";
+import { createDiskHistory, RateLimitStopError } from "./lib/labHistory";
 import { parsePrivateExperiments } from "./lib/labPrivate";
 import { renderSkippedCsv, renderTradesCsv } from "./lib/labReport";
 
@@ -94,7 +95,10 @@ async function main() {
   const step = stepOf(experiments);
   const { start, end } = backtestPeriod(args.to ?? startedAt, args.days, step);
   const days = (end - start) / DAY;
-  const exitInterval = args.exitInterval ?? chooseExitInterval(days, own);
+  const exitInterval =
+    args.exitInterval ?? chooseExitInterval(days, experiments);
+  const wrongExit = exitIntervalError(exitInterval, step);
+  if (wrongExit) fail(wrongExit);
   const splitAt =
     args.split === null ? null : splitPoint(start, end, args.split, step);
 
@@ -215,6 +219,10 @@ async function main() {
     },
   });
 
+  // Бан пришёл уже после тиков (свечи для отчёта, контекст рынка): данные неполные — отчёт не пишем.
+  const stopped = history.stopped();
+  if (stopped) throw stopped;
+
   mkdirSync(out, { recursive: true });
   writeFileSync(path.join(out, "report.md"), md);
   writeFileSync(path.join(out, "report.json"), JSON.stringify(report, null, 2));
@@ -236,5 +244,9 @@ main().catch((error) => {
     "[lab:backtest]",
     error instanceof Error ? error.message : error,
   );
+  if (error instanceof RateLimitStopError)
+    console.error(
+      "[lab:backtest] прогон прерван, отчёт не записан: Binance ограничил IP. Уже загруженное — в кэше, повтор позже догрузит только недостающее.",
+    );
   process.exit(1);
 });

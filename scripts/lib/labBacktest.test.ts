@@ -20,6 +20,7 @@ import {
   chooseExitInterval,
   createBacktestDeps,
   createSeriesStore,
+  exitIntervalError,
   fundingAt,
   limitationsOf,
   mergeFileExperiments,
@@ -37,6 +38,7 @@ import {
   type HistoryCandle,
   INTERVAL_MS,
   type MarketSymbol,
+  RateLimitStopError,
 } from "./labHistory";
 
 const MIN = 60_000;
@@ -416,6 +418,21 @@ describe("точность выходов (AC3)", () => {
     expect(chooseExitInterval(14, [majors, top30])).toBe("5m");
   });
 
+  it("--exit-tf крупнее шага тика отклоняется: свеча выходов начиналась бы до входа", async () => {
+    expect(exitIntervalError("15m", "5m")).toMatch(/крупнее шага тика 5m/);
+    expect(exitIntervalError("5m", "5m")).toBeNull();
+    expect(exitIntervalError("15m", "1h")).toBeNull();
+    await expect(
+      runBacktest({
+        experiments: [exp("PS99", "spot", { timeframe: "5m" })],
+        start: START,
+        end: START + HOUR,
+        exitInterval: "15m",
+        history: synthHistory(synth()),
+      }),
+    ).rejects.toThrow(/--exit-tf 15m/);
+  });
+
   it("стоп и тейк в одной свече выходов: по 1m — тейк, по 5m — засчитывается стоп", async () => {
     // Вход в START по 100 (+ слиппедж); через минуту — тейк +1 %, ещё через минуту — стоп −1 %, обе внутри 5m-свечи.
     const s = synth({
@@ -586,6 +603,42 @@ describe("отчёт и --split (AC5)", () => {
     expect(md).toContain("### Проверочная");
     expect(md).toContain("### Разница (проверочная − обучающая)");
     expect(md).toContain("## Сводка");
+    // Шапка — бэктеста, а не эпохи; группы без экспериментов в строках контроля не показываются.
+    expect(md).not.toContain("учёта эпохи");
+    expect(md).toContain("закрытые за период бэктеста");
+    expect(md).not.toMatch(/coinm — нет/);
+  });
+});
+
+describe("останов по бану Binance (major-1 ревью)", () => {
+  it("бан посреди прогона прерывает runBacktest: дальше тиков нет", async () => {
+    const base = synthHistory(synth());
+    const ban = new RateLimitStopError("api.binance.com: ответ 418", 418);
+    let stopped: Error | null = null;
+    let klinesCalls = 0;
+    const history: BacktestHistory = {
+      ...base,
+      stopped: () => stopped,
+      klines: async (...args) => {
+        if (++klinesCalls > 3) {
+          stopped = ban;
+          throw ban;
+        }
+        return base.klines(...args);
+      },
+    };
+    const ticks: number[] = [];
+    await expect(
+      runBacktest({
+        experiments: EXPERIMENTS,
+        start: START,
+        end: END,
+        exitInterval: "5m",
+        history,
+        onTick: (done) => ticks.push(done),
+      }),
+    ).rejects.toBe(ban);
+    expect(ticks).toEqual([]);
   });
 });
 
@@ -668,6 +721,27 @@ describe("аргументы и выбор экспериментов", () => {
     expect(new Date(p.start).toISOString()).toBe("2026-10-02T10:00:00.000Z");
     expect(tickTimes(p.start, p.start + 3 * HOUR, HOUR)).toHaveLength(4);
     expect(splitPoint(p.start, p.end, 0.5, "1h") - p.start).toBe(7 * DAY);
+  });
+
+  it("сбой загрузки funding — ошибка данных, а не «нет истории»", async () => {
+    const base = synthHistory(synth());
+    const run = await runBacktest({
+      experiments: [EXPERIMENTS[1]],
+      start: START,
+      end: START + 3 * HOUR,
+      exitInterval: "5m",
+      history: {
+        ...base,
+        funding: async (_m, symbol) => {
+          if (symbol === "ALFUSDT") throw new Error("нет в кэше");
+          return [];
+        },
+      },
+    });
+    expect(run.fundingMissing).toEqual(["usdm:BETUSDT"]);
+    expect(run.errors.map((e) => e.message)).toContain(
+      "funding usdm ALFUSDT: нет в кэше",
+    );
   });
 
   it("funding — последняя выплата не позже тика", () => {
