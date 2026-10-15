@@ -16,7 +16,29 @@ export interface MirrorStep {
   detail: string;
 }
 
-export interface MirrorDeps {
+/** Демо-позиция на закрытие. Остальные поля (свои ордера) runMirror не читает — передаёт в close. */
+export interface MirrorCloseItem {
+  tradeId: string;
+  market: "spot" | "futures";
+  symbol: string;
+  direction: "long" | "short";
+  quantity: number;
+}
+
+/** Итог входа. Остальные поля (свои ордера) runMirror не читает — передаёт в saveOpen. */
+export interface MirrorOpenResult {
+  id: string;
+  status: "protected" | "unprotected" | "rejected";
+  message: string;
+  entryPrice: number | null;
+  filledQuantity: number | null;
+  steps: MirrorStep[];
+}
+
+export interface MirrorDeps<
+  C extends MirrorCloseItem = MirrorCloseItem,
+  R extends MirrorOpenResult = MirrorOpenResult,
+> {
   now: () => number;
   /** Ключ Binance Demo задан — иначе прогон ничего не делает. */
   configured: boolean;
@@ -29,35 +51,15 @@ export interface MirrorDeps {
   hasSymbol: (market: "spot" | "futures", symbol: string) => Promise<boolean>;
   /** Захват сделки (вставка pending). false — её уже взял другой прогон. */
   claim: (tradeId: string) => Promise<boolean>;
-  open: (req: MirrorOrderRequest) => Promise<{
-    id: string;
-    status: "protected" | "unprotected" | "rejected";
-    message: string;
-    entryPrice: number | null;
-    filledQuantity: number | null;
-    steps: MirrorStep[];
-  }>;
+  open: (req: MirrorOrderRequest) => Promise<R>;
   /** Отметить захваченную сделку пропущенной (не открывалась). */
   markSkipped: (tradeId: string, reason: string) => Promise<void>;
-  saveOpen: (
-    tradeId: string,
-    result: Awaited<ReturnType<MirrorDeps["open"]>>,
-  ) => Promise<void>;
-  claimToClose: () => Promise<
-    {
-      tradeId: string;
-      market: "spot" | "futures";
-      symbol: string;
-      direction: "long" | "short";
-      quantity: number;
-    }[]
-  >;
-  close: (req: {
-    market: "spot" | "futures";
-    symbol: string;
-    direction: "long" | "short";
-    quantity: number;
-  }) => Promise<{
+  saveOpen: (tradeId: string, result: R) => Promise<void>;
+  /** id демо-позиций на закрытие (без захвата). */
+  listToClose: () => Promise<string[]>;
+  /** Захват одной позиции на закрытие; null — её уже взял другой прогон. */
+  claimToClose: (tradeId: string) => Promise<C | null>;
+  close: (item: C) => Promise<{
     status: "closed" | "failed";
     message: string;
     steps: MirrorStep[];
@@ -65,7 +67,7 @@ export interface MirrorDeps {
   }>;
   saveClose: (
     tradeId: string,
-    result: Awaited<ReturnType<MirrorDeps["close"]>>,
+    result: Awaited<ReturnType<MirrorDeps<C, R>["close"]>>,
   ) => Promise<void>;
 }
 
@@ -73,8 +75,10 @@ export interface MirrorRunResult {
   configured: boolean;
   opened: { tradeId: string; symbol: string; status: string }[];
   skipped: number;
-  /** Не начаты из-за бюджета времени прогона — их возьмёт следующий прогон. */
+  /** Входы, не начатые из-за бюджета времени прогона, — их возьмёт следующий прогон. */
   deferred: number;
+  /** Закрытия, не начатые из-за бюджета времени, — следующему прогону. */
+  deferredCloses: number;
   closed: { tradeId: string; symbol: string; status: string }[];
 }
 
@@ -83,18 +87,31 @@ export interface MirrorRunResult {
  * затем открыть зеркала свежих входов. Сделка «захватывается» до запроса к бирже —
  * параллельный прогон её не повторит.
  */
-export async function runMirror(deps: MirrorDeps): Promise<MirrorRunResult> {
+export async function runMirror<
+  C extends MirrorCloseItem,
+  R extends MirrorOpenResult,
+>(deps: MirrorDeps<C, R>): Promise<MirrorRunResult> {
   const result: MirrorRunResult = {
     configured: deps.configured,
     opened: [],
     skipped: 0,
     deferred: 0,
+    deferredCloses: 0,
     closed: [],
   };
   if (!deps.configured) return result;
   const startedAt = deps.now();
+  const overBudget = () => deps.now() - startedAt > MIRROR.runBudgetMs;
 
-  for (const m of await deps.claimToClose()) {
+  // Захват по одному: после бюджета строки не уходят в closing и достаются следующему прогону.
+  const toClose = await deps.listToClose();
+  for (const [i, tradeId] of toClose.entries()) {
+    if (overBudget()) {
+      result.deferredCloses = toClose.length - i;
+      break;
+    }
+    const m = await deps.claimToClose(tradeId);
+    if (!m) continue;
     const r = await deps.close(m);
     await deps.saveClose(m.tradeId, r);
     result.closed.push({
@@ -115,7 +132,7 @@ export async function runMirror(deps: MirrorDeps): Promise<MirrorRunResult> {
   for (const [i, d] of decisions.entries()) {
     // Бюджет исчерпан — не захватываем ничего, в том числе пропуски: план следующего прогона
     // учтёт, что отложенные входы не открылись (иначе соседний кандидат мог бы уйти в «занята»).
-    if (deps.now() - startedAt > MIRROR.runBudgetMs) {
+    if (overBudget()) {
       result.deferred = decisions.length - i;
       break;
     }

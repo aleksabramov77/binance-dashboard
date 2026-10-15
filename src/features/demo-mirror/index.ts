@@ -10,7 +10,9 @@ export {
   planMirror,
 } from "./lib/planMirror";
 export {
+  type MirrorCloseItem,
   type MirrorDeps,
+  type MirrorOpenResult,
   type MirrorRunResult,
   type MirrorStep,
   runMirror,

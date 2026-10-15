@@ -3,10 +3,11 @@
 import {
   activeMirrorSymbols,
   claimMirror,
-  claimMirrorsToClose,
+  claimMirrorToClose,
   claimOpenMirrors,
   type DemoResetResult,
   listMirrorCandidates,
+  listMirrorsToClose,
   type MirrorCandidate,
   markDemoReset,
   updateMirror,
@@ -55,8 +56,11 @@ export async function runDemoMirror() {
         demoRef: r.id,
         entryPrice: r.entryPrice,
         quantity: r.filledQuantity,
+        // Свои стоп/тейк (PR 2b): тип TradeResult.protectRefs (shared) совпадает с MirrorProtectRefs.
+        protectRefs: r.protectRefs ?? null,
       }),
-    claimToClose: () => claimMirrorsToClose(db),
+    listToClose: () => listMirrorsToClose(db),
+    claimToClose: (tradeId) => claimMirrorToClose(db, tradeId),
     close: (req) => closeDemoPosition(req),
     saveClose: (tradeId, r) =>
       updateMirror(db, tradeId, {
@@ -71,11 +75,12 @@ export async function runDemoMirror() {
     result.opened.length ||
     result.closed.length ||
     result.skipped ||
-    result.deferred
+    result.deferred ||
+    result.deferredCloses
   )
     log.info(
       "mirror.run",
-      `Зеркало: открыто ${result.opened.length}, закрыто ${result.closed.length}, пропущено ${result.skipped}${result.deferred ? `, отложено до следующего прогона ${result.deferred}` : ""}`,
+      `Зеркало: открыто ${result.opened.length}, закрыто ${result.closed.length}, пропущено ${result.skipped}${result.deferred ? `, входов отложено до следующего прогона ${result.deferred}` : ""}${result.deferredCloses ? `, закрытий отложено ${result.deferredCloses}` : ""}`,
       { ...result },
     );
   return result;
