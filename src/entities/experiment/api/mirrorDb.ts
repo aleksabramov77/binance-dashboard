@@ -1,5 +1,6 @@
 import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { computeDemoStats } from "../lib/stats";
 import {
   demoMirrorOrdersTable,
   experimentsTable,
@@ -12,6 +13,7 @@ import {
   mirrorProtectRefsSchema,
   OPEN_MIRROR_STATUSES,
 } from "../model/mirror";
+import type { DemoSummary } from "../model/view";
 
 // Demo-зеркало (spec 008): какие paper-сделки повторить на Binance Demo и какие демо-позиции закрыть.
 // Без @/… и node:* — как dbStore. Сделки с биржей делает композиция src/app/server/demoMirror.ts.
@@ -287,6 +289,8 @@ export interface MirrorSummary {
    * цена выхода paper-сделки. Точная история — «Демо-сделки» на /signals.
    */
   pnl: number;
+  /** PnL закрытых сделок в порядке закрытия (для PF/DD/equity, spec 0016); без цены выхода — не входит. */
+  pnls: number[];
 }
 
 export const emptyMirrorSummary = (): MirrorSummary => ({
@@ -298,6 +302,7 @@ export const emptyMirrorSummary = (): MirrorSummary => ({
   rejected: 0,
   skipped: 0,
   pnl: 0,
+  pnls: [],
 });
 
 /**
@@ -316,6 +321,7 @@ export async function mirrorSummaries(
       quantity: demoMirrorOrdersTable.quantity,
       demoExit: demoMirrorOrdersTable.exitPrice,
       paperExit: paperTradesTable.exitPrice,
+      closedAt: demoMirrorOrdersTable.closedAt,
     })
     .from(demoMirrorOrdersTable)
     .innerJoin(
@@ -325,6 +331,10 @@ export async function mirrorSummaries(
     .where(
       sql`${demoMirrorOrdersTable.createdAt} >= coalesce((select ${experimentsTable.demoResetAt} from ${experimentsTable} where ${experimentsTable.id} = ${demoMirrorOrdersTable.experimentId}), '-infinity'::timestamptz)`,
     );
+  // Порядок закрытия — для просадки от пика; незакрытые (null) в pnls не попадают.
+  const closedTime = (r: (typeof rows)[number]) =>
+    r.closedAt ? new Date(r.closedAt).getTime() : 0;
+  rows.sort((a, b) => closedTime(a) - closedTime(b));
   const out = new Map<string, MirrorSummary>();
   for (const r of rows) {
     let s = out.get(r.experimentId);
@@ -352,10 +362,20 @@ export async function mirrorSummaries(
     const pnl =
       (r.direction === "short" ? -1 : 1) * (exit - r.entryPrice) * r.quantity;
     s.pnl += pnl;
+    s.pnls.push(pnl);
     if (pnl > 0) s.wins++;
     else s.losses++;
   }
   return out;
+}
+
+/** Сводка для API страниц: счётчики + PF/DD/equity по формулам paper (spec 0016). */
+export function toDemoSummary(
+  summary: MirrorSummary,
+  initialBudget: number,
+): DemoSummary {
+  const { pnls, ...counts } = summary;
+  return { ...counts, ...computeDemoStats(pnls, initialBudget) };
 }
 
 /**

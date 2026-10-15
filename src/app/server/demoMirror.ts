@@ -12,13 +12,16 @@ import {
   markDemoReset,
   updateMirror,
 } from "@/entities/experiment";
-import { runMirror } from "@/features/demo-mirror";
+import { mirrorLogEntry, runMirror } from "@/features/demo-mirror";
 import { closeDemoPosition, placeTrade } from "@/features/execute-trade";
 import { fetchDemoSymbolRules } from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { getLabSettings } from "./experimentSettings";
+
+const writeMirrorLog = (e: ReturnType<typeof mirrorLogEntry>) =>
+  log[e.level](e.event, e.message, e.data);
 
 export async function runDemoMirror() {
   const db = getDb();
@@ -42,14 +45,19 @@ export async function runDemoMirror() {
       return c ? claimMirror(db, c) : false;
     },
     open: (req) => placeTrade(req),
-    markSkipped: (tradeId, reason) =>
-      updateMirror(db, tradeId, {
+    // Каждый пропуск и отказ — отдельная запись журнала с experimentId (spec 0016): на неё ведёт
+    // ссылка из «N отказ · M пропуск».
+    markSkipped: async (tradeId, reason) => {
+      await updateMirror(db, tradeId, {
         status: "skipped",
         message: reason,
         steps: [],
-      }),
-    saveOpen: (tradeId, r) =>
-      updateMirror(db, tradeId, {
+      });
+      const c = byId.get(tradeId);
+      if (c) writeMirrorLog(mirrorLogEntry("skipped", c, reason));
+    },
+    saveOpen: async (tradeId, r) => {
+      await updateMirror(db, tradeId, {
         status: r.status,
         message: r.message,
         steps: r.steps,
@@ -58,7 +66,11 @@ export async function runDemoMirror() {
         quantity: r.filledQuantity,
         // Свои стоп/тейк (PR 2b): тип TradeResult.protectRefs (shared) совпадает с MirrorProtectRefs.
         protectRefs: r.protectRefs ?? null,
-      }),
+      });
+      const c = byId.get(tradeId);
+      if (c && r.status === "rejected")
+        writeMirrorLog(mirrorLogEntry("rejected", c, r.message));
+    },
     listToClose: () => listMirrorsToClose(db),
     claimToClose: (tradeId) => claimMirrorToClose(db, tradeId),
     close: (req) => closeDemoPosition(req),

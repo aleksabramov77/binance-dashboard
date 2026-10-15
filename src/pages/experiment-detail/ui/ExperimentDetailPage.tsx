@@ -3,6 +3,7 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import {
+  assetGroupOf,
   type DemoSummary,
   describeConfig,
   EquityChart,
@@ -153,7 +154,7 @@ const HELP: Record<(typeof TRADE_SORT_KEYS)[number], string> = {
   closedAt: "Время выхода. «открыта» — сделка ещё идёт.",
   symbol: "Торговая пара.",
   direction:
-    "Лонг — покупка, зарабатывает на росте. Шорт — продажа, зарабатывает на падении (только Futures).",
+    "Лонг — покупка, зарабатывает на росте. Шорт — продажа, зарабатывает на падении (только USDⓈ-M).",
   entryPrice: "Цена входа с учётом проскальзывания 0,05%.",
   exitPrice: "Цена выхода: по стопу, тейку, трейлингу, времени или сигналу.",
   exitReason:
@@ -224,7 +225,7 @@ function TradesTable({
       </p>
     );
   return (
-    <div className="overflow-x-auto rounded-xl border bg-card">
+    <div className="overflow-clip rounded-xl border bg-card">
       <Table>
         <TableHeader>
           <TableRow>
@@ -362,7 +363,7 @@ export function ExperimentDetailPage({ id }: { id: string }) {
                 {data.experiment.name}
               </h1>
               <Badge variant="outline">
-                {data.experiment.market === "spot" ? "Spot" : "Futures"}
+                {assetGroupOf(data.experiment.market).label}
               </Badge>
               {!data.experiment.enabled && (
                 <Badge variant="outline">выключен</Badge>

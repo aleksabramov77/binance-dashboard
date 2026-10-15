@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
+import { demoMirrorOrdersTable } from "../model/db";
 import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
 import {
   activeMirrorSymbols,
@@ -11,6 +12,7 @@ import {
   claimOpenMirrors,
   listMirrorCandidates,
   listMirrorsToClose,
+  type MirrorCandidate,
   markDemoReset,
   mirrorStatuses,
   mirrorSummaries,
@@ -237,6 +239,52 @@ describe("демо-сводка и демо-сброс", () => {
       losses: 1,
       pnl: -2,
     });
+  });
+
+  it("pnls — закрытые сделки в порядке закрытия; без цены выхода сделка в closed, но не в pnls", async () => {
+    const store = await setup();
+    const runId = await ensureRun(db);
+    await store.insertTrade(trade("c", runId, "F01"));
+    // a: +5 (закрыта позже), old: −2 (закрыта раньше), c: без цены выхода у обеих сторон.
+    const closeMirror = async (
+      c: MirrorCandidate,
+      exitPrice: number | null,
+      closedAt: string,
+    ) => {
+      await claimMirror(db, c);
+      await updateMirror(db, c.tradeId, {
+        status: "closed",
+        message: "ok",
+        steps: [],
+        entryPrice: 100,
+        quantity: 1,
+        exitPrice,
+        closed: true,
+      });
+      await db
+        .update(demoMirrorOrdersTable)
+        .set({ closedAt: new Date(closedAt) })
+        .where(eq(demoMirrorOrdersTable.tradeId, c.tradeId));
+    };
+    const candidate = (tradeId: string): MirrorCandidate => ({
+      tradeId,
+      experimentId: "F01",
+      market: "futures",
+      symbol: "ETHUSDT",
+      direction: "long",
+      openedAt: "2026-10-11T11:55:00.000Z",
+      entryPrice: 100,
+      quantity: 1,
+      stop: 95,
+      takeProfit: 110,
+    });
+    await closeMirror(candidate("a"), 105, "2026-10-11T13:00:00.000Z");
+    await closeMirror(candidate("old"), 98, "2026-10-11T12:00:00.000Z");
+    await closeMirror(candidate("c"), null, "2026-10-11T12:30:00.000Z");
+    const s = (await mirrorSummaries(db)).get("F01");
+    expect(s?.closed).toBe(3);
+    expect(s?.pnls).toEqual([-2, 5]); // по времени закрытия
+    expect(s?.pnl).toBe(3);
   });
 });
 

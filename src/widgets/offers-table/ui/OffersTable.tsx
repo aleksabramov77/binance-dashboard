@@ -83,7 +83,7 @@ export function OffersTable({ ranked }: { ranked: RankedOffer[] }) {
     );
   }
   return (
-    <div className="overflow-x-auto rounded-xl border bg-card">
+    <div className="min-w-0 overflow-clip rounded-xl border bg-card">
       <Table>
         <TableHeader>
           <TableRow>

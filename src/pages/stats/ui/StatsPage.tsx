@@ -4,6 +4,7 @@ import { ArrowLeft, Ban } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useMemo } from "react";
 import {
+  assetGroupOf,
   blacklistCandidates,
   formatProfitFactor,
   formatR,
@@ -71,7 +72,6 @@ const PERIOD_LABELS: Record<StatsPeriod, string> = {
   "24h": "24 ч",
   "7d": "7 дн",
 };
-const MARKET_LABELS = { spot: "Spot", futures: "Futures" } as const;
 const DIRECTION_LABELS = { long: "Long (B)", short: "Short (S)" } as const;
 /** Значение «все» в Select (у Radix пустое значение запрещено). */
 const ALL = "all";
@@ -135,7 +135,7 @@ const COLUMNS: {
     label: "Max DD",
     numeric: true,
     description:
-      "Наибольшая просадка накопленного PnL группы от пика, в $ (и в % капитала для экспериментов и рынков).",
+      "Наибольшая просадка накопленного PnL группы от пика, в $ (и в % от пика equity для экспериментов и рынков).",
   },
 ];
 
@@ -217,7 +217,10 @@ function Filters({ data }: { data: TradeStatsResponse | null | undefined }) {
         }
         options={[
           { value: ALL, label: "Все" },
-          ...MARKET_FILTERS.map((m) => ({ value: m, label: MARKET_LABELS[m] })),
+          ...MARKET_FILTERS.map((m) => ({
+            value: m,
+            label: assetGroupOf(m).label,
+          })),
         ]}
       />
       <FilterSelect
@@ -625,7 +628,7 @@ function StatsDashboard() {
                 </p>
               )}
 
-              <div className="overflow-x-auto rounded-xl border bg-card">
+              <div className="overflow-clip rounded-xl border bg-card">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -653,7 +656,7 @@ function StatsDashboard() {
             Сделки — закрытые (+ открытые). PnL — реализованный, за вычетом
             комиссий. Период: закрытая сделка учитывается по времени закрытия,
             открытая — по времени открытия. Max DD — наибольшая просадка
-            накопленного PnL группы от пика, в $ (и в % от капитала для
+            накопленного PnL группы от пика, в $ (и в % от пика equity для
             экспериментов и рынков). Long = покупка (B), Short = продажа (S).
           </p>
         </div>

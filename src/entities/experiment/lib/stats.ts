@@ -160,3 +160,35 @@ export function groupStats<T extends StatsTrade, K extends string>(
     .map(([key, list]) => ({ key, stats: computeStats(list, budgetOf(key)) }))
     .sort((a, b) => b.stats.realizedPnl - a.stats.realizedPnl);
 }
+
+/** Метрики демо-сделок эксперимента (spec 0016): те же формулы, что у paper, по PnL в порядке закрытия. */
+export interface DemoStats {
+  grossProfit: number;
+  profitFactor: number | null;
+  /** Просадка от пика в долях (0,05 = 5 %). */
+  maxDrawdownPct: number;
+  /** Стартовый бюджет эксперимента + Σ PnL демо (отдельного демо-капитала у эксперимента нет). */
+  equity: number;
+}
+
+export function computeDemoStats(
+  pnls: number[],
+  initialBudget: number,
+): DemoStats {
+  let grossProfit = 0;
+  let grossLoss = 0;
+  let equity = initialBudget;
+  const equities = [equity];
+  for (const pnl of pnls) {
+    if (pnl > 0) grossProfit += pnl;
+    else if (pnl < 0) grossLoss -= pnl;
+    equity += pnl;
+    equities.push(equity);
+  }
+  return {
+    grossProfit,
+    profitFactor: grossLoss > 0 ? grossProfit / grossLoss : null,
+    maxDrawdownPct: maxDrawdown(equities).pct,
+    equity,
+  };
+}
