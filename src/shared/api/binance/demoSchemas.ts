@@ -163,6 +163,7 @@ export const futuresOpenAlgoOrdersSchema = z.array(
     .object({
       algoId: z.number(),
       clientAlgoId: z.string().nullable().catch(null),
+      symbol: z.string().catch(""),
       side: z.enum(["BUY", "SELL"]),
       positionSide: z.string().catch("BOTH"),
       orderType: z.string(),
@@ -214,6 +215,7 @@ export const algoHistorySchema = z.array(
       triggerPrice: decimal.catch(0),
       // id рыночного ордера, которым исполнился TP/SL; не срабатывал — null.
       actualOrderId: actualOrderIdSchema,
+      clientAlgoId: z.string().nullable().catch(null),
     })
     .loose(),
 );
@@ -239,6 +241,7 @@ export const spotAllOrdersSchema = z.array(
       side: z.enum(["BUY", "SELL"]),
       status: z.string(),
       stopPrice: decimal.catch(0),
+      clientOrderId: z.string().catch(""),
     })
     .loose(),
 );
@@ -260,6 +263,10 @@ export const algoOrderQuerySchema = z
     algoId: z.number(),
     algoStatus: z.string(),
     actualOrderId: actualOrderIdSchema,
+    // Средняя цена исполнения сработавшего ордера; не срабатывал — 0.
+    actualPrice: decimal.catch(0),
+    // Исполненный объём сработавшего ордера; поле есть только после исполнения — иначе 0.
+    actualQty: decimal.catch(0),
   })
   .loose();
 export type AlgoOrderQuery = z.infer<typeof algoOrderQuerySchema>;
@@ -318,6 +325,7 @@ export const futuresUserTradesSchema = z.array(
       commission: decimal,
       commissionAsset: z.string(),
       time: z.number(),
+      positionSide: z.string().catch("BOTH"),
     })
     .loose(),
 );

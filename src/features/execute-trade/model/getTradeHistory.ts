@@ -45,6 +45,7 @@ function symbolState(
             amount: p.amount,
             entryPrice: p.entryPrice,
             unrealizedPnl: p.unrealizedPnl,
+            bySide: p.bySide,
           }
         : null,
     };

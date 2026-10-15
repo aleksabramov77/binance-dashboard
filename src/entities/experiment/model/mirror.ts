@@ -74,6 +74,7 @@ export const mirrorProtectRefsSchema = z.preprocess(
     z.object({
       market: z.literal("usdm"),
       entryOrderId: z.number().nullable(),
+      legs: z.literal("quantity").optional(),
       stop: algoRefSchema.nullable(),
       takeProfit: algoRefSchema.nullable(),
     }),

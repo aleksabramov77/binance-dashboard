@@ -28,9 +28,20 @@
   (`protectiveToCancel`: algo и reduceOnly/closePosition закрывающей стороны своего positionSide; спот —
   `spotProtectiveToCancel`, продажи), закрывается позиция своей стороны; чужие ордера символа остаются. Все ордера
   символа больше нигде не снимаются (`demoCancelAllOrders` удалён).
+- `sweepTriggeredLegs(mirrors)` — сверка своих ног открытых фьючерсных зеркал (spec 0012, PR 2d): TP/SL на свой объём
+  биржа друг с другом не связывает (демо 2026-10-15: сработал тейк — стоп остался NEW, и наоборот), а висящий
+  reduceOnly-ордер закрыл бы объём соседнего зеркала. Одна выборка `fetchDemoOpenAlgoOrders` на прогон; открыта ровно
+  одна своя нога (`lib/closePlan.ts → orphanLegCandidate`) — статус пропавшей; сработала — вторая снимается, зеркало
+  считается закрытым биржей (цена — `actualPrice`). Вызывает крон зеркала до закрытий и входов. Спот: OCO/OTOCO
+  снимает вторую ногу сам.
 - `getTradeHistory()` — история демо-сделок с биржи (`GET /api/trade/history`), локально не хранится.
 
 ## История и статусы сделок (`model/getTradeHistory.ts`)
+Несколько сделок по одной монете не склеиваются (spec 0012, PR 2d): ордера своей сделки узнаются по своим
+`clientOrderId`/`clientAlgoId` (`bd<id>-…`, `clientIdGroup` → `DemoSymbolOrders.groups`; вход `-M`, свои TP/SL по
+`actualOrderId`, своё закрытие `-C`), у открытой сделки — только её стопы. Ордер без своего id (ручной, закрытие до
+PR 2d) — выход самой поздней открытой сделки дашборда той же стороны, иначе — общая последовательность стороны
+позиции (Hedge — LONG/SHORT отдельно, позиция по стороне — `DemoPosition.bySide`).
 1. Символы — `fetchDemoTradedSymbols` (запросы без `symbol`), не больше 40.
 2. На символ: fills (`fetchDemoFills`) и ордера для статусов (`fetchDemoSymbolOrders`: futures —
    `allAlgoOrders` + `allOrders`, spot — `allOrders`); один раз — позиции futures и баланс spot.
@@ -86,10 +97,12 @@
      позиций и ордеров, обычных и algo) перед входом включается Hedge (`demoEnableHedgeMode`, `-4059` — не
      ошибка); счёт не пуст или переключить не вышло (`-4067/-4068`) — вход в One-way. Выбор — `lib/futuresMode.ts → choosePositionMode`,
      шаг «Режим позиций» в отчёте;
-   - своя сторона занята (`ownSideBusy`: Hedge — позиция/ордера своего positionSide, One-way — любые по символу) —
-     `rejected` без запросов на изменение (в т.ч. ручные сделки с /signals);
-   - изолированная маржа и плечо; по символу уже есть ордера/позиция (`-4047/-4048`) — тип маржи не меняется,
-     вход идёт дальше;
+   - ручной вход (/signals): своя сторона занята (`ownSideBusy`: Hedge — позиция/ордера своего positionSide,
+     One-way — любые по символу) — `rejected` без запросов на изменение. Вход зеркала (`TradeRequest.mirror`, PR 2d)
+     делит монету и сторону с другими зеркалами (у каждого свои TP/SL на свой объём); в One-way мешает только
+     встречная позиция («нужен Hedge mode»);
+   - изолированная маржа и плечо; по символу уже есть ордера/позиция (`-4047/-4048`, демо отвечает `-4067`) — тип
+     маржи не меняется, вход идёт дальше;
    - вход по рынку (Hedge — `positionSide`), затем algo `STOP_MARKET` и `TAKE_PROFIT_MARKET` **на свой объём**
      (`quantity`, без `closePosition`; One-way — `reduceOnly`, Hedge — `positionSide`; параметры —
      `shared/api/binance/positionMode.ts`). Стоп не встал — откат: reduce своего объёма своей стороны и снятие своего

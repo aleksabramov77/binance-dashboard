@@ -146,10 +146,20 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   const entrySide = req.direction === "long" ? "BUY" : "SELL";
   const exitSide: "BUY" | "SELL" = req.direction === "long" ? "SELL" : "BUY";
 
-  // Своя сторона занята — второй вход смешал бы объёмы; в One-way это любая позиция/ордер по символу.
+  // Ручной вход — только на свободную сторону; зеркало делит сторону с другими зеркалами (PR 2d),
+  // но в One-way не входит против встречной позиции (закрыл бы её).
+  // Своя сторона до входа: при неизвестном исходе свой объём — только прирост (на стороне соседи).
+  let sideBefore = 0;
   try {
     const state = await fetchDemoFuturesSymbolState(creds, req.symbol);
-    if (ownSideBusy(state, side))
+    sideBefore = ownPosition(state.positions, side).amount;
+    const busy = ownSideBusy(state, side, req.mirror === true);
+    if (busy === "opposite")
+      return finish(
+        "rejected",
+        `По ${req.symbol} есть встречная позиция — в One-way вход закрыл бы её; нужен Hedge mode.`,
+      );
+    if (busy)
       return finish(
         "rejected",
         mode === "hedge"
@@ -193,6 +203,8 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   const futuresRefs = {
     market: "usdm" as const,
     entryOrderId: null as number | null,
+    // Ноги на свой объём (PR 2c): без этой метки строки 2b считаются legacy (planMirror).
+    legs: "quantity" as const,
     stop: null as StoredAlgoRef | null,
     takeProfit: null as StoredAlgoRef | null,
   };
@@ -314,7 +326,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
           c.tradeDeadline,
           async () =>
             ownPosition(await demoFuturesPositions(creds, req.symbol), side),
-          (p) => p.amount !== 0,
+          (p) => p.amount > sideBefore,
         );
       } catch (checkError) {
         steps.push({
@@ -323,7 +335,12 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
           detail: errorText(checkError),
         });
       }
-      const checked = afterFuturesPositionCheck(position);
+      const checked = afterFuturesPositionCheck(
+        position,
+        sideBefore,
+        order === null ? "missing" : "unknown",
+        Number(v.quantity),
+      );
       if (!("protect" in checked)) {
         if (position)
           steps.push({
@@ -369,6 +386,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
         entryPrice,
         filled,
         stopRef: stop.ref,
+        closeId: ids.close,
         steps,
         done,
       });
@@ -521,6 +539,8 @@ async function rollbackFutures(c: {
   entryPrice: number;
   filled: number;
   stopRef: StoredAlgoRef | null;
+  /** Свой clientOrderId закрытия (`bd…-C`) — для истории «Демо-сделки». */
+  closeId: string;
   steps: TradeStep[];
   done: Done;
 }): Promise<TradeResult> {
@@ -529,7 +549,14 @@ async function rollbackFutures(c: {
   try {
     const qty = floorToStep(c.filled, c.rules.stepSize);
     const order = await withPositionRetry(() =>
-      demoFuturesReduceMarket(creds, req.symbol, c.exitSide, qty, c.side),
+      demoFuturesReduceMarket(
+        creds,
+        req.symbol,
+        c.exitSide,
+        qty,
+        c.side,
+        c.closeId,
+      ),
     );
     steps.push({
       label,

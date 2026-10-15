@@ -5,6 +5,7 @@ import {
   algoLookup,
   averagePrice,
   closeVerdict,
+  orphanLegCandidate,
   ownCloseQuantity,
   planOwnClose,
   spotLeg,
@@ -62,6 +63,7 @@ describe("planOwnClose", () => {
       cancel: ["stop", "takeProfit"],
       closedByExchange: false,
       soldByLegs: 0,
+      soldUnknown: false,
     });
   });
   it("сработал стоп — позицию закрыла биржа, висящий тейк снять", () => {
@@ -74,6 +76,8 @@ describe("planOwnClose", () => {
       cancel: ["takeProfit"],
       closedByExchange: true,
       soldByLegs: 0,
+      // Объём сработавшего стопа не передан — неизвестен: закрытие не докрывает.
+      soldUnknown: true,
     });
   });
   it("без тейка (stopOnly) и с частично исполненным тейком спота", () => {
@@ -82,7 +86,12 @@ describe("planOwnClose", () => {
         stop: spotLeg({ status: "NEW", executedQty: 0 }),
         takeProfit: null,
       }),
-    ).toEqual({ cancel: ["stop"], closedByExchange: false, soldByLegs: 0 });
+    ).toEqual({
+      cancel: ["stop"],
+      closedByExchange: false,
+      soldByLegs: 0,
+      soldUnknown: false,
+    });
     expect(
       planOwnClose({
         stop: spotLeg({ status: "NEW", executedQty: 0 }),
@@ -163,11 +172,92 @@ describe("свой algo-ордер с неизвестным исходом по
 
 describe("closeVerdict", () => {
   it("своя нога сработала, но своя позиция осталась — докрыть, а не «закрыта биржей»", () => {
-    expect(closeVerdict({ closedByExchange: true }, 0.2)).toBe("close");
-    expect(closeVerdict({ closedByExchange: true }, 0)).toBe(
+    expect(
+      closeVerdict({ closedByExchange: true, soldUnknown: false }, 0.2),
+    ).toBe("close");
+    expect(
+      closeVerdict({ closedByExchange: true, soldUnknown: false }, 0),
+    ).toBe("closedByExchange");
+    expect(
+      closeVerdict({ closedByExchange: false, soldUnknown: false }, 0),
+    ).toBe("nothingLeft");
+    expect(
+      closeVerdict({ closedByExchange: false, soldUnknown: false }, 1),
+    ).toBe("close");
+  });
+});
+
+describe("orphanLegCandidate (вторая нога после срабатывания первой, PR 2d)", () => {
+  const refs = {
+    stop: { algoId: 1, clientAlgoId: "bda-S" },
+    takeProfit: { algoId: 2, clientAlgoId: "bda-T" },
+  };
+  it("тейк пропал из открытых, стоп висит — кандидат снять стоп", () => {
+    expect(
+      orphanLegCandidate(refs, [{ algoId: 1, clientAlgoId: "bda-S" }]),
+    ).toEqual({ missing: "takeProfit", remaining: "stop" });
+  });
+  it("стоп пропал (ссылка без algoId — по clientAlgoId), тейк висит", () => {
+    expect(
+      orphanLegCandidate(
+        { ...refs, takeProfit: { algoId: null, clientAlgoId: "bda-T" } },
+        [{ algoId: 99, clientAlgoId: "bda-T" }],
+      ),
+    ).toEqual({ missing: "stop", remaining: "takeProfit" });
+  });
+  it("обе стоят или обеих нет — ничего", () => {
+    const both = [
+      { algoId: 1, clientAlgoId: "bda-S" },
+      { algoId: 2, clientAlgoId: "bda-T" },
+    ];
+    expect(orphanLegCandidate(refs, both)).toBeNull();
+    expect(orphanLegCandidate(refs, [])).toBeNull();
+  });
+  it("одна нога (stopOnly): стоит — ничего; пропала — кандидат «сработала», снимать нечего", () => {
+    const stopOnly = { ...refs, takeProfit: null };
+    expect(
+      orphanLegCandidate(stopOnly, [{ algoId: 1, clientAlgoId: "bda-S" }]),
+    ).toBeNull();
+    expect(orphanLegCandidate(stopOnly, [])).toEqual({
+      missing: "stop",
+      remaining: null,
+    });
+  });
+});
+
+describe("закрытие после сработавшей своей ноги при соседях на стороне (ревью #66)", () => {
+  const triggered = { algoStatus: "FINISHED", actualOrderId: 77 };
+  it("объём ноги известен — докрываем только своё, объём соседа не трогаем", () => {
+    // Своё 40: стоп закрыл 40, на стороне 30 соседа → докрывать нечего.
+    const plan = planOwnClose({
+      stop: algoLeg(triggered, 40),
+      takeProfit: null,
+    });
+    expect(plan).toMatchObject({
+      closedByExchange: true,
+      soldByLegs: 40,
+      soldUnknown: false,
+    });
+    const qty = ownCloseQuantity(40, plan.soldByLegs, 30);
+    expect(qty).toBe(0);
+    expect(closeVerdict(plan, qty)).toBe("closedByExchange");
+    // Нога закрыла часть (25 из 40) — докрываем 15.
+    const partial = planOwnClose({
+      stop: algoLeg(triggered, 25),
+      takeProfit: null,
+    });
+    expect(
+      closeVerdict(partial, ownCloseQuantity(40, partial.soldByLegs, 45)),
+    ).toBe("close");
+  });
+  it("объём ноги неизвестен — не докрываем вовсе", () => {
+    const plan = planOwnClose({
+      stop: algoLeg(triggered, null),
+      takeProfit: null,
+    });
+    expect(plan.soldUnknown).toBe(true);
+    expect(closeVerdict(plan, ownCloseQuantity(40, plan.soldByLegs, 70))).toBe(
       "closedByExchange",
     );
-    expect(closeVerdict({ closedByExchange: false }, 0)).toBe("nothingLeft");
-    expect(closeVerdict({ closedByExchange: false }, 1)).toBe("close");
   });
 });

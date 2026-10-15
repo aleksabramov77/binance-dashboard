@@ -144,16 +144,59 @@ export async function listMirrorCandidates(
   }));
 }
 
-/** Символы (market:symbol), по которым зеркало уже держит или открывает позицию. */
-export async function activeMirrorSymbols(db: Db): Promise<Set<string>> {
+/** Зеркало, которое держит или открывает позицию на демо. */
+export interface ActiveMirrorRow {
+  market: "spot" | "usdm";
+  symbol: string;
+  direction: "long" | "short";
+  /**
+   * Строка нового учёта: свои ссылки на стоп/тейк (protect_refs) и, у фьючерсов, ноги на свой объём
+   * (legs "quantity", с PR 2c), или вход ещё отправляется (pending — ссылки запишет этот же код).
+   * false — строка до PR 2b (без ссылок: её закрытие снимает защитные ордера своей стороны) или
+   * фьючерсы 2b (ноги с closePosition: сработавшая закроет всю сторону) — второе зеркало на монету
+   * при ней не открываем.
+   */
+  hasRefs: boolean;
+}
+
+/**
+ * Строка нового учёта: свои ссылки есть и ноги — на свой объём. Фьючерсы без метки legs "quantity" —
+ * входы 2b (ноги с closePosition): сработавшая закроет всю сторону вместе с соседями — legacy.
+ */
+function ownLegsOnly(market: string, raw: unknown): boolean {
+  const refs = parseProtectRefs(raw);
+  if (!refs) return false;
+  return (
+    market !== "usdm" || (refs.market === "usdm" && refs.legs === "quantity")
+  );
+}
+
+/**
+ * Зеркала, которые держат или открывают позицию: монета и сторона — для лимита на монету и
+ * встречных позиций в One-way (spec 0012, PR 2d).
+ */
+export async function activeMirrors(db: Db): Promise<ActiveMirrorRow[]> {
   const rows = await db
     .select({
       market: demoMirrorOrdersTable.market,
       symbol: demoMirrorOrdersTable.symbol,
+      direction: demoMirrorOrdersTable.direction,
+      status: demoMirrorOrdersTable.status,
+      protectRefs: demoMirrorOrdersTable.protectRefs,
     })
     .from(demoMirrorOrdersTable)
     .where(inArray(demoMirrorOrdersTable.status, [...ACTIVE_MIRROR_STATUSES]));
-  return new Set(rows.map((r) => `${r.market}:${r.symbol}`));
+  return rows.map((r) => {
+    const market = demoMirrorMarketSchema.parse(r.market);
+    return {
+      market,
+      symbol: r.symbol,
+      direction: r.direction as ActiveMirrorRow["direction"],
+      hasRefs:
+        r.status === ("pending" satisfies MirrorStatus) ||
+        ownLegsOnly(market, r.protectRefs),
+    };
+  });
 }
 
 /** Захват сделки зеркалом (status pending). false — её уже захватил другой прогон. */
@@ -261,6 +304,66 @@ export async function claimMirrorToClose(
   return toClose(row, paper?.reason ?? null);
 }
 
+/**
+ * Открытые фьючерсные зеркала со своими ссылками — для сверки ног (своя нога сработала — снять вторую).
+ */
+export async function listOpenMirrorLegs(
+  db: Db,
+): Promise<
+  { tradeId: string; symbol: string; protectRefs: MirrorProtectRefs }[]
+> {
+  const rows = await db
+    .select({
+      tradeId: demoMirrorOrdersTable.tradeId,
+      symbol: demoMirrorOrdersTable.symbol,
+      protectRefs: demoMirrorOrdersTable.protectRefs,
+    })
+    .from(demoMirrorOrdersTable)
+    .where(
+      and(
+        inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
+        eq(demoMirrorOrdersTable.market, "usdm"),
+        isNotNull(demoMirrorOrdersTable.protectRefs),
+      ),
+    );
+  return rows.flatMap((r) => {
+    const protectRefs = parseProtectRefs(r.protectRefs);
+    return protectRefs
+      ? [{ tradeId: r.tradeId, symbol: r.symbol, protectRefs }]
+      : [];
+  });
+}
+
+/**
+ * Позицию зеркала закрыла биржа его стопом/тейком (вторая нога снята): строка закрыта сразу, не
+ * дожидаясь paper-сделки, с фактической ценой выхода (для демо-PnL). Только из открытых статусов —
+ * захваченную на закрытие строку не трогаем. false — строка уже не открыта.
+ */
+export async function markMirrorClosedByExchange(
+  db: Db,
+  tradeId: string,
+  patch: { message: string; steps: unknown[]; exitPrice: number | null },
+): Promise<boolean> {
+  const rows = await db
+    .update(demoMirrorOrdersTable)
+    .set({
+      status: "closed" satisfies MirrorStatus,
+      message: patch.message,
+      steps: patch.steps,
+      exitPrice: patch.exitPrice,
+      updatedAt: sql`now()`,
+      closedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(demoMirrorOrdersTable.tradeId, tradeId),
+        inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
+      ),
+    )
+    .returning({ tradeId: demoMirrorOrdersTable.tradeId });
+  return rows.length > 0;
+}
+
 /** Статусы зеркала по сделкам — для таблицы сделок эксперимента. */
 export async function mirrorStatuses(
   db: Db,
@@ -297,7 +400,7 @@ export interface MirrorSummary {
   /** Не открылись: биржа или проверка заявки отказали. */
   rejected: number;
   /**
-   * Пропущены зеркалом по своим правилам: по монете уже есть зеркальная позиция, монеты нет на
+   * Пропущены зеркалом по своим правилам: встречная позиция без Hedge mode (до PR 2d — «монета занята»), монеты нет на
    * демо-рынке, вход старше 10 минут, пара не к USDT. Запроса на вход не было.
    */
   skipped: number;

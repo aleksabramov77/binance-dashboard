@@ -14,6 +14,7 @@ const fill = (over: Partial<DemoFill>): DemoFill => ({
   commission: 0.001,
   commissionAsset: "USDT",
   realizedPnl: 0,
+  positionSide: "BOTH",
   ...over,
 });
 
@@ -58,5 +59,14 @@ describe("groupFills", () => {
       "usdm-BATUSDT-3",
       "usdm-BATUSDT-1",
     ]);
+  });
+});
+
+describe("groupFills: средняя цена", () => {
+  it("без хвоста плавающей точки", () => {
+    const [o] = groupFills([
+      fill({ qty: 39, price: 0.1738, quoteQty: 6.7782 }),
+    ]);
+    expect(o.avgPrice).toBe(0.1738);
   });
 });

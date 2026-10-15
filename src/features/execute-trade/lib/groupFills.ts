@@ -1,4 +1,5 @@
 import type { DemoFill } from "@/shared/api/binance/demo.server";
+import { averagePrice } from "./closePlan";
 
 /** Все fills одного ордера, сложенные вместе. */
 export interface OrderAggregate {
@@ -14,6 +15,8 @@ export interface OrderAggregate {
   commissions: { asset: string; amount: number }[];
   /** Только фьючерсы: realized PnL от Binance. */
   realizedPnl: number | null;
+  /** Сторона позиции ордера: Hedge — LONG/SHORT, иначе BOTH. */
+  positionSide: string;
 }
 
 export const orderKey = (
@@ -38,6 +41,7 @@ export function groupFills(fills: DemoFill[]): OrderAggregate[] {
         quoteQty: 0,
         commissions: [],
         realizedPnl: f.realizedPnl === null ? null : 0,
+        positionSide: f.positionSide,
       };
       byOrder.set(key, order);
     }
@@ -56,7 +60,8 @@ export function groupFills(fills: DemoFill[]): OrderAggregate[] {
   return [...byOrder.values()]
     .map((o) => ({
       ...o,
-      avgPrice: o.quantity > 0 ? o.quoteQty / o.quantity : 0,
+      // Без хвоста плавающей точки (0.17379999999999998 → 0.1738), как averagePrice входа/выхода.
+      avgPrice: o.quantity > 0 ? averagePrice(o.quoteQty, o.quantity) : 0,
     }))
     .sort((a, b) => b.time - a.time);
 }

@@ -7,3 +7,8 @@ export {
 export { getTradeHistory } from "./model/getTradeHistory";
 export { getTradeOverview } from "./model/getTradeOverview";
 export { placeTrade } from "./model/placeTrade";
+export {
+  type OpenMirrorLegs,
+  type SweptMirror,
+  sweepTriggeredLegs,
+} from "./model/sweepTriggeredLegs";

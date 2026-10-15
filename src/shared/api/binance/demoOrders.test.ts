@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { toFuturesSymbolOrders, toSpotSymbolOrders } from "./demoOrders";
+import {
+  clientIdGroup,
+  toFuturesSymbolOrders,
+  toSpotSymbolOrders,
+} from "./demoOrders";
 import {
   algoHistorySchema,
   futuresAllOrdersSchema,
@@ -46,7 +50,7 @@ describe("toFuturesSymbolOrders", () => {
     const result = toFuturesSymbolOrders(algos, []);
     expect([...result.closeKinds]).toEqual([[362733533, "sl"]]);
     expect(result.openStops).toEqual([
-      { side: "BUY", triggerPrice: 0.1402, trailing: false },
+      { side: "BUY", triggerPrice: 0.1402, trailing: false, group: null },
     ]);
   });
 
@@ -86,7 +90,7 @@ describe("toFuturesSymbolOrders", () => {
     expect(result.closeKinds.get(1)).toBe("liquidation");
     expect(result.closeKinds.has(2)).toBe(false);
     expect(result.openStops).toEqual([
-      { side: "SELL", triggerPrice: 0, trailing: true },
+      { side: "SELL", triggerPrice: 0, trailing: true, group: null },
     ]);
   });
 });
@@ -135,7 +139,101 @@ describe("toSpotSymbolOrders", () => {
     expect(result.closeKinds.get(11)).toBe("tp");
     expect(result.closeKinds.get(12)).toBe("sl");
     expect(result.openStops).toEqual([
-      { side: "SELL", triggerPrice: 2400, trailing: false },
+      { side: "SELL", triggerPrice: 2400, trailing: false, group: null },
     ]);
+  });
+});
+
+describe("свои сделки по clientOrderId (spec 0012, PR 2d)", () => {
+  it("clientIdGroup: bd<id>-<роль> → сделка; чужие id — null", () => {
+    expect(clientIdGroup("bdd2248f1ca0b143a6b6957361-S")).toBe(
+      "bdd2248f1ca0b143a6b6957361",
+    );
+    expect(clientIdGroup("bd253b690480a7462996cba4e0-T2")).toBe(
+      "bd253b690480a7462996cba4e0",
+    );
+    for (const id of ["foreign-ada-stop", "web_123", "", null, "autoclose-1"])
+      expect(clientIdGroup(id)).toBeNull();
+  });
+  it("фьючерсы: сработавший свой algo — в сделке по actualOrderId; вход и закрытие — по clientOrderId", () => {
+    const algos = [
+      {
+        symbol: "ADAUSDT",
+        orderType: "TAKE_PROFIT_MARKET",
+        side: "SELL" as const,
+        algoStatus: "FINISHED",
+        triggerPrice: 0.23,
+        actualOrderId: 900,
+        clientAlgoId: "bdaaa-T",
+      },
+      {
+        symbol: "ADAUSDT",
+        orderType: "STOP_MARKET",
+        side: "SELL" as const,
+        algoStatus: "NEW",
+        triggerPrice: 0.21,
+        actualOrderId: null,
+        clientAlgoId: "bdbbb-S",
+      },
+    ];
+    const orders = [
+      {
+        orderId: 1,
+        type: "MARKET",
+        side: "BUY" as const,
+        status: "FILLED",
+        clientOrderId: "bdaaa-M",
+        stopPrice: 0,
+      },
+      {
+        orderId: 2,
+        type: "MARKET",
+        side: "BUY" as const,
+        status: "FILLED",
+        clientOrderId: "bdbbb-M",
+        stopPrice: 0,
+      },
+      {
+        orderId: 3,
+        type: "MARKET",
+        side: "SELL" as const,
+        status: "FILLED",
+        clientOrderId: "web_x",
+        stopPrice: 0,
+      },
+    ];
+    const r = toFuturesSymbolOrders(algos, orders);
+    expect(r.groups).toEqual(
+      new Map([
+        [900, "bdaaa"],
+        [1, "bdaaa"],
+        [2, "bdbbb"],
+      ]),
+    );
+    expect(r.openStops).toEqual([
+      { side: "SELL", triggerPrice: 0.21, trailing: false, group: "bdbbb" },
+    ]);
+  });
+});
+
+describe("свои закрывающие ордера (fullExits)", () => {
+  it("спот: исполненные -C, -S, -T2 своей сделки; вход -M и чужие — нет", () => {
+    const o = (orderId: number, clientOrderId: string, status = "FILLED") => ({
+      orderId,
+      type: "MARKET",
+      side: "SELL" as const,
+      status,
+      stopPrice: 0,
+      clientOrderId,
+    });
+    const r = toSpotSymbolOrders([
+      o(1, "bda-C"),
+      o(2, "bda-S"),
+      o(3, "bda-T2"),
+      o(4, "bda-M"),
+      o(5, "web_1"),
+      o(6, "bdb-T", "CANCELED"),
+    ]);
+    expect([...r.fullExits]).toEqual([1, 2, 3]);
   });
 });

@@ -71,7 +71,8 @@
 - `protectRefs.ts` — `demoProtectRefsSchema` (клиент-безопасно): ссылки на свои стоп/тейк сделки (spec 0012, PR 2b).
   Свои ордера: `fetchDemoAlgoOrder` / `demoCancelAlgoOrder` (по algoId или clientAlgoId; нет — `-2013`/`-2011`), `demoSpotCancelByClientId`,
   `fetchDemoFuturesOrder` (по orderId или clientOrderId; null — `-2013`); свои id принимают `demoFuturesMarketOrder`,
-  `demoFuturesCloseAt` (`clientAlgoId`), `demoSpotOcoSell`, `demoSpotStopLossSell`.
+  `demoFuturesProtect` (`clientAlgoId`), `demoSpotOcoSell`, `demoSpotStopLossSell`. `fetchDemoOpenAlgoOrders` —
+  открытые algo-ордера всего счёта одним запросом (сверка своих ног зеркал за прогон).
 - Таймаут каждого запроса — `REQUEST_TIMEOUT_MS` (15 с, `shared/lib/fetchRetry.ts`, `AbortSignal.timeout`): больше 10 с,
   за которые Binance сам отвечает -1007. Сработал — сетевая ошибка: чтение после таймаута повторяется не больше
   `TIMEOUT_RETRIES` (1) раза, у ордера исход неизвестен. `actualOrderId` 0 / "" / не положительный — не срабатывал.
