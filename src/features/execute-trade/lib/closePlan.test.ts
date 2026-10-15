@@ -7,7 +7,6 @@ import {
   closeVerdict,
   ownCloseQuantity,
   planOwnClose,
-  positionOnSide,
   spotLeg,
   spotNetQuantity,
 } from "./closePlan";
@@ -99,11 +98,6 @@ describe("сколько докрывать своим ордером", () => {
     expect(ownCloseQuantity(0.5, 0, 0.2)).toBe(0.2);
     expect(ownCloseQuantity(40, 10, 39.96)).toBe(30);
     expect(ownCloseQuantity(40, 45, 10)).toBe(0);
-  });
-  it("позиция фьючерсов — только в сторону сделки", () => {
-    expect(positionOnSide(0.5, "long")).toBe(0.5);
-    expect(positionOnSide(-0.5, "long")).toBe(0);
-    expect(positionOnSide(-0.5, "short")).toBe(0.5);
   });
 });
 

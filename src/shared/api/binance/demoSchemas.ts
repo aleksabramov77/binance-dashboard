@@ -132,9 +132,63 @@ export const positionRiskSchema = z.array(
       positionAmt: decimal,
       entryPrice: decimal,
       unRealizedProfit: decimal.catch(0),
+      // One-way — BOTH; Hedge — LONG и SHORT отдельными строками.
+      positionSide: z.string().catch("BOTH"),
     })
     .loose(),
 );
+
+/** GET /fapi/v1/positionSide/dual: true — Hedge mode. */
+export const positionModeSchema = z
+  .object({ dualSidePosition: z.boolean() })
+  .loose();
+
+/** Открытые обычные ордера фьючерсов символа (для снятия защитных своей стороны). */
+export const futuresOpenOrdersSchema = z.array(
+  z
+    .object({
+      orderId: z.number(),
+      side: z.enum(["BUY", "SELL"]),
+      positionSide: z.string().catch("BOTH"),
+      type: z.string(),
+      reduceOnly: z.boolean().catch(false),
+      closePosition: z.boolean().catch(false),
+    })
+    .loose(),
+);
+
+/** Открытые algo-ордера (TP/SL) символа. */
+export const futuresOpenAlgoOrdersSchema = z.array(
+  z
+    .object({
+      algoId: z.number(),
+      clientAlgoId: z.string().nullable().catch(null),
+      side: z.enum(["BUY", "SELL"]),
+      positionSide: z.string().catch("BOTH"),
+      orderType: z.string(),
+    })
+    .loose(),
+);
+
+export interface FuturesSymbolState {
+  positions: { positionSide: string; amount: number; entryPrice: number }[];
+  orders: z.infer<typeof futuresOpenOrdersSchema>;
+  algos: z.infer<typeof futuresOpenAlgoOrdersSchema>;
+}
+
+/** Открытые ордера спота символа. */
+export const spotOpenOrdersSchema = z.array(
+  z
+    .object({
+      orderId: z.number(),
+      orderListId: z.number().catch(-1),
+      clientOrderId: z.string(),
+      side: z.enum(["BUY", "SELL"]),
+      type: z.string(),
+    })
+    .loose(),
+);
+export type SpotOpenOrder = z.infer<typeof spotOpenOrdersSchema>[number];
 
 /** История и активные algo-ордера (TP/SL) символа на демо-фьючерсах. */
 /**
