@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { demoProtectRefsSchema } from "@/shared/api/binance";
 
 export const MAX_LEVERAGE = 3;
 /** Максимальная потеря на стопе — доля баланса кошелька (2%). Проверяется и в UI, и на сервере. */
@@ -43,6 +44,11 @@ export const tradeResultSchema = z.object({
   filledQuantity: z.number().nullable(),
   steps: z.array(tradeStepSchema),
   message: z.string(),
+  /**
+   * Свои защитные ордера на демо (spec 0012, PR 2b): по ним закрытие снимает только их. Нет у
+   * rejected; у старых путей и ответов — нет поля.
+   */
+  protectRefs: demoProtectRefsSchema.nullable().optional(),
 });
 
 export const tradeOverviewSchema = z.object({

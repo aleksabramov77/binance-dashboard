@@ -7,6 +7,7 @@ import {
 } from "@/entities/trade";
 import {
   BinanceApiError,
+  type DemoProtectRefs,
   demoCancelAllOrders,
   demoFuturesCloseAt,
   demoFuturesMarketOrder,
@@ -17,6 +18,9 @@ import {
   demoSpotMarketOrder,
   demoSpotOcoSell,
   demoSpotStopLossSell,
+  type FuturesOrder,
+  fetchDemoFills,
+  fetchDemoFuturesOrder,
   fetchDemoOpenSymbols,
   fetchDemoPrice,
   fetchDemoSpotOrderByClientId,
@@ -34,15 +38,17 @@ import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { SPOT_TAKER_FEE } from "../config/spot";
+import { groupFills } from "../lib/groupFills";
 import {
   chooseSpotEntry,
   pendingOutcome,
-  spotClientIds,
   spotEntryFromQuery,
   spotEntryLimitPrice,
+  tradeClientIds,
 } from "../lib/spotEntry";
 import {
   afterEntryError,
+  afterFuturesOrderCheck,
   afterFuturesPositionCheck,
   afterFuturesRollback,
   afterFuturesStop,
@@ -97,6 +103,11 @@ type Finish = (
   filledQuantity?: number | null,
 ) => TradeResult;
 
+/** Свои защитные ордера сделки (PR 2b): заполняются по ходу, уходят в TradeResult.protectRefs. */
+interface RefsHolder {
+  current: DemoProtectRefs | null;
+}
+
 /** Завершить сделку выбранным исходом (lib/tradeOutcome); цена и объём — только если позиция есть. */
 type Done = (
   o: TradeOutcome,
@@ -118,6 +129,8 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     environment: "demo" as const,
     request: req,
   };
+  // Свои защитные ордера (PR 2b) — заполняются по ходу сделки; у rejected позиции нет — и ссылок нет.
+  const refs: RefsHolder = { current: null };
   const finish: Finish = (
     status,
     message,
@@ -131,6 +144,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
       entryPrice,
       filledQuantity,
       steps,
+      protectRefs: status === "rejected" ? null : refs.current,
     };
     const logData = {
       tradeId: base.id,
@@ -143,6 +157,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
       leverage: req.leverage,
       entryPrice,
       filledQuantity,
+      protectRefs: result.protectRefs,
       steps,
     };
     if (status === "protected")
@@ -216,7 +231,8 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
       v,
       rules,
       price,
-      ids: spotClientIds(base.id),
+      ids: tradeClientIds(base.id),
+      refs,
       steps,
       done,
     });
@@ -253,8 +269,10 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   }
 
   const entryLabel = `${req.direction === "long" ? "Лонг" : "Шорт"} по рынку`;
+  const ids = tradeClientIds(base.id);
   let entryPrice: number;
   let filled: number;
+  let entryOrderId: number | null = null;
   const sentAt = Date.now();
   try {
     const order = await demoFuturesMarketOrder(
@@ -262,9 +280,14 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
       req.symbol,
       entrySide,
       v.quantity,
+      ids.market,
     );
+    entryOrderId = order.orderId;
     filled = order.executedQty || Number(v.quantity);
-    entryPrice = order.avgPrice || price;
+    entryPrice =
+      order.avgPrice ||
+      (await futuresFillPrice(creds, req.symbol, order.orderId)) ||
+      price;
     steps.push({
       label: entryLabel,
       ok: true,
@@ -276,44 +299,94 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
       steps.push({ label: entryLabel, ok: false, detail: errorText(error) });
       return done(failed);
     }
-    // Исход неизвестен (-1007, 5xx, обрыв сети): проверяем позицию на бирже, а не гадаем.
+    // Исход неизвестен (-1007, 5xx, обрыв сети): сверяем свой ордер по clientOrderId, затем позицию.
     steps.push({
       label: entryLabel,
       ok: false,
-      detail: `${errorText(error)} — проверяю позицию на бирже`,
+      detail: `${errorText(error)} — проверяю ордер ${ids.market} на бирже`,
     });
-    let position: { amount: number; entryPrice: number } | null = null;
+    const deadline = unknownOutcomeDeadline(sentAt, Date.now());
+    let order: FuturesOrder | null | "error";
     try {
-      position = await recheckUntil(
-        unknownOutcomeDeadline(sentAt, Date.now()),
-        () => demoFuturesPosition(creds, req.symbol),
-        (p) => p.amount !== 0,
+      order = await recheckUntil(
+        deadline,
+        () =>
+          fetchDemoFuturesOrder(creds, req.symbol, {
+            clientOrderId: ids.market,
+          }),
+        (o) => o !== null && o.executedQty > 0,
       );
     } catch (checkError) {
       steps.push({
-        label: "Проверка позиции",
+        label: "Проверка ордера",
         ok: false,
         detail: errorText(checkError),
       });
+      order = "error";
     }
-    const checked = afterFuturesPositionCheck(position);
-    if (!("protect" in checked)) {
-      if (position)
+    const byOrder = afterFuturesOrderCheck(order);
+    if (byOrder !== "checkPosition" && !("filled" in byOrder)) {
+      steps.push({
+        label: "Проверка ордера",
+        ok: true,
+        detail: byOrder.message,
+      });
+      return done(byOrder);
+    }
+    if (byOrder !== "checkPosition") {
+      const o = byOrder.filled;
+      entryOrderId = o.orderId;
+      filled = o.executedQty;
+      entryPrice =
+        o.avgPrice ||
+        (await futuresFillPrice(creds, req.symbol, o.orderId)) ||
+        price;
+      steps.push({
+        label: "Проверка ордера",
+        ok: true,
+        detail: `${o.status}: ${filled} по ~${entryPrice}, ордер #${o.orderId} — ставлю защиту`,
+      });
+    } else {
+      let position: { amount: number; entryPrice: number } | null = null;
+      try {
+        position = await recheckUntil(
+          deadline,
+          () => demoFuturesPosition(creds, req.symbol),
+          (p) => p.amount !== 0,
+        );
+      } catch (checkError) {
         steps.push({
           label: "Проверка позиции",
-          ok: true,
-          detail: "Позиции нет",
+          ok: false,
+          detail: errorText(checkError),
         });
-      return done(checked);
+      }
+      const checked = afterFuturesPositionCheck(position);
+      if (!("protect" in checked)) {
+        if (position)
+          steps.push({
+            label: "Проверка позиции",
+            ok: true,
+            detail: "Позиции нет",
+          });
+        return done(checked);
+      }
+      filled = Math.abs(checked.protect.amount);
+      entryPrice = checked.protect.entryPrice || price;
+      steps.push({
+        label: "Проверка позиции",
+        ok: true,
+        detail: `Позиция открыта: ${checked.protect.amount} по ${entryPrice} — ставлю защиту`,
+      });
     }
-    filled = Math.abs(checked.protect.amount);
-    entryPrice = checked.protect.entryPrice || price;
-    steps.push({
-      label: "Проверка позиции",
-      ok: true,
-      detail: `Позиция открыта: ${checked.protect.amount} по ${entryPrice} — ставлю защиту`,
-    });
   }
+  const futuresRefs = {
+    market: "futures" as const,
+    entryOrderId,
+    stop: null as { algoId: number; clientAlgoId: string | null } | null,
+    takeProfit: null as { algoId: number; clientAlgoId: string | null } | null,
+  };
+  refs.current = futuresRefs;
 
   // Сначала стоп: не встал — позиция без защиты не остаётся, сразу закрываем её по рынку (AC5).
   let stopPlaced = false;
@@ -325,9 +398,14 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
         exitSide,
         "STOP_MARKET",
         v.stopLoss,
+        ids.stop,
       ),
     );
     stopPlaced = true;
+    futuresRefs.stop = {
+      algoId: algo.algoId,
+      clientAlgoId: algo.clientAlgoId ?? ids.stop,
+    };
     steps.push({
       label: "Stop Loss",
       ok: true,
@@ -359,9 +437,14 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
         exitSide,
         "TAKE_PROFIT_MARKET",
         v.takeProfit,
+        ids.takeProfit,
       ),
     );
     tpPlaced = true;
+    futuresRefs.takeProfit = {
+      algoId: algo.algoId,
+      clientAlgoId: algo.clientAlgoId ?? ids.takeProfit,
+    };
     steps.push({
       label: "Take Profit",
       ok: true,
@@ -374,6 +457,31 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Фактическая цена входа фьючерсов, если в ответе MARKET нет avgPrice (демо иногда шлёт 0):
+ * ордер по orderId, затем его исполнения (userTrades). null — узнать не удалось (берём текущую).
+ */
+async function futuresFillPrice(
+  creds: BinanceCredentials,
+  symbol: string,
+  orderId: number,
+): Promise<number | null> {
+  try {
+    const order = await fetchDemoFuturesOrder(creds, symbol, { orderId });
+    if (order && order.avgPrice > 0) return order.avgPrice;
+    const fills = await fetchDemoFills(creds, "futures", symbol, 50);
+    const own = groupFills(fills).find((o) => o.orderId === orderId);
+    return own && own.avgPrice > 0 ? own.avgPrice : null;
+  } catch (error) {
+    log.warn("trade.fill_price", `${symbol}: цена входа не уточнена`, {
+      symbol,
+      orderId,
+      error: errorText(error),
+    });
+    return null;
+  }
+}
 
 /**
  * Перечитывать, пока не найдётся или пока проверка не будет начата после дедлайна
@@ -451,7 +559,9 @@ interface SpotContext {
   rules: SymbolRules;
   price: number;
   /** Свои clientOrderId заявки — чтобы перечитать её, если исход неизвестен. */
-  ids: ReturnType<typeof spotClientIds>;
+  ids: ReturnType<typeof tradeClientIds>;
+  /** Свои стоп/тейк — для закрытия (PR 2b). */
+  refs: RefsHolder;
   steps: TradeStep[];
   done: Done;
 }
@@ -564,6 +674,7 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
     if (!("found" in rechecked)) return done(rechecked);
     list = rechecked.found;
   }
+  c.refs.current = spotListRefs(list, ids, mode === "otoco");
 
   const filled = list.filled;
   const entryPrice = filled > 0 ? list.quoteQty / filled : price;
@@ -633,6 +744,24 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
     entryPrice,
     filled,
   });
+}
+
+/** Ссылки на стоп/тейк заявки OTO/OTOCO: id из ответа (или перечитанной заявки) и свои clientOrderId. */
+function spotListRefs(
+  list: SpotEntryListResult,
+  ids: ReturnType<typeof tradeClientIds>,
+  withTakeProfit: boolean,
+): DemoProtectRefs {
+  const stop = list.pending.find((p) => p.type.startsWith("STOP_LOSS"));
+  const tp = list.pending.find((p) => !p.type.startsWith("STOP_LOSS"));
+  return {
+    market: "spot",
+    orderListId: list.orderListId,
+    stop: { orderId: stop?.orderId ?? null, clientOrderId: ids.stop },
+    takeProfit: withTakeProfit
+      ? { orderId: tp?.orderId ?? null, clientOrderId: ids.takeProfit }
+      : null,
+  };
 }
 
 /** Спот без составных заявок: покупка по рынку, затем защита (при её отказе — продажа). */
@@ -727,9 +856,19 @@ async function protectOrSell(
   c: SpotContext,
   bought: { sellQty: string; entryPrice: number; filled: number },
 ): Promise<TradeResult> {
-  const { creds, req, v, steps, done } = c;
+  const { creds, req, v, ids, steps, done } = c;
   const { sellQty, entryPrice, filled } = bought;
   const protectLabel = req.stopOnly ? "Стоп" : "OCO: тейк + стоп";
+  // Свои id отдельной защиты: даже при неизвестном исходе закрытие найдёт стоп по clientOrderId.
+  const own: Extract<DemoProtectRefs, { market: "spot" }> = {
+    market: "spot",
+    orderListId: null,
+    stop: { orderId: null, clientOrderId: ids.protectStop },
+    takeProfit: req.stopOnly
+      ? null
+      : { orderId: null, clientOrderId: ids.protectTakeProfit },
+  };
+  c.refs.current = own;
   let result: "placed" | OrderFailure;
   try {
     if (req.stopOnly) {
@@ -738,7 +877,9 @@ async function protectOrSell(
         req.symbol,
         sellQty,
         v.stopLoss,
+        ids.protectStop,
       );
+      own.stop = { orderId: stop.orderId, clientOrderId: ids.protectStop };
       steps.push({
         label: protectLabel,
         ok: true,
@@ -751,7 +892,13 @@ async function protectOrSell(
         sellQty,
         v.takeProfit,
         v.stopLoss,
+        {
+          list: ids.protectList,
+          stop: ids.protectStop,
+          takeProfit: ids.protectTakeProfit,
+        },
       );
+      own.orderListId = oco.orderListId;
       steps.push({
         label: protectLabel,
         ok: true,

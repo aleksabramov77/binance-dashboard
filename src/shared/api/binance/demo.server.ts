@@ -11,7 +11,11 @@ export type {
   DemoSymbolOrders,
 } from "./demoOrders";
 export type { PriceBand, SymbolRules } from "./demoRules";
-export type { AlgoOrderQuery, SpotOrderQuery } from "./demoSchemas";
+export type {
+  AlgoOrderQuery,
+  FuturesOrder,
+  SpotOrderQuery,
+} from "./demoSchemas";
 export {
   type DemoFill,
   type DemoPosition,

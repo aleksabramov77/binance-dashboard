@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   afterEntryError,
+  afterFuturesOrderCheck,
   afterFuturesPositionCheck,
   afterFuturesRollback,
   afterFuturesStop,
@@ -142,5 +143,20 @@ describe("спот", () => {
       status: "unprotected",
       withEntry: true,
     });
+  });
+});
+
+describe("фьючерсы: свой ордер входа после неизвестного исхода", () => {
+  it("исполнен — берём объём из ордера; завершён без исполнения — отказ; иначе — по позиции", () => {
+    const order = { status: "FILLED", executedQty: 40, avgPrice: 0.2292 };
+    expect(afterFuturesOrderCheck(order)).toEqual({ filled: order });
+    expect(
+      afterFuturesOrderCheck({ status: "EXPIRED", executedQty: 0 }),
+    ).toMatchObject({ status: "rejected", withEntry: false });
+    expect(afterFuturesOrderCheck({ status: "NEW", executedQty: 0 })).toBe(
+      "checkPosition",
+    );
+    expect(afterFuturesOrderCheck(null)).toBe("checkPosition");
+    expect(afterFuturesOrderCheck("error")).toBe("checkPosition");
   });
 });

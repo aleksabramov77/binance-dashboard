@@ -61,6 +61,32 @@ export function afterFuturesPositionCheck<P extends { amount: number }>(
   return { protect: position };
 }
 
+const FUTURES_FINAL = [
+  "FILLED",
+  "CANCELED",
+  "REJECTED",
+  "EXPIRED",
+  "EXPIRED_IN_MATCH",
+];
+
+/**
+ * Фьючерсы, исход входа неизвестен: свой ордер входа, перечитанный по clientOrderId (PR 2b).
+ * Исполнен — { filled } (объём и цена из ордера); завершён без исполнения — rejected;
+ * не найден, ещё в работе или не прочитали — сверить по позиции символа.
+ */
+export function afterFuturesOrderCheck<
+  O extends { status: string; executedQty: number },
+>(order: O | null | "error"): TradeOutcome | { filled: O } | "checkPosition" {
+  if (order === null || order === "error") return "checkPosition";
+  if (order.executedQty > 0) return { filled: order };
+  if (FUTURES_FINAL.includes(order.status))
+    return outcome(
+      "rejected",
+      `Вход не исполнился — ордер на бирже ${order.status}, позиции нет.`,
+    );
+  return "checkPosition";
+}
+
 /** Фьючерсы: стоп после входа. Не встал — откат (позиция без стопа не остаётся, AC5). */
 export function afterFuturesStop(
   placed: boolean,
