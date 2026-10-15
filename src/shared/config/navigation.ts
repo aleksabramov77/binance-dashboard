@@ -7,4 +7,5 @@ export const NAV_ITEMS = [
   { href: "/stats", label: "Статистика" },
   { href: "/settings", label: "Настройки" },
   { href: "/logs", label: "Логи" },
+  { href: "/help", label: "Справка" },
 ] as const;

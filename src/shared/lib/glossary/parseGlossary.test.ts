@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseGlossary } from "./glossary";
+import { parseGlossary } from "./parseGlossary";
 
 const md = `# Глоссарий
 
