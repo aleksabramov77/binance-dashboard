@@ -1,19 +1,27 @@
-import type { PaperTrade } from "@binance-dashboard/trading-core";
+import type {
+  PaperTrade,
+  SkippedSignal,
+} from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
 import type { LabExperiment } from "@/entities/experiment";
-import { EXPERIMENT_CATALOG } from "@/features/paper-engine";
+import { ENGINE, EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import type { MarketContext } from "./labMarket";
 import {
   archetypeOf,
   buildLabReport,
   controlsOf,
+  costR,
   type LabDataset,
+  maeR,
   meanStat,
+  median,
   mfeR,
   parseSince,
+  quantile,
   renderLabReport,
   renderTradesCsv,
   sampleLevel,
+  tradeCosts,
 } from "./labReport";
 
 const HOUR = 3_600_000;
@@ -62,6 +70,8 @@ function trade(
     pnl: r * quantity,
     rMultiple: r,
     demoOrderRef: null,
+    mae: null,
+    entryContext: {},
     signal: {},
     ...over,
   };
@@ -543,10 +553,391 @@ describe("renderTradesCsv", () => {
     ]);
     const [header, a, b] = csv.split("\n");
     expect(header.startsWith("id,experimentId,market,symbol")).toBe(true);
-    expect(header.endsWith("rMultiple,mfeR,returnPct,holdMinutes")).toBe(true);
+    expect(header).toContain(
+      "rMultiple,mfeR,returnPct,holdMinutes,mae,maeR,costR,ctx_atrPct,",
+    );
+    expect(header.endsWith("ctx_hourUtc,ctx_weekday")).toBe(true);
     expect(a.startsWith("a,S04,spot,BTCUSDT,long,")).toBe(true);
-    expect(a.endsWith(",tp,0,1,2,3,2,30")).toBe(true);
+    expect(a).toContain(",tp,0,1,2,3,2,30,");
     expect(b).toContain(",,"); // closedAt пустой
-    expect(b.endsWith(",0,,,0,,")).toBe(true);
+    expect(b).toContain(",0,,,0,,");
+  });
+
+  it("MAE, издержки в R и снимок рынка на входе — свои столбцы; у сделок до spec 0030 — пусто", () => {
+    const csv = renderTradesCsv([
+      trade("F04", 1, {
+        id: "c",
+        mae: 99.5,
+        fees: 0.1,
+        entryContext: { v: 1, atrPct: 1.2, btcAboveEma200_4h: true },
+      }),
+      trade("F04", 1, { id: "d" }),
+    ]);
+    const [header, c, d] = csv.split("\n").map((line) => line.split(","));
+    const col = (row: string[], name: string) => row[header.indexOf(name)];
+    expect(col(c, "mae")).toBe("99.5");
+    expect(col(c, "maeR")).toBe("0.5");
+    expect(Number(col(c, "costR"))).toBeGreaterThan(0.2); // 0,1 $ комиссий + слиппедж при риске 0,5 $
+    expect(col(c, "ctx_atrPct")).toBe("1.2");
+    expect(col(c, "ctx_btcAboveEma200_4h")).toBe("true");
+    expect(col(d, "maeR")).toBe("");
+    expect(col(d, "ctx_atrPct")).toBe("");
+  });
+});
+
+describe("издержки, MAE и квантили (spec 0030)", () => {
+  it("tradeCosts: комиссии и слиппедж входа; тейк — без слиппеджа выхода", () => {
+    const tp = trade("F04", 2, { entryPrice: 100.05, exitPrice: 102 });
+    expect(tradeCosts(tp).slippage).toBeCloseTo(0.05 * 0.5, 4);
+    const sl = trade("F04", -1, {
+      entryPrice: 100.05,
+      exitPrice: 98.95,
+      exitReason: "sl",
+    });
+    // Выход по стопу по рынку: 98,95 = уровень × (1 − 0,05 %).
+    expect(tradeCosts(sl).slippage).toBeCloseTo(
+      (0.05 + 98.95 / (1 - 0.0005) - 98.95) * 0.5,
+      4,
+    );
+  });
+
+  it("costR и maeR: в долях риска до начального стопа; без стопа или MAE — null", () => {
+    const t = trade("F04", 1, { fees: 0.25, mae: 99.4 });
+    expect(maeR(t)).toBeCloseTo(0.6);
+    expect(maeR(trade("F04", 1, { mae: null }))).toBeNull();
+    expect(maeR(trade("S20", 1, { initialStop: null, mae: 90 }))).toBeNull();
+    expect(
+      maeR(
+        trade("F04", 1, {
+          direction: "short",
+          initialStop: 101,
+          mae: 100.8,
+        }),
+      ),
+    ).toBeCloseTo(0.8);
+    // риск 1 $ × 0,5 = 0,5 $; комиссии 0,25 $ = 0,5R плюс слиппедж входа
+    expect(costR(t)).toBeGreaterThan(0.5);
+    expect(costR(trade("S20", 1, { initialStop: null }))).toBeNull();
+  });
+
+  it("quantile и median", () => {
+    expect(quantile([], 0.5)).toBeNull();
+    expect(quantile([5, 1, 3, 2, 4, 6, 7, 8, 9, 10], 0.9)).toBe(10);
+    expect(median([3, 1, 2])).toBe(2);
+    expect(median([4, 1, 2, 3])).toBe(2.5);
+    expect(median([])).toBeNull();
+  });
+});
+
+describe("buildLabReport: spec 0030", () => {
+  it("R до издержек и издержки в R: avg R = до − издержки; столбцы в сводке", () => {
+    const report = buildLabReport(
+      dataset(
+        [experiment("F04")],
+        [
+          trade("F04", 2, { fees: 0.05, pnl: 0.95, rMultiple: 1.9 }),
+          trade("F04", -1, { fees: 0.05, pnl: -0.55, rMultiple: -1.1 }),
+        ],
+      ),
+      { now: NOW },
+    );
+    const [f04] = report.experiments;
+    expect(f04.costs.feesUsd).toBeCloseTo(0.1);
+    expect(f04.costs.grossAvgR).not.toBeNull();
+    expect((f04.costs.grossAvgR ?? 0) - (f04.costs.costAvgR ?? 0)).toBeCloseTo(
+      f04.r.mean ?? 0,
+    );
+    expect(f04.costs.costAvgR).toBeGreaterThan(0.1);
+    const md = renderLabReport(report);
+    expect(md).toContain("| avg R | R до изд. | Изд. R |");
+    expect(md).toContain("Издержки: R до издержек");
+  });
+
+  it("MAE: прибыльные и убыточные, 90-й перцентиль; сделки без MAE не ломают отчёт", () => {
+    const winners = many(10, (i) =>
+      trade("F04", 2, { mae: 100 - (i + 1) * 0.05 }),
+    );
+    const f04 = only("F04", [
+      ...winners,
+      trade("F04", -1, { mae: 99 }),
+      trade("F04", -1, { mae: null }),
+    ]);
+    expect(f04.mae.n).toBe(11);
+    expect(f04.mae.winnersAvgR).toBeCloseTo(0.275);
+    expect(f04.mae.winnersP90R).toBeCloseTo(0.5);
+    expect(f04.mae.losersAvgR).toBeCloseTo(1);
+    const old = only("F04", [trade("F04", 1), trade("F04", -1)]);
+    expect(old.mae).toEqual({
+      n: 0,
+      winnersAvgR: null,
+      winnersP90R: null,
+      losersAvgR: null,
+    });
+    expect(old.contextCoverage).toBe(0);
+    expect(old.byContext.adx).toEqual([
+      expect.objectContaining({ key: "нет данных", closed: 2 }),
+    ]);
+    expect(
+      renderLabReport(
+        buildLabReport(dataset([experiment("F04")], [trade("F04", 1)]), {
+          now: NOW,
+        }),
+      ),
+    ).toContain("MAE: нет данных");
+  });
+
+  it("разрезы по контексту входа: режим BTC, ADX, терции ATR%, знак funding", () => {
+    const ctx = (
+      atrPct: number,
+      adx14: number,
+      funding: number,
+      up: boolean,
+    ) => ({
+      v: 1,
+      atrPct,
+      adx14,
+      funding,
+      btcAboveEma200_4h: up,
+      btcAdx14_4h: 30,
+    });
+    const f04 = only("F04", [
+      trade("F04", 2, { entryContext: ctx(0.5, 15, 0.0001, true) }),
+      trade("F04", 2, { entryContext: ctx(1, 22, 0.0001, true) }),
+      trade("F04", -1, { entryContext: ctx(2, 30, -0.0001, false) }),
+      trade("F04", -1, { entryContext: ctx(3, 45, -0.0001, false) }),
+      trade("F04", -1, { entryContext: ctx(4, 50, 0, false) }),
+      trade("F04", 1),
+    ]);
+    expect(f04.contextCoverage).toBeCloseTo(5 / 6);
+    expect(f04.byContext.btcRegime.map((r) => [r.key, r.closed])).toEqual([
+      ["тренд вверх", 2],
+      ["нет данных", 1],
+      ["тренд вниз", 3],
+    ]);
+    expect(f04.byContext.adx.map((r) => r.key)).toEqual([
+      "1 < 20",
+      "2 20–25",
+      "3 25–40",
+      "4 ≥ 40",
+      "нет данных",
+    ]);
+    expect(f04.byContext.atrPct.map((r) => [r.key, r.closed])).toEqual([
+      ["1 низкая ≤ 1", 2],
+      ["2 средняя ≤ 3", 2],
+      ["3 высокая > 3", 1],
+      ["нет данных", 1],
+    ]);
+    expect(f04.byContext.funding.map((r) => r.key).sort()).toEqual(
+      ["+ (лонги платят)", "0", "− (шорты платят)", "нет данных"].sort(),
+    );
+    expect(only("S04", [trade("S04", 1)]).byContext.funding).toEqual([]);
+    expect(
+      renderLabReport(
+        buildLabReport(
+          dataset(
+            [experiment("F04")],
+            [trade("F04", 2, { entryContext: ctx(0.5, 15, 0.0001, true) })],
+          ),
+          { now: NOW },
+        ),
+      ),
+    ).toContain("**Режим BTC 4h на входе**");
+  });
+
+  it("отсечённые сигналы: число по причинам, лимит записи — нижняя оценка, --since", () => {
+    const skip = (
+      i: number,
+      reason: SkippedSignal["reason"],
+      at = "2026-10-05T00:00:00.000Z",
+    ): SkippedSignal => ({
+      id: `s${i}`,
+      runId: 1,
+      experimentId: "F04",
+      market: "futures",
+      symbol: "ETHUSDT",
+      direction: "long",
+      bar: Date.parse(at) - HOUR,
+      at,
+      reason,
+      entryPrice: 100,
+      stop: 99,
+      takeProfit: 102,
+    });
+    const data: LabDataset = {
+      ...dataset([experiment("F04")], [trade("F04", 1)]),
+      skipped: [
+        skip(1, "max-open"),
+        skip(2, "max-open"),
+        skip(3, "no-budget", "2026-10-01T05:00:00.000Z"),
+      ],
+    };
+    const [f04] = buildLabReport(data, { now: NOW }).experiments;
+    expect(f04.skipped).toEqual({
+      total: 3,
+      byReason: { "max-open": 2, "symbol-busy": 0, "no-budget": 1 },
+      capped: false,
+      outcome: null,
+    });
+    const recent = buildLabReport(data, {
+      now: NOW,
+      since: Date.parse("2026-10-03T00:00:00Z"),
+    }).experiments[0];
+    expect(recent.skipped.total).toBe(2);
+    const capped = buildLabReport(
+      {
+        ...data,
+        skipped: Array.from({ length: ENGINE.skippedSignalsCap }, (_, i) =>
+          skip(i, "symbol-busy"),
+        ),
+      },
+      { now: NOW },
+    ).experiments[0];
+    expect(capped.skipped.capped).toBe(true);
+    const md = renderLabReport(buildLabReport(data, { now: NOW }));
+    expect(md).toContain(
+      "Отсечённые сигналы: 3 (лимит позиций 2, символ занят 0, нет денег 1).",
+    );
+    expect(md).toContain("с флагом `--after-exit`");
+  });
+
+  it("контроль: все случайные входы рынка вместе, медиана и BTC с тем же удержанием", () => {
+    const random2: LabExperiment = {
+      ...experiment("S19"),
+      id: "PS99",
+      name: "Случайный вход (тест)",
+    };
+    const market: MarketContext = {
+      symbol: "BTCUSDT",
+      lastPrice: 100,
+      periodReturnPct: 10, // 1 % в день за 10 дней
+      periodMaxDrawdownPct: 0.01,
+      ema200_4h: 90,
+      aboveEma200: true,
+      adx14_4h: 30,
+      atrPct14_4h: 1,
+      regime: "trend-up",
+      regimeAtStart: "trend-up",
+      daily: [],
+    };
+    const report = buildLabReport(
+      dataset(
+        [experiment("S04"), experiment("S19"), random2],
+        [
+          ...[1, 1, 1].map((r) => trade("S04", r)),
+          // один хвост у S19 и ровные сделки у второго контроля
+          trade("S19", 20),
+          trade("S19", -1),
+          ...[-1, -1, -1].map((r) => trade("PS99", r)),
+        ],
+      ),
+      { now: NOW, market },
+    );
+    expect(report.controlBaseline.spot).toEqual({
+      experiments: ["S19", "PS99"],
+      closed: 5,
+      meanPct: 3.2,
+      medianPct: -1,
+    });
+    expect(report.controlBaseline.futures.experiments).toEqual([]);
+    const s04 = report.experiments.find((e) => e.id === "S04");
+    expect(s04?.vsRandomPct).toBeCloseTo(1 - 3.2);
+    expect(s04?.vsRandomMedianPct).toBeCloseTo(2);
+    // 30 мин удержания при дрейфе 1 %/день ≈ +0,0208 %, круг spot 0,2 % + 0,1 % слиппеджа.
+    expect(s04?.vsMarketPct).toBeCloseTo(1 - (1 / 48 - 0.3));
+    for (const id of ["S19", "PS99"]) {
+      const c = report.experiments.find((e) => e.id === id);
+      expect(c?.vsRandomPct).toBeNull();
+      expect(c?.vsRandomMedianPct).toBeNull();
+    }
+    expect(renderLabReport(report)).toContain(
+      "Случайный вход (все такие эксперименты вместе",
+    );
+    expect(only("S04", [trade("S04", 1)]).vsMarketPct).toBeNull();
+  });
+
+  it("прошлая эпоха: период — до её конца, а не до времени отчёта", () => {
+    const endedAt = new Date(START + 4 * 24 * HOUR).toISOString();
+    const report = buildLabReport(
+      {
+        run: {
+          id: 1,
+          startedAt: new Date(START).toISOString(),
+          endedAt,
+        },
+        experiments: [experiment("S04")],
+        trades: [trade("S04", 1), trade("S04", -1)],
+      },
+      { now: NOW },
+    );
+    expect(report.run.endedAt).toBe(endedAt);
+    expect(report.periodEnd).toBe(endedAt);
+    expect(report.periodDays).toBeCloseTo(4);
+    expect(report.experiments[0].tradesPerDay).toBeCloseTo(0.5);
+    expect(renderLabReport(report)).toContain(
+      `по ${endedAt} (прошлая эпоха; конфиг экспериментов — текущий)`,
+    );
+  });
+
+  it("после выхода и исход отсечённых сигналов — из загруженных свечей ТФ", () => {
+    const tf = 15 * 60_000; // S04 — 15m
+    const exitAt = START + 2 * HOUR;
+    const closes = new Map([
+      [exitAt + 4 * tf, 101],
+      [exitAt + 12 * tf, 99],
+      [exitAt + 24 * tf, 100],
+    ]);
+    const candles = Array.from({ length: 40 }, (_, i) => {
+      const openTime = exitAt + i * tf;
+      const close = closes.get(openTime) ?? 100;
+      return { openTime, open: 100, high: 100.5, low: 99.5, close, volume: 1 };
+    });
+    const klines = new Map([["spot:BTCUSDT:15m", candles]]);
+    const t = trade("S04", 0, {
+      openedAt: new Date(exitAt - 30 * 60_000).toISOString(),
+      closedAt: new Date(exitAt + 60_000).toISOString(),
+      exitPrice: 100,
+    });
+    const report = buildLabReport(
+      {
+        ...dataset([experiment("S04")], [t]),
+        skipped: [
+          {
+            id: "s1",
+            runId: 1,
+            experimentId: "S04",
+            market: "spot",
+            symbol: "BTCUSDT",
+            direction: "long",
+            bar: exitAt - tf,
+            at: new Date(exitAt).toISOString(),
+            reason: "max-open",
+            entryPrice: 100,
+            stop: 99,
+            takeProfit: 102,
+          },
+        ],
+      },
+      { now: NOW, klines },
+    );
+    const [s04] = report.experiments;
+    expect(report.klinesLoaded).toBe(true);
+    const all = s04.afterExit?.filter((r) => r.reason === "все") ?? [];
+    expect(all.map((r) => r.bars)).toEqual([4, 12, 24]);
+    expect(all.map((r) => r.avgMovePct?.toFixed(6))).toEqual([
+      "1.000000",
+      "-1.000000",
+      "0.000000",
+    ]);
+    expect(all.map((r) => r.avgMoveR?.toFixed(6))).toEqual([
+      "1.000000",
+      "-1.000000",
+      "0.000000",
+    ]);
+    expect(all.map((r) => r.continuedShare)).toEqual([1, 0, 0]);
+    // Свечи ±0,5 не задели ни стоп 99, ни тейк 102: «не закрылся» по close конца горизонта.
+    expect(s04.skipped.outcome).toMatchObject({ n: 1, tp: 0, sl: 0, open: 1 });
+    const md = renderLabReport(report);
+    expect(md).toContain("**После выхода**");
+    expect(md).toContain("Грубый исход по свечам ТФ");
   });
 });
