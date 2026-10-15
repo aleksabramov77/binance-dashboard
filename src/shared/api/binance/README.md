@@ -51,6 +51,15 @@
   и `nextRecheckDelay` — сколько перечитывать заявку с неизвестным исходом, прежде чем сказать «её нет».
   Перечитать ордер спота по своему id — `fetchDemoSpotOrderByClientId` (null — `-2013`, ордера нет);
   `clientOrderId` задают `demoSpotMarketOrder` и `spotEntryListRequest` (`clientIds`).
+- `positionMode.ts` — режим позиций фьючерсов (spec 0012, PR 2c): `FuturesSide` (режим + сторона) и параметры
+  ордеров — вход (`entryParams`: Hedge — `positionSide`), закрытие (`reduceParams`: One-way — `reduceOnly`, Hedge —
+  `positionSide`, reduceOnly там не передаётся), защита на свой объём (`protectParams`: `quantity`, без
+  `closePosition`). Сеть: `fetchDemoPositionMode` (GET `/fapi/v1/positionSide/dual`, кэш 30 с), `demoEnableHedgeMode`
+  (только на пустом счёте; `-4059` — уже включён), `fetchDemoFuturesAccountBusy`, `fetchDemoFuturesSymbolState`
+  (позиции по сторонам, открытые обычные и algo-ордера), `demoFuturesPositions`, `demoFuturesCancelOrder`,
+  `fetchDemoSpotOpenOrders` / `demoSpotCancelOrder`. `demoFuturesMarketOrder`, `demoFuturesProtect` (бывший
+  `demoFuturesCloseAt`), `demoFuturesReduceMarket` принимают `FuturesSide`. `demoFuturesPrepare`: `-4047/-4048`
+  (ордера/позиция по символу) — тип маржи не меняется, не ошибка.
 - `protectRefs.ts` — `demoProtectRefsSchema` (клиент-безопасно): ссылки на свои стоп/тейк сделки (spec 0012, PR 2b).
   Свои ордера: `fetchDemoAlgoOrder` / `demoCancelAlgoOrder` (по algoId или clientAlgoId; нет — `-2013`/`-2011`), `demoSpotCancelByClientId`,
   `fetchDemoFuturesOrder` (по orderId или clientOrderId; null — `-2013`); свои id принимают `demoFuturesMarketOrder`,

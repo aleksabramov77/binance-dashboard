@@ -87,6 +87,22 @@ export function afterFuturesOrderCheck<
   return "checkPosition";
 }
 
+/**
+ * Фьючерсы, «стоп до входа» (AC10, Hedge, за флагом): стоп не встал — вход не отправляется,
+ * позиции нет.
+ */
+export function afterStopBeforeEntry(placed: boolean): TradeOutcome | "enter" {
+  return placed
+    ? "enter"
+    : outcome("rejected", "Стоп не принят биржей — вход не отправлялся.");
+}
+
+/** Общий срок сделки истёк до отправки входа — ничего не отправлено. */
+export const DEADLINE_BEFORE_ENTRY = outcome(
+  "rejected",
+  "Биржа долго не отвечает — вход не отправлялся, попробуйте позже.",
+);
+
 /** Фьючерсы: стоп после входа. Не встал — откат (позиция без стопа не остаётся, AC5). */
 export function afterFuturesStop(
   placed: boolean,
