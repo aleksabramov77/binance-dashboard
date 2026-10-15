@@ -126,16 +126,31 @@ export async function listMirrorCandidates(
   }));
 }
 
-/** Символы (market:symbol), по которым зеркало уже держит или открывает позицию. */
-export async function activeMirrorSymbols(db: Db): Promise<Set<string>> {
+/** Зеркало, которое держит или открывает позицию на демо. */
+export interface ActiveMirrorRow {
+  market: "spot" | "futures";
+  symbol: string;
+  direction: "long" | "short";
+}
+
+/**
+ * Зеркала, которые держат или открывают позицию: монета и сторона — для лимита на монету и
+ * встречных позиций в One-way (spec 0012, PR 2d).
+ */
+export async function activeMirrors(db: Db): Promise<ActiveMirrorRow[]> {
   const rows = await db
     .select({
       market: demoMirrorOrdersTable.market,
       symbol: demoMirrorOrdersTable.symbol,
+      direction: demoMirrorOrdersTable.direction,
     })
     .from(demoMirrorOrdersTable)
     .where(inArray(demoMirrorOrdersTable.status, [...ACTIVE_MIRROR_STATUSES]));
-  return new Set(rows.map((r) => `${r.market}:${r.symbol}`));
+  return rows.map((r) => ({
+    market: r.market as ActiveMirrorRow["market"],
+    symbol: r.symbol,
+    direction: r.direction as ActiveMirrorRow["direction"],
+  }));
 }
 
 /** Захват сделки зеркалом (status pending). false — её уже захватил другой прогон. */
@@ -279,7 +294,7 @@ export interface MirrorSummary {
   /** Не открылись: биржа или проверка заявки отказали. */
   rejected: number;
   /**
-   * Пропущены зеркалом по своим правилам: по монете уже есть зеркальная позиция, монеты нет на
+   * Пропущены зеркалом по своим правилам: встречная позиция без Hedge mode (до PR 2d — «монета занята»), монеты нет на
    * демо-рынке, вход старше 10 минут, пара не к USDT. Запроса на вход не было.
    */
   skipped: number;

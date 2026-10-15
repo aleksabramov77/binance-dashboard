@@ -6,7 +6,7 @@ import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { demoMirrorOrdersTable } from "../model/db";
 import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
 import {
-  activeMirrorSymbols,
+  activeMirrors,
   claimMirror,
   claimMirrorToClose,
   claimOpenMirrors,
@@ -101,14 +101,16 @@ describe("demo-зеркало в БД", () => {
     expect(list[0]).toMatchObject({ stop: 95, takeProfit: 110, quantity: 0.5 });
   });
 
-  it("захват идемпотентен, захваченная сделка не кандидат, символ занят", async () => {
+  it("захват идемпотентен, захваченная сделка не кандидат, зеркало активно", async () => {
     await setup();
     await setExperimentDemoMirror(db, "F01", true);
     const [c] = await listMirrorCandidates(db, SINCE);
     expect(await claimMirror(db, c)).toBe(true);
     expect(await claimMirror(db, c)).toBe(false);
     expect(await listMirrorCandidates(db, SINCE)).toEqual([]);
-    expect(await activeMirrorSymbols(db)).toEqual(new Set(["futures:ETHUSDT"]));
+    expect(await activeMirrors(db)).toEqual([
+      { market: "futures", symbol: "ETHUSDT", direction: "long" },
+    ]);
   });
 
   it("закрытая paper-сделка с открытым зеркалом захватывается на закрытие один раз", async () => {
@@ -163,7 +165,7 @@ describe("demo-зеркало в БД", () => {
       steps: [],
       closed: true,
     });
-    expect(await activeMirrorSymbols(db)).toEqual(new Set());
+    expect(await activeMirrors(db)).toEqual([]);
     expect(await mirrorStatuses(db, ["a", "b"])).toEqual(
       new Map([["a", { status: "closed", message: "закрыта" }]]),
     );

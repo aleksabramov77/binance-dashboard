@@ -1,7 +1,7 @@
 // Композиция demo-зеркала (spec 008): БД (entities/experiment) + биржа (features/execute-trade)
 // + логика прогона (features/demo-mirror). Только сервер; вызывает POST /api/cron/demo-mirror.
 import {
-  activeMirrorSymbols,
+  activeMirrors,
   claimMirror,
   claimMirrorToClose,
   claimOpenMirrors,
@@ -14,7 +14,10 @@ import {
 } from "@/entities/experiment";
 import { mirrorLogEntry, runMirror } from "@/features/demo-mirror";
 import { closeDemoPosition, placeTrade } from "@/features/execute-trade";
-import { fetchDemoSymbolRules } from "@/shared/api/binance/demo.server";
+import {
+  fetchDemoPositionMode,
+  fetchDemoSymbolRules,
+} from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
@@ -35,7 +38,12 @@ export async function runDemoMirror() {
       for (const c of list) byId.set(c.tradeId, c);
       return list;
     },
-    busySymbols: () => activeMirrorSymbols(db),
+    activeMirrors: () => activeMirrors(db),
+    positionMode: () => {
+      const config = getDemoTradingConfig();
+      if (!config) return Promise.reject(new Error("Demo не настроен"));
+      return fetchDemoPositionMode(config.credentials);
+    },
     // null — символа нет на демо; сетевой сбой — исключение (кандидат подождёт). Фьючерсный
     // справочник кэшируется на 10 минут, спот — запрос на символ.
     hasSymbol: async (market, symbol) =>

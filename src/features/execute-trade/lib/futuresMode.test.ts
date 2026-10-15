@@ -102,7 +102,7 @@ describe("ownSideBusy (ручной вход и зеркало)", () => {
       algos: [algo("BUY", "SHORT", 1)],
     };
     expect(ownSideBusy(state, hedgeLong)).toBe(false);
-    expect(ownSideBusy(state, hedgeShort)).toBe(true);
+    expect(ownSideBusy(state, hedgeShort)).toBe("busy");
   });
   it("One-way: любая позиция или ордер по символу — занято", () => {
     expect(
@@ -110,7 +110,7 @@ describe("ownSideBusy (ручной вход и зеркало)", () => {
         { positions: [], orders: [order("BUY", "BOTH", 1)], algos: [] },
         onewayShort,
       ),
-    ).toBe(true);
+    ).toBe("busy");
     expect(
       ownSideBusy(
         {
@@ -179,5 +179,31 @@ describe("recheckStep (общий дедлайн сделки)", () => {
   });
   it("дедлайн сделки раньше — не окончательно (giveUp), а не «нет»", () => {
     expect(recheckStep(false, 59_500, 59_400, 65_000, 60_000)).toBe("giveUp");
+  });
+});
+
+describe("ownSideBusy: вход зеркала (PR 2d)", () => {
+  const longPos = {
+    positions: [{ positionSide: "BOTH", amount: 40, entryPrice: 0.22 }],
+    orders: [order("SELL", "BOTH", 1, true)],
+    algos: [algo("SELL", "BOTH", 2)],
+  };
+  it("One-way: та же сторона у другого зеркала — можно; встречная — нет", () => {
+    expect(ownSideBusy(longPos, onewayLong, true)).toBe(false);
+    expect(ownSideBusy(longPos, onewayShort, true)).toBe("opposite");
+    // Ручной вход — по-прежнему только на пустой символ.
+    expect(ownSideBusy(longPos, onewayLong)).toBe("busy");
+  });
+  it("Hedge: зеркалу не мешает ничего", () => {
+    const state = {
+      positions: [
+        { positionSide: "LONG", amount: 40, entryPrice: 0.22 },
+        { positionSide: "SHORT", amount: -10, entryPrice: 0.23 },
+      ],
+      orders: [],
+      algos: [],
+    };
+    expect(ownSideBusy(state, hedgeLong, true)).toBe(false);
+    expect(ownSideBusy(state, hedgeShort, true)).toBe(false);
   });
 });

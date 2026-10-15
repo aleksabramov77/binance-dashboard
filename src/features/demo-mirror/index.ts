@@ -7,6 +7,7 @@ export {
   mirrorLogEntry,
 } from "./lib/mirrorLog";
 export {
+  type ActiveMirror,
   type MirrorDecision,
   type MirrorListing,
   type MirrorOrderRequest,

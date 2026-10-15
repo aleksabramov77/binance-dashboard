@@ -146,10 +146,17 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   const entrySide = req.direction === "long" ? "BUY" : "SELL";
   const exitSide: "BUY" | "SELL" = req.direction === "long" ? "SELL" : "BUY";
 
-  // Своя сторона занята — второй вход смешал бы объёмы; в One-way это любая позиция/ордер по символу.
+  // Ручной вход — только на свободную сторону; зеркало делит сторону с другими зеркалами (PR 2d),
+  // но в One-way не входит против встречной позиции (закрыл бы её).
   try {
     const state = await fetchDemoFuturesSymbolState(creds, req.symbol);
-    if (ownSideBusy(state, side))
+    const busy = ownSideBusy(state, side, req.mirror === true);
+    if (busy === "opposite")
+      return finish(
+        "rejected",
+        `По ${req.symbol} есть встречная позиция — в One-way вход закрыл бы её; нужен Hedge mode.`,
+      );
+    if (busy)
       return finish(
         "rejected",
         mode === "hedge"

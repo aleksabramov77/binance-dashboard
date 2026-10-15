@@ -25,6 +25,11 @@ export const tradeRequestSchema = z.object({
    * Binance отклоняет фильтром PERCENT_PRICE_BY_SIDE, а с ним не встаёт и стоп.
    */
   stopOnly: z.boolean().optional(),
+  /**
+   * Вход demo-зеркала (spec 0012, PR 2d): своя сторона символа может быть общей с другими зеркалами
+   * (у каждого свои TP/SL на свой объём). Ручной вход (без флага) — только на свободную сторону.
+   */
+  mirror: z.boolean().optional(),
 });
 
 export const tradeStepSchema = z.object({

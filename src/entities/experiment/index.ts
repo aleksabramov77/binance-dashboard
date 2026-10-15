@@ -3,7 +3,8 @@
 export { loadBudgetInputs } from "./api/budgetsStore";
 // Demo-зеркало (spec 008): какие сделки повторить на Binance Demo и какие закрыть (только сервер).
 export {
-  activeMirrorSymbols,
+  type ActiveMirrorRow,
+  activeMirrors,
   claimMirror,
   claimMirrorToClose,
   claimOpenMirrors,

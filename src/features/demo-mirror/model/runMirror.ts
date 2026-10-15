@@ -1,5 +1,5 @@
 import { MIRROR } from "../config/mirror";
-import type { MirrorOrderRequest } from "../lib/planMirror";
+import type { ActiveMirror, MirrorOrderRequest } from "../lib/planMirror";
 import {
   listingKey,
   type MirrorListing,
@@ -43,7 +43,13 @@ export interface MirrorDeps<
   /** Ключ Binance Demo задан — иначе прогон ничего не делает. */
   configured: boolean;
   listCandidates: (since: Date) => Promise<MirrorTradeInput[]>;
-  busySymbols: () => Promise<Set<string>>;
+  /** Зеркала, которые держат или открывают позицию: монета и сторона (лимит на монету, встречные). */
+  activeMirrors: () => Promise<ActiveMirror[]>;
+  /**
+   * Режим позиций демо-фьючерсов: в One-way встречная сторона по монете — пропуск, в Hedge — вход.
+   * Исключение — режим неизвестен: встречные кандидаты ждут следующего прогона.
+   */
+  positionMode: () => Promise<"oneway" | "hedge">;
   /**
    * Есть ли символ на демо-рынке: false — точно нет (вход пропускается), исключение — сеть
    * (кандидат ждёт следующего прогона). Проверяется до захвата сделки и запроса на вход.
@@ -123,15 +129,19 @@ export async function runMirror<
 
   const now = deps.now();
   const candidates = await deps.listCandidates(new Date(now - 60 * 60_000));
+  let futuresMode: "oneway" | "hedge" | null = null;
+  if (candidates.some((c) => c.market === "futures"))
+    futuresMode = await deps.positionMode().catch(() => null);
   const decisions = planMirror(
     candidates,
-    await deps.busySymbols(),
+    await deps.activeMirrors(),
     now,
     await checkListing(deps, candidates),
+    futuresMode,
   );
   for (const [i, d] of decisions.entries()) {
     // Бюджет исчерпан — не захватываем ничего, в том числе пропуски: план следующего прогона
-    // учтёт, что отложенные входы не открылись (иначе соседний кандидат мог бы уйти в «занята»).
+    // учтёт, что отложенные входы не открылись (лимит на монету, встречные стороны).
     if (overBudget()) {
       result.deferred = decisions.length - i;
       break;

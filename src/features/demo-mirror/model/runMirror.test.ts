@@ -21,7 +21,8 @@ function deps(over: Partial<MirrorDeps> = {}): MirrorDeps {
     now: () => NOW,
     configured: true,
     listCandidates: async () => [],
-    busySymbols: async () => new Set(),
+    activeMirrors: async () => [],
+    positionMode: async () => "oneway",
     hasSymbol: async () => true,
     claim: async () => true,
     open: async () => ({
