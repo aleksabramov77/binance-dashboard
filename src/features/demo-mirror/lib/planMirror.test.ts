@@ -71,7 +71,14 @@ describe("planMirror", () => {
         trade({ tradeId: "b" }),
         trade({ tradeId: "spot", market: "spot" }),
       ],
-      [{ market: "futures", symbol: "BTCUSDT", direction: "long" }],
+      [
+        {
+          market: "futures",
+          symbol: "BTCUSDT",
+          direction: "long",
+          hasRefs: true,
+        },
+      ],
       NOW,
     );
     expect(decisions.map((d) => [d.tradeId, d.kind])).toEqual([
@@ -131,6 +138,7 @@ describe("planMirror: несколько зеркал на монету (spec 00
     market: "futures" as const,
     symbol: "ETHUSDT",
     direction: "long" as const,
+    hasRefs: true,
   };
 
   it("одна сторона — открываем и в One-way (у каждого свой объём и TP/SL)", () => {
@@ -168,7 +176,7 @@ describe("planMirror: несколько зеркал на монету (spec 00
         trade({ tradeId: "s1", market: "spot" }),
         trade({ tradeId: "s2", market: "spot" }),
       ],
-      [{ market: "spot", symbol: "ETHUSDT", direction: "long" }],
+      [{ market: "spot", symbol: "ETHUSDT", direction: "long", hasRefs: true }],
       NOW,
     );
     expect(d.map((x) => x.kind)).toEqual(["open", "open"]);
@@ -191,5 +199,42 @@ describe("planMirror: несколько зеркал на монету (spec 00
     } finally {
       MIRROR.maxPerCoin = saved;
     }
+  });
+});
+
+describe("planMirror: открытые зеркала до PR 2b (без protect_refs)", () => {
+  const legacy = {
+    market: "futures" as const,
+    symbol: "ETHUSDT",
+    direction: "long" as const,
+    hasRefs: false,
+  };
+  it("на монете открыта legacy-строка — любое новое зеркало этого рынка пропускаем", () => {
+    const d = planMirror(
+      [trade({ tradeId: "x" }), trade({ tradeId: "sp", market: "spot" })],
+      [legacy],
+      NOW,
+      undefined,
+      "hedge",
+    );
+    expect(d).toEqual([
+      {
+        tradeId: "x",
+        kind: "skip",
+        reason:
+          "По ETHUSDT (futures) открыто зеркало без учёта своих ордеров (до PR 2b) — второе зеркало после его закрытия.",
+      },
+      // Другой рынок той же монеты — не мешает.
+      expect.objectContaining({ tradeId: "sp", kind: "open" }),
+    ]);
+  });
+  it("legacy закрылась — открываем; строки со ссылками — несколько зеркал", () => {
+    expect(planMirror([trade({ tradeId: "x" })], [], NOW)[0].kind).toBe("open");
+    const d = planMirror(
+      [trade({ tradeId: "x" }), trade({ tradeId: "y" })],
+      [{ ...legacy, hasRefs: true }],
+      NOW,
+    );
+    expect(d.map((x) => x.kind)).toEqual(["open", "open"]);
   });
 });

@@ -131,6 +131,13 @@ export interface ActiveMirrorRow {
   market: "spot" | "futures";
   symbol: string;
   direction: "long" | "short";
+  /**
+   * Строка нового учёта: есть свои ссылки на стоп/тейк (protect_refs, с PR 2b) или вход ещё
+   * отправляется (pending — ссылки запишет этот же код). false — строка до PR 2b (или вход без
+   * ссылок): её закрытие снимает все защитные ордера своей стороны символа, поэтому второе зеркало
+   * на монету при ней не открываем.
+   */
+  hasRefs: boolean;
 }
 
 /**
@@ -143,6 +150,8 @@ export async function activeMirrors(db: Db): Promise<ActiveMirrorRow[]> {
       market: demoMirrorOrdersTable.market,
       symbol: demoMirrorOrdersTable.symbol,
       direction: demoMirrorOrdersTable.direction,
+      status: demoMirrorOrdersTable.status,
+      hasRefs: isNotNull(demoMirrorOrdersTable.protectRefs),
     })
     .from(demoMirrorOrdersTable)
     .where(inArray(demoMirrorOrdersTable.status, [...ACTIVE_MIRROR_STATUSES]));
@@ -150,6 +159,8 @@ export async function activeMirrors(db: Db): Promise<ActiveMirrorRow[]> {
     market: r.market as ActiveMirrorRow["market"],
     symbol: r.symbol,
     direction: r.direction as ActiveMirrorRow["direction"],
+    hasRefs:
+      r.hasRefs === true || r.status === ("pending" satisfies MirrorStatus),
   }));
 }
 

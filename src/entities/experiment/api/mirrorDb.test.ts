@@ -108,8 +108,14 @@ describe("demo-зеркало в БД", () => {
     expect(await claimMirror(db, c)).toBe(true);
     expect(await claimMirror(db, c)).toBe(false);
     expect(await listMirrorCandidates(db, SINCE)).toEqual([]);
+    // Только что захвачена (pending): ссылки запишет вход — строка нового учёта.
     expect(await activeMirrors(db)).toEqual([
-      { market: "futures", symbol: "ETHUSDT", direction: "long" },
+      {
+        market: "futures",
+        symbol: "ETHUSDT",
+        direction: "long",
+        hasRefs: true,
+      },
     ]);
   });
 
@@ -136,6 +142,15 @@ describe("demo-зеркало в БД", () => {
     });
     expect(await listMirrorsToClose(db)).toEqual([]);
     expect(await claimMirrorToClose(db, "a")).toBeNull();
+    // С сохранёнными protect_refs — строка нового учёта (несколько зеркал на монету).
+    expect(await activeMirrors(db)).toEqual([
+      {
+        market: "futures",
+        symbol: "ETHUSDT",
+        direction: "long",
+        hasRefs: true,
+      },
+    ]);
 
     await store.closeTrade("a", {
       closedAt: "2026-10-11T12:30:00.000Z",
@@ -335,6 +350,15 @@ describe("protect_refs", () => {
       steps: [],
       quantity: 0.5,
     });
+    // Открытая строка до PR 2b (без protect_refs) — монета занята для новых зеркал (planMirror).
+    expect(await activeMirrors(db)).toEqual([
+      {
+        market: "futures",
+        symbol: "ETHUSDT",
+        direction: "long",
+        hasRefs: false,
+      },
+    ]);
     await db.execute(
       sql`update demo_mirror_orders set protect_refs = '{"market":"spot"}'::jsonb where trade_id = 'a'`,
     );

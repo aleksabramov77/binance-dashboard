@@ -78,6 +78,8 @@ export interface ActiveMirror {
   market: "spot" | "futures";
   symbol: string;
   direction: "long" | "short";
+  /** Свои ссылки на стоп/тейк (PR 2b). false — строка до них: монета занята до её закрытия. */
+  hasRefs: boolean;
 }
 
 /**
@@ -133,6 +135,16 @@ export function planMirror(
     // Справочник демо не загрузился — не пропускаем навсегда, повторим на следующей минуте.
     if (listing.unknown.has(key(t))) continue;
     const sameCoin = taken.filter((m) => key(m) === key(t));
+    // Строка до PR 2b (без своих ссылок) закрывается снятием всех защитных ордеров своей стороны
+    // символа — сняла бы и стоп второго зеркала. Пока она открыта, монета занята.
+    if (sameCoin.some((m) => !m.hasRefs)) {
+      decisions.push({
+        tradeId: t.tradeId,
+        kind: "skip",
+        reason: `По ${t.symbol} (${t.market}) открыто зеркало без учёта своих ордеров (до PR 2b) — второе зеркало после его закрытия.`,
+      });
+      continue;
+    }
     if (MIRROR.maxPerCoin !== null && sameCoin.length >= MIRROR.maxPerCoin) {
       decisions.push({
         tradeId: t.tradeId,
@@ -156,7 +168,12 @@ export function planMirror(
     }
     // Лимит прогона: остальные кандидаты дождутся следующей минуты (не пропускаем навсегда).
     if (opened >= MIRROR.maxEntriesPerRun) continue;
-    taken.push({ market: t.market, symbol: t.symbol, direction: t.direction });
+    taken.push({
+      market: t.market,
+      symbol: t.symbol,
+      direction: t.direction,
+      hasRefs: true,
+    });
     opened++;
     decisions.push({
       tradeId: t.tradeId,
