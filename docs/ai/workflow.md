@@ -20,7 +20,8 @@
  │     есть замечания → DEVELOPER правит → TESTER снова все AC на локальном сервере → REVIEWER
  │     (до 3 кругов, дальше — к пользователю); замечаний нет → label `ai-approved`
  ├─6. статусы в PRD, spec и docs/HISTORY.md, зелёный CI → ⏸ пользователь: «мерж» → squash-merge
- └─7. выкатка (`/flow release`) → `pnpm wt remove <ветка>` (сервер остановлен, worktree удалён)
+ ├─7. выкатка (`/flow release`) → `pnpm wt remove <ветка>` (сервер остановлен, worktree удалён)
+ └─8. закрытие: хвосты проверены, другие сессии оповещены → 🎉 «сессию можно закрывать» (иначе ⛔ «пока не закрывать»)
 CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger · typecheck · Vitest · build.
 ```
 
@@ -31,7 +32,7 @@ CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger �
 
 | Команда | Этапы |
 |---|---|
-| `/flow feature "<требование>"` | скилл `feature` до готового PR → ⏸ «мержить?» → мерж по `.claude/skills/merge/SKILL.md` → `release` |
+| `/flow feature "<требование>"` | скилл `feature` до готового PR → ⏸ «мержить?» → мерж по `.claude/skills/merge/SKILL.md` → `release` → `cleanup` → `close` (🎉 «сессию можно закрывать») |
 | `/flow bug "<описание>"` | то же со скиллом `bug` |
 | `/flow release` | выкатка влитого в main: `db:migrate` → Edge Function `engine-tick` → кроны → ⏸ env на Vercel (`!`-командой пользователя) → ожидание деплоя Vercel → смоук-проверки |
 | `/flow worktree-cleanup` | удалить worktree давно влитых задач (с остановкой их сервера) и разобрать забытые |
@@ -75,8 +76,8 @@ Claude запускать из папки проекта (`~/Projects/my/binance
 на чистом `main` — в нём только мерж и выкатка; spec и строка журнала задачи пишутся уже в её worktree. У каждого worktree свой локальный сервер (`pnpm wt serve`, свой порт
 и своя PGlite): на нём Tester проверяет задачу до PR и после каждого круга правок по ревью.
 
-Каждая задача заканчивается удалением своего worktree: после мержа и выкатки — `pnpm wt remove <ветка>` (останавливает сервер,
-удаляет worktree и локальную ветку). Чтобы забытые копии не копились, хук `SessionStart` (`.claude/settings.json`)
+После мержа и выкатки задача удаляет свой worktree — `pnpm wt remove <ветка>` (останавливает сервер,
+удаляет worktree и локальную ветку), а последним сообщением сессии выводит блок «сессию можно закрывать» (шаг 8). Чтобы забытые копии не копились, хук `SessionStart` (`.claude/settings.json`)
 при старте каждой сессии запускает `pnpm wt prune --quiet`: удаляет worktree, чей PR влит больше суток назад и в
 котором всё закоммичено и запушено, остальное показывает. Видно всё командой `pnpm wt list`. Встроенные
 `EnterWorktree`/`--worktree` и голый `git worktree add` не использовать — они не готовят worktree.
