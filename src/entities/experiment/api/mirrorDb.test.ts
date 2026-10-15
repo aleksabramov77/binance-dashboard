@@ -126,6 +126,7 @@ describe("demo-зеркало в БД", () => {
     const protectRefs = {
       market: "futures" as const,
       entryOrderId: 11,
+      legs: "quantity" as const,
       stop: { algoId: 21, clientAlgoId: "bd1-S" },
       takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
     };
@@ -341,6 +342,34 @@ describe("data-fix drizzle/0005 (spec 0012, AC2)", () => {
 });
 
 describe("protect_refs", () => {
+  it("фьючерсы 2b (ссылки без legs: «quantity» — ноги с closePosition) — legacy: монета занята", async () => {
+    await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    const refs2b = {
+      market: "futures" as const,
+      entryOrderId: 1,
+      stop: { algoId: 21, clientAlgoId: "bd1-S" },
+      takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
+    };
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      quantity: 0.5,
+      protectRefs: refs2b,
+    });
+    expect((await activeMirrors(db))[0]?.hasRefs).toBe(false);
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      protectRefs: { ...refs2b, legs: "quantity" },
+    });
+    expect((await activeMirrors(db))[0]?.hasRefs).toBe(true);
+  });
+
   it("своя нога сработала: строка закрыта биржей сразу, с ценой выхода; paper-сделка ещё открыта", async () => {
     await setup();
     await setExperimentDemoMirror(db, "F01", true);

@@ -23,6 +23,11 @@ export const demoProtectRefsSchema = z.discriminatedUnion("market", [
     market: z.literal("futures"),
     /** Рыночный ордер входа. */
     entryOrderId: z.number().nullable(),
+    /**
+     * Ноги на свой объём (quantity + reduceOnly/positionSide, с PR 2c). Нет — ноги с closePosition
+     * (2b): сработавшая закроет всю сторону вместе с другими зеркалами.
+     */
+    legs: z.literal("quantity").optional(),
     stop: algoRefSchema.nullable(),
     takeProfit: algoRefSchema.nullable(),
   }),

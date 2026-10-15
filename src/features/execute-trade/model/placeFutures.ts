@@ -203,6 +203,8 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   const futuresRefs = {
     market: "futures" as const,
     entryOrderId: null as number | null,
+    // Ноги на свой объём (PR 2c): без этой метки строки 2b считаются legacy (planMirror).
+    legs: "quantity" as const,
     stop: null as StoredAlgoRef | null,
     takeProfit: null as StoredAlgoRef | null,
   };

@@ -132,12 +132,26 @@ export interface ActiveMirrorRow {
   symbol: string;
   direction: "long" | "short";
   /**
-   * Строка нового учёта: есть свои ссылки на стоп/тейк (protect_refs, с PR 2b) или вход ещё
-   * отправляется (pending — ссылки запишет этот же код). false — строка до PR 2b (или вход без
-   * ссылок): её закрытие снимает все защитные ордера своей стороны символа, поэтому второе зеркало
-   * на монету при ней не открываем.
+   * Строка нового учёта: свои ссылки на стоп/тейк (protect_refs) и, у фьючерсов, ноги на свой объём
+   * (legs "quantity", с PR 2c), или вход ещё отправляется (pending — ссылки запишет этот же код).
+   * false — строка до PR 2b (без ссылок: её закрытие снимает защитные ордера своей стороны) или
+   * фьючерсы 2b (ноги с closePosition: сработавшая закроет всю сторону) — второе зеркало на монету
+   * при ней не открываем.
    */
   hasRefs: boolean;
+}
+
+/**
+ * Строка нового учёта: свои ссылки есть и ноги — на свой объём. Фьючерсы без метки legs "quantity" —
+ * входы 2b (ноги с closePosition): сработавшая закроет всю сторону вместе с соседями — legacy.
+ */
+function ownLegsOnly(market: string, raw: unknown): boolean {
+  const refs = parseProtectRefs(raw);
+  if (!refs) return false;
+  return (
+    market !== "futures" ||
+    (refs.market === "futures" && refs.legs === "quantity")
+  );
 }
 
 /**
@@ -151,7 +165,7 @@ export async function activeMirrors(db: Db): Promise<ActiveMirrorRow[]> {
       symbol: demoMirrorOrdersTable.symbol,
       direction: demoMirrorOrdersTable.direction,
       status: demoMirrorOrdersTable.status,
-      hasRefs: isNotNull(demoMirrorOrdersTable.protectRefs),
+      protectRefs: demoMirrorOrdersTable.protectRefs,
     })
     .from(demoMirrorOrdersTable)
     .where(inArray(demoMirrorOrdersTable.status, [...ACTIVE_MIRROR_STATUSES]));
@@ -160,7 +174,8 @@ export async function activeMirrors(db: Db): Promise<ActiveMirrorRow[]> {
     symbol: r.symbol,
     direction: r.direction as ActiveMirrorRow["direction"],
     hasRefs:
-      r.hasRefs === true || r.status === ("pending" satisfies MirrorStatus),
+      r.status === ("pending" satisfies MirrorStatus) ||
+      ownLegsOnly(r.market, r.protectRefs),
   }));
 }
 
