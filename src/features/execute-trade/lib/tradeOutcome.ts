@@ -1,4 +1,5 @@
 import type { TradeResult } from "@/entities/trade";
+import { SPOT_ENTRY_SLIPPAGE_TEXT } from "../config/spot";
 
 // Выбор исхода сделки по результатам шагов placeTrade (spec 0012): чистые функции, сеть — в model.
 // Правило: позиция без стопа — только unprotected; rejected — только когда позиции точно нет.
@@ -128,7 +129,7 @@ export function afterSpotBuy(
     return outcome(
       "rejected",
       entry === "spotList"
-        ? "Покупка не исполнилась по цене до +0,5% — монеты не куплены."
+        ? `Покупка не исполнилась по цене до +${SPOT_ENTRY_SLIPPAGE_TEXT} — монеты не куплены.`
         : "Покупка не исполнилась — монеты не куплены.",
     );
   return outcome("unprotected", UNKNOWN_BUY);

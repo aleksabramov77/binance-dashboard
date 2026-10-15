@@ -1,6 +1,11 @@
 import type { TradeRequest } from "@/entities/trade";
 import type { PriceBand, SymbolRules } from "@/shared/api/binance/demo.server";
-import { SPOT_ENTRY_SLIPPAGE, SPOT_TAKER_FEE } from "../config/spot";
+import {
+  SPOT_ENTRY_SLIPPAGE,
+  SPOT_ENTRY_SLIPPAGE_TEXT,
+  SPOT_TAKER_FEE,
+  SPOT_TAKER_FEE_TEXT,
+} from "../config/spot";
 
 /** Число знаков после запятой у шага биржи: "0.00010000" → 4, "1" → 0. */
 export function stepDecimals(step: string): number {
@@ -228,7 +233,7 @@ export function validateTrade(
     const stopUsd = spotStopNotional(qty, stopAtExchange, rules.stepSize);
     if (stopUsd < rules.minNotional)
       errors.push(
-        `Стоп продаст ${spotSellQuantity(qty, rules.stepSize)} (куплено минус комиссия 0,1%) по ${roundToTick(stopLoss, rules.tickSize)} — это $${stopUsd.toFixed(2)}, меньше минимального ордера ($${rules.minNotional}): биржа отклонит заявку. Увеличьте количество.`,
+        `Стоп продаст ${spotSellQuantity(qty, rules.stepSize)} (куплено минус комиссия ${SPOT_TAKER_FEE_TEXT}) по ${roundToTick(stopLoss, rules.tickSize)} — это $${stopUsd.toFixed(2)}, меньше минимального ордера ($${rules.minNotional}): биржа отклонит заявку. Увеличьте количество.`,
       );
   }
   if (notionalUsd > maxNotionalUsd)
@@ -237,7 +242,7 @@ export function validateTrade(
     );
 
   const wallet = req.market === "spot" ? "Spot" : "USDⓈ-M Futures";
-  // Спот покупается LIMIT FOK по цене +0,5% — биржа блокирует USDT по лимитной цене.
+  // Спот покупается LIMIT FOK по цене +SPOT_ENTRY_SLIPPAGE — биржа блокирует USDT по лимитной цене.
   const requiredUsd = isSpot
     ? notionalUsd * (1 + SPOT_ENTRY_SLIPPAGE)
     : notionalUsd / req.leverage;
@@ -248,7 +253,7 @@ export function validateTrade(
   } else {
     if (requiredUsd > availableUsd)
       errors.push(
-        `Нужно ${usd(requiredUsd)} ${isSpot ? "USDT (с запасом 0,5% на цену покупки)" : "маржи"}, а на ${wallet} свободно ${usd(availableUsd)}.`,
+        `Нужно ${usd(requiredUsd)} ${isSpot ? `USDT (с запасом ${SPOT_ENTRY_SLIPPAGE_TEXT} на цену покупки)` : "маржи"}, а на ${wallet} свободно ${usd(availableUsd)}.`,
       );
     const lossAtStop = qty * Math.abs(price - stopLoss);
     const maxLoss = availableUsd * maxRiskPct;
