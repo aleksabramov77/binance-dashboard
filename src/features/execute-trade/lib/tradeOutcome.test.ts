@@ -75,15 +75,16 @@ describe("фьючерсы", () => {
       ),
     ).toMatchObject({ status: "rejected", withEntry: false });
   });
-  it("соседи на стороне, свой ордер не найден, но сторона выросла на заявку — вход исполнился, не rejected (ревью #66)", () => {
-    expect(
-      afterFuturesPositionCheck(
-        { amount: 70, entryPrice: 0.22 },
-        30,
-        "missing",
-        40,
-      ),
-    ).toEqual({ protect: { amount: 40, entryPrice: null } });
+  it("свой ордер не найден и после дедлайна, а сторона выросла на заявку — может быть вход соседа: unprotected без защиты и отката (PR 2e)", () => {
+    for (const before of [0, 30])
+      expect(
+        afterFuturesPositionCheck(
+          { amount: before + 40, entryPrice: 0.22 },
+          before,
+          "missing",
+          40,
+        ),
+      ).toMatchObject({ status: "unprotected", withEntry: false });
   });
   it("соседи на стороне, свой ордер не найден, прирост неясен — unprotected, не rejected", () => {
     expect(

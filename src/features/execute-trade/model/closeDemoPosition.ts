@@ -317,8 +317,22 @@ async function closeOwn(
   // Своё закрытие — с id своей сделки (`bd…-C`): в «Демо-сделках» оно попадёт в свою сделку.
   const closeId = ownCloseId(refs);
   let plan: ClosePlan;
+  // Статусы и исполненный объём своих ног: не прочитали — ничего не делаем, строка close_failed, и
+  // крон повторит закрытие в следующем прогоне (без объёма ноги докрывать опасно — можно закрыть чужое).
   try {
     plan = await readOwnLegs(creds, req.symbol, refs);
+  } catch (error) {
+    steps.push({
+      label: "Прочитать свои стоп/тейк",
+      ok: false,
+      detail: errorText(error),
+    });
+    return finish(
+      "failed",
+      "Не удалось прочитать свои стоп/тейк — закрытие повторится в следующем прогоне.",
+    );
+  }
+  try {
     const cancelled: string[] = [];
     for (const leg of plan.cancel)
       if (await cancelOwn(creds, req.symbol, refs, leg))
@@ -338,7 +352,7 @@ async function closeOwn(
     });
     return finish(
       "failed",
-      "Не удалось снять свои защитные ордера — позиция не закрыта, проверьте на demo.binance.com.",
+      "Не удалось снять свои защитные ордера — позиция не закрыта, закрытие повторится в следующем прогоне.",
     );
   }
   // Своя нога сработала — позицию всё равно перечитываем: остался свой объём — докрываем.
