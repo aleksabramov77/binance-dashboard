@@ -32,11 +32,17 @@ export function chooseSpotEntry(
 }
 
 /**
- * Свои clientOrderId заявки (≤ 36 символов, [A-Za-z0-9_-]): по ним перечитываем её, если исход
- * неизвестен (-1007, 5xx, обрыв сети). prefix — из id сделки, чтобы связать ордера с журналом.
+ * Свои clientOrderId сделки (≤ 36 символов, [A-Za-z0-9_-]): по ним перечитываем заявку, если исход
+ * неизвестен (-1007, 5xx, обрыв сети), и закрытие находит свои стоп/тейк (PR 2b). prefix — из id
+ * сделки, чтобы связать ордера с журналом. Спот: OTO/OTOCO — L/W/S/T, рыночная покупка — M,
+ * отдельная защита после покупки (OCO/стоп) — L2/S2/T2: id ордеров OTOCO могут быть ещё заняты.
+ * Фьючерсы: вход — M, algo-стоп и тейк — S/T (clientAlgoId).
  */
-export function spotClientIds(tradeId: string): SpotEntryClientIds & {
+export function tradeClientIds(tradeId: string): SpotEntryClientIds & {
   market: string;
+  protectList: string;
+  protectStop: string;
+  protectTakeProfit: string;
 } {
   const prefix = `bd${tradeId.replace(/[^A-Za-z0-9]/g, "").slice(0, 24)}`;
   return {
@@ -45,6 +51,9 @@ export function spotClientIds(tradeId: string): SpotEntryClientIds & {
     stop: `${prefix}-S`,
     takeProfit: `${prefix}-T`,
     market: `${prefix}-M`,
+    protectList: `${prefix}-L2`,
+    protectStop: `${prefix}-S2`,
+    protectTakeProfit: `${prefix}-T2`,
   };
 }
 

@@ -1,6 +1,13 @@
 // Только для сервера (пишет в журнал). Не экспортируется из клиентского @/shared/lib.
 import { log } from "./logger.server";
 
+/**
+ * Таймаут одного HTTP-запроса (до тела ответа включительно). Больше 10 с: за 10 с Binance сам
+ * отвечает -1007 «Timeout waiting for response from backend server» — этот ответ важнее обрыва.
+ * Сработал — сетевая ошибка: чтение повторяется, у ордера исход неизвестен (проверяем на бирже).
+ */
+export const REQUEST_TIMEOUT_MS = 15_000;
+
 /** Паузы перед повторами при сетевом сбое. */
 export const RETRY_DELAYS_MS = [400, 1200, 3000] as const;
 
@@ -16,6 +23,16 @@ export function describeNetworkError(error: unknown): string {
 
 export class NetworkError extends Error {}
 
+/** Запрос оборван по REQUEST_TIMEOUT_MS (AbortSignal.timeout → DOMException «TimeoutError»). */
+export const isTimeoutError = (error: unknown) =>
+  error instanceof Error && error.name === "TimeoutError";
+
+/**
+ * Сколько раз повторять запрос после таймаута: каждый таймаут — уже 15 с ожидания, четыре попытки
+ * подвесили бы один GET на ~65 с. Остальные сетевые сбои повторяются все RETRY_DELAYS_MS.
+ */
+export const TIMEOUT_RETRIES = 1;
+
 /**
  * Повторяет операцию при сетевом сбое или обрыве тела ответа.
  * Только для идемпотентных запросов (чтение): ордера так повторять нельзя.
@@ -26,6 +43,7 @@ export async function withRetry<T>(
   delays: readonly number[] = RETRY_DELAYS_MS,
 ): Promise<T> {
   let lastError: unknown;
+  let timeouts = 0;
   const attempts = delays.length + 1;
   for (const [i, delay] of [0, ...delays].entries()) {
     if (delay) await sleep(delay);
@@ -41,6 +59,15 @@ export async function withRetry<T>(
       // HTTP-ошибки с ответом сервера не повторяем — повтор их не исправит.
       if (error instanceof HttpError) throw error;
       lastError = error;
+      if (isTimeoutError(error) && ++timeouts > TIMEOUT_RETRIES) {
+        log.warn(
+          "net.retry",
+          `${label}: снова таймаут ${REQUEST_TIMEOUT_MS / 1000} с, больше не повторяем`,
+          { label, attempt: i + 1, attempts },
+          error,
+        );
+        break;
+      }
       log.warn(
         "net.retry",
         `${label}: сбой сети, попытка ${i + 1}/${attempts}`,
@@ -149,7 +176,10 @@ export async function getJsonWithRetry(
   if (pause) cooldowns.delete(host);
 
   return withRetry(label, async () => {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!res.ok) {
       const body: unknown = await res.json().catch(() => null);
       log.warn("http.upstream", `${label}: ответ ${res.status}`, {

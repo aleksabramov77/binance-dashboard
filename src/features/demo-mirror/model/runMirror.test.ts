@@ -34,7 +34,8 @@ function deps(over: Partial<MirrorDeps> = {}): MirrorDeps {
     }),
     markSkipped: vi.fn(async () => {}),
     saveOpen: vi.fn(async () => {}),
-    claimToClose: async () => [],
+    listToClose: async () => [],
+    claimToClose: async () => null,
     close: async () => ({
       status: "closed",
       message: "ok",
@@ -63,15 +64,18 @@ describe("runMirror", () => {
   it("закрывает, затем открывает; захваченную другим прогоном сделку не трогает", async () => {
     const order: string[] = [];
     const d = deps({
-      claimToClose: async () => [
-        {
-          tradeId: "c1",
-          market: "spot",
-          symbol: "BTCUSDT",
-          direction: "long",
-          quantity: 0.001,
-        },
-      ],
+      listToClose: async () => ["c1", "taken"],
+      // "taken" уже захватил другой прогон.
+      claimToClose: async (tradeId) =>
+        tradeId === "c1"
+          ? {
+              tradeId: "c1",
+              market: "spot",
+              symbol: "BTCUSDT",
+              direction: "long",
+              quantity: 0.001,
+            }
+          : null,
       close: async () => {
         order.push("close");
         return { status: "closed", message: "ok", steps: [], exitPrice: null };
@@ -167,5 +171,41 @@ describe("runMirror", () => {
     expect(r.skipped).toBe(0);
     expect(claim).toHaveBeenCalledTimes(2);
     expect(claim).not.toHaveBeenCalledWith("t3");
+  });
+
+  it("бюджет времени на закрытия: после 200 с позиции не захватываются, входы не начинаются", async () => {
+    let clock = NOW;
+    const claimToClose = vi.fn(async (tradeId: string) => ({
+      tradeId,
+      market: "futures" as const,
+      symbol: "ETHUSDT",
+      direction: "long" as const,
+      quantity: 1,
+    }));
+    const open = vi.fn();
+    const r = await runMirror(
+      deps({
+        now: () => clock,
+        listToClose: async () => ["c1", "c2", "c3"],
+        claimToClose,
+        close: async () => {
+          clock += 150_000; // закрытие при сбое биржи шло долго
+          return {
+            status: "closed",
+            message: "ok",
+            steps: [],
+            exitPrice: null,
+          };
+        },
+        open,
+        listCandidates: async () => [trade({ tradeId: "a" })],
+      }),
+    );
+    // c1 — до 150 с, c2 начат (150 ≤ 200) и закончился на 300 с, c3 не захвачен.
+    expect(r.closed.map((c) => c.tradeId)).toEqual(["c1", "c2"]);
+    expect(r.deferredCloses).toBe(1);
+    expect(claimToClose).not.toHaveBeenCalledWith("c3");
+    expect(open).not.toHaveBeenCalled();
+    expect(r.deferred).toBe(1);
   });
 });

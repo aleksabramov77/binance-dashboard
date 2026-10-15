@@ -5,10 +5,11 @@ export { loadBudgetInputs } from "./api/budgetsStore";
 export {
   activeMirrorSymbols,
   claimMirror,
-  claimMirrorsToClose,
+  claimMirrorToClose,
   claimOpenMirrors,
   emptyMirrorSummary,
   listMirrorCandidates,
+  listMirrorsToClose,
   type MirrorCandidate,
   type MirrorSummary,
   type MirrorToClose,
@@ -127,8 +128,10 @@ export {
   experimentDemoMirrorSchema,
   MIRROR_STATUS_LABELS,
   MIRROR_STATUSES,
+  type MirrorProtectRefs,
   type MirrorStatus,
   type MirrorView,
+  mirrorProtectRefsSchema,
   mirrorStatusSchema,
   OPEN_MIRROR_STATUSES,
 } from "./model/mirror";
