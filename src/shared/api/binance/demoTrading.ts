@@ -14,7 +14,9 @@ import {
 } from "./demoOrders";
 import { type SymbolRules, toRules } from "./demoRules";
 import {
+  type AlgoOrderQuery,
   algoHistorySchema,
+  algoOrderQuerySchema,
   algoOrderSchema,
   anySchema,
   exchangeInfoSchema,
@@ -176,6 +178,7 @@ export async function demoSpotStopLossSell(
   symbol: string,
   quantity: string,
   stopPrice: string,
+  clientOrderId?: string,
 ): Promise<SpotOrder> {
   return signedRequest(
     DEMO_URL.spot,
@@ -190,17 +193,19 @@ export async function demoSpotStopLossSell(
       quantity,
       stopPrice,
       newOrderRespType: "RESULT",
+      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
     },
   );
 }
 
-/** OCO на продажу: лимитный тейк выше рынка + стоп-маркет ниже. */
+/** OCO на продажу: лимитный тейк выше рынка + стоп-маркет ниже. ids — свои clientOrderId. */
 export async function demoSpotOcoSell(
   creds: BinanceCredentials,
   symbol: string,
   quantity: string,
   takeProfit: string,
   stopLoss: string,
+  ids?: { list: string; stop: string; takeProfit: string },
 ) {
   return signedRequest(
     DEMO_URL.spot,
@@ -216,6 +221,13 @@ export async function demoSpotOcoSell(
       abovePrice: takeProfit,
       belowType: "STOP_LOSS",
       belowStopPrice: stopLoss,
+      ...(ids
+        ? {
+            listClientOrderId: ids.list,
+            aboveClientOrderId: ids.takeProfit,
+            belowClientOrderId: ids.stop,
+          }
+        : {}),
     },
   );
 }
@@ -281,6 +293,34 @@ export async function fetchDemoSpotOrderByClientId(
   }
 }
 
+/**
+ * Отменить свой ордер спота по clientOrderId. Ордер из списка (OCO, OTO/OTOCO) снимает весь
+ * список. false — отменять нечего: ордера нет или он уже исполнен/снят (-2011, -2013).
+ */
+export async function demoSpotCancelByClientId(
+  creds: BinanceCredentials,
+  symbol: string,
+  clientOrderId: string,
+): Promise<boolean> {
+  try {
+    await signedRequest(
+      DEMO_URL.spot,
+      creds,
+      "DELETE",
+      "/api/v3/order",
+      anySchema,
+      {
+        symbol,
+        origClientOrderId: clientOrderId,
+      },
+    );
+    return true;
+  } catch (error) {
+    if (isNoSuchOrder(error)) return false;
+    throw error;
+  }
+}
+
 /** Изолированная маржа и плечо для символа. «Уже установлено» — не ошибка. */
 export async function demoFuturesPrepare(
   creds: BinanceCredentials,
@@ -311,11 +351,13 @@ export async function demoFuturesPrepare(
   );
 }
 
+/** clientOrderId — свой id: по нему перечитываем вход, если исход неизвестен. */
 export async function demoFuturesMarketOrder(
   creds: BinanceCredentials,
   symbol: string,
   side: "BUY" | "SELL",
   quantity: string,
+  clientOrderId?: string,
 ): Promise<FuturesOrder> {
   return signedRequest(
     DEMO_URL.futures,
@@ -330,8 +372,35 @@ export async function demoFuturesMarketOrder(
       quantity,
       newOrderRespType: "RESULT",
       recvWindow: ORDER_RECV_WINDOW_MS,
+      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
     },
   );
+}
+
+/**
+ * Ордер фьючерсов по orderId или своему clientOrderId; null — такого ордера нет (-2013).
+ * Нужен для фактической цены входа (в ответе MARKET avgPrice бывает 0) и сверки неизвестного исхода.
+ */
+export async function fetchDemoFuturesOrder(
+  creds: BinanceCredentials,
+  symbol: string,
+  ref: { orderId: number } | { clientOrderId: string },
+): Promise<FuturesOrder | null> {
+  try {
+    return await signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v1/order",
+      futuresOrderSchema,
+      "orderId" in ref
+        ? { symbol, orderId: ref.orderId }
+        : { symbol, origClientOrderId: ref.clientOrderId },
+    );
+  } catch (error) {
+    if (isNoSuchOrder(error)) return null;
+    throw error;
+  }
 }
 
 /** Условный ордер, закрывающий всю позицию при достижении цены (TP или SL). */
@@ -341,6 +410,7 @@ export async function demoFuturesCloseAt(
   side: "BUY" | "SELL",
   type: "STOP_MARKET" | "TAKE_PROFIT_MARKET",
   triggerPrice: string,
+  clientAlgoId?: string,
 ) {
   return signedRequest(
     DEMO_URL.futures,
@@ -357,8 +427,50 @@ export async function demoFuturesCloseAt(
       closePosition: true,
       workingType: "MARK_PRICE",
       priceProtect: true,
+      ...(clientAlgoId ? { clientAlgoId } : {}),
     },
   );
+}
+
+/** Свой algo-ордер (стоп/тейк) по algoId; null — не найден (снятые без исполнения хранятся 3 дня). */
+export async function fetchDemoAlgoOrder(
+  creds: BinanceCredentials,
+  algoId: number,
+): Promise<AlgoOrderQuery | null> {
+  try {
+    return await signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v1/algoOrder",
+      algoOrderQuerySchema,
+      { algoId },
+    );
+  } catch (error) {
+    if (isNoSuchOrder(error)) return null;
+    throw error;
+  }
+}
+
+/** Отменить свой algo-ордер. false — отменять нечего (уже сработал, снят или не найден). */
+export async function demoCancelAlgoOrder(
+  creds: BinanceCredentials,
+  algoId: number,
+): Promise<boolean> {
+  try {
+    await signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "DELETE",
+      "/fapi/v1/algoOrder",
+      anySchema,
+      { algoId },
+    );
+    return true;
+  } catch (error) {
+    if (isNoSuchOrder(error)) return false;
+    throw error;
+  }
 }
 
 /** Закрытие (части) фьючерсной позиции по рынку: reduceOnly — не откроет встречную позицию. */
@@ -388,6 +500,11 @@ export async function demoFuturesReduceMarket(
 /** Binance: -2011 Unknown order / нет открытых ордеров — для «отменить всё» это не ошибка. */
 const isNothingToCancel = (error: unknown) =>
   error instanceof BinanceApiError && error.code === -2011;
+
+/** Binance: -2011 (отмена: ордер неизвестен/уже не активен), -2013 (запрос: ордера нет). */
+const isNoSuchOrder = (error: unknown) =>
+  error instanceof BinanceApiError &&
+  (error.code === -2011 || error.code === -2013);
 
 /**
  * Отменяет все открытые ордера по символу: spot — включая OCO; futures — обычные и algo (TP/SL).

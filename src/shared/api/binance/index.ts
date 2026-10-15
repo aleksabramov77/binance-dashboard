@@ -3,4 +3,5 @@
 export type { Candle, Market } from "./market";
 export type { Ticker24h } from "./marketSchemas";
 export { resolveUsdPrice } from "./prices";
+export { type DemoProtectRefs, demoProtectRefsSchema } from "./protectRefs";
 export type { EarnProduct, EarnProductDetail } from "./schemas";

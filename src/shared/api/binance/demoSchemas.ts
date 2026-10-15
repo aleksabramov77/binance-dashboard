@@ -174,8 +174,29 @@ export const spotAllOrdersSchema = z.array(
 );
 
 export const algoOrderSchema = z
-  .object({ algoId: z.number(), algoStatus: z.string().optional() })
+  .object({
+    algoId: z.number(),
+    clientAlgoId: z.string().nullable().catch(null),
+    algoStatus: z.string().optional(),
+  })
   .loose();
+
+/**
+ * GET /fapi/v1/algoOrder: статус своего стопа/тейка. Статусы на демо: NEW, CANCELED, EXPIRED,
+ * TRIGGERED, FINISHED (demoOrders.test.ts); actualOrderId — рыночный ордер, которым он сработал.
+ */
+export const algoOrderQuerySchema = z
+  .object({
+    algoId: z.number(),
+    algoStatus: z.string(),
+    actualOrderId: z
+      .union([z.string(), z.number()])
+      .optional()
+      .transform((v) => (v === undefined || v === "" ? null : Number(v)))
+      .catch(null),
+  })
+  .loose();
+export type AlgoOrderQuery = z.infer<typeof algoOrderQuerySchema>;
 
 export const anySchema = z.unknown();
 

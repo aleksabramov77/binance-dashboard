@@ -1,6 +1,13 @@
 // Только для сервера (пишет в журнал). Не экспортируется из клиентского @/shared/lib.
 import { log } from "./logger.server";
 
+/**
+ * Таймаут одного HTTP-запроса (до тела ответа включительно). Больше 10 с: за 10 с Binance сам
+ * отвечает -1007 «Timeout waiting for response from backend server» — этот ответ важнее обрыва.
+ * Сработал — сетевая ошибка: чтение повторяется, у ордера исход неизвестен (проверяем на бирже).
+ */
+export const REQUEST_TIMEOUT_MS = 15_000;
+
 /** Паузы перед повторами при сетевом сбое. */
 export const RETRY_DELAYS_MS = [400, 1200, 3000] as const;
 
@@ -70,7 +77,10 @@ export class HttpError extends Error {
 /** GET JSON с повторами: и обрыв соединения, и обрыв тела (битый JSON) повторяются. */
 export function getJsonWithRetry(url: string, label: string): Promise<unknown> {
   return withRetry(label, async () => {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!res.ok) {
       const body: unknown = await res.json().catch(() => null);
       log.warn("http.upstream", `${label}: ответ ${res.status}`, {
