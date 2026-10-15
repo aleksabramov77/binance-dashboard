@@ -1,7 +1,7 @@
 # 0023 · Группа активов COIN-M в paper-лаборатории и шапке; `futures` → `usdm`
 
 - **Тип:** feature (задача D из плана [spec 0016](0016-glossary-ag-demo-columns.md), часть 1 — paper; демо-зеркало COIN-M — отдельная задача)
-- **Статус:** in-progress
+- **Статус:** testing
 - **Раздел PRD:** §3.4 Авто-бот → «Счета и группы активов»
 - **Дата:** 2026-10-15
 
@@ -105,3 +105,4 @@
 | 2026-10-15 | ТЗ утверждено |
 | 2026-10-15 | Разработка начата: ветка `feature/0023-coinm-asset-group` |
 | 2026-10-15 | Реализовано (Developer): ядро — `MARKETS` spot/usdm/coinm, `MARKET_KIND`, `legacyMarketSchema`, комиссия и размер сделки COIN-M целыми контрактами; `marketApi` — dapi (тикеры, свечи, funding, бессрочные с размером контракта); движок — юниверс `…USD_PERP`, ветвления по виду группы, недоступный рынок пропускается одной записью `warn`; миграция `0007_futures_to_usdm`; шапка, фильтры `/experiments` и `/stats` с COIN-M и чтением `?market=futures`; демо-зеркало COIN-M недоступно (галочка, API 400, `lab:private`); `lab:private` — `PC..`, `lab:report` — COIN-M отдельной группой; глоссарий, архитектура, README. `pnpm check`, `pnpm build`, `pnpm check:edge` зелёные |
+| 2026-10-15 | Слияние main (0019 Earn): конфликты в `shared/api/binance/index.ts` и README, глоссарий пересобран. Приёмка на локальном сервере, круг 1: 10/10 AC PASS (AC9 — юнит-тестами, AC2 — тестом миграции и сервером), скриншоты — `0023-coinm-asset-group/screens/`. Экраны утверждены пользователем. Статус → testing |
