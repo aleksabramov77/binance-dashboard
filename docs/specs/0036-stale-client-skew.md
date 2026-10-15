@@ -25,7 +25,18 @@
 → `POST /api/logs` → `log.error("client")` → монитор считает всплеск.
 
 ## Причина
-Заполняет Developer после диагностики: где и почему.
+- Сборка не знала своей версии: `deploymentId` в `next.config.ts` не задан, поэтому ни страница, ни сервер не могли
+  отличить вкладку, открытую до деплоя, от текущей. Next перезагружает страницу только при навигации; вкладка, которую
+  не трогают, продолжает опрос (`/api/experiments/budgets` раз в 30 с) старым JS со старой Zod-схемой.
+- `POST /api/logs` (`app/api/logs/route.ts`) писал любую ошибку браузера как `log.error("client", …)`, а
+  `clientErrorSchema` (`src/entities/log-entry/model/schema.ts`) не принимал версию клиента — `reportClientError`
+  (`src/shared/lib`) её и не слал. Монитор журнала (`src/app/server/logMonitor.ts`) считает всплески по `level=error`
+  и событию — ошибки устаревшей вкладки поднимали тревогу «client».
+- Тест: `app/api/logs/route.test.ts` — «ошибку вкладки со старой сборкой пишет как warn client.stale» падал до фикса
+  (версия отбрасывалась схемой, запись — `error client`).
+- Особенность Next 16.4: атрибут `data-dpl-id` Next снимает с `<html>` сразу при загрузке (`shared/lib/deployment-id`),
+  поэтому версию страницы читаем через `process.env.NEXT_DEPLOYMENT_ID` — в клиентском коде Next подставляет туда
+  сохранённое значение (`globalThis.NEXT_DEPLOYMENT_ID`); `dataset.dplId` — запасной вариант.
 
 ## Решение
 1. Версия сборки — `deploymentId` в `next.config.ts` из `VERCEL_DEPLOYMENT_ID` (локально не задан). Next ставит
@@ -56,3 +67,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-16 | Баг заведён по тревоге монитора, ТЗ утверждено пользователем |
+| 2026-10-16 | Developer, ветка `bug/0036-stale-client-skew`: падающий тест `POST /api/logs`, фикс — `deploymentId`, `getDeploymentVersion`, `GET /api/version`, версия в `reportClientError`, `warn client.stale`, плашка «Вышла новая версия» в шапке; `docs/ai/architecture.md` → «Рассинхрон версий клиента» |
