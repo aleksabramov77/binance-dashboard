@@ -25,6 +25,12 @@
 - `market.ts` — `createMarketApi` поверх `getJsonWithRetry` (`shared/lib/fetchRetry.ts`) для Node;
   `client.ts` — Earn и цены через тот же `getJsonWithRetry`.
 - `accountClient.ts` — Spot, Funding, Simple Earn (read-only).
+- `earnAccountClient.ts` + `earnAccountSchemas.ts` — каталоги сложных продуктов Earn (spec 0019), только подписанные
+  GET (USER_DATA, read-only ключ). Экспорт — через `account.server.ts`, типы — через `index.ts`. См. «Earn: сложные
+  продукты» ниже.
+- `client.ts` → `fetchEarnOverview()` — публичная сводка Earn (`bapi/earn/v1/friendly/finance-earn/homepage/overview`,
+  без ключа, `code === "000000"`): ~12 топ-активов, у каждого `productSummary[] {productType, maxApr, minApr,
+  duration ["FLEXIBLE"|"FIXED"], lowRisk, soldOut}`; APR — доли. Схема мягкая: пустые поля → `null`.
 - `demoTrading.ts` — справочник символов, цены, балансы, ордера Spot/OCO, Futures + algo TP/SL, позиции,
   `fetchDemoOpenSymbols` — символы с открытой позицией или ордерами. История: `fetchDemoTradedSymbols` —
   снимок `DemoTradeSnapshot` (символы + позиции futures + баланс spot одним заходом), `fetchDemoFills`
@@ -70,3 +76,24 @@
 - Тесты схем — `demoSchemas.test.ts`; сетевые функции не тестируются (нет моков сети).
 - `fetchFundingRates` — `/fapi/v1/premiumIndex` одним запросом по всем фьючерсам (без ключа): ставки
   funding для движка лаборатории (F14). У поставочных контрактов ставки нет — они пропускаются.
+
+## Earn: сложные продукты (spec 0019, проба полей 2026-10-15)
+Все ответы сверены пробой на живом read-only ключе. Числа — строками (`z.coerce.number()`), время — мс, `duration` —
+дни, **APR — доли везде** (у Dual `"2.5608"` = 256 % годовых: короткие сроки у страйка, сводка даёт тот же порядок).
+
+| Функция | Ручка | Параметры | Поля, которые используем |
+|---|---|---|---|
+| `fetchDualProducts` | `GET /sapi/v1/dci/product/list` | `optionType CALL\|PUT`, `investCoin`, `exercisedCoin`, `pageSize` ≤ 100 (500 → `-1102`), `pageIndex` | `total`, `list[] {id, investCoin, exercisedCoin, strikePrice, duration, settleDate, purchaseEndTime, canPurchase, apr, minAmount, maxAmount, optionType}` |
+| `fetchOnchainYieldsProducts` | `GET /sapi/v1/onchain-yields/locked/list` | `size` | `rows[] {projectId, detail {asset, rewardAsset, duration, isSoldOut, apr, status "PURCHASING", canRedeemToFlex}, quota {totalPersonalQuota, minimum}}` |
+| `fetchStakingQuota("eth"\|"sol")` | `GET /sapi/v1/eth-staking/eth/quota`, `/sapi/v1/sol-staking/sol/quota` | — | `leftStakingPersonalQuota, minStakeAmount, redeemPeriod` (дни), `stakeable`, `soldOut` (у SOL), `commissionFee` |
+| `fetchStableYieldQuota("rwusd"\|"bfusd")` | `GET /sapi/v1/rwusd/quota`, `/sapi/v1/bfusd/quota` | — | `subscribeEnable` (только RWUSD), `subscriptionQuota {leftQuota, minimum}`, `standardRedemptionQuota {redeemPeriod, fee}`, `fastRedemptionQuota` |
+| `fetchLatestRate(...)` | `…/history/rateHistory` у ETH/SOL staking, RWUSD, BFUSD | `size=1` | `rows[0] {annualPercentageRate, time}` — APR последнего дня (в quota/account ставки нет) |
+| `fetchSoftStakingList` | `GET /sapi/v1/soft-staking/list` | `size` | `rows[] {asset, apr, minAmount, maxCap}` |
+
+- **Семантика Dual** (сверено по ответу): у CALL `investCoin` — монета, страйки выше цены → «Sell High»; у PUT
+  `investCoin` — стейбл, страйки ниже цены → «Buy Low». Список отсортирован от ближнего к цене страйка к дальнему; у
+  BTC/ETH ~5–7 страниц по 100 на пару. `fetchDualProducts` читает до 10 страниц.
+- Каталог целиком (16 пар Dual + 6 групп) — ~70 запросов веса 1, ~4–5 с; кэш 5 мин в `features/load-earn-catalog`.
+  `rateHistory` у Binance тяжелее обычных ручек — дёргается только на холодный кэш (4 запроса).
+- Ручки `…/account` (балансы позиций) не используются: «Мои позиции» — вне scope 0019.
+- Нет аккаунта RWUSD/BFUSD или другая ошибка группы → группа уходит в `warnings` загрузчика, остальные видны.

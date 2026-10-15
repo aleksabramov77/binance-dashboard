@@ -13,4 +13,13 @@ export type {
   SpotAccount,
   WalletBalance,
 } from "./accountSchemas";
+export {
+  type DualPairQuery,
+  fetchDualProducts,
+  fetchLatestRate,
+  fetchOnchainYieldsProducts,
+  fetchSoftStakingList,
+  fetchStableYieldQuota,
+  fetchStakingQuota,
+} from "./earnAccountClient";
 export { BinanceApiError } from "./signed";
