@@ -1526,7 +1526,20 @@ const baselineLine = (b: LabReport["controlBaseline"]): string => {
   return `Случайный вход (все такие эксперименты вместе — база «к случайному входу»): ${MARKETS.map(one).join("; ")}.`;
 };
 
-export function renderLabReport(report: LabReport): string {
+/** Оформление отчёта для других источников данных (бэктест, spec 0032): свой заголовок, шапка и разделы. */
+export interface LabReportView {
+  /** Заголовок вместо «Отчёт лаборатории». */
+  title?: string;
+  /** Строки шапки вместо строки «Сформирован … БД … эпоха». */
+  intro?: string[];
+  /** Разделы перед блоком «Рынок». */
+  sections?: string[];
+}
+
+export function renderLabReport(
+  report: LabReport,
+  view: LabReportView = {},
+): string {
   const focus = new Set(report.focus);
   const detailed = focus.size
     ? report.experiments.filter((e) => focus.has(e.id))
@@ -1541,9 +1554,11 @@ export function renderLabReport(report: LabReport): string {
       ? `Эпоха #${run.id} с ${run.startedAt}`
       : `Эпоха #${run.id} с ${run.startedAt} по ${run.endedAt} (прошлая эпоха; конфиг экспериментов — текущий)`;
   return [
-    "# Отчёт лаборатории",
+    `# ${view.title ?? "Отчёт лаборатории"}`,
     "",
-    `Сформирован ${report.generatedAt}. БД: ${report.database ?? "не указана"}. ${runLine}; период с ${report.periodStart} (${num(report.periodDays, 1)} дн.).`,
+    ...(view.intro ?? [
+      `Сформирован ${report.generatedAt}. БД: ${report.database ?? "не указана"}. ${runLine}; период с ${report.periodStart} (${num(report.periodDays, 1)} дн.).`,
+    ]),
     "Только закрытые сделки учёта эпохи; PnL — за вычетом комиссий и слиппеджа. Как читать — скилл trading-lab; подсказки — references/failure-modes.md.",
     controlLine(report.controls),
     baselineLine(report.controlBaseline),
@@ -1556,6 +1571,7 @@ export function renderLabReport(report: LabReport): string {
         ]
       : []),
     "",
+    ...(view.sections ?? []),
     ...marketSection(report.market),
     "## Сводка (по средней доходности сделки)",
     "",
