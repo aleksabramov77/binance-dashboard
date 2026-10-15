@@ -19,7 +19,6 @@ import {
   demoSpotOcoSell,
   demoSpotStopLossSell,
   type FuturesOrder,
-  fetchDemoFills,
   fetchDemoFuturesOrder,
   fetchDemoOpenSymbols,
   fetchDemoPrice,
@@ -38,7 +37,6 @@ import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { SPOT_TAKER_FEE } from "../config/spot";
-import { groupFills } from "../lib/groupFills";
 import {
   chooseSpotEntry,
   pendingOutcome,
@@ -67,6 +65,7 @@ import {
   type ValidatedTrade,
   validateTrade,
 } from "../lib/validateTrade";
+import { futuresFillPrice } from "./futuresFillPrice";
 
 /**
  * Позиция ещё не видна сразу после входа — повторяем: -4509 у closePosition (TP/SL),
@@ -457,31 +456,6 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Фактическая цена входа фьючерсов, если в ответе MARKET нет avgPrice (демо иногда шлёт 0):
- * ордер по orderId, затем его исполнения (userTrades). null — узнать не удалось (берём текущую).
- */
-async function futuresFillPrice(
-  creds: BinanceCredentials,
-  symbol: string,
-  orderId: number,
-): Promise<number | null> {
-  try {
-    const order = await fetchDemoFuturesOrder(creds, symbol, { orderId });
-    if (order && order.avgPrice > 0) return order.avgPrice;
-    const fills = await fetchDemoFills(creds, "futures", symbol, 50);
-    const own = groupFills(fills).find((o) => o.orderId === orderId);
-    return own && own.avgPrice > 0 ? own.avgPrice : null;
-  } catch (error) {
-    log.warn("trade.fill_price", `${symbol}: цена входа не уточнена`, {
-      symbol,
-      orderId,
-      error: errorText(error),
-    });
-    return null;
-  }
-}
 
 /**
  * Перечитывать, пока не найдётся или пока проверка не будет начата после дедлайна

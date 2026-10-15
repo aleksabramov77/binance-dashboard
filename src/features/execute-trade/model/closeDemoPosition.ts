@@ -25,6 +25,7 @@ import {
   spotLeg,
 } from "../lib/closePlan";
 import { floorToStep, isDust } from "../lib/validateTrade";
+import { futuresFillPrice } from "./futuresFillPrice";
 
 export interface CloseDemoRequest {
   market: "spot" | "futures";
@@ -288,16 +289,15 @@ async function closeOwn(
         req.direction === "long" ? "SELL" : "BUY",
         qty,
       );
+      const exitPrice =
+        order.avgPrice ||
+        (await futuresFillPrice(creds, req.symbol, order.orderId));
       steps.push({
         label: "Закрыть свой объём по рынку",
         ok: true,
-        detail: `${qty} из ${Math.abs(position.amount)} по ~${order.avgPrice}, ордер #${order.orderId}`,
+        detail: `${qty} из ${Math.abs(position.amount)} по ~${exitPrice ?? "рынку"}, ордер #${order.orderId}`,
       });
-      return finish(
-        "closed",
-        "Позиция закрыта по рынку.",
-        order.avgPrice > 0 ? order.avgPrice : null,
-      );
+      return finish("closed", "Позиция закрыта по рынку.", exitPrice || null);
     }
 
     const baseAsset = req.symbol.replace(/USDT$/, "");
