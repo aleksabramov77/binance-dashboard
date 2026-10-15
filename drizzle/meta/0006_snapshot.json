@@ -34,9 +34,7 @@
         "earn_snapshots_fetched_at_unique": {
           "name": "earn_snapshots_fetched_at_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "fetched_at"
-          ]
+          "columns": ["fetched_at"]
         }
       },
       "policies": {},
@@ -170,12 +168,8 @@
           "name": "demo_mirror_orders_trade_id_paper_trades_id_fk",
           "tableFrom": "demo_mirror_orders",
           "tableTo": "paper_trades",
-          "columnsFrom": [
-            "trade_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["trade_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -516,12 +510,8 @@
           "name": "paper_trades_run_id_runs_id_fk",
           "tableFrom": "paper_trades",
           "tableTo": "runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -529,12 +519,8 @@
           "name": "paper_trades_experiment_id_experiments_id_fk",
           "tableFrom": "paper_trades",
           "tableTo": "experiments",
-          "columnsFrom": [
-            "experiment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["experiment_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
