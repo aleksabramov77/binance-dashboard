@@ -116,6 +116,6 @@
 | 2026-10-15 | ТЗ написано, план из 4 задач и решения пользователя зафиксированы |
 | 2026-10-15 | ТЗ утверждено |
 | 2026-10-15 | Разработка в ветке `feature/0016-glossary-ag-demo-columns`: глоссарий `docs/ai/glossary.md` + `pnpm glossary` (парсер — `src/shared/lib/glossary`, JSON — `src/pages/help/config`); страница `/help`; карта групп активов `ASSET_GROUPS` и колонка AG; демо-метрики PF / Max DD / Equity (`computeDemoStats`, `toDemoSummary`) и оттенок демо-колонок; записи журнала `mirror.rejected` / `mirror.skipped`, фильтры `/logs` и `GET /api/logs` в URL, иконка-ссылка у «отказ · пропуск»; текст диалога «Сбросить всё Demo»; подсказки Max DD |
-| 2026-10-15 | Цвет демо-колонок: в коде `bg-sky-500/[0.06]`; варианты для выбора — `0016-glossary-ag-demo-columns/screens/demo-tone-{sky,amber,violet}.png` (выбор пользователя — ожидается) |
+| 2026-10-15 | Цвет демо-колонок: в коде `bg-sky-500/[0.06]`; варианты для выбора — `0016-glossary-ag-demo-columns/screens/demo-tone-{sky,amber,violet}.png` — пользователь выбрал sky (2026-10-15) |
 | 2026-10-15 | Статус → testing |
 <!-- Ветка feature/0016-glossary-ag-demo-columns, PR, круги тестов и ревью, мерж -->

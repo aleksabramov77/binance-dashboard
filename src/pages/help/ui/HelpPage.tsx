@@ -40,7 +40,7 @@ function Section({ title, terms }: Glossary["sections"][number]) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-lg font-semibold">{title}</h2>
-      <div className="overflow-x-auto rounded-xl border bg-card">
+      <div className="overflow-clip rounded-xl border bg-card">
         <Table>
           <TableHeader>
             <TableRow>
