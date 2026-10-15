@@ -15,6 +15,7 @@ import {
 import { ENGINE_KEYS, EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import { createMemoryDb } from "@/shared/db/client.server";
 import {
+  buildTickDeps,
   createPerpetualsSource,
   type EngineTickEnv,
   prepareEngineDb,
@@ -214,6 +215,39 @@ describe.skipIf(!pgUrl)("withEngineTickLock на Postgres: два сеанса",
     } finally {
       await Promise.all([a.end(), b.end()]);
     }
+  });
+});
+
+describe("buildTickDeps: свечи", () => {
+  it("прокидывает startTime в fetchKlines и режет limit до 1000 (баг 0028)", async () => {
+    const fetchKlines = vi.fn(market.fetchKlines);
+    const deps = buildTickDeps(
+      env({ market: { ...market, fetchKlines } }),
+      createDbExperimentStore(db),
+    );
+    await deps.candles("futures", "BTCUSDT", "1m", 1500, 1_000_000);
+    await deps.candles("spot", "BTCUSDT", "1h", 301);
+    expect(fetchKlines.mock.calls).toEqual([
+      ["futures", "BTCUSDT", "1m", 1000, 1_000_000],
+      ["spot", "BTCUSDT", "1h", 301, undefined],
+    ]);
+  });
+
+  it("пустой справочник фьючерсов (после фильтра только крипты) — warn в журнал (spec 0029)", async () => {
+    const log = vi.fn();
+    const deps = buildTickDeps(
+      env({ perpetuals: async () => new Set(), log }),
+      createDbExperimentStore(db),
+    );
+    expect(await deps.tickers("futures")).toEqual([]);
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      "engine.perpetuals",
+      expect.stringContaining("пуст"),
+    );
+    log.mockClear();
+    await deps.tickers("spot");
+    expect(log).not.toHaveBeenCalled();
   });
 });
 

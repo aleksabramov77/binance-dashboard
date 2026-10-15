@@ -37,7 +37,13 @@ export type TradeClose = Pick<
  * Движок работает только через этот интерфейс — так тик одинаков на VM и в Supabase.
  */
 export interface ExperimentStore {
-  listExperiments(): Promise<Experiment[]>;
+  /**
+   * Эксперименты; строку, не прошедшую схему конфига, реализация пропускает и сообщает в onInvalid
+   * (id и пути полей) — одна битая строка не останавливает тик остальных.
+   */
+  listExperiments(
+    onInvalid?: (row: { id: string; problem: string }) => void,
+  ): Promise<Experiment[]>;
   /** Текущая эпоха учёта (runs.id с наибольшим id). */
   currentRunId(): Promise<number>;
   /** Открытые сделки эпохи. */

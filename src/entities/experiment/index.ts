@@ -135,6 +135,10 @@ export {
   mirrorStatusSchema,
   OPEN_MIRROR_STATUSES,
 } from "./model/mirror";
+export type {
+  InvalidExperimentRow,
+  OnInvalidExperiment,
+} from "./model/parseRows";
 export {
   type BudgetForm,
   budgetFormSchema,

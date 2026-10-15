@@ -2,6 +2,7 @@ import { MAJORS, type Universe } from "@binance-dashboard/trading-core";
 import {
   ENGINE,
   LEVERAGED_TOKEN,
+  NON_CRYPTO,
   QUOTE,
   STABLECOINS,
 } from "../config/engine.ts";
@@ -18,10 +19,14 @@ export interface MarketTicker {
 
 const SYMBOL = /^[A-Z0-9]+USDT$/;
 
-/** Торгуемый символ: только …USDT (без поставочных фьючерсов вида BTCUSDT_251226), не стейбл и не плечевой токен. */
+/**
+ * Торгуемый символ: только …USDT (без поставочных фьючерсов вида BTCUSDT_251226), не стейбл, не плечевой
+ * токен и не токенизированная акция, металл или индекс (NON_CRYPTO).
+ */
 export function isEligibleSymbol(symbol: string): boolean {
   if (!SYMBOL.test(symbol) || LEVERAGED_TOKEN.test(symbol)) return false;
-  return !STABLECOINS.has(symbol.slice(0, -QUOTE.length));
+  const base = symbol.slice(0, -QUOTE.length);
+  return !STABLECOINS.has(base) && !NON_CRYPTO.has(base);
 }
 
 /** PIXEL → PIXELUSDT: blacklist и symbols в каталоге можно писать базой. */

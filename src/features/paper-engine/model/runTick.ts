@@ -9,7 +9,11 @@ import {
   evaluateStrategy,
   exitFill,
   FEE_RATE,
+  type MarketFilter,
+  marketRegimeAllows,
   type PaperTrade,
+  regimeMinCandles,
+  sessionAllows,
   settle,
   sizePosition,
   TIMEFRAME_MS,
@@ -50,12 +54,16 @@ export interface TickDeps {
   /** Этот раннер; тик работает, только если он совпадает с engine_state.runner. */
   runner: EngineRunner;
   store: ExperimentStore;
-  /** Публичные свечи Binance (последняя может быть незакрытой — движок её отбросит). */
+  /**
+   * Публичные свечи Binance (последняя может быть незакрытой — движок её отбросит). Без startTime —
+   * последние limit свечей, со startTime (мс) — до limit свечей начиная с него.
+   */
   candles(
     market: ExperimentMarket,
     symbol: string,
     interval: Interval,
     limit: number,
+    startTime?: number,
   ): Promise<Candle[]>;
   /** Тикеры 24 ч рынка; для futures — только бессрочные контракты. */
   tickers(market: ExperimentMarket): Promise<MarketTicker[]>;
@@ -136,7 +144,9 @@ export async function runTick(
 
   const limit = createLimiter(ENGINE.concurrency);
   const cache: CandleCache = deps.cache ?? new Map();
-  const experiments = await store.listExperiments();
+  const experiments = await store.listExperiments(({ id, problem }) =>
+    fail(`эксперимент ${id} пропущен: конфиг не проходит схему`, problem),
+  );
   const byId = new Map(experiments.map((e) => [e.id, e]));
   const runId = await store.currentRunId();
   const open = await store.openTrades(runId);
@@ -200,6 +210,41 @@ export async function runTick(
     return p;
   };
 
+  // Свечи режима рынка (spec 0029) — через signalCandles: общий кэш, один запрос на (рынок, символ, TF).
+  // Сбой загрузки и короткая история — одна ошибка тика на (рынок, символ, TF), а не на каждый эксперимент.
+  // Нет данных — вход запрещён (как у trendFilter); выходы идут как обычно.
+  const regimeMemo = new Map<string, Promise<Candle[] | null>>();
+  const regimeReported = new Set<string>();
+  const regimeAllows = async (
+    market: ExperimentMarket,
+    filter: MarketFilter,
+    direction: TradeDirection,
+  ) => {
+    const key = candleKey(market, filter.symbol, filter.timeframe);
+    const where = `режим рынка ${market} ${filter.symbol} ${filter.timeframe}`;
+    let p = regimeMemo.get(key);
+    if (!p) {
+      p = signalCandles(market, filter.symbol, filter.timeframe).catch(
+        (error) => {
+          fail(where, error);
+          return null;
+        },
+      );
+      regimeMemo.set(key, p);
+    }
+    const candles = await p;
+    if (candles === null) return false;
+    const need = regimeMinCandles(filter);
+    if (candles.length < need) {
+      if (!regimeReported.has(`${key}:${need}`)) {
+        regimeReported.add(`${key}:${need}`);
+        fail(where, `мало свечей режима: ${candles.length} из ${need}`);
+      }
+      return false;
+    }
+    return marketRegimeAllows(candles, filter, direction);
+  };
+
   const closeTrade = async (
     trade: PaperTrade,
     rawPrice: number,
@@ -238,6 +283,53 @@ export async function runTick(
     );
   };
 
+  /**
+   * Закрытые 1m-свечи от from подряд: страницы по maxMinuteCandles от startTime, пока не дойдём до
+   * текущей минуты. Разрыв короче страницы — один запрос. После долгого простоя — не больше
+   * maxMinutePages страниц за тик: checkedUntil сдвинется только по прочитанному, остальное
+   * дочитают следующие тики (баг 0028: раньше читался только хвост, пропущенные минуты терялись).
+   */
+  const minuteCandles = async (
+    market: ExperimentMarket,
+    symbol: string,
+    from: number,
+  ) => {
+    const minutes: Candle[] = [];
+    let start = from;
+    for (let page = 0; page < ENGINE.maxMinutePages; page++) {
+      const left = Math.max(2, Math.ceil((now - start) / MINUTE) + 1);
+      const batch = closedCandles(
+        await limit(() =>
+          deps.candles(
+            market,
+            symbol,
+            "1m",
+            Math.min(ENGINE.maxMinuteCandles, left),
+            start,
+          ),
+        ),
+        MINUTE,
+        now,
+      ).filter((c) => c.openTime >= start);
+      minutes.push(...batch);
+      const last = batch.at(-1);
+      if (!last || left <= ENGINE.maxMinuteCandles) return minutes;
+      start = last.openTime + MINUTE;
+    }
+    const end = lastClosedOpenTime(MINUTE, now) + MINUTE;
+    if (start < end) {
+      const gapMinutes = Math.round((end - from) / MINUTE);
+      const leftMinutes = Math.round((end - start) / MINUTE);
+      deps.log?.(
+        "warn",
+        "engine.minute-gap",
+        `${market} ${symbol}: разрыв 1m-свечей выходов ${gapMinutes} мин, за тик прочитано ${minutes.length}, остаток ${leftMinutes} мин дочитают следующие тики`,
+        { market, symbol, gapMinutes, leftMinutes },
+      );
+    }
+    return minutes;
+  };
+
   // 1. Выходы по 1m-свечам после checkedUntil: стоп, тейк, трейлинг, безубыток, тайм-стоп.
   const groups = new Map<string, PaperTrade[]>();
   for (const t of open) {
@@ -249,15 +341,7 @@ export async function runTick(
       const { market, symbol } = trades[0];
       try {
         const from = Math.min(...trades.map((t) => t.checkedUntil));
-        const count = Math.min(
-          ENGINE.maxMinuteCandles,
-          Math.max(2, Math.ceil((now - from) / MINUTE) + 1),
-        );
-        const minutes = closedCandles(
-          await limit(() => deps.candles(market, symbol, "1m", count)),
-          MINUTE,
-          now,
-        );
+        const minutes = await minuteCandles(market, symbol, from);
         for (const trade of trades) {
           const exp = byId.get(trade.experimentId);
           if (!exp) continue;
@@ -364,6 +448,9 @@ export async function runTick(
     );
     const hold = config.entry.type === "hold";
     const fresh = hold || now - (bar + tfMs) <= maxAge;
+    // Торговые часы — по времени входа (тика), одно решение на эксперимент.
+    const inSession =
+      !config.sessionFilter || sessionAllows(now, config.sessionFilter);
 
     for (const { symbol, candles } of ready) {
       const t = ticker.get(symbol);
@@ -383,10 +470,15 @@ export async function runTick(
 
       const entry = signal.entry;
       if (!entry || !fresh || !inUniverse.has(symbol)) continue;
-      if (!allowed(exp, entry.direction)) continue;
+      if (!allowed(exp, entry.direction) || !inSession) continue;
       const current = mine();
       if (current.length >= config.maxOpen) continue;
       if (current.some((x) => x.symbol === symbol)) continue;
+      if (
+        config.marketFilter &&
+        !(await regimeAllows(market, config.marketFilter, entry.direction))
+      )
+        continue;
       if (!(await trendAllows(exp, symbol, entry.direction, price))) continue;
 
       const atr = atrSeries(candles, ENGINE.atrPeriod).at(-1) ?? Number.NaN;
