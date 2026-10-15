@@ -12,7 +12,7 @@ import {
   seedExperiments,
   withEngineTickLock,
 } from "@/entities/experiment";
-import { ENGINE_KEYS } from "@/features/paper-engine";
+import { ENGINE_KEYS, EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import { createMemoryDb } from "@/shared/db/client.server";
 import {
   createPerpetualsSource,
@@ -270,6 +270,8 @@ describe("prepareEngineDb и приватные эксперименты (spec 0
 
     expect(await read()).toEqual([before]);
     expect(before).toMatchObject({ enabled: false, initialBudget: 777 });
-    expect(await db.select().from(experimentsTable)).toHaveLength(41);
+    expect(await db.select().from(experimentsTable)).toHaveLength(
+      EXPERIMENT_CATALOG.length + 1,
+    );
   });
 });
