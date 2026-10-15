@@ -38,13 +38,25 @@
 - `demoOrderLists.ts` — спот-вход одной заявкой (spec 0012): параметры OTOCO/OTO (`spotEntryListRequest`,
   рабочий `LIMIT BUY FOK`) и разбор ответа (`summarizeSpotEntryList`); сеть — `demoSpotBuyProtected`,
   статус отложенного ордера — `fetchDemoSpotOrderStatus`. Тесты — `demoOrderLists.test.ts`.
+- `orderOutcome.ts` — `orderErrorOutcome(error)`: ошибка ордера — `rejected` (биржа точно отказала) или `unknown`
+  (`-1006`/`-1007` «execution status unknown», HTTP 5xx, сеть, нераспознанный ответ — ордер мог исполниться).
+  Список кодов — `UNKNOWN_OUTCOME_CODES`, по документации Binance (Spot и USDⓈ-M Futures, 2026-10-15).
+  `ORDER_RECV_WINDOW_MS` (5 с) — `recvWindow` ордеров входа (у остальных запросов 10 с); `unknownOutcomeDeadline`
+  и `nextRecheckDelay` — сколько перечитывать заявку с неизвестным исходом, прежде чем сказать «её нет».
+  Перечитать ордер спота по своему id — `fetchDemoSpotOrderByClientId` (null — `-2013`, ордера нет);
+  `clientOrderId` задают `demoSpotMarketOrder` и `spotEntryListRequest` (`clientIds`).
 - `*Schemas.ts` — Zod-схемы ответов. Числа Binance приходят строками → `z.coerce.number()`.
 
 ## Подводные камни
 - **Только демо-хосты для ордеров.** Live-торговли нет намеренно; не добавлять реальные торговые хосты.
 - Демо-фьючерсы иногда не присылают `avgPrice`/`executedQty` — схемы терпят это (`.catch(0)`).
 - `exchangeInfo` демо-фьючерсов ~900 КБ — кэшируется на 10 минут, при сбое используется старая копия.
-- Лимиты веса Binance: не делать запросов в цикле по сотням символов; кэшировать справочники.
+- Лимиты веса Binance: не делать запросов в цикле по сотням символов; кэшировать справочники. Лимит — 6000 веса
+  в минуту **на IP**, а исходящий IP Vercel общий с чужими приложениями. Для одной цены — `fetchTickerPrices(market)`
+  (`ticker/price`, вес 4/2), а не `ticker/24hr` без символа (вес 80/40).
+- После 429/418 `getJsonWithRetry` (`src/shared/lib/fetchRetry.ts`) ставит паузу на хост: срок берётся из `Retry-After`
+  или «banned until» (по умолчанию 60 с). Во время паузы запрос сразу бросает `HttpError` без похода в сеть, потому что
+  повтор во время бана удлиняет бан. Пауза одна на процесс (на Vercel — на экземпляр функции), в журнале — `binance.cooldown`.
 - Ошибки `-1121` (Invalid symbol) и `-4046` (margin type уже установлен) — ожидаемые, обрабатываются явно.
 - `-4067` на `/fapi/v1/marginType` — по символу есть открытые ордера (даже если маржа уже изолированная);
   `placeTrade` не доходит до этого вызова, если символ уже в сделке.

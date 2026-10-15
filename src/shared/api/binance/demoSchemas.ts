@@ -94,6 +94,19 @@ export const spotOrderStatusSchema = z
   .object({ orderId: z.number(), type: z.string(), status: z.string() })
   .loose();
 
+/** GET /api/v3/order целиком: по нему перечитываем заявку с неизвестным исходом (без комиссии). */
+export const spotOrderQuerySchema = z
+  .object({
+    orderId: z.number(),
+    orderListId: z.number().catch(-1),
+    type: z.string(),
+    side: z.enum(["BUY", "SELL"]),
+    status: z.string(),
+    executedQty: decimal,
+    cummulativeQuoteQty: decimal,
+  })
+  .loose();
+
 export const futuresOrderSchema = z
   .object({
     symbol: z.string(),
@@ -225,3 +238,4 @@ export const futuresUserTradesSchema = z.array(
 export type SpotOrder = z.infer<typeof spotOrderSchema>;
 export type OrderListReports = z.infer<typeof orderListReportsSchema>;
 export type FuturesOrder = z.infer<typeof futuresOrderSchema>;
+export type SpotOrderQuery = z.infer<typeof spotOrderQuerySchema>;

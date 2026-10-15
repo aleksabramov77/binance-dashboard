@@ -1,5 +1,11 @@
 import type { TradeRequest } from "@/entities/trade";
 import type { PriceBand, SymbolRules } from "@/shared/api/binance/demo.server";
+import {
+  SPOT_ENTRY_SLIPPAGE,
+  SPOT_ENTRY_SLIPPAGE_TEXT,
+  SPOT_TAKER_FEE,
+  SPOT_TAKER_FEE_TEXT,
+} from "../config/spot";
 
 /** Число знаков после запятой у шага биржи: "0.00010000" → 4, "1" → 0. */
 export function stepDecimals(step: string): number {
@@ -44,6 +50,63 @@ export function fitToMinNotional(
   const fitted =
     Math.ceil((rules.minNotional * 1.01) / price / step - 1e-9) * step;
   return fitted * price > maxNotionalUsd ? quantity : fitted;
+}
+
+/** Спот: сколько продавать стопом/тейком — купленное минус комиссия в монете, вниз к шагу. */
+export const spotSellQuantity = (
+  quantity: string | number,
+  stepSize: string,
+  feeRate = SPOT_TAKER_FEE,
+) => floorToStep(Number(quantity) * (1 - feeRate), stepSize);
+
+/**
+ * Спот: на сколько долларов продаст стоп. Стоп продаёт купленное за вычетом комиссии, а биржа
+ * проверяет NOTIONAL отложенного STOP_LOSS по цене стопа — демо 2026-10-15: OTO на 31 BAT по 0,1705,
+ * стоп 30 BAT × 0,16 = $4,8 < $5 → -1013 NOTIONAL, заявка отклонена целиком; со стопом 0,167 ($5,01) прошла.
+ */
+export const spotStopNotional = (
+  quantity: number,
+  stopLoss: number,
+  stepSize: string,
+) => Number(spotSellQuantity(quantity, stepSize)) * stopLoss;
+
+/**
+ * fitMinNotional для спота: объём, при котором и стоп после комиссии не меньше minNotional
+ * (с запасом 1%). Те же пределы, что у fitToMinNotional: не больше чем в MAX_MIN_NOTIONAL_BUMP раз
+ * и не выше maxNotionalUsd; иначе — как было.
+ */
+export function fitSpotStopToMinNotional(
+  quantity: number,
+  price: number,
+  stopLoss: number,
+  rules: Pick<SymbolRules, "stepSize" | "minNotional">,
+  maxNotionalUsd = Number.POSITIVE_INFINITY,
+): number {
+  if (
+    stopLoss <= 0 ||
+    spotStopNotional(quantity, stopLoss, rules.stepSize) >= rules.minNotional
+  )
+    return quantity;
+  const step = Number(rules.stepSize);
+  let fitted =
+    Math.ceil(
+      (rules.minNotional * 1.01) / stopLoss / (1 - SPOT_TAKER_FEE) / step -
+        1e-9,
+    ) * step;
+  // Округление продажи вниз к шагу может съесть шаг — добавляем, пока стоп не пройдёт.
+  for (
+    let i = 0;
+    i < 3 &&
+    spotStopNotional(fitted, stopLoss, rules.stepSize) < rules.minNotional;
+    i++
+  )
+    fitted += step;
+  if (
+    fitted > quantity * MAX_MIN_NOTIONAL_BUMP ||
+    fitted * price > maxNotionalUsd
+  )
+    return quantity;
+  return fitted;
 }
 
 /** Запас от границы фильтра цены биржи — доля текущей цены (средняя цена биржи от неё отстаёт). */
@@ -137,9 +200,23 @@ export function validateTrade(
     }
   }
 
+  const isSpot = req.market === "spot";
+  // Стоп — как уйдёт на биржу (к тику): по нему биржа считает NOTIONAL стопа спота.
+  const stopAtExchange = Number(roundToTick(stopLoss, rules.tickSize));
   const quantity = floorToStep(
     req.fitMinNotional
-      ? fitToMinNotional(req.quantity, price, rules, maxNotionalUsd)
+      ? Math.max(
+          fitToMinNotional(req.quantity, price, rules, maxNotionalUsd),
+          isSpot
+            ? fitSpotStopToMinNotional(
+                req.quantity,
+                price,
+                stopAtExchange,
+                rules,
+                maxNotionalUsd,
+              )
+            : 0,
+        )
       : req.quantity,
     rules.stepSize,
   );
@@ -151,14 +228,24 @@ export function validateTrade(
     errors.push(
       `Объём $${notionalUsd.toFixed(2)} меньше минимального для символа ($${rules.minNotional}).`,
     );
+  else if (isSpot && errors.length === 0) {
+    // Покупка проходит, а стоп на купленное минус комиссия — нет: биржа отклонит всю заявку.
+    const stopUsd = spotStopNotional(qty, stopAtExchange, rules.stepSize);
+    if (stopUsd < rules.minNotional)
+      errors.push(
+        `Стоп продаст ${spotSellQuantity(qty, rules.stepSize)} (куплено минус комиссия ${SPOT_TAKER_FEE_TEXT}) по ${roundToTick(stopLoss, rules.tickSize)} — это $${stopUsd.toFixed(2)}, меньше минимального ордера ($${rules.minNotional}): биржа отклонит заявку. Увеличьте количество.`,
+      );
+  }
   if (notionalUsd > maxNotionalUsd)
     errors.push(
       `Объём $${notionalUsd.toFixed(2)} больше лимита на демо-сделку ($${maxNotionalUsd}).`,
     );
 
   const wallet = req.market === "spot" ? "Spot" : "USDⓈ-M Futures";
-  const requiredUsd =
-    req.market === "spot" ? notionalUsd : notionalUsd / req.leverage;
+  // Спот покупается LIMIT FOK по цене +SPOT_ENTRY_SLIPPAGE — биржа блокирует USDT по лимитной цене.
+  const requiredUsd = isSpot
+    ? notionalUsd * (1 + SPOT_ENTRY_SLIPPAGE)
+    : notionalUsd / req.leverage;
   if (availableUsd <= 0) {
     errors.push(
       `На демо-кошельке ${wallet} 0 USDT — пополните его на demo.binance.com.`,
@@ -166,7 +253,7 @@ export function validateTrade(
   } else {
     if (requiredUsd > availableUsd)
       errors.push(
-        `Нужно ${usd(requiredUsd)} ${req.market === "spot" ? "USDT" : "маржи"}, а на ${wallet} свободно ${usd(availableUsd)}.`,
+        `Нужно ${usd(requiredUsd)} ${isSpot ? `USDT (с запасом ${SPOT_ENTRY_SLIPPAGE_TEXT} на цену покупки)` : "маржи"}, а на ${wallet} свободно ${usd(availableUsd)}.`,
       );
     const lossAtStop = qty * Math.abs(price - stopLoss);
     const maxLoss = availableUsd * maxRiskPct;
