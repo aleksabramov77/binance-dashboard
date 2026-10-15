@@ -1,6 +1,5 @@
 import {
   type Experiment,
-  experimentSchema,
   type PaperTrade,
   paperTradeSchema,
 } from "@binance-dashboard/trading-core";
@@ -12,6 +11,10 @@ import {
   paperTradesTable,
   runsTable,
 } from "../model/db.ts";
+import {
+  type OnInvalidExperiment,
+  parseExperimentRows,
+} from "../model/parseRows.ts";
 import { countedTrade } from "./accounting.ts";
 import type { ExperimentDb } from "./tickLock.ts";
 
@@ -82,12 +85,15 @@ export async function seedExperiments(
 /** Хранилище движка лаборатории поверх таблиц домена. */
 export function createDbExperimentStore(db: Db) {
   return {
-    async listExperiments(): Promise<Experiment[]> {
+    /** Строки, не прошедшие строгую схему, пропускаются и уходят в onInvalid (spec 0029). */
+    async listExperiments(
+      onInvalid?: OnInvalidExperiment,
+    ): Promise<Experiment[]> {
       const rows = await db
         .select()
         .from(experimentsTable)
         .orderBy(asc(experimentsTable.id));
-      return rows.map((r) => experimentSchema.parse(r));
+      return parseExperimentRows(rows, onInvalid).map((x) => x.experiment);
     },
 
     currentRunId: () => ensureRun(db),

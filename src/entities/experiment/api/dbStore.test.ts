@@ -1,4 +1,5 @@
 import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { experimentsTable } from "../model/db.ts";
@@ -69,6 +70,22 @@ describe("хранилище лаборатории на Drizzle (PGlite)", () =
     expect(list.map((e) => e.id)).toEqual(["F01", "F02"]);
     expect(list[0].name).toBe("Новое имя");
     expect(list.every((e) => !e.enabled)).toBe(true);
+  });
+
+  it("строка с незнакомым полем конфига пропускается, остальные читаются (spec 0029)", async () => {
+    await seedExperiments(db, [exp("F01"), exp("F02")]);
+    await db
+      .update(experimentsTable)
+      .set({ config: { ...exp("F01").config, marketFiltr: {} } as never })
+      .where(eq(experimentsTable.id, "F01"));
+    const invalid: string[] = [];
+    const list = await createDbExperimentStore(db).listExperiments((r) =>
+      invalid.push(`${r.id}: ${r.problem}`),
+    );
+    expect(list.map((e) => e.id)).toEqual(["F02"]);
+    expect(invalid).toEqual([
+      expect.stringMatching(/^F01: config\.marketFiltr — /),
+    ]);
   });
 
   it("первая эпоха создаётся один раз", async () => {

@@ -49,6 +49,44 @@ describe("describeConfig", () => {
   });
 });
 
+describe("describeConfig: фильтры режима рынка и часов", () => {
+  it("режим рынка: условие по направлениям и ADX", () => {
+    const lines = describeConfig({
+      ...config,
+      marketFilter: {
+        symbol: "BTCUSDT",
+        timeframe: "1d",
+        ema: 100,
+        minAdx: 30,
+        long: "above",
+        short: "any",
+      },
+    });
+    expect(lines.find((l) => l.label === "Режим рынка")?.value).toBe(
+      "лонг — BTCUSDT выше EMA 100 на 1d; шорт — при любом; ADX ≥ 30 на 1d",
+    );
+  });
+
+  it("часы через полночь и дни недели с понедельника", () => {
+    const lines = Object.fromEntries(
+      describeConfig({
+        ...config,
+        sessionFilter: { hoursUtc: [22, 6], days: [0, 5, 1] },
+      }).map((l) => [l.label, l.value]),
+    );
+    expect(lines).toMatchObject({
+      Часы: "22:00–06:00 UTC (через полночь)",
+      Дни: "пн, пт, вс (UTC)",
+    });
+  });
+
+  it("без фильтров — строк нет", () => {
+    const labels = describeConfig(config).map((l) => l.label);
+    expect(labels).not.toContain("Режим рынка");
+    expect(labels).not.toContain("Часы");
+  });
+});
+
 describe("describeEntry", () => {
   it("доли переводит в проценты без хвостов плавающей точки", () => {
     expect(describeEntry({ type: "funding", threshold: 0.0005 })).toContain(

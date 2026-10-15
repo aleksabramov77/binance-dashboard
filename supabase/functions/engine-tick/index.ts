@@ -58,8 +58,9 @@ const market = createMarketApi(getJson);
 // кэш свечей, справочник фьючерсов, признак сида каталога.
 let client: ReturnType<typeof postgres> | null = null;
 const cache: CandleCache = new Map();
+// Юниверс лаборатории — только крипта: без индексов и токенов реальных активов (spec 0029).
 const perpetuals = createPerpetualsSource(
-  () => market.fetchPerpetualSymbols(),
+  () => market.fetchPerpetualSymbols({ cryptoOnly: true }),
   PERPETUALS_TTL_MS,
   Date.now,
 );
