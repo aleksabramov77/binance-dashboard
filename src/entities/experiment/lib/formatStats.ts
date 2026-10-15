@@ -15,8 +15,9 @@ const percent1 = new Intl.NumberFormat("ru-RU", {
 export const formatSignedUsd = (v: number) =>
   `${v > 0 ? "+" : ""}${formatUsd(v)}`;
 
+/** Доля в процентах; то, что округляется до 0,0 %, — «0 %» без минуса (иначе Max DD 0 → «-0 %»). */
 export const formatRate = (v: number | null) =>
-  v === null ? "—" : percent1.format(v);
+  v === null ? "—" : percent1.format(Math.abs(v) < 0.0005 ? 0 : v);
 
 /** Profit factor: без убыточных сделок, но с прибылью — ∞. */
 export const formatProfitFactor = (

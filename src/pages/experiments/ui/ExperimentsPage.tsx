@@ -162,8 +162,13 @@ const COLUMNS: {
   },
 ];
 
-/** Оттенок всех колонок «Демо: …» — заголовки и ячейки (AC6; вариант утверждает пользователь). */
+/** Оттенок всех колонок «Демо: …» — ячейки (AC6; пользователь выбрал sky 2026-10-15). */
 const DEMO_TONE = "bg-sky-500/[0.06]";
+/**
+ * Тот же оттенок для липкой шапки — фоновым изображением поверх непрозрачного bg-card шапки.
+ * Цвет фона (как в DEMO_TONE) заменил бы bg-card, и строки просвечивали бы при прокрутке.
+ */
+const DEMO_HEAD_TONE = "bg-linear-to-b from-sky-500/[0.06] to-sky-500/[0.06]";
 const isDemoColumn = (key: SortKey) => key.startsWith("demo");
 
 function ColumnHead({
@@ -178,7 +183,7 @@ function ColumnHead({
       className={cn(
         column.numeric && "text-right",
         column.key === "demo" && "text-center",
-        isDemoColumn(column.key) && DEMO_TONE,
+        isDemoColumn(column.key) && DEMO_HEAD_TONE,
       )}
       {...head}
       description={column.description}
