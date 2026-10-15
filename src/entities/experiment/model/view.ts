@@ -46,6 +46,11 @@ export const demoSummarySchema = z.object({
   rejected: z.number().int(),
   skipped: z.number().int(),
   pnl: z.number(),
+  // Метрики по закрытым демо-сделкам — формулы paper (spec 0016, computeDemoStats).
+  grossProfit: z.number(),
+  profitFactor: z.number().nullable(),
+  maxDrawdownPct: z.number(),
+  equity: z.number(),
 });
 
 export const experimentSummarySchema = experimentSchema

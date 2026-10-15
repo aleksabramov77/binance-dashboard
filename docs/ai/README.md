@@ -9,6 +9,7 @@
 | [`architecture.md`](architecture.md) | FSD-слои, сервер/клиент, данные, логирование, где что лежит |
 | [`conventions.md`](conventions.md) | Нейминг, тесты, номер задачи, коммиты, ветки, PR, Definition of Done |
 | [`workflow.md`](workflow.md) | AI-конвейер: `/feature`, `/bug`, `/merge`, процессы `/flow`, worktree на задачу, роли агентов |
+| [`glossary.md`](glossary.md) | Глоссарий терминов и сокращений (AG, Paper/Demo/Real, эпоха, PF…) — источник истины для `/help` (`pnpm glossary`) |
 | [`deploy-supabase.md`](deploy-supabase.md) | **Основной деплой:** Supabase (БД, тик) + Vercel (интерфейс, регион Tokyo) |
 | [`deploy.md`](deploy.md) | Резервный деплой на Oracle Cloud (Dubai): VM, HTTPS, Supabase, GitHub OAuth, автодеплой, ключи на сервере |
 | [`../specs/`](../specs/) | ТЗ на каждую фичу и баг (`NNNN-slug.md`) + шаблоны |

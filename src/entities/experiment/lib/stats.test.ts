@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeDemoStats,
   computeStats,
   equityCurve,
   groupStats,
@@ -138,5 +139,30 @@ describe("groupStats", () => {
   it("без бюджета equity группы равна её PnL", () => {
     const [g] = groupStats([closed("2026-10-10T01:00:00Z", 7)], () => "all");
     expect(g.stats.equity).toBe(7);
+  });
+});
+
+describe("computeDemoStats", () => {
+  it("PF, просадка от пика и equity по PnL в порядке закрытия", () => {
+    expect(computeDemoStats([10, -5, 20, -30], 1000)).toEqual({
+      grossProfit: 30,
+      profitFactor: 30 / 35,
+      maxDrawdownPct: 30 / 1025, // пик 1025 → 995
+      equity: 995,
+    });
+  });
+  it("без убытков — PF null, без сделок — нули и equity = бюджет", () => {
+    expect(computeDemoStats([5, 5], 100)).toMatchObject({
+      profitFactor: null,
+      grossProfit: 10,
+      maxDrawdownPct: 0,
+      equity: 110,
+    });
+    expect(computeDemoStats([], 100)).toEqual({
+      grossProfit: 0,
+      profitFactor: null,
+      maxDrawdownPct: 0,
+      equity: 100,
+    });
   });
 });
