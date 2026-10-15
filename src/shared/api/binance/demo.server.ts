@@ -14,6 +14,8 @@ export type { PriceBand, SymbolRules } from "./demoRules";
 export type {
   AlgoOrderQuery,
   FuturesOrder,
+  FuturesSymbolState,
+  SpotOpenOrder,
   SpotOrderQuery,
 } from "./demoSchemas";
 export type { AlgoRef } from "./demoTrading";
@@ -22,24 +24,30 @@ export {
   type DemoPosition,
   type DemoTradeSnapshot,
   demoCancelAlgoOrder,
-  demoCancelAllOrders,
-  demoFuturesCloseAt,
+  demoEnableHedgeMode,
+  demoFuturesCancelOrder,
   demoFuturesMarketOrder,
-  demoFuturesPosition,
+  demoFuturesPositions,
   demoFuturesPrepare,
+  demoFuturesProtect,
   demoFuturesReduceMarket,
   demoSpotBuyProtected,
   demoSpotCancelByClientId,
+  demoSpotCancelOrder,
   demoSpotMarketOrder,
   demoSpotOcoSell,
   demoSpotStopLossSell,
   fetchDemoAlgoOrder,
   fetchDemoFills,
+  fetchDemoFuturesAccountBusy,
   fetchDemoFuturesOrder,
   fetchDemoFuturesPositions,
+  fetchDemoFuturesSymbolState,
   fetchDemoOpenSymbols,
+  fetchDemoPositionMode,
   fetchDemoPrice,
   fetchDemoSpotHoldings,
+  fetchDemoSpotOpenOrders,
   fetchDemoSpotOrderByClientId,
   fetchDemoSpotOrderStatus,
   fetchDemoSymbolOrders,
@@ -54,5 +62,13 @@ export {
   UNKNOWN_OUTCOME_CODES,
   unknownOutcomeDeadline,
 } from "./orderOutcome";
+export {
+  entryParams,
+  type FuturesSide,
+  type PositionMode,
+  positionSideOf,
+  protectParams,
+  reduceParams,
+} from "./positionMode";
 export { type DemoProtectRefs, demoProtectRefsSchema } from "./protectRefs";
 export { BinanceApiError, ResponseFormatError } from "./signed";
