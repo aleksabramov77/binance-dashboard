@@ -39,25 +39,28 @@ export async function getExperimentBudgets(): Promise<ExperimentBudgets> {
   const { runId, inputs } = await loadBudgetInputs(getDb());
   const markets = [...new Set(inputs.open.map((t) => t.market))];
 
-  let prices: PriceLookup | null = null;
-  try {
-    const loaded = new Map(
-      await Promise.all(
-        markets.map(async (m) => [m, await lastPrices(m)] as const),
-      ),
-    );
-    prices = (market, symbol) => loaded.get(market)?.get(symbol);
-  } catch (error) {
-    // Нет цен — показываем equity без нереализованного PnL (подсказка в хедере это объясняет). Во время паузы
-    // после 429/418 шапка опрашивается каждые 30 с — это debug, сама пауза уже записана как binance.cooldown.
-    log[error instanceof CooldownError ? "debug" : "warn"](
-      "experiments.budgets",
-      "Цены для нереализованного PnL недоступны",
-      {
-        error: error instanceof Error ? error.message : String(error),
-      },
-    );
-  }
+  // Цены — по группе: рынок не ответил (например, dapi для COIN-M) — его группа без нереализованного PnL
+  // (подсказка в хедере это объясняет), остальные считаются как обычно.
+  const loaded = new Map(
+    await Promise.all(
+      markets.map(async (m) => {
+        try {
+          return [m, await lastPrices(m)] as const;
+        } catch (error) {
+          // Во время паузы после 429/418 шапка опрашивается каждые 30 с — это debug, сама пауза уже
+          // записана как binance.cooldown.
+          log[error instanceof CooldownError ? "debug" : "warn"](
+            "experiments.budgets",
+            `Цены ${m} для нереализованного PnL недоступны`,
+            { error: error instanceof Error ? error.message : String(error) },
+          );
+          return [m, null] as const;
+        }
+      }),
+    ),
+  );
+  const prices: PriceLookup = (market, symbol) =>
+    loaded.get(market)?.get(symbol);
 
   return { runId, markets: computeMarketBudgets(inputs, prices) };
 }

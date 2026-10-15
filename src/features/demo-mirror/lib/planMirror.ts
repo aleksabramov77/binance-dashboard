@@ -4,7 +4,7 @@ import { MIRROR } from "../config/mirror";
 
 export interface MirrorTradeInput {
   tradeId: string;
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
   symbol: string;
   direction: "long" | "short";
   openedAt: string;
@@ -16,7 +16,7 @@ export interface MirrorTradeInput {
 
 export interface MirrorOrderRequest {
   symbol: string;
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
   direction: "long" | "short";
   quantity: number;
   stopLoss: number;
@@ -71,11 +71,11 @@ export interface MirrorListing {
 
 export const listingKey = key;
 
-const MARKET_NAME = { spot: "демо-споте", futures: "демо-фьючерсах" } as const;
+const MARKET_NAME = { spot: "демо-споте", usdm: "демо-фьючерсах" } as const;
 
 /** Зеркало, которое держит или открывает позицию (из БД). */
 export interface ActiveMirror {
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
   symbol: string;
   direction: "long" | "short";
   /** Свои ссылки на стоп/тейк (PR 2b). false — строка до них: монета занята до её закрытия. */
@@ -154,7 +154,7 @@ export function planMirror(
       continue;
     }
     if (
-      t.market === "futures" &&
+      t.market === "usdm" &&
       futuresMode !== "hedge" &&
       sameCoin.some((m) => m.direction !== t.direction)
     ) {
@@ -183,7 +183,7 @@ export function planMirror(
         market: t.market,
         direction: t.direction,
         quantity: t.quantity,
-        leverage: t.market === "futures" ? MIRROR.leverage : 1,
+        leverage: t.market === "usdm" ? MIRROR.leverage : 1,
         fitMinNotional: true,
         stopOnly: t.takeProfit === null,
         mirror: true,

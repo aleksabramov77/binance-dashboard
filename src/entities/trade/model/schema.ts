@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { demoProtectRefsSchema } from "@/shared/api/binance";
+import { demoProtectRefsSchema, tradeMarketSchema } from "@/shared/api/binance";
 
 export const MAX_LEVERAGE = 3;
 /** Максимальная потеря на стопе — доля баланса кошелька (2%). Проверяется и в UI, и на сервере. */
@@ -7,7 +7,7 @@ export const MAX_RISK_PCT = 0.02;
 
 export const tradeRequestSchema = z.object({
   symbol: z.string().regex(/^[A-Z0-9]+USDT$/),
-  market: z.enum(["spot", "futures"]),
+  market: tradeMarketSchema,
   direction: z.enum(["long", "short"]),
   quantity: z.number().positive(),
   stopLoss: z.number().positive(),
@@ -59,10 +59,10 @@ export const tradeResultSchema = z.object({
 export const tradeOverviewSchema = z.object({
   configured: z.boolean(),
   maxNotionalUsd: z.number(),
-  balances: z.object({ spot: z.number(), futures: z.number() }).nullable(),
+  balances: z.object({ spot: z.number(), usdm: z.number() }).nullable(),
   /** Символы с открытой позицией или ордерами на демо — в эти сетапы мы уже зашли. */
   openSymbols: z
-    .object({ spot: z.array(z.string()), futures: z.array(z.string()) })
+    .object({ spot: z.array(z.string()), usdm: z.array(z.string()) })
     .nullable(),
   error: z.string().nullable(),
 });
@@ -85,7 +85,7 @@ export const tradeStatusSchema = z.enum(TRADE_STATUSES);
 /** Исполненный ордер с демо-счёта Binance: все его fills сложены в одну строку. */
 export const executedOrderSchema = z.object({
   id: z.string(),
-  market: z.enum(["spot", "futures"]),
+  market: tradeMarketSchema,
   symbol: z.string(),
   side: z.enum(["BUY", "SELL"]),
   /** Время последнего исполнения, ISO. */

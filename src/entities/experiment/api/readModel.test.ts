@@ -21,7 +21,7 @@ afterEach(() => close());
 
 const exp = (id: string): Experiment => ({
   id,
-  market: "futures",
+  market: "usdm",
   name: id,
   hypothesis: "тест",
   config: {
@@ -47,7 +47,7 @@ const trade = (
   id,
   runId,
   experimentId,
-  market: "futures",
+  market: "usdm",
   symbol: "BTCUSDT",
   direction: "long",
   openedAt: `2026-10-10T${String(hour).padStart(2, "0")}:00:00.000Z`,
@@ -278,14 +278,14 @@ describe("данные для отчёта лаборатории (pnpm lab:repo
       {
         id: "F01",
         name: "F01",
-        market: "futures",
+        market: "usdm",
         enabled: true,
         demoMirror: false,
       },
       {
         id: "F02",
         name: "F02",
-        market: "futures",
+        market: "usdm",
         enabled: false,
         demoMirror: true,
       },

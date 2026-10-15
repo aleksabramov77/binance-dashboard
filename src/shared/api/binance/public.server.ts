@@ -7,7 +7,9 @@ export {
 export {
   fetch24hTicker,
   fetch24hTickers,
+  fetchCoinmTickers,
   fetchFundingRates,
   fetchKlines,
   fetchPerpetualSymbols,
+  fetchPerpetuals,
 } from "./market";

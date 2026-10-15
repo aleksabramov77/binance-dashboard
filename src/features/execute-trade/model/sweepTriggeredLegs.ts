@@ -43,7 +43,7 @@ export async function sweepTriggeredLegs(
   // Зеркала с хотя бы одной своей ногой; одна нога (stopOnly) — сработала: строка закрыта, снимать нечего.
   const futures = mirrors.filter(
     (m) =>
-      m.protectRefs.market === "futures" &&
+      m.protectRefs.market === "usdm" &&
       (m.protectRefs.stop || m.protectRefs.takeProfit),
   );
   if (!config || futures.length === 0) return [];
@@ -63,7 +63,7 @@ export async function sweepTriggeredLegs(
     // Бюджет прогона: остальные зеркала сверим на следующей минуте.
     if (overBudget()) break;
     const refs = m.protectRefs;
-    if (refs.market !== "futures") continue;
+    if (refs.market !== "usdm") continue;
     const candidate = orphanLegCandidate(refs, openAlgos);
     if (!candidate) continue;
     const remaining = candidate.remaining;

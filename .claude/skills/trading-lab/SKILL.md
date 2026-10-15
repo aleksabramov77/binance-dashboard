@@ -26,8 +26,9 @@ description: Знания и метод лаборатории эксперим�
 
 Контекст проекта (читать по необходимости):
 - эксперимент = гипотеза + `ExperimentConfig` (`packages/trading-core/src/experiment.ts`); исходный каталог —
-  `src/features/paper-engine/config/catalog.ts` (S01–S20 spot только long, F01–F20 futures), новые — приватные
-  `private/experiments.json` (`PS..` spot, `PF..` futures; `docs/ai/architecture.md` → «Приватные эксперименты»);
+  `src/features/paper-engine/config/catalog.ts` (S01–S20 spot только long, F01–F20 USDⓈ-M — `usdm`), новые — приватные
+  `private/experiments.json` (`PS..` spot, `PF..` USDⓈ-M — `usdm`, `PC..` COIN-M — `coinm`: целые контракты по $100/$10,
+  бюджет и PnL в $; `docs/ai/architecture.md` → «Приватные эксперименты»);
 - логика входов — `packages/trading-core/src/strategies.ts`, выходов — `exits.ts`, комиссии и слиппедж —
   `fills.ts`, как работает тик — `src/features/paper-engine/README.md`;
 - отчёт — `scripts/lib/labReport.ts` (метрики, подсказки `HINT_RULES`), контекст рынка — `scripts/lib/labMarket.ts`.
@@ -55,7 +56,7 @@ description: Знания и метод лаборатории эксперим�
    планка «перевеса нет». Buy & hold BTC (S20, F20) — планка «а просто держать?»; они не закрывают сделок,
    поэтому в отчёте их заменяет доходность BTC за период (блок «Рынок»). Эксперимент интересен, только если он
    лучше контроля своего рынка за тот же период.
-5. **Наказывай стратегию.** Комиссии (spot 0,1%, futures 0,05% на сторону) и слиппедж 0,05% уже в PnL. Для
+5. **Наказывай стратегию.** Комиссии (spot 0,1%, USDⓈ-M и COIN-M 0,05% на сторону) и слиппедж 0,05% уже в PnL. Для
    решения о демо-зеркале мысленно удвой слиппедж: перевес, который живёт в десятых процента на сделку,
    реальный рынок съест (funding в paper не учитывается — для удержаний дольше 8 ч это тоже минус).
 6. **Плато, а не пик.** Хороший параметр окружён хорошими соседями (Donchian 20 ≈ 15 ≈ 30). Если работает
@@ -137,7 +138,7 @@ MAE (худшая цена) движок не хранит — не придум
 
 Приватно, без кода и без публичного PR (репозиторий публичный — spec 0015; этап `experiment` `/flow lab`):
 - JSON карточки — в массив `private/experiments.json`: id — следующий свободный `PSxx` (spot, только long) /
-  `PFxx` (futures), формат — `experimentSchema` из `trading-core`; публичный `catalog.ts` (S01–S20, F01–F20) не
+  `PFxx` (USDⓈ-M, `market: "usdm"`) / `PCxx` (COIN-M, `market: "coinm"`, без демо-зеркала), формат — `experimentSchema` из `trading-core`; публичный `catalog.ts` (S01–S20, F01–F20) не
   расширяется;
 - `pnpm lab:private --dry-run` — проверка (схема, префикс ↔ рынок, повторы) и план «новый / обновится»; после
   подтверждения пользователя — `pnpm lab:private --prod` (без `--prod` в Postgres не пишет); эксперимент виден в

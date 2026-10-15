@@ -1,4 +1,8 @@
-import { directionSchema, marketSchema } from "@binance-dashboard/trading-core";
+import {
+  directionSchema,
+  legacyMarketSchema,
+  marketSchema,
+} from "@binance-dashboard/trading-core";
 import { z } from "zod";
 import { runInfoSchema, tradeStatsSchema } from "./view";
 
@@ -20,7 +24,8 @@ export const statsPeriodSchema = z.enum(STATS_PERIODS);
 /** Параметры запроса. Отсутствующий фильтр — «все»; run не задан — текущая эпоха. */
 export const statsQuerySchema = z.object({
   groupBy: statsGroupBySchema.default("experiment"),
-  market: marketSchema.optional(),
+  /** Старые ссылки ?market=futures — группа USDⓈ-M (spec 0023). */
+  market: legacyMarketSchema.optional(),
   experiment: z.string().min(1).optional(),
   direction: directionSchema.optional(),
   symbol: z.string().min(1).optional(),
@@ -30,7 +35,7 @@ export const statsQuerySchema = z.object({
 
 export const statsGroupSchema = z.object({
   key: z.string(),
-  /** Подпись группы: «F01 · Имя», «Futures», «Long (B)», «BTCUSDT». */
+  /** Подпись группы: «F01 · Имя», «USDⓈ-M», «Long (B)», «BTCUSDT». */
   label: z.string(),
   stats: tradeStatsSchema,
 });

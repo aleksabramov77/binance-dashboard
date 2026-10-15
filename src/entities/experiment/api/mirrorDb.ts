@@ -2,6 +2,11 @@ import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { computeDemoStats } from "../lib/stats";
 import {
+  DEMO_MIRROR_MARKETS,
+  type DemoMirrorMarket,
+  demoMirrorMarketSchema,
+} from "../model/assetGroup";
+import {
   demoMirrorOrdersTable,
   experimentsTable,
   paperTradesTable,
@@ -24,7 +29,7 @@ type Db = PgDatabase<PgQueryResultHKT>;
 export interface MirrorCandidate {
   tradeId: string;
   experimentId: string;
-  market: "spot" | "futures";
+  market: DemoMirrorMarket;
   symbol: string;
   direction: "long" | "short";
   openedAt: string;
@@ -37,7 +42,7 @@ export interface MirrorCandidate {
 /** Открытая демо-позиция, чья paper-сделка уже закрылась. */
 export interface MirrorToClose {
   tradeId: string;
-  market: "spot" | "futures";
+  market: DemoMirrorMarket;
   symbol: string;
   direction: "long" | "short";
   /** Исполненное количество входа (для спота — сколько продавать). */
@@ -58,7 +63,7 @@ const toClose = (
   exitReason: string | null,
 ): MirrorToClose => ({
   tradeId: r.tradeId,
-  market: r.market as MirrorToClose["market"],
+  market: demoMirrorMarketSchema.parse(r.market),
   symbol: r.symbol,
   direction: r.direction as MirrorToClose["direction"],
   quantity: r.quantity ?? 0,
@@ -66,6 +71,10 @@ const toClose = (
   protectRefs: parseProtectRefs(r.protectRefs),
 });
 
+/**
+ * Тумблер зеркала. Включить можно только в группе, которую зеркало умеет (DEMO_MIRROR_MARKETS):
+ * COIN-M — false, как и неизвестный id (композиция различает их по market эксперимента).
+ */
 export async function setExperimentDemoMirror(
   db: Db,
   id: string,
@@ -74,7 +83,14 @@ export async function setExperimentDemoMirror(
   const rows = await db
     .update(experimentsTable)
     .set({ demoMirror, updatedAt: sql`now()` })
-    .where(eq(experimentsTable.id, id))
+    .where(
+      and(
+        eq(experimentsTable.id, id),
+        demoMirror
+          ? inArray(experimentsTable.market, [...DEMO_MIRROR_MARKETS])
+          : undefined,
+      ),
+    )
     .returning({ id: experimentsTable.id });
   return rows.length > 0;
 }
@@ -112,6 +128,8 @@ export async function listMirrorCandidates(
     .where(
       and(
         eq(experimentsTable.demoMirror, true),
+        // COIN-M на демо не зеркалим (spec 0023) — даже если флаг включили в обход тумблера.
+        inArray(paperTradesTable.market, [...DEMO_MIRROR_MARKETS]),
         isNull(paperTradesTable.closedAt),
         gte(paperTradesTable.openedAt, since),
         isNull(demoMirrorOrdersTable.tradeId),
@@ -120,7 +138,7 @@ export async function listMirrorCandidates(
     .orderBy(paperTradesTable.openedAt);
   return rows.map((r) => ({
     ...r,
-    market: r.market as MirrorCandidate["market"],
+    market: demoMirrorMarketSchema.parse(r.market),
     direction: r.direction as MirrorCandidate["direction"],
     openedAt: r.openedAt.toISOString(),
   }));
@@ -128,7 +146,7 @@ export async function listMirrorCandidates(
 
 /** Зеркало, которое держит или открывает позицию на демо. */
 export interface ActiveMirrorRow {
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
   symbol: string;
   direction: "long" | "short";
   /**
@@ -149,8 +167,7 @@ function ownLegsOnly(market: string, raw: unknown): boolean {
   const refs = parseProtectRefs(raw);
   if (!refs) return false;
   return (
-    market !== "futures" ||
-    (refs.market === "futures" && refs.legs === "quantity")
+    market !== "usdm" || (refs.market === "usdm" && refs.legs === "quantity")
   );
 }
 
@@ -169,14 +186,17 @@ export async function activeMirrors(db: Db): Promise<ActiveMirrorRow[]> {
     })
     .from(demoMirrorOrdersTable)
     .where(inArray(demoMirrorOrdersTable.status, [...ACTIVE_MIRROR_STATUSES]));
-  return rows.map((r) => ({
-    market: r.market as ActiveMirrorRow["market"],
-    symbol: r.symbol,
-    direction: r.direction as ActiveMirrorRow["direction"],
-    hasRefs:
-      r.status === ("pending" satisfies MirrorStatus) ||
-      ownLegsOnly(r.market, r.protectRefs),
-  }));
+  return rows.map((r) => {
+    const market = demoMirrorMarketSchema.parse(r.market);
+    return {
+      market,
+      symbol: r.symbol,
+      direction: r.direction as ActiveMirrorRow["direction"],
+      hasRefs:
+        r.status === ("pending" satisfies MirrorStatus) ||
+        ownLegsOnly(market, r.protectRefs),
+    };
+  });
 }
 
 /** Захват сделки зеркалом (status pending). false — её уже захватил другой прогон. */
@@ -302,7 +322,7 @@ export async function listOpenMirrorLegs(
     .where(
       and(
         inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
-        eq(demoMirrorOrdersTable.market, "futures"),
+        eq(demoMirrorOrdersTable.market, "usdm"),
         isNotNull(demoMirrorOrdersTable.protectRefs),
       ),
     );

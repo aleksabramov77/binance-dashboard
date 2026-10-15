@@ -56,12 +56,16 @@ import {
 } from "./positionMode";
 import { BinanceApiError, type SignedParams, signedRequest } from "./signed";
 
-/** Binance Demo Trading — виртуальные деньги, реальные котировки. */
-const DEMO_URL: Record<Market, string> = {
+/** Binance Demo Trading — виртуальные деньги, реальные котировки. Хосты: spot и фьючерсы USDⓈ-M. */
+const DEMO_URL = {
   spot: "https://demo-api.binance.com",
   futures: "https://demo-fapi.binance.com",
+} as const;
+const DEMO_HOST: Record<Market, string> = {
+  spot: DEMO_URL.spot,
+  usdm: DEMO_URL.futures,
 };
-const PREFIX: Record<Market, string> = { spot: "/api/v3", futures: "/fapi/v1" };
+const PREFIX: Record<Market, string> = { spot: "/api/v3", usdm: "/fapi/v1" };
 const RULES_TTL_MS = 10 * 60_000;
 
 /** Справочник демо-фьючерсов (~900 КБ) — грузим редко, держим последнюю удачную копию. */
@@ -108,11 +112,11 @@ export async function fetchDemoSymbolRules(
   if (!futuresRules || Date.now() - futuresRules.at > RULES_TTL_MS) {
     try {
       const raw = await getJson(
-        `${DEMO_URL.futures}${PREFIX.futures}/exchangeInfo`,
+        `${DEMO_URL.futures}${PREFIX.usdm}/exchangeInfo`,
       );
       futuresRules = {
         at: Date.now(),
-        bySymbol: indexRules("futures", raw),
+        bySymbol: indexRules("usdm", raw),
       };
     } catch (error) {
       // Устаревший справочник лучше, чем никакого: шаги цены меняются редко.
@@ -127,7 +131,7 @@ export async function fetchDemoPrice(
   symbol: string,
 ): Promise<number> {
   const raw = await getJson(
-    `${DEMO_URL[market]}${PREFIX[market]}/ticker/price?symbol=${symbol}`,
+    `${DEMO_HOST[market]}${PREFIX[market]}/ticker/price?symbol=${symbol}`,
   );
   return priceSchema.parse(raw).price;
 }
@@ -135,7 +139,7 @@ export async function fetchDemoPrice(
 /** Свободные USDT на демо-споте и демо-фьючерсах. */
 export async function fetchDemoUsdtBalances(
   creds: BinanceCredentials,
-): Promise<{ spot: number; futures: number }> {
+): Promise<{ spot: number; usdm: number }> {
   const [spot, futures] = await Promise.all([
     signedRequest(
       DEMO_URL.spot,
@@ -155,7 +159,7 @@ export async function fetchDemoUsdtBalances(
   ]);
   return {
     spot: spot.balances.find((b) => b.asset === "USDT")?.free ?? 0,
-    futures: futures.find((b) => b.asset === "USDT")?.availableBalance ?? 0,
+    usdm: futures.find((b) => b.asset === "USDT")?.availableBalance ?? 0,
   };
 }
 
@@ -849,7 +853,7 @@ export async function fetchDemoTradedSymbols(
       spot: [
         ...new Set([...symbolsOf(orderLists), ...symbolsOf(spotOpen), ...held]),
       ],
-      futures: [
+      usdm: [
         ...new Set([
           ...symbolsOf(income),
           ...positions.keys(),
@@ -904,7 +908,7 @@ export async function fetchDemoOpenSymbols(
   ]);
   return {
     spot: [...new Set(symbolsOf(spotOpen))],
-    futures: [
+    usdm: [
       ...new Set([
         ...symbolsOf(positions.filter((p) => p.positionAmt !== 0)),
         ...symbolsOf(futOpen),

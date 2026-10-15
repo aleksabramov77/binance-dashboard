@@ -57,7 +57,7 @@ interface Trade {
 /** Остаток меньше этой доли входа — позиция закрыта (на споте остаётся пыль от комиссии). */
 const DUST: Record<OrderAggregate["market"], number> = {
   spot: 0.02,
-  futures: 1e-6,
+  usdm: 1e-6,
 };
 
 /**
@@ -84,7 +84,7 @@ function applyOrder(
   if (cur && !isClosed && dir !== cur.dir) {
     const closeQty = Math.min(o.quantity, cur.remaining);
     const pnl =
-      o.market === "futures"
+      o.market === "usdm"
         ? (o.realizedPnl ?? 0)
         : (o.avgPrice - cur.entryCost / cur.entryQty) * closeQty * cur.dir;
     cur.pnl = cur.pnl === null ? null : cur.pnl + pnl;
@@ -97,7 +97,7 @@ function applyOrder(
     // Строка ордера получит статус новой сделки, роль «выход» и PnL закрытой.
     // Только futures: на споте шорта нет, а «лишняя» продажа — это вход за пределами
     // истории или монеты с депозита; излишек просто отбрасываем.
-    if (o.market === "futures" && reversal > cur.entryQty * DUST[o.market]) {
+    if (o.market === "usdm" && reversal > cur.entryQty * DUST[o.market]) {
       const next: Trade = {
         key,
         fullyClosed: false,
@@ -124,9 +124,9 @@ function applyOrder(
   // Новая сделка. Ордер с PnL (futures) или продажа на споте без входа в истории —
   // это выход, вход которого остался за пределами загруженной истории.
   const orphanExit =
-    o.market === "futures" ? (o.realizedPnl ?? 0) !== 0 : o.side === "SELL";
+    o.market === "usdm" ? (o.realizedPnl ?? 0) !== 0 : o.side === "SELL";
   if (orphanExit) {
-    const pnl = o.market === "futures" ? o.realizedPnl : null;
+    const pnl = o.market === "usdm" ? o.realizedPnl : null;
     trades.push({
       key,
       fullyClosed: true,
@@ -255,7 +255,7 @@ export function markTrades(
           : state.position.amount;
       // Позиция на бирже должна совпадать по направлению (futures) или по монете (spot).
       const stillOpen =
-        market === "futures"
+        market === "usdm"
           ? Math.sign(amount) === trade.dir
           : amount >= trade.remaining * SPOT_HELD_SHARE;
       if (stillOpen) {

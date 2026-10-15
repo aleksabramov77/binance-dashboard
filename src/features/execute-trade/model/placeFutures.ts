@@ -201,7 +201,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
     tradeDeadline: c.tradeDeadline,
   };
   const futuresRefs = {
-    market: "futures" as const,
+    market: "usdm" as const,
     entryOrderId: null as number | null,
     // Ноги на свой объём (PR 2c): без этой метки строки 2b считаются legacy (planMirror).
     legs: "quantity" as const,

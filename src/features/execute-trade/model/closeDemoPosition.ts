@@ -45,7 +45,7 @@ import { floorToStep, isDust } from "../lib/validateTrade";
 import { futuresFillPrice } from "./futuresFillPrice";
 
 export interface CloseDemoRequest {
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
   symbol: string;
   direction: "long" | "short";
   /**
@@ -108,7 +108,7 @@ export async function closeDemoPosition(
   // а не все ордера символа — чужие (ручные, другие зеркала в Hedge) остаются.
   let futures: { side: FuturesSide; amount: number } | null = null;
   try {
-    if (req.market === "futures") {
+    if (req.market === "usdm") {
       const side: FuturesSide = {
         mode: await fetchDemoPositionMode(creds),
         direction: req.direction,
@@ -147,7 +147,7 @@ export async function closeDemoPosition(
 
   try {
     if (futures) {
-      const rules = await fetchDemoSymbolRules("futures", req.symbol);
+      const rules = await fetchDemoSymbolRules("usdm", req.symbol);
       const qty = rules
         ? floorToStep(futures.amount, rules.stepSize)
         : String(futures.amount);
@@ -231,7 +231,7 @@ async function readOwnLegs(
   symbol: string,
   refs: DemoProtectRefs,
 ): Promise<ClosePlan> {
-  if (refs.market === "futures") {
+  if (refs.market === "usdm") {
     const [stop, takeProfit] = await Promise.all(
       [refs.stop, refs.takeProfit].map(async (r) => {
         const lookup = r && algoLookup(r);
@@ -280,7 +280,7 @@ async function cancelOwn(
   refs: DemoProtectRefs,
   leg: "stop" | "takeProfit",
 ): Promise<boolean> {
-  if (refs.market === "futures") {
+  if (refs.market === "usdm") {
     const ref = refs[leg];
     const lookup = ref && algoLookup(ref);
     return lookup ? demoCancelAlgoOrder(creds, lookup) : false;
@@ -296,7 +296,7 @@ const LEG_LABEL = { stop: "стоп", takeProfit: "тейк" } as const;
 /** clientOrderId своего закрытия: группа сделки из своего стопа/тейка + `-C`; нет — без id. */
 function ownCloseId(refs: DemoProtectRefs): string | undefined {
   const ids =
-    refs.market === "futures"
+    refs.market === "usdm"
       ? [refs.stop?.clientAlgoId, refs.takeProfit?.clientAlgoId]
       : [refs.stop?.clientOrderId, refs.takeProfit?.clientOrderId];
   const group = ids.map(clientIdGroup).find((g) => g !== null);
@@ -379,7 +379,7 @@ async function closeOwn(
     const rules = await fetchDemoSymbolRules(req.market, req.symbol);
     if (!rules)
       return finish("failed", `${req.symbol} нет на демо-рынке ${req.market}.`);
-    if (req.market === "futures") {
+    if (req.market === "usdm") {
       // Своя сторона: в Hedge — строка LONG/SHORT, в One-way — общая позиция в сторону сделки.
       const side: FuturesSide = {
         mode: await fetchDemoPositionMode(creds),

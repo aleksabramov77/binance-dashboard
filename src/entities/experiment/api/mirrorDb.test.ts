@@ -31,7 +31,7 @@ afterEach(() => close());
 
 const exp = (id: string): Experiment => ({
   id,
-  market: "futures",
+  market: "usdm",
   name: id,
   hypothesis: "тест",
   config: {
@@ -56,7 +56,7 @@ const trade = (
   id,
   runId,
   experimentId,
-  market: "futures",
+  market: "usdm",
   symbol: "ETHUSDT",
   direction: "long",
   openedAt,
@@ -113,7 +113,7 @@ describe("demo-зеркало в БД", () => {
     // Только что захвачена (pending): ссылки запишет вход — строка нового учёта.
     expect(await activeMirrors(db)).toEqual([
       {
-        market: "futures",
+        market: "usdm",
         symbol: "ETHUSDT",
         direction: "long",
         hasRefs: true,
@@ -124,7 +124,7 @@ describe("demo-зеркало в БД", () => {
   it("закрытая paper-сделка с открытым зеркалом захватывается на закрытие один раз", async () => {
     // Свои стоп/тейк (PR 2b): сохраняются при входе и приходят в захвате на закрытие.
     const protectRefs = {
-      market: "futures" as const,
+      market: "usdm" as const,
       entryOrderId: 11,
       legs: "quantity" as const,
       stop: { algoId: 21, clientAlgoId: "bd1-S" },
@@ -148,7 +148,7 @@ describe("demo-зеркало в БД", () => {
     // С сохранёнными protect_refs — строка нового учёта (несколько зеркал на монету).
     expect(await activeMirrors(db)).toEqual([
       {
-        market: "futures",
+        market: "usdm",
         symbol: "ETHUSDT",
         direction: "long",
         hasRefs: true,
@@ -166,7 +166,7 @@ describe("demo-зеркало в БД", () => {
     expect(await listMirrorsToClose(db)).toEqual(["a"]);
     expect(await claimMirrorToClose(db, "a")).toEqual({
       tradeId: "a",
-      market: "futures",
+      market: "usdm",
       symbol: "ETHUSDT",
       direction: "long",
       quantity: 0.5,
@@ -289,7 +289,7 @@ describe("демо-сводка и демо-сброс", () => {
     const candidate = (tradeId: string): MirrorCandidate => ({
       tradeId,
       experimentId: "F01",
-      market: "futures",
+      market: "usdm",
       symbol: "ETHUSDT",
       direction: "long",
       openedAt: "2026-10-11T11:55:00.000Z",
@@ -348,7 +348,7 @@ describe("protect_refs", () => {
     const [c] = await listMirrorCandidates(db, SINCE);
     await claimMirror(db, c);
     const refs2b = {
-      market: "futures" as const,
+      market: "usdm" as const,
       entryOrderId: 1,
       stop: { algoId: 21, clientAlgoId: "bd1-S" },
       takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
@@ -404,7 +404,7 @@ describe("protect_refs", () => {
     const [c] = await listMirrorCandidates(db, SINCE);
     await claimMirror(db, c);
     const protectRefs = {
-      market: "futures" as const,
+      market: "usdm" as const,
       entryOrderId: 1,
       stop: { algoId: 21, clientAlgoId: "bd1-S" },
       takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
@@ -459,7 +459,7 @@ describe("protect_refs", () => {
     // Открытая строка до PR 2b (без protect_refs) — монета занята для новых зеркал (planMirror).
     expect(await activeMirrors(db)).toEqual([
       {
-        market: "futures",
+        market: "usdm",
         symbol: "ETHUSDT",
         direction: "long",
         hasRefs: false,

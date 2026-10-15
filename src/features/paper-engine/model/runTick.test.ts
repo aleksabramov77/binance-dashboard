@@ -20,7 +20,7 @@ const T0 = Date.parse("2026-10-10T12:00:00Z");
 const exp = (
   id: string,
   patch: Partial<ExperimentConfig> = {},
-  market: Experiment["market"] = "futures",
+  market: Experiment["market"] = "usdm",
 ): Experiment => ({
   id,
   market,
@@ -334,7 +334,7 @@ describe("runTick: фильтры режима рынка и часов (spec 00
     );
     expect(r.opened).toBe(0);
     expect(r.errors.filter((e) => e.includes("режим рынка"))).toEqual([
-      "режим рынка futures BTCUSDT 4h: нет сети",
+      "режим рынка usdm BTCUSDT 4h: нет сети",
     ]);
   });
 
@@ -362,7 +362,7 @@ describe("runTick: фильтры режима рынка и часов (spec 00
     );
     expect(r.opened).toBe(0);
     expect(r.errors.filter((e) => e.includes("режим рынка"))).toEqual([
-      "режим рынка futures BTCUSDT 4h: мало свечей режима: 20 из 50",
+      "режим рынка usdm BTCUSDT 4h: мало свечей режима: 20 из 50",
     ]);
   });
 
@@ -690,7 +690,7 @@ describe("runTick: выключенный эксперимент и сброс �
     const plan = planReset({
       experiments,
       open: store.trades().filter((t) => t.closedAt === null),
-      prices: { [priceKey("futures", "BTCUSDT")]: 101 },
+      prices: { [priceKey("usdm", "BTCUSDT")]: 101 },
       now,
     });
     for (const c of plan.closes) await store.closeTrade(c.id, c.close);
@@ -706,5 +706,118 @@ describe("runTick: выключенный эксперимент и сброс �
     const next = await runTick(m.deps(store), T0 + HOUR);
     expect(next.opened).toBe(1);
     expect(store.trades().at(-1)?.runId).toBe(2);
+  });
+});
+
+describe("runTick: COIN-M (spec 0023)", () => {
+  const coinmExp = (id: string, patch: Partial<ExperimentConfig> = {}) =>
+    exp(
+      id,
+      { universe: { type: "symbols", symbols: ["BTC"] }, ...patch },
+      "coinm",
+    );
+
+  /** Рынок COIN-M поверх синтетических свечей: тикеры с размером контракта, по группам. */
+  function coinmMarket(opts: { coinmDown?: boolean } = {}) {
+    const m = market(["BTCUSDT"]);
+    const funding: string[] = [];
+    const logs: string[] = [];
+    const deps = (store: TickDeps["store"]): TickDeps => ({
+      ...m.deps(store),
+      tickers: async (group) => {
+        if (group !== "coinm")
+          return [
+            {
+              symbol: "BTCUSDT",
+              lastPrice: 100,
+              priceChangePercent: 0,
+              quoteVolume: 1e9,
+            },
+          ];
+        if (opts.coinmDown) throw new Error("dapi недоступен");
+        return [
+          {
+            symbol: "BTCUSD_PERP",
+            lastPrice: 100,
+            priceChangePercent: 0,
+            quoteVolume: 1e9,
+            contractSize: 10,
+          },
+        ];
+      },
+      funding: async (group) => {
+        funding.push(group);
+        return {};
+      },
+      log: (level, _event, message) => logs.push(`${level}: ${message}`),
+    });
+    return { m, funding, logs, deps };
+  }
+
+  it("входит целыми контрактами: floor($50 / $10) = 5 контрактов, qty = 5 × 10 / вход", async () => {
+    const store = enabledStore([coinmExp("C")]);
+    const r = await runTick(coinmMarket().deps(store), T0);
+    expect(r.opened).toBe(1);
+    const [t] = store.trades();
+    expect(t.market).toBe("coinm");
+    expect(t.symbol).toBe("BTCUSD_PERP");
+    expect(t.quantity * t.entryPrice).toBeCloseTo(50);
+    expect(t.fees).toBeCloseTo(0.0005 * 50);
+  });
+
+  it("шорт разрешён, как у USDⓈ-M (у Spot тот же конфиг не входит)", async () => {
+    // Случайный вход: половина экспериментов получает short — у COIN-M они входят.
+    const ids = Array.from({ length: 10 }, (_, i) => `C${i}`);
+    const store = enabledStore(
+      ids.map((id) =>
+        coinmExp(id, {
+          entry: { type: "random", probability: 1 },
+          directions: ["short"],
+        }),
+      ),
+    );
+    const r = await runTick(coinmMarket().deps(store), T0);
+    expect(r.opened).toBeGreaterThan(0);
+    expect(store.trades().every((t) => t.direction === "short")).toBe(true);
+  });
+
+  it("funding запрашивается по своей группе", async () => {
+    const store = enabledStore([
+      coinmExp("C", { entry: { type: "funding", threshold: 0.001 } }),
+      exp("U", { entry: { type: "funding", threshold: 0.001 } }),
+    ]);
+    const cm = coinmMarket();
+    await runTick(cm.deps(store), T0);
+    expect([...cm.funding].sort()).toEqual(["coinm", "usdm"]);
+  });
+
+  it("режим рынка BTCUSDT у COIN-M читается по BTCUSD_PERP (свечи dapi)", async () => {
+    const store = enabledStore([
+      coinmExp("C", {
+        marketFilter: {
+          symbol: "BTCUSDT",
+          timeframe: "4h",
+          ema: 50,
+          long: "any",
+          short: "any",
+        },
+      }),
+    ]);
+    const cm = coinmMarket();
+    await runTick(cm.deps(store), T0);
+    const regime = cm.m.calls.filter((c) => c.interval === "4h");
+    expect(regime.map((c) => c.symbol)).toEqual(["BTCUSD_PERP"]);
+  });
+
+  it("dapi недоступен: COIN-M пропускается одной записью warn, USDⓈ-M торгует", async () => {
+    const store = enabledStore([coinmExp("C1"), coinmExp("C2"), exp("U")]);
+    const cm = coinmMarket({ coinmDown: true });
+    const r = await runTick(cm.deps(store), T0);
+    expect(r.opened).toBe(1);
+    expect(store.trades().map((t) => t.market)).toEqual(["usdm"]);
+    expect(r.errors).toHaveLength(1);
+    expect(cm.logs.filter((l) => l.startsWith("warn"))).toHaveLength(1);
+    // Свеча COIN-M не помечена обработанной — следующий тик попробует снова.
+    expect(r.evaluated).toEqual(["U"]);
   });
 });

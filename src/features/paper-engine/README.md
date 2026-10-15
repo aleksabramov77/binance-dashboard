@@ -13,9 +13,9 @@ spec 007b). Поэтому модули слайса импортируют то
 ## Устройство
 | Модуль | Что делает |
 |---|---|
-| `config/catalog.ts` | 40 экспериментов S01–S20 (spot, только long) и F01–F20 (futures) по плану spec 003, бюджет 10 000 |
-| `config/engine.ts` | лимиты свечей, параллельность запросов, порог ликвидности movers, стейблкоины, не-крипто активы `NON_CRYPTO` |
-| `lib/universe.ts` | `pickUniverse`: majors / top-N по обороту / movers / symbols, blacklist; только `…USDT`, без стейблов, UP/DOWN/BULL/BEAR и не-крипто |
+| `config/catalog.ts` | 40 экспериментов S01–S20 (spot, только long) и F01–F20 (USDⓈ-M, `usdm`) по плану spec 003, бюджет 10 000; эксперименты COIN-M (`coinm`) — только приватные `PC..` |
+| `config/engine.ts` | лимиты свечей, параллельность запросов, порог ликвидности movers, стейблкоины, не-крипто активы `NON_CRYPTO`, хвост символа группы `SYMBOL_SUFFIX` |
+| `lib/universe.ts` | `pickUniverse(universe, tickers, market)`: majors / top-N по обороту / movers / symbols, blacklist; символы группы — `…USDT` (Spot, USDⓈ-M) или `…USD_PERP` (COIN-M), без стейблов, UP/DOWN/BULL/BEAR и не-крипто (`NON_CRYPTO` — во всех группах); `coinmTicker` — оборот COIN-M в $ (контракты × размер контракта); `symbolInMarket` — символ режима рынка в формате группы (BTCUSDT → BTCUSD_PERP) |
 | `lib/candles.ts` | отбрасывание незакрытой свечи, склейка кэша, детерминированное «случайное» число |
 | `lib/levels.ts` | стоп и тейк от цены входа: ATR / % / уровень сигнала, TP по R:R / % / сигналу |
 | `model/store.ts` | интерфейс `ExperimentStore`, ключи `engine_state`, роли раннера |
@@ -53,7 +53,8 @@ spec 007b). Поэтому модули слайса импортируют то
 - `config.marketFilter` — `marketRegimeAllows` ядра по закрытым свечам `symbol` (по умолчанию BTCUSDT) таймфрейма
   фильтра. Свечи берутся через тот же `signalCandles`, что и свечи сигналов: незакрытая отброшена, один запрос
   на (market, symbol, tf) за тик для всех экспериментов, кэш между тиками. Рынок свечей BTC — рынок эксперимента
-  (spot-эксперимент — spot BTCUSDT, futures — бессрочный BTCUSDT): кэш общий с экспериментами, которые торгуют сам
+  (spot-эксперимент — spot BTCUSDT, USDⓈ-M — бессрочный BTCUSDT, COIN-M — BTCUSD_PERP: символ переводится в формат
+  группы `symbolInMarket`, так что `BTCUSDT` в конфиге годится для всех групп): кэш общий с экспериментами, которые торгуют сам
   BTC, а разница цены spot/perp на close старшего ТФ для сравнения с EMA несущественна.
 - Нет свечей режима (сбой запроса; меньше `regimeMinCandles` — «мало свечей режима») — вход запрещён, одна ошибка
   в `errors` тика на (рынок, символ, TF), а не на каждый эксперимент; выходы и выход по сигналу работают как обычно. Порядок проверок входа: направление и часы → `maxOpen` и символ → режим рынка → тренд.
@@ -64,12 +65,13 @@ spec 007b). Поэтому модули слайса импортируют то
 - Spot: `exchangeInfo` не отличает токенизированные акции и металлы от монет, поэтому `isEligibleSymbol` исключает
   базы из явного списка `NON_CRYPTO` (`config/engine.ts`: PAXG, XAUT, XAU, XAG, BTCDOM и токенизированные акции/ETF
   Binance с суффиксом B — `SNDKB`, `TSLAB`, `SPYB`…). Новые листинги дописываются в список вручную.
-- Futures: поставщик тикеров (`src/app/server/experimentEngine.ts`, Edge Function) берёт бессрочные контракты
-  `fetchPerpetualSymbols({ cryptoOnly: true })` — только `underlyingType = COIN`: без индексов (`INDEX`: BTCDOMUSDT,
+- Фьючерсы (USDⓈ-M и COIN-M): поставщик тикеров (`src/app/server/experimentEngine.ts`, Edge Function) берёт бессрочные
+  контракты `fetchPerpetuals(market, { cryptoOnly: true })` — только `underlyingType = COIN` (у dapi поле тоже есть,
+  все 20 бессрочных COIN-M на 2026-10-16 — `COIN`): без индексов (`INDEX`: BTCDOMUSDT,
   ALLUSDT) и пре-маркета (`PREMARKET` — монеты до листинга на spot: особые правила контракта, нет истории, тонкая
   ликвидность). Акции и сырьё (`TRADIFI_PERPETUAL`) и так отсекает `contractType = PERPETUAL`. Подтип `RWA` не
   учитывается: его носят и настоящие монеты RWA-сектора (MANTRAUSDT, CFGUSDT) — они остаются в юниверсе, а токены
-  золота PAXGUSDT и XAUTUSDT (тоже `COIN` + `RWA`) отсекает `NON_CRYPTO`: `isEligibleSymbol` действует на оба рынка.
+  золота PAXGUSDT и XAUTUSDT (тоже `COIN` + `RWA`) отсекает `NON_CRYPTO`: `isEligibleSymbol` действует на все группы, включая COIN-M (`PAXGUSD_PERP`).
 - Уже открытые сделки по исключённым символам закрываются своими выходами: символы открытых сделок движок
   обрабатывает и вне юниверса.
 

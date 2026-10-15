@@ -17,7 +17,7 @@ export interface StrategyContext {
   candles: Candle[];
   /** Изменение за 24 ч (доля), для сканера. */
   change24h: number;
-  /** Ставка финансирования (доля), только futures. */
+  /** Ставка финансирования (доля), только фьючерсы (USDⓈ-M, COIN-M). */
   funding?: number;
   /** Место символа в рейтинге доходности за lookback среди юниверса (0 — лучший). */
   momentumRank?: number;

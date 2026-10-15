@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useSetExperimentDemoMirror } from "@/entities/experiment";
+import {
+  ASSET_GROUPS,
+  type ExperimentMarket,
+  useSetExperimentDemoMirror,
+} from "@/entities/experiment";
 import { Button } from "@/shared/ui/button";
 import { Checkbox } from "@/shared/ui/checkbox";
 import {
@@ -15,13 +19,19 @@ import {
 
 /**
  * Чекбокс «торговать на демо-счёте» с подтверждением в модалке (spec 008): включение и выключение
- * demo-зеркала эксперимента. Значение хранится в БД (experiments.demo_mirror).
+ * demo-зеркала эксперимента. Значение хранится в БД (experiments.demo_mirror). У групп без зеркала
+ * (COIN-M, spec 0023) галочка выключена, причина — в подсказке.
  */
 export function DemoMirrorToggle({
   experiment,
   demoConfigured,
 }: {
-  experiment: { id: string; name: string; demoMirror: boolean };
+  experiment: {
+    id: string;
+    name: string;
+    market: ExperimentMarket;
+    demoMirror: boolean;
+  };
   /** На сервере задан ключ Binance Demo; нет — включить нельзя (выключить можно). */
   demoConfigured: boolean;
 }) {
@@ -29,6 +39,10 @@ export function DemoMirrorToggle({
   const mutation = useSetExperimentDemoMirror();
   const next = !experiment.demoMirror;
   const blocked = next && !demoConfigured;
+  // Выключить уже включённое можно всегда; включить — только там, где зеркало умеет группу.
+  const unavailable = next
+    ? ASSET_GROUPS[experiment.market].demoMirrorBlocked
+    : null;
 
   const confirm = () =>
     mutation.mutate(
@@ -40,12 +54,13 @@ export function DemoMirrorToggle({
     <>
       <Checkbox
         checked={experiment.demoMirror}
-        disabled={mutation.isPending}
+        disabled={mutation.isPending || unavailable !== null}
         aria-label={`Торговля на демо-счёте: ${experiment.id}`}
         title={
-          experiment.demoMirror
+          unavailable ??
+          (experiment.demoMirror
             ? "Торгует на демо-счёте Binance — снять"
-            : "Включить торговлю на демо-счёте Binance"
+            : "Включить торговлю на демо-счёте Binance")
         }
         // Значение меняет только подтверждение в модалке.
         onCheckedChange={() => {

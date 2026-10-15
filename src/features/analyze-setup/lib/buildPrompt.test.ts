@@ -8,7 +8,7 @@ const setup: Setup = {
   base: "KAIA",
   kind: "overheat-short",
   direction: "short",
-  market: "futures",
+  market: "usdm",
   status: "watch",
   entry: 0.05,
   stopLoss: 0.055,

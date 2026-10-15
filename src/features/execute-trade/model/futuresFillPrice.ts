@@ -22,7 +22,7 @@ export async function futuresFillPrice(
   try {
     const order = await fetchDemoFuturesOrder(creds, symbol, { orderId });
     if (order && order.avgPrice > 0) return order.avgPrice;
-    const fills = await fetchDemoFills(creds, "futures", symbol, 50);
+    const fills = await fetchDemoFills(creds, "usdm", symbol, 50);
     const own = groupFills(fills).find((o) => o.orderId === orderId);
     return own && own.avgPrice > 0 ? own.avgPrice : null;
   } catch (error) {

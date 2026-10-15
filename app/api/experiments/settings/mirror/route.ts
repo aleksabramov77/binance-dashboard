@@ -21,5 +21,8 @@ export const POST = withLogging("experiments.mirror", async (request) => {
       { error: `Эксперимент ${parsed.data.id} не найден` },
       { status: 404 },
     );
+  // Группа не умеет демо-зеркало (COIN-M — позже, spec 0023).
+  if ("blocked" in settings)
+    return Response.json({ error: settings.blocked }, { status: 400 });
   return Response.json(settings);
 });

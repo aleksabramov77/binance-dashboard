@@ -205,12 +205,12 @@ export function TradeTicketDialog({
 
   const active = fresh ?? setup;
   const isStale = recheck.data?.status === "stale";
-  const isFutures = setup.market === "futures";
+  const isFutures = setup.market === "usdm";
   const notional = quantity * active.entry;
   const loss = quantity * Math.abs(active.entry - stopLoss);
   const profit = quantity * Math.abs(takeProfit - active.entry);
   const balance = isFutures
-    ? overview?.balances?.futures
+    ? overview?.balances?.usdm
     : overview?.balances?.spot;
 
   // Проверка денег и риска до отправки (сервер повторит её сам).

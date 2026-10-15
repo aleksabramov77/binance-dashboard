@@ -1,11 +1,14 @@
-import { desc, eq, isNull } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import { desc, eq, isNull, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import {
   experimentsTable as experiments,
+  demoMirrorOrdersTable as mirrorOrders,
   paperTradesTable as paperTrades,
   runsTable as runs,
 } from "./db.ts";
+import { mirrorProtectRefsSchema } from "./mirror.ts";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -14,7 +17,7 @@ beforeEach(async () => {
   ({ db, close } = await createMemoryDb());
   await db.insert(experiments).values({
     id: "F06",
-    market: "futures",
+    market: "usdm",
     name: "Donchian-20, 1h",
     hypothesis: "Пробой канала продолжается",
     config: {
@@ -34,7 +37,7 @@ const trade = (id: string, runId: number) => ({
   id,
   runId,
   experimentId: "F06",
-  market: "futures",
+  market: "usdm",
   symbol: "BTCUSDT",
   direction: "long",
   openedAt: new Date("2026-10-10T10:00:00Z"),
@@ -114,5 +117,93 @@ describe("таблицы лаборатории (PGlite)", () => {
         .insert(paperTrades)
         .values({ ...trade("x", run.id), experimentId: "NOPE" }),
     ).rejects.toThrow();
+  });
+});
+
+describe("миграция 0007: futures → usdm (spec 0023, AC2)", () => {
+  const MIGRATION = new URL(
+    "../../../../drizzle/0007_futures_to_usdm.sql",
+    import.meta.url,
+  );
+  const migrate = async () => {
+    for (const statement of readFileSync(MIGRATION, "utf8").split(
+      "--> statement-breakpoint",
+    ))
+      await db.execute(sql.raw(statement));
+  };
+
+  it("переводит market и protect_refs старых строк в usdm; spot и повтор не меняются", async () => {
+    // Строки в формате прода до миграции (миграции PGlite уже применены — пишем старые значения сами).
+    await db
+      .update(experiments)
+      .set({ market: "futures" })
+      .where(eq(experiments.id, "F06"));
+    const [run] = await db.insert(runs).values({}).returning();
+    await db.insert(paperTrades).values([
+      { ...trade("t1", run.id), market: "futures" },
+      { ...trade("t2", run.id), market: "spot", symbol: "ETHUSDT" },
+    ]);
+    await db.insert(mirrorOrders).values([
+      {
+        tradeId: "t1",
+        experimentId: "F06",
+        market: "futures",
+        symbol: "BTCUSDT",
+        direction: "long",
+        status: "protected",
+        protectRefs: {
+          market: "futures",
+          entryOrderId: 1,
+          stop: { algoId: 2, clientAlgoId: "s" },
+          takeProfit: null,
+        },
+      },
+      {
+        tradeId: "t2",
+        experimentId: "F06",
+        market: "spot",
+        symbol: "ETHUSDT",
+        direction: "long",
+        status: "protected",
+        protectRefs: {
+          market: "spot",
+          orderListId: 5,
+          stop: null,
+          takeProfit: null,
+        },
+      },
+    ]);
+
+    await migrate();
+    await migrate();
+
+    const [e] = await db.select().from(experiments);
+    expect(e.market).toBe("usdm");
+    const tradesByid = Object.fromEntries(
+      (await db.select().from(paperTrades)).map((t) => [t.id, t.market]),
+    );
+    expect(tradesByid).toEqual({ t1: "usdm", t2: "spot" });
+    const mirrors = await db
+      .select()
+      .from(mirrorOrders)
+      .orderBy(mirrorOrders.tradeId);
+    expect(mirrors.map((m) => m.market)).toEqual(["usdm", "spot"]);
+    expect(mirrors[0].protectRefs).toMatchObject({
+      market: "usdm",
+      entryOrderId: 1,
+      stop: { algoId: 2, clientAlgoId: "s" },
+    });
+    expect(mirrors[1].protectRefs).toMatchObject({ market: "spot" });
+  });
+
+  it("protect_refs со старым market, который миграция не застала, читаются как usdm", () => {
+    expect(
+      mirrorProtectRefsSchema.parse({
+        market: "futures",
+        entryOrderId: null,
+        stop: null,
+        takeProfit: null,
+      }),
+    ).toMatchObject({ market: "usdm" });
   });
 });

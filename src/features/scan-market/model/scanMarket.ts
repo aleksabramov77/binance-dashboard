@@ -66,7 +66,7 @@ function buildUniverse(
 async function analyze(
   mover: Mover,
 ): Promise<{ mover: Mover; setup: Setup | null }> {
-  const market = mover.futures ? "futures" : "spot";
+  const market = mover.futures ? "usdm" : "spot";
   try {
     const [h1, h4]: [Candle[], Candle[]] = await Promise.all([
       fetchKlines(market, mover.symbol, "1h", 200),
@@ -94,7 +94,7 @@ export async function scanMarket(force = false): Promise<ScanResult> {
 
   const [spotTickers, futuresTickers, perps] = await Promise.all([
     fetch24hTickers("spot"),
-    fetch24hTickers("futures"),
+    fetch24hTickers("usdm"),
     fetchPerpetualSymbols(),
   ]);
   const universe = buildUniverse(spotTickers, futuresTickers, perps).sort(

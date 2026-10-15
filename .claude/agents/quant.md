@@ -21,7 +21,7 @@ model: opus
    фокуса; `report.json` — точные числа (единицы — в его поле `legend`); `trades.csv` — сделки периода для своих
    расчётов.
 4. Эксперименты: исходный каталог — `src/features/paper-engine/config/catalog.ts` (S01–S20, F01–F20), приватные —
-   `private/experiments.json` (`PS..`/`PF..`: что уже есть, следующий свободный id); типы входов, выходов и схема —
+   `private/experiments.json` (`PS..` spot / `PF..` usdm / `PC..` coinm: что уже есть, следующий свободный id); типы входов, выходов и схема —
    `packages/trading-core/src/experiment.ts`.
 
 ## Вход
@@ -53,7 +53,7 @@ model: opus
 
 ## Режим ideate → `<каталог прогона>/ideas.md`
 Прочитай свой `review.md`. Карточки — строго по `hypothesis-card.md`, включая **готовый JSON для
-`private/experiments.json`** и следующий свободный id (`PSxx`/`PFxx`; spot — только long) с пометкой «сейчас» или
+`private/experiments.json`** и следующий свободный id (`PSxx`/`PFxx`/`PCxx` — spot/usdm/coinm; spot — только long) с пометкой «сейчас» или
 «ждёт блок: …» (нужен новый тип входа/выхода/фильтра в `trading-core`). Источники идей по силе: разбор данных (tune/pivot) →
 инверсия устойчивого провала (`negative-edge`) → смена архетипа → эффекты из литературы (`indicators.md` →
 «Крипто»). Идею пользователя из фокуса оцени той же картой — честно, вплоть до `discard`, с причиной. Проверь

@@ -40,7 +40,7 @@ Zustand (клиентское состояние, если понадобитс�
 | Earn | `pages/earn` (вкладки Simple / Dual / Стейкинг и DeFi / Гид), `widgets/{best-offers,changes-feed,offers-table,dual-offers-table,yield-products-table,kind-summary,earn-guide,allocation-plan}`, `features/{collect-snapshot,refresh-snapshot,offer-filters,load-earn-catalog,allocation-advice}`, `entities/{earn-offer,earn-product}` (сложные продукты, гид — spec 0019) | `/api/earn/*` (в т.ч. `/api/earn/summary` — публичная сводка, `/api/earn/advanced` — каталоги по ключу), `/api/cron/earn-snapshot` | таблица `earn_snapshots` (`entities/earn-offer/model/db.ts`); каталоги сложных продуктов — только кэш в памяти 5 мин |
 | Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
-| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`, группы активов AG — `model/assetGroup.ts`, демо-метрики — `computeDemoStats`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`), `/api/cron/tick`, `/api/cron/demo-mirror` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state`, `demo_mirror_orders` |
+| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`, группы активов AG — `model/assetGroup.ts` (`spot` / `usdm` / `coinm`, вид группы `kind`, доступность демо-зеркала; spec 0023), демо-метрики — `computeDemoStats`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`), `/api/cron/tick`, `/api/cron/demo-mirror` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state`, `demo_mirror_orders` |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
 | Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login,help}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → Telegram), `features/db-space` (свободное место в базе: пороги, тексты бота), `src/app/server/{logs,logMonitor,alertState,dbSpace,telegramBot}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs` (фильтры `level`/`event`/`experiment`/`days`), `/api/cron/log-monitor`, `/api/telegram/webhook`, `/api/auth/*`, страница `/login`, страница `/help` (глоссарий из `docs/ai/glossary.md` через `pnpm glossary`) | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
 
@@ -76,7 +76,8 @@ Zustand (клиентское состояние, если понадобитс�
   `node:*`, Next и `*.server`, с явными расширениями `.ts` в относительных импортах (бандлер Supabase
   не угадывает расширения) — оба правила проверяет Biome; `pnpm check:edge` — `deno check` функций.
 - Исключение: `@/shared/lib` реэкспортирует индикаторы (ema/rsi/atr и ta-серии) из `trading-core`, чтобы
-  сканер Сигналов не дублировал математику. Индикаторы доменно-нейтральны; если ядро начнут использовать
+  сканер Сигналов не дублировал математику; так же `shared/api/binance/markets.ts` берёт из ядра чтение старого имени
+  рынка `futures` (`normalizeMarket`, `withLegacyMarketField`, spec 0023) — одна реализация на всё приложение. Индикаторы доменно-нейтральны; если ядро начнут использовать
   другие домены шире индикаторов — вынести индикаторы в свой пакет.
 - Новый слайс — сразу в таблицу выше, в свой домен. Новый домен — новая строка.
 
@@ -85,6 +86,18 @@ Workspace-пакет `@binance-dashboard/trading-core` (spec 003): индика�
 выходы, размер позиции, исполнение paper-сделок. Только чистые функции и Zod — без React, Next, `@/…`,
 сети, БД и env (Biome `overrides`). Приложение импортирует пакет (`transpilePackages` в `next.config.ts`);
 UI сущности — в `src/entities/experiment`. Подробно — `packages/trading-core/README.md`.
+
+## Группы активов (AG, spec 0016, 0023)
+- Значения `market` в коде, БД и URL — `spot`, `usdm` (USDⓈ-M, `fapi`), `coinm` (COIN-M, `dapi`); коды для людей —
+  `SPOT`, `FT:USDM`, `FT:COINM` (`entities/experiment/model/assetGroup.ts` → `ASSET_GROUPS`, порядок ключей — порядок в
+  шапке и фильтрах). Схема — одна, `marketSchema` из `trading-core`; «это фьючерс» — признак `MARKET_KIND` / `isFuturesMarket`
+  (шорт, плечо, funding), а не сравнение со строкой. Старое имя `futures` (до spec 0023) читают `legacyMarketSchema`
+  (ядро: журнал, `?market=futures`), `parseMarketParam` (фильтры nuqs) и `tradeMarketSchema` (`shared/api/binance`:
+  сетапы и сделки Сигналов, у них только `spot` / `usdm`). Данные в БД переведены миграцией `drizzle/0007_futures_to_usdm.sql`.
+- COIN-M в движке: юниверс — бессрочные `…USD_PERP` со статусом TRADING (`fetchPerpetuals("coinm")`, размер контракта),
+  оборот в $ = контракты × размер (`coinmTicker`), сделка — целые контракты (`sizePosition({ contractSizeUsd })`), PnL и
+  комиссии в $ по формулам USDⓈ-M. Рынок без тикеров (dapi недоступен) — его эксперименты ждут следующего тика, одна запись
+  `warn`; остальные группы торгуют. Демо-зеркало COIN-M — позже: `DEMO_MIRROR_MARKETS`, галочка выключена, API — 400.
 
 ## Сервер и клиент
 - Всё, что использует секреты, `node:crypto` или `node:fs` (логгер), — **только сервер**.
@@ -163,7 +176,8 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   (эксперименты), `lab/` (анализы `/flow lab`), `README.md`.
 - `private/experiments.json` — массив в формате каталога (`experimentSchema` из `trading-core`): `id`, `market`,
   `name`, `hypothesis`, `config`; необязательные `initialBudget` (10 000), `enabled` (`true`), `demoMirror` (`false`).
-  id — `P` + буква рынка + номер: `PS01` (spot), `PF01` (futures); с id каталога (`S..`, `F..`) не пересекается.
+  id — `P` + буква группы + номер: `PS01` (spot), `PF01` (usdm), `PC01` (coinm, spec 0023; `demoMirror: true` для него —
+  ошибка: демо-зеркало COIN-M позже); с id каталога (`S..`, `F..`) не пересекается.
 - `pnpm lab:private [--dry-run] [--prod] [--file <path>]` (`scripts/lab-private.ts`, чистая логика и тесты —
   `scripts/lib/labPrivate.ts`): проверяет файл целиком (схема, лишние поля, префикс ↔ рынок, повторы, пересечение
   с каталогом) до подключения к БД, печатает цель (хост Postgres без пароля или «локальная PGlite») и план

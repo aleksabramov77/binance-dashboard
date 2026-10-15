@@ -53,7 +53,7 @@ function BudgetItem({ budget }: { budget: MarketBudget }) {
   );
 }
 
-/** Equity лаборатории по рынкам (Spot / USDⓈ-M) и изменение от старта эпохи. */
+/** Equity лаборатории по группам активов (Spot, USDⓈ-M, COIN-M) и изменение от старта эпохи. */
 export function MarketBudgets({ className }: { className?: string }) {
   const { data, error } = useExperimentBudgets();
   if (error)

@@ -5,7 +5,7 @@ import { type MirrorTradeInput, mirrorLevels, planMirror } from "./planMirror";
 const NOW = Date.parse("2026-10-11T12:00:00Z");
 const trade = (over: Partial<MirrorTradeInput> = {}): MirrorTradeInput => ({
   tradeId: "t1",
-  market: "futures",
+  market: "usdm",
   symbol: "ETHUSDT",
   direction: "long",
   openedAt: "2026-10-11T11:59:00Z",
@@ -48,7 +48,7 @@ describe("planMirror", () => {
       kind: "open",
       request: {
         symbol: "ETHUSDT",
-        market: "futures",
+        market: "usdm",
         direction: "long",
         quantity: 0.5,
         leverage: 1,
@@ -73,7 +73,7 @@ describe("planMirror", () => {
       ],
       [
         {
-          market: "futures",
+          market: "usdm",
           symbol: "BTCUSDT",
           direction: "long",
           hasRefs: true,
@@ -108,7 +108,7 @@ describe("planMirror: монеты, которых нет на демо (spec 00
       [],
       NOW,
       {
-        missing: new Set(["futures:BTWUSDT", "spot:DOSUSDT"]),
+        missing: new Set(["usdm:BTWUSDT", "spot:DOSUSDT"]),
         unknown: new Set(),
       },
     );
@@ -127,7 +127,7 @@ describe("planMirror: монеты, которых нет на демо (spec 00
       ],
       [],
       NOW,
-      { missing: new Set(), unknown: new Set(["futures:TRUTHUSDT"]) },
+      { missing: new Set(), unknown: new Set(["usdm:TRUTHUSDT"]) },
     );
     expect(d).toEqual([]);
   });
@@ -135,7 +135,7 @@ describe("planMirror: монеты, которых нет на демо (spec 00
 
 describe("planMirror: несколько зеркал на монету (spec 0012, PR 2d)", () => {
   const longEth = {
-    market: "futures" as const,
+    market: "usdm" as const,
     symbol: "ETHUSDT",
     direction: "long" as const,
     hasRefs: true,
@@ -194,7 +194,7 @@ describe("planMirror: несколько зеркал на монету (spec 00
       );
       expect(d.map((x) => x.kind)).toEqual(["open", "skip"]);
       expect(d[1]).toMatchObject({
-        reason: "По ETHUSDT (futures) уже 2 зеркал — лимит на монету 2.",
+        reason: "По ETHUSDT (usdm) уже 2 зеркал — лимит на монету 2.",
       });
     } finally {
       MIRROR.maxPerCoin = saved;
@@ -204,7 +204,7 @@ describe("planMirror: несколько зеркал на монету (spec 00
 
 describe("planMirror: открытые зеркала до PR 2b (без protect_refs)", () => {
   const legacy = {
-    market: "futures" as const,
+    market: "usdm" as const,
     symbol: "ETHUSDT",
     direction: "long" as const,
     hasRefs: false,
@@ -222,7 +222,7 @@ describe("planMirror: открытые зеркала до PR 2b (без protect
         tradeId: "x",
         kind: "skip",
         reason:
-          "По ETHUSDT (futures) открыто старое зеркало, чьи стоп и тейк закрывают всю позицию, — второе зеркало после его закрытия.",
+          "По ETHUSDT (usdm) открыто старое зеркало, чьи стоп и тейк закрывают всю позицию, — второе зеркало после его закрытия.",
       },
       // Другой рынок той же монеты — не мешает.
       expect.objectContaining({ tradeId: "sp", kind: "open" }),

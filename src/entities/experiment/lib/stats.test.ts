@@ -119,7 +119,7 @@ describe("groupStats", () => {
   it("группирует по ключу, берёт бюджет группы и сортирует по PnL", () => {
     const trades = [
       { ...closed("2026-10-10T01:00:00Z", 10), market: "spot" as const },
-      { ...closed("2026-10-10T02:00:00Z", 40), market: "futures" as const },
+      { ...closed("2026-10-10T02:00:00Z", 40), market: "usdm" as const },
       { ...closed("2026-10-10T03:00:00Z", -5), market: "spot" as const },
     ];
     const groups = groupStats(
@@ -127,7 +127,7 @@ describe("groupStats", () => {
       (t) => t.market,
       (m) => (m === "spot" ? 100 : 200),
     );
-    expect(groups.map((g) => g.key)).toEqual(["futures", "spot"]);
+    expect(groups.map((g) => g.key)).toEqual(["usdm", "spot"]);
     expect(groups[1].stats).toMatchObject({
       closed: 2,
       realizedPnl: 5,
