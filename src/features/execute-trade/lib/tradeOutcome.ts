@@ -49,16 +49,39 @@ export function afterEntryError(
 }
 
 /**
- * Фьючерсы, исход входа неизвестен: позиция на бирже (null — проверить не удалось).
- * Позиция есть — { protect }: ставить защиту на неё.
+ * Фьючерсы, исход входа неизвестен, свой ордер `-M` не подтверждён — сверка по позиции своей стороны
+ * (null — проверить не удалось) относительно снимка до входа (before): на стороне могут быть позиции
+ * других зеркал (PR 2d), их объём — не наш. { protect } — свой объём (прирост), entryPrice null —
+ * средняя цена стороны не наша, берём текущую.
+ * - сторона до входа пуста: позиция есть — вся она наша, нет — вход не прошёл;
+ * - не пуста, ордер точно не найден (missing) — вход не прошёл;
+ * - не пуста, ордер не прочитан (unknown): прирост ≈ объёму заявки (±1%) — защищаем прирост; иначе
+ *   неясно, чей объём, — unprotected без защиты и без отката (не тронуть чужое).
  */
-export function afterFuturesPositionCheck<P extends { amount: number }>(
-  position: P | null,
-): TradeOutcome | { protect: P } {
+export function afterFuturesPositionCheck(
+  position: { amount: number; entryPrice: number } | null,
+  before: number,
+  order: "missing" | "unknown",
+  expectedQty: number,
+): TradeOutcome | { protect: { amount: number; entryPrice: number | null } } {
   if (position === null) return outcome("unprotected", UNKNOWN_FUTURES);
-  if (position.amount === 0)
-    return outcome("rejected", "Вход не исполнился — позиции на бирже нет.");
-  return { protect: position };
+  if (before <= 0) {
+    if (position.amount === 0)
+      return outcome("rejected", "Вход не исполнился — позиции на бирже нет.");
+    return { protect: position };
+  }
+  if (order === "missing")
+    return outcome(
+      "rejected",
+      "Вход не исполнился — своего ордера на бирже нет (сторона открыта другими зеркалами).",
+    );
+  const growth = position.amount - before;
+  if (Math.abs(growth - expectedQty) <= expectedQty * 0.01)
+    return { protect: { amount: growth, entryPrice: null } };
+  return outcome(
+    "unprotected",
+    "Неизвестно, исполнился ли свой вход: сторона уже открыта другими зеркалами, прирост не совпал с заявкой — защиту и откат не ставили, проверьте на demo.binance.com.",
+  );
 }
 
 const FUTURES_FINAL = [

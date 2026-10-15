@@ -148,8 +148,11 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
 
   // Ручной вход — только на свободную сторону; зеркало делит сторону с другими зеркалами (PR 2d),
   // но в One-way не входит против встречной позиции (закрыл бы её).
+  // Своя сторона до входа: при неизвестном исходе свой объём — только прирост (на стороне соседи).
+  let sideBefore = 0;
   try {
     const state = await fetchDemoFuturesSymbolState(creds, req.symbol);
+    sideBefore = ownPosition(state.positions, side).amount;
     const busy = ownSideBusy(state, side, req.mirror === true);
     if (busy === "opposite")
       return finish(
@@ -321,7 +324,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
           c.tradeDeadline,
           async () =>
             ownPosition(await demoFuturesPositions(creds, req.symbol), side),
-          (p) => p.amount !== 0,
+          (p) => p.amount > sideBefore,
         );
       } catch (checkError) {
         steps.push({
@@ -330,7 +333,12 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
           detail: errorText(checkError),
         });
       }
-      const checked = afterFuturesPositionCheck(position);
+      const checked = afterFuturesPositionCheck(
+        position,
+        sideBefore,
+        order === null ? "missing" : "unknown",
+        Number(v.quantity),
+      );
       if (!("protect" in checked)) {
         if (position)
           steps.push({

@@ -36,16 +36,55 @@ describe("ошибка отправки входа", () => {
 });
 
 describe("фьючерсы", () => {
-  it("проверка позиции после неизвестного исхода", () => {
-    const position = { amount: -0.5, entryPrice: 100 };
-    expect(afterFuturesPositionCheck(position)).toEqual({ protect: position });
+  it("проверка позиции после неизвестного исхода: сторона до входа пуста", () => {
+    const position = { amount: 0.5, entryPrice: 100 };
+    expect(afterFuturesPositionCheck(position, 0, "unknown", 0.5)).toEqual({
+      protect: position,
+    });
     expect(
-      afterFuturesPositionCheck({ amount: 0, entryPrice: 0 }),
+      afterFuturesPositionCheck(
+        { amount: 0, entryPrice: 0 },
+        0,
+        "missing",
+        0.5,
+      ),
     ).toMatchObject({ status: "rejected", withEntry: false });
-    expect(afterFuturesPositionCheck(null)).toMatchObject({
+    expect(afterFuturesPositionCheck(null, 0, "unknown", 0.5)).toMatchObject({
       status: "unprotected",
       withEntry: false,
     });
+  });
+  it("на стороне уже есть объём соседей (PR 2d): защищаем только свой прирост", () => {
+    // Сосед держит 30, наш вход 40 → на стороне 70: защищаем 40, а не 70.
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 70, entryPrice: 0.22 },
+        30,
+        "unknown",
+        40,
+      ),
+    ).toEqual({ protect: { amount: 40, entryPrice: null } });
+  });
+  it("соседи на стороне, свой ордер точно не найден — вход не прошёл, их объём не трогаем", () => {
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 30, entryPrice: 0.22 },
+        30,
+        "missing",
+        40,
+      ),
+    ).toMatchObject({ status: "rejected", withEntry: false });
+  });
+  it("соседи на стороне, ордер не прочитан, прирост неясен — unprotected без защиты и отката", () => {
+    for (const amount of [30, 55])
+      expect(
+        afterFuturesPositionCheck(
+          { amount, entryPrice: 0.22 },
+          30,
+          "unknown",
+          40,
+        ),
+      ).toMatchObject({ status: "unprotected", withEntry: false });
   });
   it("стоп не встал — откат; встал — тейк или готово (stopOnly)", () => {
     expect(afterFuturesStop(false, false)).toBe("rollback");
