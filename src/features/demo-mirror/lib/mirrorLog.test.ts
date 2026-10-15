@@ -5,7 +5,7 @@ const c = {
   tradeId: "t1",
   experimentId: "F03",
   symbol: "BTCUSDT",
-  market: "futures" as const,
+  market: "usdm" as const,
 };
 
 describe("mirrorLogEntry", () => {
@@ -18,7 +18,7 @@ describe("mirrorLogEntry", () => {
         experimentId: "F03",
         tradeId: "t1",
         symbol: "BTCUSDT",
-        market: "futures",
+        market: "usdm",
         reason: "объём ниже минимума",
       },
     });

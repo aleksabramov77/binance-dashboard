@@ -3,17 +3,20 @@
 export { loadBudgetInputs } from "./api/budgetsStore";
 // Demo-зеркало (spec 008): какие сделки повторить на Binance Demo и какие закрыть (только сервер).
 export {
-  activeMirrorSymbols,
+  type ActiveMirrorRow,
+  activeMirrors,
   claimMirror,
   claimMirrorToClose,
   claimOpenMirrors,
   emptyMirrorSummary,
   listMirrorCandidates,
   listMirrorsToClose,
+  listOpenMirrorLegs,
   type MirrorCandidate,
   type MirrorSummary,
   type MirrorToClose,
   markDemoReset,
+  markMirrorClosedByExchange,
   setExperimentDemoMirror,
   toDemoSummary,
   updateMirror,
@@ -116,7 +119,11 @@ export {
   ASSET_GROUPS,
   type AssetGroup,
   assetGroupOf,
+  COINM_MIRROR_BLOCKED,
+  DEMO_MIRROR_MARKETS,
+  type DemoMirrorMarket,
   type Market,
+  parseMarketParam,
 } from "./model/assetGroup";
 export {
   type ExperimentBudgets,

@@ -126,7 +126,7 @@ export function detectSetup(mover: Mover, candles1h: Candle[]): Setup | null {
     base: mover.base,
     kind: isLong ? "rebound-long" : "overheat-short",
     direction,
-    market: isLong && mover.spot ? "spot" : "futures",
+    market: isLong && mover.spot ? "spot" : "usdm",
     status: confirmed ? "ready" : "watch",
     entry,
     stopLoss,

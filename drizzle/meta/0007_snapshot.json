@@ -1,5 +1,5 @@
 {
-  "id": "ed3b0a49-d6b3-4357-99d0-8cd41dc71abc",
+  "id": "3178f9d5-581a-4e2d-9cc3-465c45b1a080",
   "prevId": "8f9ae695-2832-4d3b-ac34-b6b4702815a1",
   "version": "7",
   "dialect": "postgresql",
@@ -33,8 +33,8 @@
       "uniqueConstraints": {
         "earn_snapshots_fetched_at_unique": {
           "name": "earn_snapshots_fetched_at_unique",
-          "nullsNotDistinct": false,
-          "columns": ["fetched_at"]
+          "columns": ["fetched_at"],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -158,20 +158,20 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "demo_mirror_orders_trade_id_paper_trades_id_fk": {
           "name": "demo_mirror_orders_trade_id_paper_trades_id_fk",
           "tableFrom": "demo_mirror_orders",
-          "tableTo": "paper_trades",
           "columnsFrom": ["trade_id"],
+          "tableTo": "paper_trades",
           "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -444,19 +444,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::jsonb"
-        },
-        "mae": {
-          "name": "mae",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "entry_context": {
-          "name": "entry_context",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
         }
       },
       "indexes": {
@@ -477,9 +464,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "paper_trades_run_closed_idx": {
           "name": "paper_trades_run_closed_idx",
@@ -498,9 +485,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "paper_trades_symbol_idx": {
           "name": "paper_trades_symbol_idx",
@@ -513,29 +500,29 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "paper_trades_run_id_runs_id_fk": {
           "name": "paper_trades_run_id_runs_id_fk",
           "tableFrom": "paper_trades",
-          "tableTo": "runs",
           "columnsFrom": ["run_id"],
+          "tableTo": "runs",
           "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "paper_trades_experiment_id_experiments_id_fk": {
           "name": "paper_trades_experiment_id_experiments_id_fk",
           "tableFrom": "paper_trades",
-          "tableTo": "experiments",
           "columnsFrom": ["experiment_id"],
+          "tableTo": "experiments",
           "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -570,147 +557,6 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.skipped_signals": {
-      "name": "skipped_signals",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "experiment_id": {
-          "name": "experiment_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "market": {
-          "name": "market",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "symbol": {
-          "name": "symbol",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "direction": {
-          "name": "direction",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bar": {
-          "name": "bar",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "at": {
-          "name": "at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "entry_price": {
-          "name": "entry_price",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stop": {
-          "name": "stop",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "take_profit": {
-          "name": "take_profit",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "skipped_signals_run_experiment_idx": {
-          "name": "skipped_signals_run_experiment_idx",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "experiment_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "skipped_signals_at_idx": {
-          "name": "skipped_signals_at_idx",
-          "columns": [
-            {
-              "expression": "at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "skipped_signals_run_id_runs_id_fk": {
-          "name": "skipped_signals_run_id_runs_id_fk",
-          "tableFrom": "skipped_signals",
-          "tableTo": "runs",
-          "columnsFrom": ["run_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "skipped_signals_experiment_id_experiments_id_fk": {
-          "name": "skipped_signals_experiment_id_experiments_id_fk",
-          "tableFrom": "skipped_signals",
-          "tableTo": "experiments",
-          "columnsFrom": ["experiment_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -831,9 +677,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "app_logs_level_ts_idx": {
           "name": "app_logs_level_ts_idx",
@@ -852,9 +698,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -867,10 +713,10 @@
   },
   "enums": {},
   "schemas": {},
+  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

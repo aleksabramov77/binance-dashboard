@@ -37,7 +37,7 @@ const errorsOf = (r: ParseResult) => (r.ok ? [] : r.errors);
 
 describe("parsePrivateExperiments", () => {
   it("дефолты каталога: бюджет 10 000, включён, без demo-зеркала", () => {
-    const r = parse([item(), item({ id: "PF99", market: "futures" })]);
+    const r = parse([item(), item({ id: "PF99", market: "usdm" })]);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.experiments[0]).toMatchObject({
@@ -46,7 +46,7 @@ describe("parsePrivateExperiments", () => {
       enabled: true,
       demoMirror: false,
     });
-    expect(r.experiments[1].market).toBe("futures");
+    expect(r.experiments[1].market).toBe("usdm");
   });
 
   it("явные initialBudget, enabled, demoMirror сохраняются", () => {
@@ -113,13 +113,35 @@ describe("parsePrivateExperiments", () => {
     ]);
   });
 
-  it("id без префикса PS/PF и id с префиксом другого рынка", () => {
+  it("старое имя группы futures в файле читается как usdm (файлы до spec 0023)", () => {
+    const r = parse([item({ id: "PF99", market: "futures" })]);
+    expect(r.ok && r.experiments[0].market).toBe("usdm");
+  });
+
+  it("PC.. — группа COIN-M (spec 0023)", () => {
+    const r = parse([item({ id: "PC99", market: "coinm" })]);
+    expect(r.ok && r.experiments[0]).toMatchObject({
+      id: "PC99",
+      market: "coinm",
+      demoMirror: false,
+    });
+    expect(errorsOf(parse([item({ id: "PC99", market: "usdm" })]))).toEqual([
+      "PC99: поле market — префикс PC означает coinm, а указано usdm",
+    ]);
+    expect(
+      errorsOf(
+        parse([item({ id: "PC99", market: "coinm", demoMirror: true })]),
+      ),
+    ).toEqual(["PC99: поле demoMirror — Демо-зеркало COIN-M — позже"]);
+  });
+
+  it("id без префикса PS/PF/PC и id с префиксом другого рынка", () => {
     expect(errorsOf(parse([item({ id: "X01" })]))).toEqual([
       expect.stringMatching(/^X01: поле id — нужен вид PS01/),
     ]);
     expect(errorsOf(parse([item({ id: "PS1" })]))).toHaveLength(1);
     expect(errorsOf(parse([item({ id: "PF99" })]))).toEqual([
-      "PF99: поле market — префикс PF означает futures, а указано spot",
+      "PF99: поле market — префикс PF означает usdm, а указано spot",
     ]);
   });
 

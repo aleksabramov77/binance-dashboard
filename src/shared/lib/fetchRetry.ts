@@ -161,12 +161,11 @@ export function mergeCooldown(
 
 const hhmmss = (ms: number) => new Date(ms).toISOString().slice(11, 19);
 
-/** GET JSON с повторами: и обрыв соединения, и обрыв тела (битый JSON) повторяются. */
-export async function getJsonWithRetry(
-  url: string,
-  label: string,
-): Promise<unknown> {
-  const host = new URL(url).host;
+/**
+ * Перед запросом к хосту: действует пауза после 429/418 — сразу `CooldownError`, запрос не отправляется.
+ * Общая для всех клиентов Binance: публичных (`getJsonWithRetry`) и подписанных (`signedRequest`, spec 0022).
+ */
+export function assertNoCooldown(host: string, label: string): void {
   const pause = cooldowns.get(host);
   if (pause && Date.now() < pause.until)
     throw new CooldownError(
@@ -174,6 +173,42 @@ export async function getJsonWithRetry(
       pause.status,
     );
   if (pause) cooldowns.delete(host);
+}
+
+/** После ответа с ошибкой: 429/418 ставит (или продлевает) паузу хоста по Retry-After / «banned until»; иначе ничего. */
+export function recordCooldown(
+  host: string,
+  label: string,
+  res: { status: number; headers: Headers },
+  body: unknown,
+): void {
+  if (!COOLDOWN_STATUSES.has(res.status)) return;
+  const until = cooldownEnd(Date.now(), res.headers.get("retry-after"), body);
+  const { next, changed } = mergeCooldown(
+    cooldowns.get(host),
+    { until, status: res.status },
+    Date.now(),
+  );
+  cooldowns.set(host, next);
+  if (changed)
+    log.warn(
+      "binance.cooldown",
+      `${label}: пауза запросов к ${host} до ${hhmmss(next.until)} UTC`,
+      {
+        host,
+        status: next.status,
+        until: new Date(next.until).toISOString(),
+      },
+    );
+}
+
+/** GET JSON с повторами: и обрыв соединения, и обрыв тела (битый JSON) повторяются. */
+export async function getJsonWithRetry(
+  url: string,
+  label: string,
+): Promise<unknown> {
+  const host = new URL(url).host;
+  assertNoCooldown(host, label);
 
   return withRetry(label, async () => {
     const res = await fetch(url, {
@@ -187,29 +222,7 @@ export async function getJsonWithRetry(
         status: res.status,
         body,
       });
-      if (COOLDOWN_STATUSES.has(res.status)) {
-        const until = cooldownEnd(
-          Date.now(),
-          res.headers.get("retry-after"),
-          body,
-        );
-        const { next, changed } = mergeCooldown(
-          cooldowns.get(host),
-          { until, status: res.status },
-          Date.now(),
-        );
-        cooldowns.set(host, next);
-        if (changed)
-          log.warn(
-            "binance.cooldown",
-            `${label}: пауза запросов к ${host} до ${hhmmss(next.until)} UTC`,
-            {
-              host,
-              status: next.status,
-              until: new Date(next.until).toISOString(),
-            },
-          );
-      }
+      recordCooldown(host, label, res, body);
       throw new HttpError(`${label}: ответ ${res.status}`, res.status, body);
     }
     return res.json();

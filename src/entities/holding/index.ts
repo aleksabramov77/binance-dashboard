@@ -4,7 +4,9 @@ export {
   type HoldingPlace,
   holdingSchema,
   holdingValueUsd,
+  type IncomePeriod,
   type Portfolio,
+  plannedIncomeUsd,
   portfolioSchema,
   type Wallet,
 } from "./model/schema";

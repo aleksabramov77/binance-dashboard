@@ -8,7 +8,7 @@ const setup: Setup = {
   base: "X",
   kind: "rebound-long",
   direction: "long",
-  market: "futures",
+  market: "usdm",
   status: "ready",
   entry: 100,
   stopLoss: 95,

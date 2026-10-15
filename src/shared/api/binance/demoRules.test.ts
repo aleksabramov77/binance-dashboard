@@ -82,7 +82,7 @@ describe("toRules", () => {
 
   it("фьючерсы BTCUSDT: MIN_NOTIONAL, PERCENT_PRICE в коридор не идёт (algo-стопы он не ограничивает)", () => {
     const info = exchangeInfoSchema.parse({ symbols: [btcFutures] });
-    expect(toRules("futures", info.symbols[0])).toEqual({
+    expect(toRules("usdm", info.symbols[0])).toEqual({
       tickSize: "0.10",
       stepSize: "0.0001",
       minQty: 0.0001,

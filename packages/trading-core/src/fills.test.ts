@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { entryFill, exitFill, settle, unrealizedPnl } from "./fills.ts";
+import {
+  entryFill,
+  exitFill,
+  FEE_RATE,
+  settle,
+  unrealizedPnl,
+} from "./fills.ts";
 
 describe("entryFill / exitFill", () => {
   it("вход по рынку хуже цены на 0,05%", () => {
@@ -29,9 +35,9 @@ describe("settle", () => {
     expect(s.rMultiple).toBeCloseTo(1.958);
   });
 
-  it("futures short: комиссия 0,05%, прибыль при падении", () => {
+  it("usdm short: комиссия 0,05%, прибыль при падении", () => {
     const s = settle({
-      market: "futures",
+      market: "usdm",
       direction: "short",
       entryPrice: 100,
       exitPrice: 90,
@@ -45,7 +51,7 @@ describe("settle", () => {
 
   it("убыток на стопе ≈ −1R минус комиссии; без стопа R не определён", () => {
     const loss = settle({
-      market: "futures",
+      market: "usdm",
       direction: "long",
       entryPrice: 100,
       exitPrice: 98,
@@ -74,5 +80,28 @@ describe("unrealizedPnl", () => {
         105,
       ),
     ).toBeCloseTo(4.795);
+  });
+
+  it("coinm: PnL инверсного контракта в $ по цене выхода = линейному при qty = N × размер / вход", () => {
+    // 2 контракта по $100 (BTC), вход 50 000, выход 55 000 (long).
+    const contracts = 2;
+    const size = 100;
+    const entryPrice = 50_000;
+    const exitPrice = 55_000;
+    const quantity = (contracts * size) / entryPrice;
+    const s = settle({
+      market: "coinm",
+      direction: "long",
+      entryPrice,
+      exitPrice,
+      quantity,
+      initialStop: null,
+    });
+    // Инверсный контракт: PnL в BTC = N × C × (1/вход − 1/выход), в $ — по цене выхода.
+    const inverseUsd =
+      contracts * size * (1 / entryPrice - 1 / exitPrice) * exitPrice;
+    expect(s.pnl + s.fees).toBeCloseTo(inverseUsd);
+    expect(s.fees).toBeCloseTo(0.0005 * quantity * (entryPrice + exitPrice));
+    expect(FEE_RATE.coinm).toBe(0.0005);
   });
 });

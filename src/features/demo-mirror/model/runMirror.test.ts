@@ -5,7 +5,7 @@ import { type MirrorDeps, runMirror } from "./runMirror";
 const NOW = Date.parse("2026-10-11T12:00:00Z");
 const trade = (over: Partial<MirrorTradeInput>): MirrorTradeInput => ({
   tradeId: "t1",
-  market: "futures",
+  market: "usdm",
   symbol: "ETHUSDT",
   direction: "long",
   openedAt: "2026-10-11T11:59:00Z",
@@ -21,7 +21,8 @@ function deps(over: Partial<MirrorDeps> = {}): MirrorDeps {
     now: () => NOW,
     configured: true,
     listCandidates: async () => [],
-    busySymbols: async () => new Set(),
+    activeMirrors: async () => [],
+    positionMode: async () => "oneway",
     hasSymbol: async () => true,
     claim: async () => true,
     open: async () => ({
@@ -34,6 +35,7 @@ function deps(over: Partial<MirrorDeps> = {}): MirrorDeps {
     }),
     markSkipped: vi.fn(async () => {}),
     saveOpen: vi.fn(async () => {}),
+    sweepLegs: async () => [],
     listToClose: async () => [],
     claimToClose: async () => null,
     close: async () => ({
@@ -177,7 +179,7 @@ describe("runMirror", () => {
     let clock = NOW;
     const claimToClose = vi.fn(async (tradeId: string) => ({
       tradeId,
-      market: "futures" as const,
+      market: "usdm" as const,
       symbol: "ETHUSDT",
       direction: "long" as const,
       quantity: 1,
@@ -207,5 +209,42 @@ describe("runMirror", () => {
     expect(claimToClose).not.toHaveBeenCalledWith("c3");
     expect(open).not.toHaveBeenCalled();
     expect(r.deferred).toBe(1);
+  });
+
+  it("сначала сверка своих ног: закрытые биржей зеркала — в результате, до закрытий и входов", async () => {
+    const order: string[] = [];
+    const r = await runMirror(
+      deps({
+        sweepLegs: async () => {
+          order.push("sweep");
+          return [{ tradeId: "m1", symbol: "ADAUSDT" }];
+        },
+        listToClose: async () => {
+          order.push("list");
+          return [];
+        },
+      }),
+    );
+    expect(order).toEqual(["sweep", "list"]);
+    expect(r.swept).toEqual([{ tradeId: "m1", symbol: "ADAUSDT" }]);
+  });
+
+  it("сверка ног получает бюджет прогона: после 200 с — true", async () => {
+    let clock = NOW;
+    let budgetCheck: (() => boolean) | null = null;
+    await runMirror(
+      deps({
+        now: () => clock,
+        sweepLegs: async (overBudget) => {
+          budgetCheck = overBudget;
+          return [];
+        },
+      }),
+    );
+    expect(budgetCheck).not.toBeNull();
+    const check = budgetCheck as unknown as () => boolean;
+    expect(check()).toBe(false);
+    clock += 201_000;
+    expect(check()).toBe(true);
   });
 });

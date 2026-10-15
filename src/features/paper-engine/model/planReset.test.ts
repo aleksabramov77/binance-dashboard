@@ -6,7 +6,7 @@ const NOW = Date.parse("2026-10-10T12:34:56Z");
 
 const exp = (id: string, timeframe: "15m" | "1h" | "4h"): Experiment => ({
   id,
-  market: "futures",
+  market: "usdm",
   name: id,
   hypothesis: "тест",
   initialBudget: 10_000,
@@ -26,7 +26,7 @@ const trade = (patch: Partial<PaperTrade>): PaperTrade => ({
   id: "1-A-BTCUSDT-0",
   runId: 1,
   experimentId: "A",
-  market: "futures",
+  market: "usdm",
   symbol: "BTCUSDT",
   direction: "long",
   openedAt: "2026-10-10T10:00:00.000Z",
@@ -56,7 +56,7 @@ describe("planReset", () => {
     const plan = planReset({
       experiments: [],
       open: [trade({})],
-      prices: { [priceKey("futures", "BTCUSDT")]: 110 },
+      prices: { [priceKey("usdm", "BTCUSDT")]: 110 },
       now: NOW,
     });
     const [c] = plan.closes;
@@ -77,8 +77,8 @@ describe("planReset", () => {
         trade({ id: "spot", market: "spot", symbol: "ETHUSDT" }),
       ],
       prices: {
-        [priceKey("futures", "BTCUSDT")]: 90,
-        [priceKey("futures", "ETHUSDT")]: 2000,
+        [priceKey("usdm", "BTCUSDT")]: 90,
+        [priceKey("usdm", "ETHUSDT")]: 2000,
       },
       now: NOW,
     });

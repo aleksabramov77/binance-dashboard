@@ -75,7 +75,7 @@ export const labSettingsSchema = z.object({
     }),
   ),
   /** Свободные USDT на демо-счёте Binance; null — ключа нет или биржа не ответила. */
-  demoBalances: z.object({ spot: z.number(), futures: z.number() }).nullable(),
+  demoBalances: z.object({ spot: z.number(), usdm: z.number() }).nullable(),
 });
 
 export const experimentResetSchema = z.object({ id: z.string().min(1) });

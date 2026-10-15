@@ -1,5 +1,7 @@
 import type { TradeStep } from "@/entities/trade";
 import {
+  type AlgoOrderQuery,
+  clientIdGroup,
   type DemoProtectRefs,
   demoCancelAlgoOrder,
   demoFuturesCancelOrder,
@@ -10,6 +12,7 @@ import {
   demoSpotMarketOrder,
   type FuturesSide,
   fetchDemoAlgoOrder,
+  fetchDemoFuturesOrder,
   fetchDemoFuturesSymbolState,
   fetchDemoPositionMode,
   fetchDemoPrice,
@@ -24,6 +27,7 @@ import { log } from "@/shared/lib/logger.server";
 import {
   algoLeg,
   algoLookup,
+  algoTriggered,
   averagePrice,
   type ClosePlan,
   closeVerdict,
@@ -41,7 +45,7 @@ import { floorToStep, isDust } from "../lib/validateTrade";
 import { futuresFillPrice } from "./futuresFillPrice";
 
 export interface CloseDemoRequest {
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
   symbol: string;
   direction: "long" | "short";
   /**
@@ -104,7 +108,7 @@ export async function closeDemoPosition(
   // а не все ордера символа — чужие (ручные, другие зеркала в Hedge) остаются.
   let futures: { side: FuturesSide; amount: number } | null = null;
   try {
-    if (req.market === "futures") {
+    if (req.market === "usdm") {
       const side: FuturesSide = {
         mode: await fetchDemoPositionMode(creds),
         direction: req.direction,
@@ -143,7 +147,7 @@ export async function closeDemoPosition(
 
   try {
     if (futures) {
-      const rules = await fetchDemoSymbolRules("futures", req.symbol);
+      const rules = await fetchDemoSymbolRules("usdm", req.symbol);
       const qty = rules
         ? floorToStep(futures.amount, rules.stepSize)
         : String(futures.amount);
@@ -227,11 +231,14 @@ async function readOwnLegs(
   symbol: string,
   refs: DemoProtectRefs,
 ): Promise<ClosePlan> {
-  if (refs.market === "futures") {
+  if (refs.market === "usdm") {
     const [stop, takeProfit] = await Promise.all(
       [refs.stop, refs.takeProfit].map(async (r) => {
         const lookup = r && algoLookup(r);
-        return lookup ? algoLeg(await fetchDemoAlgoOrder(creds, lookup)) : null;
+        if (!lookup) return null;
+        const q = await fetchDemoAlgoOrder(creds, lookup);
+        if (!q || !algoTriggered(q)) return algoLeg(q);
+        return algoLeg(q, await triggeredQty(creds, symbol, q));
       }),
     );
     return planOwnClose({ stop: stop ?? null, takeProfit: takeProfit ?? null });
@@ -248,6 +255,24 @@ async function readOwnLegs(
   return planOwnClose({ stop: stop ?? null, takeProfit: takeProfit ?? null });
 }
 
+/**
+ * Сколько закрыла своя сработавшая algo-нога: actualQty, иначе executedQty рыночного ордера
+ * actualOrderId. null — данных нет (тогда закрытие не докрывает остаток). Сбой сети не глотаем:
+ * закрытие уйдёт в close_failed, и следующий прогон перечитает объём (ревью #66).
+ */
+async function triggeredQty(
+  creds: BinanceCredentials,
+  symbol: string,
+  q: AlgoOrderQuery,
+): Promise<number | null> {
+  if (q.actualQty > 0) return q.actualQty;
+  if (q.actualOrderId === null) return null;
+  const order = await fetchDemoFuturesOrder(creds, symbol, {
+    orderId: q.actualOrderId,
+  });
+  return order && order.executedQty > 0 ? order.executedQty : null;
+}
+
 /** Снять свой ордер. Спот: снятие ордера из списка (OCO/OTOCO) снимает весь список. */
 async function cancelOwn(
   creds: BinanceCredentials,
@@ -255,7 +280,7 @@ async function cancelOwn(
   refs: DemoProtectRefs,
   leg: "stop" | "takeProfit",
 ): Promise<boolean> {
-  if (refs.market === "futures") {
+  if (refs.market === "usdm") {
     const ref = refs[leg];
     const lookup = ref && algoLookup(ref);
     return lookup ? demoCancelAlgoOrder(creds, lookup) : false;
@@ -268,6 +293,16 @@ async function cancelOwn(
 
 const LEG_LABEL = { stop: "стоп", takeProfit: "тейк" } as const;
 
+/** clientOrderId своего закрытия: группа сделки из своего стопа/тейка + `-C`; нет — без id. */
+function ownCloseId(refs: DemoProtectRefs): string | undefined {
+  const ids =
+    refs.market === "usdm"
+      ? [refs.stop?.clientAlgoId, refs.takeProfit?.clientAlgoId]
+      : [refs.stop?.clientOrderId, refs.takeProfit?.clientOrderId];
+  const group = ids.map(clientIdGroup).find((g) => g !== null);
+  return group ? `${group}-C` : undefined;
+}
+
 /**
  * Закрытие по своим ордерам (PR 2b): ордера других зеркал и ручные ордера по символу не трогаем,
  * позицию докрываем только на свой объём.
@@ -279,6 +314,8 @@ async function closeOwn(
   steps: TradeStep[],
   finish: CloseFinish,
 ): Promise<CloseDemoResult> {
+  // Своё закрытие — с id своей сделки (`bd…-C`): в «Демо-сделках» оно попадёт в свою сделку.
+  const closeId = ownCloseId(refs);
   let plan: ClosePlan;
   try {
     plan = await readOwnLegs(creds, req.symbol, refs);
@@ -315,6 +352,21 @@ async function closeOwn(
           ? `Сработал свой стоп/тейк на бирже; ${detail}`
           : detail,
     });
+    // Объём своей сработавшей ноги неизвестен — остаток не докрываем (на стороне могут быть соседи).
+    // Статус closed: нога reduceOnly закрывает свой объём, а повтор close_failed каждую минуту риск
+    // не снимет; хвост, если он есть, виден в «Демо-сделках».
+    if (verdict === "closedByExchange" && plan.soldUnknown) {
+      // Отдельное событие: свой хвост мог остаться без защиты — видно в журнале и мониторе.
+      log.warn(
+        "trade.close_unverified",
+        `${req.symbol}: своя нога сработала, её объём неизвестен — остаток не докрывали`,
+        { ...req, steps },
+      );
+      return finish(
+        "closed",
+        "Позиция закрыта биржей (сработал стоп/тейк); исполненный объём своей ноги неизвестен — остаток не докрывали, чтобы не закрыть объём других зеркал.",
+      );
+    }
     return finish(
       "closed",
       verdict === "closedByExchange"
@@ -327,7 +379,7 @@ async function closeOwn(
     const rules = await fetchDemoSymbolRules(req.market, req.symbol);
     if (!rules)
       return finish("failed", `${req.symbol} нет на демо-рынке ${req.market}.`);
-    if (req.market === "futures") {
+    if (req.market === "usdm") {
       // Своя сторона: в Hedge — строка LONG/SHORT, в One-way — общая позиция в сторону сделки.
       const side: FuturesSide = {
         mode: await fetchDemoPositionMode(creds),
@@ -338,7 +390,8 @@ async function closeOwn(
         side,
       );
       const qty = floorToStep(
-        ownCloseQuantity(req.quantity, 0, position.amount),
+        // Минус закрытое своей сработавшей ногой: остальное на стороне — чужое.
+        ownCloseQuantity(req.quantity, plan.soldByLegs, position.amount),
         rules.stepSize,
       );
       if (closeVerdict(plan, Number(qty)) !== "close")
@@ -351,6 +404,7 @@ async function closeOwn(
         req.direction === "long" ? "SELL" : "BUY",
         qty,
         side,
+        closeId,
       );
       const exitPrice =
         order.avgPrice ||
@@ -381,7 +435,13 @@ async function closeOwn(
       return nothingToClose(
         `${baseAsset}: к продаже ${qty} (~$${(Number(qty) * price).toFixed(2)}) — меньше минимального ордера`,
       );
-    const order = await demoSpotMarketOrder(creds, req.symbol, "SELL", qty);
+    const order = await demoSpotMarketOrder(
+      creds,
+      req.symbol,
+      "SELL",
+      qty,
+      closeId,
+    );
     steps.push({
       label: "Продать свой объём по рынку",
       ok: true,

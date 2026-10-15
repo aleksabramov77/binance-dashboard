@@ -20,7 +20,7 @@ function Signals() {
   const tradeOverview = useTradeOverview();
   const balances = tradeOverview.data?.balances;
   // Капитал «авто» — всё, что лежит в USDT на демо (Spot + Futures).
-  const autoCapital = balances ? balances.spot + balances.futures : null;
+  const autoCapital = balances ? balances.spot + balances.usdm : null;
   const settings = useEffectiveRiskSettings(autoCapital);
   const data = scan.data;
 

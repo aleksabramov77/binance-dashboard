@@ -8,12 +8,15 @@ export const SIZING = {
   minNotionalUsd: 5,
 } as const;
 
+/** Запас на погрешность плавающей точки при округлении до целых контрактов. */
+const EPS = 1e-9;
+
 export interface SizeInput {
   entry: number;
   /** null — без стопа (buy & hold): объём по лимиту. */
   stop: number | null;
   initialBudget: number;
-  /** Свободно для входа, USD: spot — кэш, futures — свободная маржа. */
+  /** Свободно для входа, USD: spot — кэш, фьючерсы — свободная маржа. */
   availableUsd: number;
   /** Плечо: 1 для spot. Маржа = объём / плечо. */
   leverage: number;
@@ -22,6 +25,12 @@ export interface SizeInput {
    * не применяются, объём урезается только свободными деньгами.
    */
   fixedNotionalUsd?: number;
+  /**
+   * Размер контракта COIN-M, USD (BTC — 100, остальные — 10; spec 0023). Задан — объём округляется
+   * вниз до целых контрактов, минимум 1 контракт (если на него хватает денег); количество в монете =
+   * контракты × размер / цена входа: PnL инверсного контракта в $ тогда считается как у линейного.
+   */
+  contractSizeUsd?: number;
 }
 
 export interface PositionSize {
@@ -56,7 +65,20 @@ export function sizePosition(
     fixed !== undefined || riskPerUnit === null
       ? Number.POSITIVE_INFINITY
       : (rules.riskPct * initialBudget) / riskPerUnit;
-  const quantity = Math.min(byRisk, cap / entry);
+  let quantity = Math.min(byRisk, cap / entry);
+  const contract = input.contractSizeUsd;
+  if (contract !== undefined) {
+    if (!(contract > 0)) return null;
+    // Контракты — от объёма в $, а не от quantity × entry: деление и обратное умножение на цену
+    // теряют точность ($50 / 5434 × 5434 = 49,999…) и давали 4 контракта вместо 5.
+    const wantedUsd = Math.min(cap, byRisk * entry);
+    const contracts = Math.min(
+      Math.max(1, Math.floor(wantedUsd / contract + EPS)),
+      Math.floor(free / contract + EPS),
+    );
+    if (contracts < 1) return null;
+    quantity = (contracts * contract) / entry;
+  }
   const notional = quantity * entry;
   if (!Number.isFinite(quantity) || notional < rules.minNotionalUsd)
     return null;

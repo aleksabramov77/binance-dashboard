@@ -1,20 +1,29 @@
 // Композиция demo-зеркала (spec 008): БД (entities/experiment) + биржа (features/execute-trade)
 // + логика прогона (features/demo-mirror). Только сервер; вызывает POST /api/cron/demo-mirror.
 import {
-  activeMirrorSymbols,
+  activeMirrors,
   claimMirror,
   claimMirrorToClose,
   claimOpenMirrors,
   type DemoResetResult,
   listMirrorCandidates,
   listMirrorsToClose,
+  listOpenMirrorLegs,
   type MirrorCandidate,
   markDemoReset,
+  markMirrorClosedByExchange,
   updateMirror,
 } from "@/entities/experiment";
 import { mirrorLogEntry, runMirror } from "@/features/demo-mirror";
-import { closeDemoPosition, placeTrade } from "@/features/execute-trade";
-import { fetchDemoSymbolRules } from "@/shared/api/binance/demo.server";
+import {
+  closeDemoPosition,
+  placeTrade,
+  sweepTriggeredLegs,
+} from "@/features/execute-trade";
+import {
+  fetchDemoPositionMode,
+  fetchDemoSymbolRules,
+} from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
@@ -35,7 +44,12 @@ export async function runDemoMirror() {
       for (const c of list) byId.set(c.tradeId, c);
       return list;
     },
-    busySymbols: () => activeMirrorSymbols(db),
+    activeMirrors: () => activeMirrors(db),
+    positionMode: () => {
+      const config = getDemoTradingConfig();
+      if (!config) return Promise.reject(new Error("Demo не настроен"));
+      return fetchDemoPositionMode(config.credentials);
+    },
     // null — символа нет на демо; сетевой сбой — исключение (кандидат подождёт). Фьючерсный
     // справочник кэшируется на 10 минут, спот — запрос на символ.
     hasSymbol: async (market, symbol) =>
@@ -71,6 +85,23 @@ export async function runDemoMirror() {
       if (c && r.status === "rejected")
         writeMirrorLog(mirrorLogEntry("rejected", c, r.message));
     },
+    sweepLegs: async (overBudget) => {
+      const swept = await sweepTriggeredLegs(
+        await listOpenMirrorLegs(db),
+        overBudget,
+      );
+      const closed: { tradeId: string; symbol: string }[] = [];
+      for (const m of swept)
+        if (
+          await markMirrorClosedByExchange(db, m.tradeId, {
+            message: m.message,
+            steps: m.steps,
+            exitPrice: m.exitPrice,
+          })
+        )
+          closed.push({ tradeId: m.tradeId, symbol: m.symbol });
+      return closed;
+    },
     listToClose: () => listMirrorsToClose(db),
     claimToClose: (tradeId) => claimMirrorToClose(db, tradeId),
     close: (req) => closeDemoPosition(req),
@@ -88,11 +119,12 @@ export async function runDemoMirror() {
     result.closed.length ||
     result.skipped ||
     result.deferred ||
-    result.deferredCloses
+    result.deferredCloses ||
+    result.swept.length
   )
     log.info(
       "mirror.run",
-      `Зеркало: открыто ${result.opened.length}, закрыто ${result.closed.length}, пропущено ${result.skipped}${result.deferred ? `, входов отложено до следующего прогона ${result.deferred}` : ""}${result.deferredCloses ? `, закрытий отложено ${result.deferredCloses}` : ""}`,
+      `Зеркало: открыто ${result.opened.length}, закрыто ${result.closed.length}, пропущено ${result.skipped}${result.deferred ? `, входов отложено до следующего прогона ${result.deferred}` : ""}${result.deferredCloses ? `, закрытий отложено ${result.deferredCloses}` : ""}${result.swept.length ? `, закрыто биржей (вторая нога снята) ${result.swept.length}` : ""}`,
       { ...result },
     );
   return result;

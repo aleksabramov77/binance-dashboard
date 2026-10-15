@@ -26,7 +26,7 @@ afterEach(() => close());
 
 const exp = (id: string, name = id): Experiment => ({
   id,
-  market: "futures",
+  market: "usdm",
   name,
   hypothesis: "тест",
   config: {
@@ -46,7 +46,7 @@ const trade = (id: string, runId: number): PaperTrade => ({
   id,
   runId,
   experimentId: "F01",
-  market: "futures",
+  market: "usdm",
   symbol: "BTCUSDT",
   direction: "long",
   openedAt: "2026-10-10T10:00:00.000Z",
@@ -177,7 +177,7 @@ describe("отсечённые сигналы (spec 0030, PGlite)", () => {
     id,
     runId,
     experimentId: "F01",
-    market: "futures",
+    market: "usdm",
     symbol: "ETHUSDT",
     direction: "long",
     bar: Date.parse("2026-10-10T10:00:00Z"),

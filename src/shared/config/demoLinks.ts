@@ -7,11 +7,8 @@ const DEMO_WEB_URL = "https://demo.binance.com/en";
 export const DEMO_WALLET_URL = `${DEMO_WEB_URL}/my/wallet/demo/main`;
 
 /** Страница пары на Binance Demo: Futures — /futures/BATUSDT, Spot — /trade/ETH_USDT?type=spot. */
-export function demoChartUrl(
-  market: "spot" | "futures",
-  symbol: string,
-): string {
-  if (market === "futures") return `${DEMO_WEB_URL}/futures/${symbol}`;
+export function demoChartUrl(market: "spot" | "usdm", symbol: string): string {
+  if (market === "usdm") return `${DEMO_WEB_URL}/futures/${symbol}`;
   const { base, quote } = splitSymbol(symbol);
   // Неизвестная котируемая валюта — страница рынков вместо битой ссылки «ABC_».
   return quote

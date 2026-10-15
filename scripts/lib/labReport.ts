@@ -8,6 +8,8 @@ import {
   type EntryRule,
   type ExperimentMarket,
   FEE_RATE,
+  isFuturesMarket,
+  MARKETS,
   type PaperTrade,
   SKIP_REASONS,
   type SkippedSignal,
@@ -220,7 +222,7 @@ export interface ContextSlices {
   /** ATR% и ширина Bollinger — терции значений этого эксперимента (у разных ТФ разный масштаб). */
   atrPct: SliceRow[];
   bbWidthPct: SliceRow[];
-  /** Знак funding на входе (futures). */
+  /** Знак funding на входе (фьючерсы: usdm, coinm). */
   funding: SliceRow[];
 }
 
@@ -525,7 +527,8 @@ export function controlsOf(
 ): Controls {
   const controls: Controls = {
     spot: { random: null, hold: null },
-    futures: { random: null, hold: null },
+    usdm: { random: null, hold: null },
+    coinm: { random: null, hold: null },
   };
   for (const e of experiments) {
     const type = e.config.entry.type;
@@ -686,7 +689,7 @@ function contextSlices(closed: ClosedTrade[]): ContextSlices {
         tercileKey(closed, (c) => c.bbWidthPct),
       ),
     ),
-    funding: closed.some((t) => t.market === "futures")
+    funding: closed.some((t) => isFuturesMarket(t.market))
       ? sliceRows(closed, (t) => fundingBucket(ctxOf(t).funding))
       : [],
   };
@@ -935,7 +938,8 @@ export function buildArchetypes(
     .filter(isClosed)
     .filter((t) => archetypeOfId.has(t.experimentId));
   const rows: ArchetypeRow[] = [];
-  for (const market of ["spot", "futures"] as const) {
+  // Группы активов — каждая отдельно (Spot, USDⓈ-M, COIN-M): архетип в разных группах не смешиваем.
+  for (const market of MARKETS) {
     for (const archetype of Object.keys(ARCHETYPE_LABEL) as Archetype[]) {
       const members = experiments.filter(
         (e) => e.market === market && e.archetype === archetype,
@@ -1113,7 +1117,7 @@ export function controlBaselines(
       medianPct: median(returns),
     };
   };
-  return { spot: one("spot"), futures: one("futures") };
+  return { spot: one("spot"), usdm: one("usdm"), coinm: one("coinm") };
 }
 
 /** Отчёт по всем экспериментам эпохи (или периода), отсортированный по средней доходности сделки. */
@@ -1511,7 +1515,7 @@ function familiesSection(families: Family[]): string[] {
 const controlLine = (c: Controls): string => {
   const one = (market: ExperimentMarket) =>
     `${market} — ${c[market].random ?? "нет"} (случайный вход), ${c[market].hold ?? "нет"} (hold BTC)`;
-  return `Контроль: ${one("spot")}; ${one("futures")}.`;
+  return `Контроль: ${MARKETS.map(one).join("; ")}.`;
 };
 
 const baselineLine = (b: LabReport["controlBaseline"]): string => {
@@ -1519,7 +1523,7 @@ const baselineLine = (b: LabReport["controlBaseline"]): string => {
     b[market].experiments.length
       ? `${market} — ${b[market].experiments.join(", ")}: ${b[market].closed} сделок, среднее ${signedPct(b[market].meanPct)}%, медиана ${signedPct(b[market].medianPct)}%`
       : `${market} — нет`;
-  return `Случайный вход (все такие эксперименты вместе — база «к случайному входу»): ${one("spot")}; ${one("futures")}.`;
+  return `Случайный вход (все такие эксперименты вместе — база «к случайному входу»): ${MARKETS.map(one).join("; ")}.`;
 };
 
 export function renderLabReport(report: LabReport): string {

@@ -18,6 +18,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFrame,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -83,7 +84,7 @@ export function OffersTable({ ranked }: { ranked: RankedOffer[] }) {
     );
   }
   return (
-    <div className="min-w-0 overflow-clip rounded-xl border bg-card">
+    <TableFrame>
       <Table>
         <TableHeader>
           <TableRow>
@@ -181,10 +182,10 @@ export function OffersTable({ ranked }: { ranked: RankedOffer[] }) {
         </TableBody>
       </Table>
       {ranked.length > MAX_ROWS && (
-        <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+        <p className="border-t px-4 py-2 text-xs text-muted-foreground contain-inline-size">
           Показаны первые {MAX_ROWS} из {ranked.length}. Уточните фильтры.
         </p>
       )}
-    </div>
+    </TableFrame>
   );
 }

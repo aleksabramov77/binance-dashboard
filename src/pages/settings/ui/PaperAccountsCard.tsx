@@ -121,10 +121,10 @@ export function PaperAccountsCard({
     : experiments;
 
   return (
-    <Card>
+    <Card className="w-fit max-w-full min-w-0">
       <CardHeader>
         <CardTitle>Paper-счета экспериментов</CardTitle>
-        <CardDescription>
+        <CardDescription className="contain-inline-size">
           Симуляция на бумаге: у каждого эксперимента свой капитал. Включено{" "}
           {enabled} из {experiments.length}. «Сбросить» в строке — начать учёт
           одного эксперимента заново.
@@ -132,7 +132,7 @@ export function PaperAccountsCard({
       </CardHeader>
       <CardContent>
         {toggle.error && (
-          <p className="mb-3 text-sm text-destructive">
+          <p className="mb-3 text-sm text-destructive contain-inline-size">
             {toggle.error.message}
           </p>
         )}
@@ -187,14 +187,15 @@ export function PaperAccountsCard({
             {rows.map((e) => (
               <TableRow key={e.id}>
                 <TableCell className="font-mono">{e.id}</TableCell>
-                <TableCell className="max-w-sm whitespace-normal">
-                  <div className="font-medium">
+                <TableCell className="whitespace-normal">
+                  <div className="font-medium whitespace-nowrap">
                     {e.name}{" "}
                     <span className="text-xs font-normal text-muted-foreground">
                       {assetGroupOf(e.market).label}
                     </span>
                   </div>
-                  <div className="line-clamp-1 text-xs text-muted-foreground">
+                  {/* contain-inline-size: гипотеза не участвует в ширине колонки, только обрезается многоточием. */}
+                  <div className="line-clamp-1 text-xs text-muted-foreground contain-inline-size">
                     {e.hypothesis}
                   </div>
                 </TableCell>

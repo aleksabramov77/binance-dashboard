@@ -10,6 +10,7 @@ import {
   evaluateStrategy,
   exitFill,
   FEE_RATE,
+  isFuturesMarket,
   type MarketFilter,
   marketRegimeAllows,
   type PaperTrade,
@@ -37,7 +38,11 @@ import {
 } from "../lib/candles.ts";
 import { computeLevels } from "../lib/levels.ts";
 import { createLimiter } from "../lib/limiter.ts";
-import { type MarketTicker, pickUniverse } from "../lib/universe.ts";
+import {
+  type MarketTicker,
+  pickUniverse,
+  symbolInMarket,
+} from "../lib/universe.ts";
 import {
   DEFAULT_RUNNER,
   ENGINE_KEYS,
@@ -71,10 +76,13 @@ export interface TickDeps {
     limit: number,
     startTime?: number,
   ): Promise<Candle[]>;
-  /** Тикеры 24 ч рынка; для futures — только бессрочные контракты. */
+  /**
+   * Тикеры 24 ч рынка; для фьючерсов — только бессрочные контракты, у COIN-M — с размером
+   * контракта и оборотом в $ (coinmTicker).
+   */
   tickers(market: ExperimentMarket): Promise<MarketTicker[]>;
-  /** Текущие ставки funding бессрочных фьючерсов (доля): { BTCUSDT: 0.0001 }. */
-  funding(): Promise<Record<string, number>>;
+  /** Текущие ставки funding бессрочных фьючерсов группы (доля): { BTCUSDT: 0.0001 }. */
+  funding(market: ExperimentMarket): Promise<Record<string, number>>;
   /** Кэш свечей между тиками (на VM — в памяти процесса). Нет — свечи грузятся заново. */
   cache?: CandleCache;
   log?: (
@@ -168,10 +176,17 @@ export async function runTick(
     }
     return p;
   };
-  let fundingMemo: Promise<Record<string, number>> | null = null;
-  const funding = () => {
-    fundingMemo ??= limit(() => deps.funding());
-    return fundingMemo;
+  const fundingMemo = new Map<
+    ExperimentMarket,
+    Promise<Record<string, number>>
+  >();
+  const funding = (market: ExperimentMarket) => {
+    let p = fundingMemo.get(market);
+    if (!p) {
+      p = limit(() => deps.funding(market));
+      fundingMemo.set(market, p);
+    }
+    return p;
   };
 
   // Свечи TF: один фетч на (market, symbol, tf) за тик, кэш между тиками дозагружает хвост.
@@ -226,16 +241,16 @@ export async function runTick(
     filter: MarketFilter,
     direction: TradeDirection,
   ) => {
-    const key = candleKey(market, filter.symbol, filter.timeframe);
-    const where = `режим рынка ${market} ${filter.symbol} ${filter.timeframe}`;
+    // Символ режима — в формате группы: BTCUSDT у COIN-M — BTCUSD_PERP (свечи dapi).
+    const symbol = symbolInMarket(filter.symbol, market);
+    const key = candleKey(market, symbol, filter.timeframe);
+    const where = `режим рынка ${market} ${symbol} ${filter.timeframe}`;
     let p = regimeMemo.get(key);
     if (!p) {
-      p = signalCandles(market, filter.symbol, filter.timeframe).catch(
-        (error) => {
-          fail(where, error);
-          return null;
-        },
-      );
+      p = signalCandles(market, symbol, filter.timeframe).catch((error) => {
+        fail(where, error);
+        return null;
+      });
       regimeMemo.set(key, p);
     }
     const candles = await p;
@@ -251,24 +266,24 @@ export async function runTick(
     return marketRegimeAllows(candles, filter, direction);
   };
 
-  // Контекст входа (spec 0030): свечи BTC 4h — через signalCandles (общий кэш со свечами режима 0029), funding —
-  // общий запрос тика. Грузятся, только когда сделка открывается; сбой — поля контекста null, вход не страдает.
+  // Контекст входа (spec 0030): свечи BTC 4h группы (BTCUSDT; у COIN-M — BTCUSD_PERP) — через signalCandles (общий
+  // кэш со свечами режима 0029), funding — общий запрос тика по группе фьючерсов. Грузятся, только когда сделка
+  // открывается; сбой — поля контекста null, вход не страдает.
   const contextBtcMemo = new Map<ExperimentMarket, Promise<Candle[] | null>>();
   const contextBtcCandles = (market: ExperimentMarket) => {
     let p = contextBtcMemo.get(market);
     if (!p) {
-      p = signalCandles(market, ENGINE.contextBtcSymbol, "4h").catch(
-        () => null,
-      );
+      p = signalCandles(
+        market,
+        symbolInMarket(ENGINE.contextBtcSymbol, market),
+        "4h",
+      ).catch(() => null);
       contextBtcMemo.set(market, p);
     }
     return p;
   };
-  let contextFundingMemo: Promise<Record<string, number>> | null = null;
-  const contextFunding = () => {
-    contextFundingMemo ??= funding().catch(() => ({}));
-    return contextFundingMemo;
-  };
+  const contextFunding = (market: ExperimentMarket) =>
+    funding(market).catch((): Record<string, number> => ({}));
 
   // Отсечённые сигналы тика (spec 0030) — пишутся одной пачкой в конце тика.
   const skipped: SkippedSignal[] = [];
@@ -424,6 +439,20 @@ export async function runTick(
   );
   const bars = barsParsed.success ? barsParsed.data : {};
 
+  // Рынок без тикеров (биржа недоступна, например dapi для COIN-M): одна запись в журнал за тик,
+  // его эксперименты ждут следующего тика, остальные группы торгуют.
+  const downMarkets = new Set<ExperimentMarket>();
+  const marketTickers = async (market: ExperimentMarket) => {
+    if (downMarkets.has(market)) return null;
+    try {
+      return await tickers(market);
+    } catch (error) {
+      downMarkets.add(market);
+      fail(`тикеры ${market}: рынок пропущен`, error);
+      return null;
+    }
+  };
+
   for (const exp of experiments) {
     if (!exp.enabled) continue;
     const { config } = exp;
@@ -435,8 +464,10 @@ export async function runTick(
       config.entry.type === "hold" &&
       open.filter((t) => t.experimentId === exp.id).length < config.maxOpen;
     if (seen && !holdGap) continue;
+    const list = await marketTickers(exp.market);
+    if (!list) continue;
     try {
-      await evaluateExperiment(exp, bar);
+      await evaluateExperiment(exp, bar, list);
       if (!seen) {
         bars[exp.id] = bar;
         result.evaluated.push(exp.id);
@@ -448,11 +479,14 @@ export async function runTick(
   }
   if (result.evaluated.length > 0) await store.setState(ENGINE_KEYS.bars, bars);
 
-  async function evaluateExperiment(exp: Experiment, bar: number) {
+  async function evaluateExperiment(
+    exp: Experiment,
+    bar: number,
+    list: MarketTicker[],
+  ) {
     const { config, market } = exp;
-    const list = await tickers(market);
     const ticker = new Map(list.map((t) => [t.symbol, t]));
-    const universe = pickUniverse(config.universe, list);
+    const universe = pickUniverse(config.universe, list, market);
     const mine = () => open.filter((t) => t.experimentId === exp.id);
     const symbols = [...new Set([...universe, ...mine().map((t) => t.symbol)])];
 
@@ -470,8 +504,8 @@ export async function runTick(
     );
     const ready = loaded.filter((x) => x !== null);
     const rates =
-      market === "futures" && config.entry.type === "funding"
-        ? await funding()
+      isFuturesMarket(market) && config.entry.type === "funding"
+        ? await funding(market)
         : {};
     const ranks = momentumRanks(exp, ready, universe);
     const inUniverse = new Set(universe);
@@ -565,7 +599,10 @@ export async function runTick(
         skip(full);
         continue;
       }
-      const leverage = market === "futures" ? ENGINE.futuresLeverage : 1;
+      const leverage = isFuturesMarket(market) ? ENGINE.futuresLeverage : 1;
+      // COIN-M — целые контракты: без размера контракта объём не посчитать.
+      const contractSizeUsd = market === "coinm" ? t?.contractSize : undefined;
+      if (market === "coinm" && contractSizeUsd === undefined) continue;
       const used = current.reduce(
         (s, x) => s + (x.entryPrice * x.quantity) / leverage,
         0,
@@ -577,6 +614,7 @@ export async function runTick(
         availableUsd: exp.initialBudget + (realized[exp.id] ?? 0) - used,
         leverage,
         fixedNotionalUsd: ENGINE.tradeNotionalUsd,
+        contractSizeUsd,
       });
       if (!size) {
         skip("no-budget");
@@ -615,10 +653,9 @@ export async function runTick(
           timeframe: config.timeframe,
           candles,
           btc4h: await contextBtcCandles(market),
-          funding:
-            market === "futures"
-              ? ((await contextFunding())[symbol] ?? null)
-              : null,
+          funding: isFuturesMarket(market)
+            ? ((await contextFunding(market))[symbol] ?? null)
+            : null,
           universeRank: volumeRank.get(symbol) ?? null,
           universeSize: universe.length,
         }),
@@ -713,10 +750,10 @@ export function capSkipped(
   });
 }
 
-/** Spot — только long; плюс направления из конфига эксперимента. */
+/** Spot — только long, фьючерсы (USDⓈ-M, COIN-M) — оба; плюс направления из конфига эксперимента. */
 const allowed = (exp: Experiment, direction: TradeDirection) =>
   exp.config.directions.includes(direction) &&
-  (exp.market === "futures" || direction === "long");
+  (isFuturesMarket(exp.market) || direction === "long");
 
 /** Место символа по доходности за lookback среди юниверса (0 — лучший); только для momentum. */
 function momentumRanks(

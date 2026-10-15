@@ -1,16 +1,23 @@
 "use client";
 
-import { parseAsStringLiteral, useQueryStates } from "nuqs";
+import { createParser, useQueryStates } from "nuqs";
+import { MARKETS, parseMarketParam } from "@/entities/experiment";
 
-export const MARKET_FILTERS = ["all", "spot", "futures"] as const;
+export const MARKET_FILTERS = ["all", ...MARKETS] as const;
 
 export type MarketFilter = (typeof MARKET_FILTERS)[number];
 
+/** Группа активов из URL; старые ссылки ?market=futures — USDⓈ-M (spec 0023). */
+const marketFilter = createParser<MarketFilter>({
+  parse: (v) => (v === "all" ? "all" : parseMarketParam(v)),
+  serialize: (v) => v,
+});
+
 const parsers = {
-  market: parseAsStringLiteral(MARKET_FILTERS).withDefault("all"),
+  market: marketFilter.withDefault("all"),
 };
 
-/** Фильтр по рынку /experiments — в URL; сортировка таблицы — в localStorage (spec 009). */
+/** Фильтр по группе активов /experiments — в URL; сортировка таблицы — в localStorage (spec 009). */
 export function useExperimentsView() {
   return useQueryStates(parsers, { clearOnDefault: true });
 }
