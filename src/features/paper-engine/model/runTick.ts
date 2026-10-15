@@ -9,7 +9,9 @@ import {
   evaluateStrategy,
   exitFill,
   FEE_RATE,
+  marketRegimeAllows,
   type PaperTrade,
+  sessionAllows,
   settle,
   sizePosition,
   TIMEFRAME_MS,
@@ -407,6 +409,29 @@ export async function runTick(
     );
     const hold = config.entry.type === "hold";
     const fresh = hold || now - (bar + tfMs) <= maxAge;
+    // Торговые часы — по времени входа (тика), одно решение на эксперимент.
+    const inSession =
+      !config.sessionFilter || sessionAllows(now, config.sessionFilter);
+    // Свечи режима рынка — одни на эксперимент за тик (и общие с другими через signalCandles).
+    let regimeCandles: Promise<Candle[] | null> | undefined;
+    const regimeAllows = async (direction: TradeDirection) => {
+      const filter = config.marketFilter;
+      if (!filter) return true;
+      regimeCandles ??= signalCandles(
+        market,
+        filter.symbol,
+        filter.timeframe,
+      ).catch((error) => {
+        fail(
+          `режим рынка ${market} ${filter.symbol} ${filter.timeframe}`,
+          error,
+        );
+        return null;
+      });
+      const candles = await regimeCandles;
+      // Нет данных режима — вход запрещён (как у trendFilter); выходы идут как обычно.
+      return candles !== null && marketRegimeAllows(candles, filter, direction);
+    };
 
     for (const { symbol, candles } of ready) {
       const t = ticker.get(symbol);
@@ -426,10 +451,11 @@ export async function runTick(
 
       const entry = signal.entry;
       if (!entry || !fresh || !inUniverse.has(symbol)) continue;
-      if (!allowed(exp, entry.direction)) continue;
+      if (!allowed(exp, entry.direction) || !inSession) continue;
       const current = mine();
       if (current.length >= config.maxOpen) continue;
       if (current.some((x) => x.symbol === symbol)) continue;
+      if (!(await regimeAllows(entry.direction))) continue;
       if (!(await trendAllows(exp, symbol, entry.direction, price))) continue;
 
       const atr = atrSeries(candles, ENGINE.atrPeriod).at(-1) ?? Number.NaN;
