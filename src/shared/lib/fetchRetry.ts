@@ -71,6 +71,9 @@ export class HttpError extends Error {
 // (от минут до 3 суток). Поэтому после такого ответа к тому же хосту не ходим, пока пауза не кончится. Пауза живёт
 // в памяти процесса (на Vercel — экземпляра функции).
 
+/** Запрос не отправлен: к хосту действует пауза после 429/418. */
+export class CooldownError extends HttpError {}
+
 /** Пауза, если Binance не сказал срок (ни Retry-After, ни «banned until»). */
 export const DEFAULT_COOLDOWN_MS = 60_000;
 
@@ -111,7 +114,7 @@ export async function getJsonWithRetry(
   const host = new URL(url).host;
   const pause = cooldowns.get(host);
   if (pause && Date.now() < pause.until)
-    throw new HttpError(
+    throw new CooldownError(
       `${label}: пауза до ${hhmmss(pause.until)} UTC после ответа ${pause.status}`,
       pause.status,
     );
@@ -132,12 +135,17 @@ export async function getJsonWithRetry(
           res.headers.get("retry-after"),
           body,
         );
-        cooldowns.set(host, { until, status: res.status });
-        log.warn(
-          "binance.cooldown",
-          `${label}: пауза запросов к ${host} до ${hhmmss(until)} UTC`,
-          { host, status: res.status, until: new Date(until).toISOString() },
-        );
+        // Параллельные запросы получают 429/418 почти одновременно: пауза только удлиняется (поздний 429 без
+        // срока не сокращает бан), а в журнал попадает одна запись на новую или продлённую паузу.
+        const current = cooldowns.get(host);
+        if (!current || current.until <= Date.now() || until > current.until) {
+          cooldowns.set(host, { until, status: res.status });
+          log.warn(
+            "binance.cooldown",
+            `${label}: пауза запросов к ${host} до ${hhmmss(until)} UTC`,
+            { host, status: res.status, until: new Date(until).toISOString() },
+          );
+        }
       }
       throw new HttpError(`${label}: ответ ${res.status}`, res.status, body);
     }

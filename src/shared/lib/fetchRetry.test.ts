@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CooldownError,
   getJsonWithRetry,
   HttpError,
   NetworkError,
   resetBinanceCooldowns,
   withRetry,
 } from "./fetchRetry";
+import { log } from "./logger.server";
 
 const socketError = () =>
   Object.assign(new TypeError("fetch failed"), {
@@ -45,6 +47,7 @@ describe("withRetry", () => {
 describe("getJsonWithRetry: пауза после 429/418 (0014)", () => {
   const SPOT = "https://api.binance.com/api/v3/ticker/price";
   const FUTURES = "https://fapi.binance.com/fapi/v1/ticker/price";
+  const DEMO = "https://demo-fapi.binance.com/fapi/v1/ticker/price";
   const T0 = Date.parse("2026-10-14T18:31:01Z");
 
   const reply = (
@@ -61,6 +64,7 @@ describe("getJsonWithRetry: пауза после 429/418 (0014)", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("после 418 не ходит на тот же хост до конца бана, после — ходит", async () => {
@@ -73,7 +77,7 @@ describe("getJsonWithRetry: пауза после 429/418 (0014)", () => {
           msg: `Way too much request weight used; IP banned until ${bannedUntil}. Please use WebSocket Streams for live updates to avoid bans.`,
         }),
       )
-      .mockResolvedValue(reply(200, []));
+      .mockImplementation(async () => reply(200, []));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(getJsonWithRetry(SPOT, "Binance")).rejects.toBeInstanceOf(
@@ -103,7 +107,7 @@ describe("getJsonWithRetry: пауза после 429/418 (0014)", () => {
         reply(429, { code: -1003 }, { "Retry-After": "30" }),
       )
       .mockResolvedValueOnce(reply(429, { code: -1003 }))
-      .mockResolvedValue(reply(200, []));
+      .mockImplementation(async () => reply(200, []));
     vi.stubGlobal("fetch", fetchMock);
 
     await getJsonWithRetry(SPOT, "Binance").catch(() => {});
@@ -126,11 +130,40 @@ describe("getJsonWithRetry: пауза после 429/418 (0014)", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(reply(429, { code: -1003 }))
-      .mockResolvedValue(reply(200, []));
+      .mockImplementation(async () => reply(200, []));
     vi.stubGlobal("fetch", fetchMock);
 
     await getJsonWithRetry(SPOT, "Binance").catch(() => {});
     await expect(getJsonWithRetry(FUTURES, "Binance")).resolves.toEqual([]);
+    await expect(getJsonWithRetry(DEMO, "Binance Demo")).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("параллельные 429/418: пауза не сокращается, в журнале одна запись", async () => {
+    const warn = vi.spyOn(log, "warn");
+    const bannedUntil = T0 + 4 * 60_000;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        reply(418, { code: -1003, msg: `IP banned until ${bannedUntil}.` }),
+      )
+      .mockResolvedValueOnce(reply(429, { code: -1003 }))
+      .mockImplementation(async () => reply(200, []));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await Promise.all([
+      getJsonWithRetry(SPOT, "Binance").catch(() => {}),
+      getJsonWithRetry(SPOT, "Binance").catch(() => {}),
+    ]);
+    expect(
+      warn.mock.calls.filter(([event]) => event === "binance.cooldown"),
+    ).toHaveLength(1);
+
+    vi.setSystemTime(T0 + 2 * 60_000);
+    const error = await getJsonWithRetry(SPOT, "Binance").catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(CooldownError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -138,7 +171,7 @@ describe("getJsonWithRetry: пауза после 429/418 (0014)", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(reply(500, null))
-      .mockResolvedValue(reply(200, []));
+      .mockImplementation(async () => reply(200, []));
     vi.stubGlobal("fetch", fetchMock);
 
     await getJsonWithRetry(SPOT, "Binance").catch(() => {});

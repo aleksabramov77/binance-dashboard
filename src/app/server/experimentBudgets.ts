@@ -9,6 +9,7 @@ import {
 } from "@/entities/experiment";
 import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import { getDb } from "@/shared/db/client.server";
+import { CooldownError } from "@/shared/lib/fetchRetry";
 import { log } from "@/shared/lib/logger.server";
 import { ensureEngineReady } from "./experimentEngine";
 
@@ -47,8 +48,9 @@ export async function getExperimentBudgets(): Promise<ExperimentBudgets> {
     );
     prices = (market, symbol) => loaded.get(market)?.get(symbol);
   } catch (error) {
-    // Нет цен — показываем equity без нереализованного PnL (подсказка в хедере это объясняет).
-    log.warn(
+    // Нет цен — показываем equity без нереализованного PnL (подсказка в хедере это объясняет). Во время паузы
+    // после 429/418 шапка опрашивается каждые 30 с — это debug, сама пауза уже записана как binance.cooldown.
+    log[error instanceof CooldownError ? "debug" : "warn"](
       "experiments.budgets",
       "Цены для нереализованного PnL недоступны",
       {
