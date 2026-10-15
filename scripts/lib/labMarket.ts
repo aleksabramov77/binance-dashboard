@@ -141,14 +141,14 @@ export function computeMarketContext(input: MarketInput): MarketContext {
   };
 }
 
-/** Свечи BTC (spot) с публичного API: 500 × 4h ≈ 83 дня — хватает на EMA200 и период до ~2,5 месяцев. */
+/** Свечи BTC (spot) с публичного API: 1000 × 4h ≈ 166 дней — EMA200 (34 дня) есть и на начало периода до ~4 месяцев. */
 export async function loadMarketContext(
   periodStart: number,
   now: number,
   symbol = "BTCUSDT",
 ): Promise<MarketContext> {
   const [h4, d1] = await Promise.all([
-    fetchKlines("spot", symbol, "4h", 500),
+    fetchKlines("spot", symbol, "4h", 1000),
     fetchKlines("spot", symbol, "1d", 90),
   ]);
   return computeMarketContext({ symbol, h4, d1, periodStart, now });
@@ -158,7 +158,7 @@ export function describeRegime(m: MarketContext): string {
   const end = REGIME_LABEL[m.regime];
   if (m.regimeAtStart === "unknown") return `режим сейчас: ${end}`;
   if (m.regimeAtStart === m.regime)
-    return `режим за период: ${end} (без смены)`;
+    return `режим за период: ${end} (одинаков на начало и конец)`;
   return `режим за период: ${REGIME_LABEL[m.regimeAtStart]} → ${end}`;
 }
 

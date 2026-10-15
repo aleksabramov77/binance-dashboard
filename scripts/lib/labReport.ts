@@ -442,15 +442,19 @@ function suspiciousFlags(
   const flags: string[] = [];
   const enough = stats.closed >= FLAG_RULES.minClosed;
   if (enough && (stats.winRate ?? 0) > FLAG_RULES.winRate)
-    flags.push(`win rate > ${FLAG_RULES.winRate * 100}% на 30+ закрытых`);
+    flags.push(
+      `win rate > ${FLAG_RULES.winRate * 100}% на ${FLAG_RULES.minClosed}+ закрытых`,
+    );
   if (enough && stats.losses === 0)
-    flags.push("нет убыточных сделок на 30+ закрытых");
+    flags.push(`нет убыточных сделок на ${FLAG_RULES.minClosed}+ закрытых`);
   if (
     enough &&
     stats.profitFactor !== null &&
     stats.profitFactor > FLAG_RULES.profitFactor
   )
-    flags.push(`profit factor > ${FLAG_RULES.profitFactor} на 30+ закрытых`);
+    flags.push(
+      `profit factor > ${FLAG_RULES.profitFactor} на ${FLAG_RULES.minClosed}+ закрытых`,
+    );
   const tp = e.config.exit.takeProfit;
   if (tp?.type === "rr") {
     const over = closed.filter(
@@ -858,7 +862,7 @@ const signedPct = (v: number | null, digits = 3): string =>
   v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
 const days = (v: number | null): string =>
   v === null ? "∞" : v === 0 ? "есть" : `${Math.ceil(v)} дн.`;
-const dateOnly = (iso: string) => iso.slice(0, 16).replace("T", " ");
+const dateTime = (iso: string) => iso.slice(0, 16).replace("T", " ");
 
 function sliceTable(title: string, rows: SliceRow[]): string[] {
   if (!rows.length) return [];
@@ -896,9 +900,11 @@ function dayLine(e: ExperimentReport): string {
 function experimentSection(e: ExperimentReport): string[] {
   const s = e.stats;
   const head = `### ${e.id} · ${e.name}${e.enabled ? "" : " (выключен)"}${e.demoMirror ? " · демо-зеркало" : ""}`;
-  const accounted = e.resetAt
-    ? `Учёт с ${dateOnly(e.accountedFrom)} UTC (сброс эксперимента), ${num(e.periodDays, 1)} дн.`
-    : "";
+  // Сброс показываем, только если учёт действительно начинается с него (а не с --since позже сброса).
+  const accounted =
+    e.resetAt !== null && e.accountedFrom === e.resetAt
+      ? `Учёт с ${dateTime(e.accountedFrom)} UTC (сброс эксперимента), ${num(e.periodDays, 1)} дн.`
+      : "";
   if (s.closed === 0)
     return [
       head,

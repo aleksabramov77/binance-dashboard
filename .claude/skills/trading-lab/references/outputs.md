@@ -41,7 +41,7 @@
 1. <вывод с числом>  (3–5 пунктов)
 
 ## Действия
-- Выключить: F17 (negative-edge), S05 (no-edge, t −4,2 на 58).
+- Выключить: F17 (negative-edge), S05 (negative-edge, t −4,2 на 58).
 - Демо-зеркало: — (или id с условием).
 - Команда: `pnpm -s lab:apply --disable F17 --disable S05`
 (Нечего применять — так и написать: «Действий нет».)
@@ -87,7 +87,7 @@ H<k+1> — заводим через /flow feature.  (или: ничего — �
 ## <YYYY-MM-DD> · PR #<n>
 - **Период:** эпоха #<n>, <с> — <по> (<N> дн.), <M> экспериментов, <K> закрытых сделок. БД: <строка из report>.
 - **Рынок:** <строка «Рынок» из report.md>.
-- **Решения:** kill — F17 (negative-edge), S05 (no-edge); mirror — нет; tune — F11 (→ H4); pivot — —; остальное keep.
+- **Решения:** kill — F17 (negative-edge), S05 (negative-edge); mirror — нет; tune — F11 (→ H4); pivot — —; остальное keep.
 - **Применено:** F17, S05 выключены (`runs/<дата>-<NNNN>/apply.md`) — или «ничего».
 - **Гипотезы:** H4 pursue → F21 (`/flow feature`), H5 backlog, H6 revise, H7 discard.
 - **Главное:** <1–2 вывода из review.md>.
