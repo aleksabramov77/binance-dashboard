@@ -86,6 +86,8 @@ export interface MirrorDeps<
 
 export interface MirrorRunResult {
   configured: boolean;
+  /** Прогон не выполнялся: идёт предыдущий (блокировка прогона, PR 2e). */
+  locked: boolean;
   opened: { tradeId: string; symbol: string; status: string }[];
   skipped: number;
   /** Входы, не начатые из-за бюджета времени прогона, — их возьмёт следующий прогон. */
@@ -97,6 +99,21 @@ export interface MirrorRunResult {
   closed: { tradeId: string; symbol: string; status: string }[];
 }
 
+/** Пустой итог прогона (ничего не делалось): нет ключа демо или прогон уже идёт (locked). */
+export const emptyMirrorRunResult = (
+  configured: boolean,
+  locked = false,
+): MirrorRunResult => ({
+  configured,
+  locked,
+  opened: [],
+  skipped: 0,
+  deferred: 0,
+  deferredCloses: 0,
+  swept: [],
+  closed: [],
+});
+
 /**
  * Один прогон: сначала закрыть демо-позиции закрытых paper-сделок (освобождает символы),
  * затем открыть зеркала свежих входов. Сделка «захватывается» до запроса к бирже —
@@ -106,15 +123,7 @@ export async function runMirror<
   C extends MirrorCloseItem,
   R extends MirrorOpenResult,
 >(deps: MirrorDeps<C, R>): Promise<MirrorRunResult> {
-  const result: MirrorRunResult = {
-    configured: deps.configured,
-    opened: [],
-    skipped: 0,
-    deferred: 0,
-    deferredCloses: 0,
-    swept: [],
-    closed: [],
-  };
+  const result = emptyMirrorRunResult(deps.configured);
   if (!deps.configured) return result;
   const startedAt = deps.now();
   const overBudget = () => deps.now() - startedAt > MIRROR.runBudgetMs;
