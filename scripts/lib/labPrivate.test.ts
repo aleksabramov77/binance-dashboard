@@ -90,7 +90,26 @@ describe("parsePrivateExperiments", () => {
 
   it("лишнее поле верхнего уровня (опечатка) — ошибка", () => {
     expect(errorsOf(parse([item({ enabeld: false })]))).toEqual([
-      expect.stringMatching(/^PS99: поле \(весь объект\) — .*enabeld/),
+      expect.stringMatching(/^PS99: поле enabeld — .*enabeld/),
+    ]);
+  });
+
+  it("неизвестное поле в config (опечатка) — ошибка с путём поля (spec 0029)", () => {
+    expect(
+      errorsOf(
+        parse([
+          item({
+            config: {
+              ...CONFIG,
+              marketFiltr: {},
+              exit: { ...CONFIG.exit, trailATR: 2 },
+            },
+          }),
+        ]),
+      ),
+    ).toEqual([
+      expect.stringMatching(/^PS99: поле config\.exit\.trailATR — /),
+      expect.stringMatching(/^PS99: поле config\.marketFiltr — /),
     ]);
   });
 
