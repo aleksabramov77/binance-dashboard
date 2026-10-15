@@ -24,15 +24,15 @@
 {
   "id": "PF01",
   "market": "futures",
-  "name": "MACD без фильтра ADX",
-  "hypothesis": "F97 (пример) даёт перевес, но сделок мало: без ADX > 25 их втрое больше — проверяем, что перевес не в фильтре.",
+  "name": "Пример: шорт пробоя Donchian-30 на 4h",
+  "hypothesis": "Вымышленный пример формата: пробой минимума 30 свечей 4h продолжается вниз; выход по времени через 20 баров.",
   "config": {
-    "timeframe": "1h",
-    "entry": { "type": "macd" },
-    "exit": { "stop": { "type": "atr", "mult": 1.5 }, "takeProfit": { "type": "rr", "r": 2 }, "breakevenAtR": 1 },
-    "universe": { "type": "top", "n": 30 },
-    "directions": ["long", "short"],
-    "maxOpen": 5
+    "timeframe": "4h",
+    "entry": { "type": "donchian", "period": 30 },
+    "exit": { "stop": { "type": "atr", "mult": 2 }, "takeProfit": null, "timeStopBars": 20 },
+    "universe": { "type": "top", "n": 15 },
+    "directions": ["short"],
+    "maxOpen": 3
   }
 }
 ```
