@@ -1,6 +1,7 @@
 import {
   atrSeries,
   type Candle,
+  computeEntryContext,
   type ExitReason,
   type Experiment,
   type ExperimentMarket,
@@ -14,6 +15,8 @@ import {
   marketRegimeAllows,
   type PaperTrade,
   regimeMinCandles,
+  type SkippedSignal,
+  type SkipReason,
   sessionAllows,
   settle,
   sizePosition,
@@ -21,6 +24,7 @@ import {
   type Timeframe,
   type TradeDirection,
   walkExits,
+  worseMae,
 } from "@binance-dashboard/trading-core";
 import { z } from "zod";
 import { ENGINE } from "../config/engine.ts";
@@ -45,12 +49,14 @@ import {
   type EngineRunner,
   type ExperimentStore,
   RUNNERS,
+  type SkippedSignalCount,
 } from "./store.ts";
 
 // Тик движка экспериментов. Среда-независимый: без @/…, node:*, process.env, fs и таймеров —
 // его вызывают и in-process таймер на VM (instrumentation.ts), и Edge Function Supabase (Deno).
 
 const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
 
 export type Interval = Timeframe | "1m";
 
@@ -260,11 +266,37 @@ export async function runTick(
     return marketRegimeAllows(candles, filter, direction);
   };
 
+  // Контекст входа (spec 0030): свечи BTC 4h группы (BTCUSDT; у COIN-M — BTCUSD_PERP) — через signalCandles (общий
+  // кэш со свечами режима 0029), funding — общий запрос тика по группе фьючерсов. Грузятся, только когда сделка
+  // открывается; сбой — поля контекста null, вход не страдает.
+  const contextBtcMemo = new Map<ExperimentMarket, Promise<Candle[] | null>>();
+  const contextBtcCandles = (market: ExperimentMarket) => {
+    let p = contextBtcMemo.get(market);
+    if (!p) {
+      p = signalCandles(
+        market,
+        symbolInMarket(ENGINE.contextBtcSymbol, market),
+        "4h",
+      ).catch(() => null);
+      contextBtcMemo.set(market, p);
+    }
+    return p;
+  };
+  const contextFunding = (market: ExperimentMarket) =>
+    funding(market).catch((): Record<string, number> => ({}));
+
+  // Отсечённые сигналы тика (spec 0030) — пишутся одной пачкой в конце тика.
+  const skipped: SkippedSignal[] = [];
+  // Сбой свечей фильтра тренда — одна ошибка тика на (рынок, символ, TF).
+  const trendReported = new Set<string>();
+
   const closeTrade = async (
     trade: PaperTrade,
     rawPrice: number,
     reason: ExitReason,
     at: number,
+    // Худшая цена с входа: проход выходов считает её сам (со свечой выхода), прочие выходы — по цене выхода.
+    mae = worseMae(trade.direction, trade.mae, rawPrice),
   ) => {
     const exitPrice = exitFill(rawPrice, trade.direction, reason);
     const s = settle({
@@ -282,6 +314,7 @@ export async function runTick(
       fees: s.fees,
       pnl: s.pnl,
       rMultiple: s.rMultiple,
+      mae,
     });
     realized[trade.experimentId] = (realized[trade.experimentId] ?? 0) + s.pnl;
     open.splice(open.indexOf(trade), 1);
@@ -376,15 +409,18 @@ export async function runTick(
               walk.exit.price,
               walk.exit.reason,
               walk.exit.at,
+              walk.mae,
             );
           } else if (
             walk.stop !== trade.stop ||
             walk.extreme !== trade.extreme ||
+            walk.mae !== trade.mae ||
             walk.checkedUntil !== trade.checkedUntil
           ) {
             const progress = {
               stop: walk.stop,
               extreme: walk.extreme,
+              mae: walk.mae,
               checkedUntil: walk.checkedUntil,
             };
             await store.updateTrade(trade.id, progress);
@@ -473,6 +509,16 @@ export async function runTick(
         : {};
     const ranks = momentumRanks(exp, ready, universe);
     const inUniverse = new Set(universe);
+    // Место в юниверсе по обороту за 24 ч (1 — самый ликвидный) — для контекста входа.
+    const volumeRank = new Map(
+      [...universe]
+        .sort(
+          (a, b) =>
+            (ticker.get(b)?.quoteVolume ?? 0) -
+            (ticker.get(a)?.quoteVolume ?? 0),
+        )
+        .map((symbol, i) => [symbol, i + 1]),
+    );
     // Свеча закрылась давно (первый тик после включения, рестарт, простой) — по такому сигналу не
     // входим: цена уже ушла. Выходы по сигналу оставляем — они закрывают риск.
     const tfMs = TIMEFRAME_MS[config.timeframe];
@@ -506,8 +552,14 @@ export async function runTick(
       if (!entry || !fresh || !inUniverse.has(symbol)) continue;
       if (!allowed(exp, entry.direction) || !inSession) continue;
       const current = mine();
-      if (current.length >= config.maxOpen) continue;
-      if (current.some((x) => x.symbol === symbol)) continue;
+      // Лимит позиций проверяется после фильтров режима и тренда: отсечённый сигнал (spec 0030) — тот, что
+      // прошёл все фильтры эксперимента и не открыт только из-за лимита. Для открытых сделок порядок не важен.
+      const full: SkipReason | null =
+        current.length >= config.maxOpen
+          ? "max-open"
+          : current.some((x) => x.symbol === symbol)
+            ? "symbol-busy"
+            : null;
       if (
         config.marketFilter &&
         !(await regimeAllows(market, config.marketFilter, entry.direction))
@@ -525,6 +577,28 @@ export async function runTick(
         atr,
       );
       if (!levels) continue;
+      const skip = (reason: SkipReason) => {
+        // hold «всегда в позиции»: занятый символ и лимит — его норма, а не упущенный сигнал.
+        if (hold) return;
+        skipped.push({
+          id: `${runId}-${exp.id}-${symbol}-${bar}-${reason}`,
+          runId,
+          experimentId: exp.id,
+          market,
+          symbol,
+          direction: entry.direction,
+          bar,
+          at: new Date(now).toISOString(),
+          reason,
+          entryPrice: fill,
+          stop: levels.stop,
+          takeProfit: levels.takeProfit,
+        });
+      };
+      if (full) {
+        skip(full);
+        continue;
+      }
       const leverage = isFuturesMarket(market) ? ENGINE.futuresLeverage : 1;
       // COIN-M — целые контракты: без размера контракта объём не посчитать.
       const contractSizeUsd = market === "coinm" ? t?.contractSize : undefined;
@@ -542,7 +616,10 @@ export async function runTick(
         fixedNotionalUsd: ENGINE.tradeNotionalUsd,
         contractSizeUsd,
       });
-      if (!size) continue;
+      if (!size) {
+        skip("no-budget");
+        continue;
+      }
 
       const trade: PaperTrade = {
         // hold входит и посреди свечи (после закрытия позиции) — id по минуте, а не по свече.
@@ -560,6 +637,7 @@ export async function runTick(
         takeProfit: levels.takeProfit,
         atr: Number.isFinite(atr) ? atr : 0,
         extreme: fill,
+        mae: fill,
         // Выходы — со следующей минуты: в текущей 1m-свече есть цены до входа.
         checkedUntil: Math.floor(now / MINUTE) * MINUTE + MINUTE,
         closedAt: null,
@@ -570,6 +648,17 @@ export async function runTick(
         rMultiple: null,
         demoOrderRef: null,
         signal: { ...entry.meta, bar, price, timeframe: config.timeframe },
+        entryContext: computeEntryContext({
+          at: now,
+          timeframe: config.timeframe,
+          candles,
+          btc4h: await contextBtcCandles(market),
+          funding: isFuturesMarket(market)
+            ? ((await contextFunding(market))[symbol] ?? null)
+            : null,
+          universeRank: volumeRank.get(symbol) ?? null,
+          universeSize: universe.length,
+        }),
       };
       await store.insertTrade(trade);
       open.push(trade);
@@ -587,7 +676,11 @@ export async function runTick(
     }
   }
 
-  /** Фильтр тренда старшего TF: long — цена выше EMA(period), short — ниже. */
+  /**
+   * Фильтр тренда старшего TF: long — цена выше EMA(period), short — ниже. Сбой загрузки свечей — вход запрещён,
+   * одна ошибка тика на (рынок, символ, TF), как у режима рынка: остальные символы эксперимента (их выходы по
+   * сигналу и входы) обрабатываются дальше.
+   */
   async function trendAllows(
     exp: Experiment,
     symbol: string,
@@ -596,7 +689,17 @@ export async function runTick(
   ) {
     const filter = exp.config.trendFilter;
     if (!filter) return true;
-    const candles = await signalCandles(exp.market, symbol, filter.timeframe);
+    let candles: Candle[];
+    try {
+      candles = await signalCandles(exp.market, symbol, filter.timeframe);
+    } catch (error) {
+      const key = candleKey(exp.market, symbol, filter.timeframe);
+      if (!trendReported.has(key)) {
+        trendReported.add(key);
+        fail(`тренд ${exp.market} ${symbol} ${filter.timeframe}`, error);
+      }
+      return false;
+    }
     const level = ema(
       candles.map((c) => c.close),
       filter.period,
@@ -605,8 +708,46 @@ export async function runTick(
     return direction === "long" ? price > level : price < level;
   }
 
+  // Отсечённые сигналы: не больше skippedSignalsCap на (эпоха, эксперимент, причина), старше срока хранения —
+  // удаляются. Объём базы ограничен (Supabase Free), для разбора хватает выборки.
+  if (skipped.length > 0)
+    try {
+      const counts = await store.skippedSignalCounts(runId, [
+        ...new Set(skipped.map((s) => s.experimentId)),
+      ]);
+      await store.insertSkippedSignals(
+        capSkipped(skipped, counts, ENGINE.skippedSignalsCap),
+      );
+      await store.pruneSkippedSignals(
+        new Date(now - ENGINE.skippedSignalsRetentionDays * DAY).toISOString(),
+      );
+    } catch (error) {
+      fail("отсечённые сигналы", error);
+    }
+
   await store.setState(ENGINE_KEYS.lastTick, result);
   return result;
+}
+
+/**
+ * Отсечённые сигналы в пределах лимита: на (эксперимент, причина) — не больше cap вместе с уже записанными
+ * в эпохе. Порядок сохраняется: в лимит попадают первые сигналы тика.
+ */
+export function capSkipped(
+  rows: SkippedSignal[],
+  counts: SkippedSignalCount[],
+  cap: number,
+): SkippedSignal[] {
+  const used = new Map(
+    counts.map((c) => [`${c.experimentId}:${c.reason}`, c.count]),
+  );
+  return rows.filter((r) => {
+    const key = `${r.experimentId}:${r.reason}`;
+    const n = used.get(key) ?? 0;
+    if (n >= cap) return false;
+    used.set(key, n + 1);
+    return true;
+  });
 }
 
 /** Spot — только long, фьючерсы (USDⓈ-M, COIN-M) — оба; плюс направления из конфига эксперимента. */

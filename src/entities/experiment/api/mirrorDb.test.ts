@@ -75,6 +75,8 @@ const trade = (
   pnl: null,
   rMultiple: null,
   demoOrderRef: null,
+  mae: null,
+  entryContext: {},
   signal: {},
 });
 

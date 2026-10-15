@@ -1,8 +1,8 @@
 # Артефакты прогона `/flow lab`: форматы
 
 Все файлы прогона — в приватном репозитории, `private/lab/<YYYY-MM-DD>-<NNNN>/` (дата прогона и номер его
-chore-задачи — так два прогона в один день не перезаписывают друг друга): `report.md`, `report.json`, `trades.csv`
-(архив эпохи), `review.md`, `ideas.md`, `apply.md`. Память между прогонами — `private/lab/journal.md` и
+chore-задачи — так два прогона в один день не перезаписывают друг друга): `report.md`, `report.json`, `trades.csv`,
+`skipped.csv` (архив эпохи), `review.md`, `ideas.md`, `apply.md`. Память между прогонами — `private/lab/journal.md` и
 `private/lab/hypotheses.md`. В публичный репозиторий из этого ничего не попадает (CLAUDE.md, spec 0015).
 Таблицы — чтобы оркестратор мог показать пользователю и перенести в журнал без переписывания.
 

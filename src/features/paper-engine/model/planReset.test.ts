@@ -45,6 +45,8 @@ const trade = (patch: Partial<PaperTrade>): PaperTrade => ({
   pnl: null,
   rMultiple: null,
   demoOrderRef: null,
+  mae: null,
+  entryContext: {},
   signal: {},
   ...patch,
 });

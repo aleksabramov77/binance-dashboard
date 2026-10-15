@@ -2,6 +2,7 @@ import type {
   Candle,
   Experiment,
   ExperimentConfig,
+  SkipReason,
 } from "@binance-dashboard/trading-core";
 import { exitFill, TIMEFRAME_MS } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
@@ -9,7 +10,12 @@ import { ENGINE } from "../config/engine.ts";
 import type { MarketTicker } from "../lib/universe.ts";
 import { createMemoryStore } from "./memoryStore.ts";
 import { planReset, priceKey } from "./planReset.ts";
-import { type Interval, runTick, type TickDeps } from "./runTick.ts";
+import {
+  capSkipped,
+  type Interval,
+  runTick,
+  type TickDeps,
+} from "./runTick.ts";
 import { ENGINE_KEYS } from "./store.ts";
 
 const MIN = 60_000;
@@ -709,6 +715,296 @@ describe("runTick: выключенный эксперимент и сброс �
   });
 });
 
+describe("runTick: контекст входа, MAE и отсечённые сигналы (spec 0030)", () => {
+  it("сделка хранит снимок рынка на входе: место в юниверсе, BTC 4h, funding, час и день", async () => {
+    const store = enabledStore([
+      exp("A", { ...ALWAYS_LONG, universe: { type: "top", n: 3 }, maxOpen: 1 }),
+    ]);
+    const m = market();
+    const groups: string[] = [];
+    const deps = {
+      ...m.deps(store),
+      funding: async (group: Experiment["market"]) => {
+        groups.push(group);
+        return { BTCUSDT: 1e-4 };
+      },
+    };
+    await runTick(deps, T0);
+    const [t] = store.trades();
+    expect(t.entryContext).toMatchObject({
+      v: 1,
+      universeRank: 1,
+      universeSize: 3,
+      funding: 1e-4,
+      hourUtc: 12,
+      weekday: 6, // 2026-10-10 — суббота
+      btcAboveEma200_4h: false, // ровная цена 100: close не выше EMA
+    });
+    expect(groups).toEqual(["usdm"]);
+    // Ровный рынок: ATR = 1 при цене 100, объём свечи равен среднему.
+    expect(t.entryContext.atrPct).toBeCloseTo(1);
+    expect(t.entryContext.volumeRatio).toBe(1);
+    expect(t.mae).toBe(t.entryPrice);
+    // Свечи BTC 4h для контекста — тем же запросом, что и свечи сигналов (кэш), один раз за тик.
+    expect(
+      m.calls.filter((c) => c.symbol === "BTCUSDT" && c.interval === "4h"),
+    ).toHaveLength(1);
+  });
+
+  it("spot: funding в контексте — null, запрос funding не делается", async () => {
+    const store = enabledStore([exp("S", ALWAYS_LONG, "spot")]);
+    let fundingCalls = 0;
+    const deps = {
+      ...market().deps(store),
+      funding: async () => {
+        fundingCalls++;
+        return { BTCUSDT: 1e-4 };
+      },
+    };
+    await runTick(deps, T0);
+    expect(store.trades()[0].entryContext.funding).toBeNull();
+    expect(fundingCalls).toBe(0);
+  });
+
+  it("сбой свечей BTC и funding не мешает входу: поля контекста null", async () => {
+    const store = enabledStore([
+      exp("A", {
+        ...ALWAYS_LONG,
+        universe: { type: "symbols", symbols: ["ETHUSDT"] },
+      }),
+    ]);
+    const base = market(["ETHUSDT"]).deps(store);
+    const deps: TickDeps = {
+      ...base,
+      candles: (mk, symbol, interval, limit, start) =>
+        symbol === "BTCUSDT"
+          ? Promise.reject(new Error("нет сети"))
+          : base.candles(mk, symbol, interval, limit, start),
+      funding: () => Promise.reject(new Error("нет сети")),
+    };
+    const r = await runTick(deps, T0);
+    expect(r.opened).toBe(1);
+    expect(store.trades()[0].entryContext).toMatchObject({
+      btcAboveEma200_4h: null,
+      btcAdx14_4h: null,
+      funding: null,
+    });
+  });
+
+  it("MAE: проход выходов сохраняет худшую цену, закрытие — со свечой выхода", async () => {
+    const m = market(["BTCUSDT"], (t) => {
+      if (t === T0 + MIN) return { low: 99.1 };
+      if (t === T0 + 3 * MIN) return { high: 105, low: 98.9 };
+      return {};
+    });
+    const store = enabledStore([exp("A", ALWAYS_LONG)]);
+    await runTick(m.deps(store), T0);
+    m.setNow(T0 + 2 * MIN);
+    await runTick(m.deps(store), T0 + 2 * MIN);
+    expect(store.trades()[0].mae).toBe(99.1);
+    m.setNow(T0 + 5 * MIN);
+    await runTick(m.deps(store), T0 + 5 * MIN);
+    const [t] = store.trades();
+    expect(t.exitReason).toBe("tp");
+    expect(t.mae).toBe(98.9);
+  });
+
+  it("сделка без MAE (до spec 0030) — MAE остаётся null", async () => {
+    const m = market(["BTCUSDT"], (t) => (t === T0 + MIN ? { low: 99 } : {}));
+    const store = enabledStore([exp("A", ALWAYS_LONG)]);
+    await runTick(m.deps(store), T0);
+    const [opened] = store.trades();
+    await store.updateTrade(opened.id, {
+      stop: opened.stop,
+      extreme: opened.extreme,
+      mae: null,
+      checkedUntil: opened.checkedUntil,
+    });
+    m.setNow(T0 + 3 * MIN);
+    await runTick(m.deps(store), T0 + 3 * MIN);
+    expect(store.trades()[0].mae).toBeNull();
+  });
+
+  it("отсечённые сигналы: лимит позиций и занятый символ — с ценой, стопом и тейком, которые были бы", async () => {
+    const store = enabledStore([
+      exp("A", { ...ALWAYS_LONG, universe: { type: "top", n: 3 }, maxOpen: 2 }),
+    ]);
+    const m = market();
+    await runTick(m.deps(store), T0);
+    expect(store.trades()).toHaveLength(2);
+    const [skip] = store.skipped();
+    expect(skip).toMatchObject({
+      runId: 1,
+      experimentId: "A",
+      market: "usdm",
+      symbol: "SOLUSDT",
+      direction: "long",
+      bar: T0 - HOUR,
+      at: new Date(T0).toISOString(),
+      reason: "max-open",
+    });
+    expect(skip.entryPrice).toBeCloseTo(100.05);
+    expect(skip.stop).toBeCloseTo(98.05);
+    expect(skip.takeProfit).toBeCloseTo(104.05);
+
+    // Следующая свеча: BTC и ETH уже в позиции у эксперимента, SOL — лимит.
+    m.setNow(T0 + HOUR);
+    await runTick(m.deps(store), T0 + HOUR);
+    expect(
+      store
+        .skipped()
+        .filter((s) => s.bar === T0)
+        .map((s) => `${s.symbol}:${s.reason}`)
+        .sort(),
+    ).toEqual(["BTCUSDT:max-open", "ETHUSDT:max-open", "SOLUSDT:max-open"]);
+  });
+
+  it("занятый символ при свободном лимите — symbol-busy; повтор тика не дублирует", async () => {
+    const store = enabledStore([exp("A", ALWAYS_LONG)]);
+    const m = market(["BTCUSDT"]);
+    await runTick(m.deps(store), T0);
+    m.setNow(T0 + HOUR);
+    await runTick(m.deps(store), T0 + HOUR);
+    await runTick(m.deps(store), T0 + HOUR);
+    expect(store.skipped().map((s) => s.reason)).toEqual(["symbol-busy"]);
+  });
+
+  it("нет свободных денег — no-budget", async () => {
+    const store = enabledStore([
+      { ...exp("A", ALWAYS_LONG), initialBudget: 4 },
+    ]);
+    const r = await runTick(market(["BTCUSDT"]).deps(store), T0);
+    expect(r.opened).toBe(0);
+    expect(store.skipped().map((s) => s.reason)).toEqual(["no-budget"]);
+  });
+
+  it("фильтр отсёк сигнал — это не отсечённый лимитом сигнал; hold не пишет занятость", async () => {
+    const trend = enabledStore([
+      exp("A", {
+        ...ALWAYS_LONG,
+        maxOpen: 1,
+        trendFilter: { timeframe: "4h", period: 50 },
+      }),
+    ]);
+    await runTick(market().deps(trend), T0);
+    expect(trend.skipped()).toEqual([]);
+
+    const hold = enabledStore([exp("H")]);
+    const m = market(["BTCUSDT"]);
+    await runTick(m.deps(hold), T0);
+    m.setNow(T0 + HOUR);
+    await runTick(m.deps(hold), T0 + HOUR);
+    expect(hold.skipped()).toEqual([]);
+  });
+
+  it("объём ограничен: не больше skippedSignalsCap на (эпоха, эксперимент, причина)", () => {
+    const row = (id: string, experimentId: string, reason: SkipReason) => ({
+      id,
+      runId: 1,
+      experimentId,
+      market: "usdm" as const,
+      symbol: "BTCUSDT",
+      direction: "long" as const,
+      bar: 0,
+      at: new Date(T0).toISOString(),
+      reason,
+      entryPrice: 100,
+      stop: 98,
+      takeProfit: null,
+    });
+    const rows = [
+      row("1", "A", "max-open"),
+      row("2", "A", "max-open"),
+      row("3", "A", "max-open"),
+      row("4", "A", "symbol-busy"),
+      row("5", "B", "max-open"),
+    ];
+    const kept = capSkipped(
+      rows,
+      [
+        { experimentId: "A", reason: "max-open", count: 2 },
+        { experimentId: "B", reason: "max-open", count: 3 },
+      ],
+      3,
+    );
+    expect(kept.map((r) => r.id)).toEqual(["1", "4"]);
+  });
+
+  it("лимит и срок хранения применяются в тике", async () => {
+    const store = enabledStore([
+      exp("A", {
+        ...ALWAYS_LONG,
+        universe: { type: "top", n: 3 },
+        maxOpen: 1,
+      }),
+    ]);
+    const old = {
+      id: "old",
+      runId: 1,
+      experimentId: "A",
+      market: "usdm" as const,
+      symbol: "XRPUSDT",
+      direction: "long" as const,
+      bar: 0,
+      at: new Date(
+        T0 - (ENGINE.skippedSignalsRetentionDays + 1) * 24 * HOUR,
+      ).toISOString(),
+      reason: "symbol-busy" as const,
+      entryPrice: 1,
+      stop: null,
+      takeProfit: null,
+    };
+    const filler = Array.from(
+      { length: ENGINE.skippedSignalsCap - 1 },
+      (_, i) => ({
+        ...old,
+        id: `f${i}`,
+        reason: "max-open" as const,
+        at: new Date(T0 - HOUR).toISOString(),
+      }),
+    );
+    await store.insertSkippedSignals([old, ...filler]);
+    await runTick(market().deps(store), T0);
+    const skipped = store.skipped();
+    // Из двух отсечённых в тике (ETH, SOL) в лимит влез один; старая запись удалена.
+    expect(skipped.filter((s) => s.reason === "max-open")).toHaveLength(
+      ENGINE.skippedSignalsCap,
+    );
+    expect(skipped.some((s) => s.symbol === "ETHUSDT")).toBe(true);
+    expect(skipped.some((s) => s.symbol === "SOLUSDT")).toBe(false);
+    expect(skipped.some((s) => s.id === "old")).toBe(false);
+  });
+});
+
+describe("runTick: сбой свечей фильтра тренда (ревью 0030)", () => {
+  it("ошибка загрузки свечей старшего TF — вход по символу запрещён, остальные символы обрабатываются, одна ошибка на ключ", async () => {
+    const trend = {
+      ...ALWAYS_LONG,
+      universe: { type: "top", n: 3 },
+      trendFilter: { timeframe: "4h", period: 50 },
+    } satisfies Partial<ExperimentConfig>;
+    const store = enabledStore([exp("A", trend), exp("B", trend)]);
+    // Старший TF ниже цены (close 90) — тренд разрешает long; у ETH свечи 4h не грузятся.
+    const base = market(undefined, undefined, (_s, interval) =>
+      interval === "4h" ? { open: 90, high: 90.5, low: 89.5, close: 90 } : {},
+    ).deps(store);
+    const deps: TickDeps = {
+      ...base,
+      candles: (mk, symbol, interval, limit, start) =>
+        symbol === "ETHUSDT" && interval === "4h"
+          ? Promise.reject(new Error("нет сети"))
+          : base.candles(mk, symbol, interval, limit, start),
+    };
+    const r = await runTick(deps, T0);
+    expect(r.evaluated).toEqual(["A", "B"]);
+    expect(r.opened).toBe(4);
+    expect(store.trades().some((t) => t.symbol === "ETHUSDT")).toBe(false);
+    expect(r.errors.filter((e) => e.startsWith("тренд"))).toEqual([
+      "тренд usdm ETHUSDT 4h: нет сети",
+    ]);
+  });
+});
+
 describe("runTick: COIN-M (spec 0023)", () => {
   const coinmExp = (id: string, patch: Partial<ExperimentConfig> = {}) =>
     exp(
@@ -819,5 +1115,31 @@ describe("runTick: COIN-M (spec 0023)", () => {
     expect(cm.logs.filter((l) => l.startsWith("warn"))).toHaveLength(1);
     // Свеча COIN-M не помечена обработанной — следующий тик попробует снова.
     expect(r.evaluated).toEqual(["U"]);
+  });
+
+  it("контекст входа и отсечённые сигналы COIN-M (spec 0030): BTC 4h — BTCUSD_PERP, funding своей группы, market = coinm", async () => {
+    const store = enabledStore([coinmExp("C", ALWAYS_LONG)]);
+    const cm = coinmMarket();
+    await runTick(cm.deps(store), T0);
+    const [t] = store.trades();
+    expect(t.entryContext).toMatchObject({
+      universeRank: 1,
+      universeSize: 1,
+      btcAboveEma200_4h: false,
+      funding: null, // в ставках группы символа нет
+    });
+    expect(cm.funding).toEqual(["coinm"]);
+    expect(
+      cm.m.calls.filter((c) => c.interval === "4h").map((c) => c.symbol),
+    ).toEqual(["BTCUSD_PERP"]);
+    cm.m.setNow(T0 + HOUR);
+    await runTick(cm.deps(store), T0 + HOUR);
+    expect(store.skipped()).toEqual([
+      expect.objectContaining({
+        market: "coinm",
+        symbol: "BTCUSD_PERP",
+        reason: "symbol-busy",
+      }),
+    ]);
   });
 });

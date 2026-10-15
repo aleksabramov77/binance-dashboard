@@ -141,7 +141,10 @@ export function computeMarketContext(input: MarketInput): MarketContext {
   };
 }
 
-/** Свечи BTC (spot) с публичного API: 1000 × 4h ≈ 166 дней — EMA200 (34 дня) есть и на начало периода до ~4 месяцев. */
+/**
+ * Свечи BTC (spot) с публичного API: 1000 × 4h ≈ 166 дней — EMA200 (34 дня) есть и на начало периода до ~4 месяцев.
+ * now — конец периода: для прошлой эпохи (`--run`) свечи после её конца отбрасываются, «последняя цена» — на конец.
+ */
 export async function loadMarketContext(
   periodStart: number,
   now: number,
@@ -151,7 +154,14 @@ export async function loadMarketContext(
     fetchKlines("spot", symbol, "4h", 1000),
     fetchKlines("spot", symbol, "1d", 90),
   ]);
-  return computeMarketContext({ symbol, h4, d1, periodStart, now });
+  const before = (c: Candle) => c.openTime < now;
+  return computeMarketContext({
+    symbol,
+    h4: h4.filter(before),
+    d1: d1.filter(before),
+    periodStart,
+    now,
+  });
 }
 
 export function describeRegime(m: MarketContext): string {
