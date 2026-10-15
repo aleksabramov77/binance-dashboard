@@ -48,6 +48,11 @@ Playwright тестировщика заходит без GitHub. Адрес и 
 На этом сервере агент-тестировщик проверяет задачу **до PR** и **ещё раз после правок по ревью** — перед повторным
 ревью (`.config/flows/feature.yaml`, `bug.yaml`).
 
+Приватные эксперименты (spec 0015) на сервере worktree: `.env.local` worktree — ссылка на основной checkout с
+прод-`DATABASE_URL`, поэтому обычный `pnpm lab:private` целится в прод и без `--prod` ничего не пишет. В базу сервера
+worktree — `pnpm wt stop` → `DATABASE_URL= pnpm lab:private` (пишет в `data/pglite` worktree) → `pnpm wt serve`.
+Запись в прод — только явно: `pnpm lab:private --prod`.
+
 ## Связанные файлы
 
 Неотслеживаемые файлы, без которых worktree не работает, перечислены в `.claude/worktree-links.json` основного

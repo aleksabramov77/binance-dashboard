@@ -150,13 +150,19 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - `private/experiments.json` — массив в формате каталога (`experimentSchema` из `trading-core`): `id`, `market`,
   `name`, `hypothesis`, `config`; необязательные `initialBudget` (10 000), `enabled` (`true`), `demoMirror` (`false`).
   id — `P` + буква рынка + номер: `PS01` (spot), `PF01` (futures); с id каталога (`S..`, `F..`) не пересекается.
-- `pnpm lab:private [--dry-run] [--file <path>]` (`scripts/lab-private.ts`, чистая логика и тесты —
+- `pnpm lab:private [--dry-run] [--prod] [--file <path>]` (`scripts/lab-private.ts`, чистая логика и тесты —
   `scripts/lib/labPrivate.ts`): проверяет файл целиком (схема, лишние поля, префикс ↔ рынок, повторы, пересечение
   с каталогом) до подключения к БД, печатает цель (хост Postgres без пароля или «локальная PGlite») и план
   («новый» / «обновится» / «без изменений»), затем пишет новые и изменённые эксперименты через `seedExperiments`
   в одной транзакции. БД — как у `pnpm db:migrate`: `DATABASE_URL` из `.env.local`, без неё — PGlite (её скрипт
   мигрирует сам; прод мигрирует деплой). `enabled`, `demoMirror`, `initialBudget` пишутся только при вставке —
   тумблеры `/settings`, бюджеты и сделки повторный запуск не трогает.
+- **Защита прода:** цель Postgres (задан `DATABASE_URL`) — это прод; запись туда только с явным `--prod`
+  (`pnpm lab:private --prod`). Без него скрипт печатает цель и план, объясняет, как писать, и выходит с ошибкой —
+  в БД ничего не пишется (`decideLabPrivateWrite`). `--dry-run` работает без `--prod`, для PGlite `--prod` не нужен.
+  В worktree `.env.local` — ссылка на основной checkout с прод-`DATABASE_URL`, а локальный сервер worktree работает
+  на `data/pglite`: чтобы эксперимент появился на нём — `pnpm wt stop` → `DATABASE_URL= pnpm lab:private` →
+  `pnpm wt serve`.
 - Дальше приватный эксперимент живёт только в таблице `experiments`: движок (VM и Edge Function), `/experiments`
   и `/experiments/[id]` (id вне каталога рендерятся по запросу) работают с ним как с экспериментом каталога. Сид
   каталога на тике делает upsert только своих id и приватные строки не трогает (тест в `engineTick.test.ts`).
