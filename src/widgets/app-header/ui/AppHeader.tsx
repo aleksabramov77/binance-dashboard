@@ -14,7 +14,7 @@ export function AppHeader() {
   const pathname = usePathname();
   return (
     <header className="border-b bg-card/60 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 sm:px-8">
+      <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 sm:px-8">
         <Link
           href="/"
           className="flex items-center gap-2 font-semibold tracking-tight"
@@ -32,7 +32,7 @@ export function AppHeader() {
           <UserMenu />
         </div>
       </div>
-      <nav className="mx-auto flex w-full max-w-7xl gap-1 overflow-x-auto px-4 pb-2 text-sm sm:px-8">
+      <nav className="flex w-full gap-1 overflow-x-auto px-4 pb-2 text-sm sm:px-8">
         {NAV_ITEMS.map((item) => (
           <Link
             key={item.href}
