@@ -254,19 +254,22 @@ function ExperimentRow({
   const s = e.stats;
   return (
     <TableRow className={cn(!e.enabled && "opacity-50")}>
-      <TableCell className="max-w-md whitespace-normal">
+      <TableCell className="whitespace-normal">
         <Link
           href={`/experiments/${encodeURIComponent(e.id)}`}
           className="group flex flex-col gap-0.5"
         >
-          <span className="flex items-center gap-2">
+          {/* Код, название и бейджи — в одну строку; переносятся, только если так таблица помещается без прокрутки
+              (режим wrap, spec 0018, решения 5 и 7). */}
+          <span className="flex items-center gap-2 whitespace-nowrap group-data-[fit=wrap]/table:whitespace-normal">
             <span className="font-mono text-xs text-muted-foreground">
               {e.id}
             </span>
             <span className="font-medium group-hover:underline">{e.name}</span>
             {!e.enabled && <Badge variant="outline">выключен</Badge>}
           </span>
-          <span className="line-clamp-1 text-xs text-muted-foreground">
+          {/* contain-inline-size: гипотеза не участвует в ширине колонки, только обрезается многоточием. */}
+          <span className="line-clamp-1 text-xs text-muted-foreground contain-inline-size">
             {e.hypothesis}
           </span>
         </Link>
@@ -373,7 +376,7 @@ function ExperimentsDashboard() {
       )}
 
       {data && (
-        <div className="overflow-x-auto rounded-xl border bg-card">
+        <div className="overflow-clip rounded-xl border bg-card">
           <Table>
             <TableHeader>
               <TableRow>

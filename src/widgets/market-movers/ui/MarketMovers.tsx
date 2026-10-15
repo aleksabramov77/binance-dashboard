@@ -62,11 +62,11 @@ function MoversTable({
   const { sort, head } = useTableSort(table);
   const rows = sort ? sortRows(movers, SORT_VALUE[sort.key], sort.dir) : movers;
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader>
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="overflow-x-auto px-0">
+      <CardContent className="px-0">
         <Table>
           <TableHeader>
             <TableRow>

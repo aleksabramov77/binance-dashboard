@@ -85,6 +85,11 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Место под вертикальную полосу прокрутки всегда: обычная (не накладная) полоса, появляясь и исчезая, не меняет
+     ширину страницы и не переключает раскладку таблиц туда-обратно (spec 0018). */
+  html {
+    scrollbar-gutter: stable;
+  }
   body {
     @apply bg-background text-foreground font-sans;
   }

@@ -58,7 +58,7 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
     ? sortRows(holdings, SORT_VALUE[sort.key], sort.dir)
     : sortRows(holdings, SORT_VALUE.usd, "desc");
   return (
-    <div className="overflow-x-auto rounded-xl border bg-card">
+    <div className="overflow-clip rounded-xl border bg-card">
       <Table>
         <TableHeader>
           <TableRow>
