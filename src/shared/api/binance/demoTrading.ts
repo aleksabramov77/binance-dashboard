@@ -336,7 +336,7 @@ export async function demoSpotCancelByClientId(
 
 /**
  * Изолированная маржа и плечо для символа. «Уже установлено» (-4046) — не ошибка. По символу уже
- * есть ордера/позиция другого зеркала (-4047/-4048 — в Hedge это нормально): тип маржи не меняется,
+ * есть ордера/позиция другого зеркала (-4047/-4048, на демо -4067): тип маржи не меняется,
  * вход идёт с тем, что есть — "kept". Плечо меняется и при открытой позиции.
  */
 export async function demoFuturesPrepare(
@@ -356,7 +356,9 @@ export async function demoFuturesPrepare(
     );
   } catch (error) {
     const code = error instanceof BinanceApiError ? error.code : undefined;
-    if (code === -4047 || code === -4048) margin = "kept";
+    // Демо на marginType при открытых ордерах отвечает -4067 (проверено 2026-10-15), по документации — -4047.
+    if (code !== undefined && [-4047, -4048, -4067, -4068].includes(code))
+      margin = "kept";
     else if (code !== -4046) throw error;
   }
   await signedRequest(

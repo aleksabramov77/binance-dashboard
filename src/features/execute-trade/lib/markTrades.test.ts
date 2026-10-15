@@ -396,6 +396,23 @@ describe("markTrades — несколько сделок дашборда по �
     expect(marks.get(manual.orderId)?.role).toBe("exit");
   });
 
+  it("выход без своего id при нескольких открытых — к самой поздней (старое закрытие до PR 2d)", () => {
+    const old = order({ side: "BUY", time: 1, quantity: 40 });
+    const recent = order({ side: "BUY", time: 2, quantity: 40 });
+    const exit = order({ side: "SELL", time: 3, quantity: 40, realizedPnl: 1 });
+    const marks = markTrades(
+      [old, recent, exit],
+      state({
+        groups: new Map([
+          [old.orderId, "bdold"],
+          [recent.orderId, "bdnew"],
+        ]),
+      }),
+    );
+    expect(statusOf(marks, recent)).toBe("manual-profit");
+    expect(statusOf(marks, old)).toBe("unknown");
+  });
+
   it("Hedge: лонг и шорт одной монеты — разные сделки, позиция по своей стороне", () => {
     const l = order({ side: "BUY", time: 1, positionSide: "LONG" });
     const sh = order({ side: "SELL", time: 2, positionSide: "SHORT" });
