@@ -25,6 +25,8 @@ export {
   paperTradesTable,
   type RunRow,
   runsTable,
+  type SkippedSignalRow,
+  skippedSignalsTable,
 } from "./model/db.ts";
 // Контракт API движка: статус и тумблер.
 export {

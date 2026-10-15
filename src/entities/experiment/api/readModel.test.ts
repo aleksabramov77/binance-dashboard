@@ -1,8 +1,13 @@
 import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { experimentsTable, runsTable } from "../model/db";
+import { statsQuerySchema } from "../model/statsView";
+import {
+  experimentDetailResponseSchema,
+  experimentsResponseSchema,
+} from "../model/view";
 import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
 import {
   readExperimentDetail,
@@ -69,6 +74,8 @@ const trade = (
   pnl,
   rMultiple: pnl === null ? null : pnl / 2,
   demoOrderRef: null,
+  mae: null,
+  entryContext: {},
   signal: {},
 });
 
@@ -115,6 +122,28 @@ describe("чтение для страниц лаборатории", () => {
     expect(detail?.stats.trades).toBe(3);
     expect(detail?.equity.map((p) => p.equity)).toEqual([1000, 1010, 1006]);
     expect(await readExperimentDetail(db, "NOPE", false, 10)).toBeNull();
+  });
+
+  it("сделки до spec 0030 (без контекста входа и MAE) не ломают страницы и контракт API", async () => {
+    await seedExperiments(db, [exp("F01")]);
+    const run = await ensureRun(db);
+    // Строка прод-формата: новые колонки не заданы — значения по умолчанию миграции.
+    await db.execute(
+      sql`insert into paper_trades (id, run_id, experiment_id, market, symbol, direction, opened_at, entry_price, quantity, initial_stop, stop, atr, extreme, checked_until, closed_at, exit_price, exit_reason, pnl, r_multiple) values ('old', ${run}, 'F01', 'futures', 'BTCUSDT', 'long', now() - interval '1 hour', 100, 1, 98, 98, 1, 101, 0, now(), 101, 'tp', 1, 0.5)`,
+    );
+    const detail = await readExperimentDetail(db, "F01", false, 10);
+    expect(detail?.trades[0]).toMatchObject({ mae: null, entryContext: {} });
+    expect(experimentDetailResponseSchema.parse(detail).trades).toHaveLength(1);
+    const overview = await readExperimentsOverview(db, false);
+    expect(
+      experimentsResponseSchema.parse(overview).experiments[0].stats.closed,
+    ).toBe(1);
+    const stats = await readTradeStats(
+      db,
+      statsQuerySchema.parse({}),
+      Date.now(),
+    );
+    expect(stats?.total.closed).toBe(1);
   });
 
   it("строка с незнакомым полем конфига не роняет страницы: пропускается и уходит в onInvalid (spec 0029)", async () => {
@@ -266,6 +295,56 @@ describe("данные для отчёта лаборатории (pnpm lab:repo
       ["F02", "2026-10-10T05:00:00.000Z"],
     ]);
     expect(data.trades.map((t) => t.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("readLabDataset --run: прошлая эпоха с концом, сброс из следующей эпохи её учёт не трогает, отсечённые сигналы", async () => {
+    await seedExperiments(db, [exp("F01"), exp("F02")]);
+    const store = createDbExperimentStore(db);
+    const first = await ensureRun(db);
+    await store.insertTrade(trade("old", first, "F02", 1, 5));
+    await store.insertSkippedSignals([
+      {
+        id: "s1",
+        runId: first,
+        experimentId: "F02",
+        market: "futures",
+        symbol: "ETHUSDT",
+        direction: "long",
+        bar: 0,
+        at: "2026-10-10T01:00:00.000Z",
+        reason: "max-open",
+        entryPrice: 100,
+        stop: 98,
+        takeProfit: null,
+      },
+    ]);
+    const [second] = await db
+      .insert(runsTable)
+      .values({ note: "вторая" })
+      .returning();
+    // сброс F02 — уже во второй эпохе
+    await db
+      .update(experimentsTable)
+      .set({ resetAt: new Date(second.startedAt.getTime() + 1000) })
+      .where(eq(experimentsTable.id, "F02"));
+
+    const past = await readLabDataset(db, undefined, first);
+    expect(past.run).toEqual({
+      id: first,
+      startedAt: expect.any(String),
+      endedAt: second.startedAt.toISOString(),
+    });
+    expect(past.experiments.find((e) => e.id === "F02")?.resetAt).toBeNull();
+    expect(past.trades.map((t) => t.id)).toEqual(["old"]);
+    expect(past.skipped.map((s) => s.id)).toEqual(["s1"]);
+
+    const current = await readLabDataset(db);
+    expect(current.run).toMatchObject({ id: second.id, endedAt: null });
+    expect(current.trades).toEqual([]);
+    expect(current.skipped).toEqual([]);
+    await expect(readLabDataset(db, undefined, 999)).rejects.toThrow(
+      /эпохи 999 нет; есть: /,
+    );
   });
 
   it("readExperimentFlags: тумблеры эксперимента и демо-зеркала по id", async () => {

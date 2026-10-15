@@ -60,6 +60,8 @@ const trade = (id: string, runId: number, closed = false): PaperTrade => ({
   pnl: closed ? 3.9 : null,
   rMultiple: closed ? 1.95 : null,
   demoOrderRef: null,
+  mae: null,
+  entryContext: {},
   signal: { bar: 1 },
 });
 

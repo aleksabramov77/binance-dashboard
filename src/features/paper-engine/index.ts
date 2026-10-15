@@ -35,6 +35,7 @@ export {
   type EngineRunner,
   type ExperimentStore,
   RUNNERS,
+  type SkippedSignalCount,
   type TradeClose,
   type TradeProgress,
 } from "./model/store.ts";

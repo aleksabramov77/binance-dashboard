@@ -83,11 +83,47 @@ export const paperTradesTable = pgTable(
     rMultiple: doublePrecision("r_multiple"),
     demoOrderRef: text("demo_order_ref"),
     signal: jsonb("signal").$type<Json>().notNull().default({}),
+    /** Худшая цена с входа (MAE, spec 0030); null — сделка до неё. */
+    mae: doublePrecision("mae"),
+    /** Снимок рынка на входе (entryContextSchema, spec 0030); `{}` — сделка до неё. */
+    entryContext: jsonb("entry_context").$type<Json>().notNull().default({}),
   },
   (t) => [
     index("paper_trades_run_experiment_idx").on(t.runId, t.experimentId),
     index("paper_trades_run_closed_idx").on(t.runId, t.closedAt),
     index("paper_trades_symbol_idx").on(t.symbol),
+  ],
+);
+
+/**
+ * Отсечённые сигналы (spec 0030): сигнал прошёл фильтры эксперимента, но сделку не открыли — лимит позиций,
+ * символ уже в позиции, нет денег. Объём ограничен движком: не больше ENGINE.skippedSignalsCap строк на
+ * (эпоха, эксперимент, причина) и хранение ENGINE.skippedSignalsRetentionDays дней (features/paper-engine).
+ */
+export const skippedSignalsTable = pgTable(
+  "skipped_signals",
+  {
+    /** run-эксперимент-символ-свеча-причина: повтор тика не дублирует строку. */
+    id: text("id").primaryKey(),
+    runId: integer("run_id")
+      .notNull()
+      .references(() => runsTable.id),
+    experimentId: text("experiment_id")
+      .notNull()
+      .references(() => experimentsTable.id),
+    market: text("market").notNull(),
+    symbol: text("symbol").notNull(),
+    direction: text("direction").notNull(),
+    /** openTime свечи сигнала ТФ эксперимента, мс. */
+    bar: bigint("bar", { mode: "number" }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    reason: text("reason").notNull(),
+    entryPrice: doublePrecision("entry_price").notNull(),
+    stop: doublePrecision("stop"),
+    takeProfit: doublePrecision("take_profit"),
+  },
+  (t) => [
+    index("skipped_signals_run_experiment_idx").on(t.runId, t.experimentId),
   ],
 );
 
@@ -147,3 +183,4 @@ export type RunRow = typeof runsTable.$inferSelect;
 export type PaperTradeRow = typeof paperTradesTable.$inferSelect;
 export type NewPaperTradeRow = typeof paperTradesTable.$inferInsert;
 export type DemoMirrorOrderRow = typeof demoMirrorOrdersTable.$inferSelect;
+export type SkippedSignalRow = typeof skippedSignalsTable.$inferSelect;

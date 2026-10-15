@@ -1,4 +1,9 @@
-import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
+import type {
+  Experiment,
+  PaperTrade,
+  SkippedSignal,
+  SkipReason,
+} from "@binance-dashboard/trading-core";
 // Модуль среды-независимый (Node на VM и Deno в Edge Function Supabase): без @/…, node:*, env и таймеров.
 
 /** Кто исполняет тики: VM Oracle (in-process таймер) или Edge Function Supabase. */
@@ -20,17 +25,24 @@ export const ENGINE_KEYS = {
   nextBudget: "next_budget",
 } as const;
 
-/** Поля сделки, которые меняет проход выходов (трейлинг, безубыток, проверенные минуты). */
+/** Поля сделки, которые меняет проход выходов (трейлинг, безубыток, экстремумы, проверенные минуты). */
 export type TradeProgress = Pick<
   PaperTrade,
-  "stop" | "extreme" | "checkedUntil"
+  "stop" | "extreme" | "mae" | "checkedUntil"
 >;
 
-/** Поля закрытия сделки. */
+/** Поля закрытия сделки; mae не задана — остаётся прежней (ручное закрытие при сбросе). */
 export type TradeClose = Pick<
   PaperTrade,
   "closedAt" | "exitPrice" | "exitReason" | "fees" | "pnl" | "rMultiple"
-> & { closedAt: string };
+> & { closedAt: string; mae?: number | null };
+
+/** Сколько отсечённых сигналов эксперимента с этой причиной уже записано в эпохе. */
+export interface SkippedSignalCount {
+  experimentId: string;
+  reason: SkipReason;
+  count: number;
+}
 
 /**
  * Хранилище лаборатории. Реализации: in-memory (тесты, Edge без БД) и Drizzle (задача 2b).
@@ -55,6 +67,15 @@ export interface ExperimentStore {
   updateTrade(id: string, progress: TradeProgress): Promise<void>;
   closeTrade(id: string, close: TradeClose): Promise<void>;
   /** Значение ключа engine_state; undefined — ключа нет. Форму проверяет вызывающий (Zod). */
+  /** Отсечённые сигналы (spec 0030): записанные в эпохе — по эксперименту и причине (для лимита объёма). */
+  skippedSignalCounts(
+    runId: number,
+    experimentIds: string[],
+  ): Promise<SkippedSignalCount[]>;
+  /** Вставка; запись с тем же id уже есть — пропускается. */
+  insertSkippedSignals(rows: SkippedSignal[]): Promise<void>;
+  /** Удалить записи старше before (ISO) — срок хранения. */
+  pruneSkippedSignals(before: string): Promise<void>;
   getState(key: string): Promise<unknown>;
   setState(key: string, value: unknown): Promise<void>;
 }

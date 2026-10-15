@@ -1,10 +1,13 @@
-import { desc, eq, isNull } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { desc, eq, isNull, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import {
   experimentsTable as experiments,
   paperTradesTable as paperTrades,
   runsTable as runs,
+  skippedSignalsTable as skippedSignals,
 } from "./db.ts";
 
 let db: Db;
@@ -114,5 +117,55 @@ describe("таблицы лаборатории (PGlite)", () => {
         .insert(paperTrades)
         .values({ ...trade("x", run.id), experimentId: "NOPE" }),
     ).rejects.toThrow();
+  });
+});
+
+describe("миграция 0007 (spec 0030): контекст входа, MAE, отсечённые сигналы", () => {
+  const migration = readFileSync(
+    path.join(process.cwd(), "drizzle/0007_entry_context_mae_skipped.sql"),
+    "utf8",
+  )
+    .split("--> statement-breakpoint")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  it("сделка прод-формата (без новых колонок) получает entry_context = {} и mae = null", async () => {
+    const [run] = await db.insert(runs).values({}).returning();
+    await db.execute(
+      sql`insert into paper_trades (id, run_id, experiment_id, market, symbol, direction, opened_at, entry_price, quantity, atr, extreme, checked_until) values ('old', ${run.id}, 'F06', 'futures', 'BTCUSDT', 'long', now(), 100, 1, 1, 100, 0)`,
+    );
+    const [old] = await db
+      .select()
+      .from(paperTrades)
+      .where(eq(paperTrades.id, "old"));
+    expect(old.entryContext).toEqual({});
+    expect(old.mae).toBeNull();
+  });
+
+  it("повторный запуск на применённой схеме с данными ничего не ломает", async () => {
+    const [run] = await db.insert(runs).values({}).returning();
+    await db.insert(paperTrades).values({
+      ...trade("t1", run.id),
+      mae: 99,
+      entryContext: { v: 1, adx14: 30 },
+    });
+    await db.insert(skippedSignals).values({
+      id: "s1",
+      runId: run.id,
+      experimentId: "F06",
+      market: "futures",
+      symbol: "ETHUSDT",
+      direction: "long",
+      bar: 0,
+      at: new Date(),
+      reason: "max-open",
+      entryPrice: 100,
+      stop: 98,
+      takeProfit: null,
+    });
+    for (const statement of migration) await db.execute(sql.raw(statement));
+    const [t1] = await db.select().from(paperTrades);
+    expect(t1).toMatchObject({ mae: 99, entryContext: { v: 1, adx14: 30 } });
+    expect(await db.select().from(skippedSignals)).toHaveLength(1);
   });
 });
