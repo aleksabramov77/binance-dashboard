@@ -20,6 +20,9 @@ export const exchangeInfoSchema = z.object({
         symbol: z.string(),
         status: z.string(),
         filters: z.array(filterSchema),
+        // Только спот: разрешены ли составные заявки (OCO, OTO/OTOCO).
+        ocoAllowed: z.boolean().optional(),
+        otoAllowed: z.boolean().optional(),
       })
       .loose(),
   ),
@@ -49,6 +52,46 @@ export const spotOrderSchema = z
 
 export const orderListSchema = z
   .object({ orderListId: z.number(), listStatusType: z.string() })
+  .loose();
+
+/**
+ * Ответ составной заявки OTO / OTOCO (newOrderRespType=FULL): по отчёту на каждый ордер —
+ * рабочий (вход) первым, затем отложенные (стоп/тейк, PENDING_NEW до исполнения входа).
+ */
+export const orderListReportsSchema = z
+  .object({
+    orderListId: z.number(),
+    listStatusType: z.string(),
+    listOrderStatus: z.string(),
+    orderReports: z.array(
+      z
+        .object({
+          orderId: z.number(),
+          type: z.string(),
+          side: z.enum(["BUY", "SELL"]),
+          status: z.string(),
+          origQty: decimal,
+          executedQty: decimal,
+          cummulativeQuoteQty: decimal,
+          fills: z
+            .array(
+              z.object({
+                price: decimal,
+                qty: decimal,
+                commission: decimal,
+                commissionAsset: z.string(),
+              }),
+            )
+            .default([]),
+        })
+        .loose(),
+    ),
+  })
+  .loose();
+
+/** Один ордер спота (GET /api/v3/order) — статус отложенного ордера после входа. */
+export const spotOrderStatusSchema = z
+  .object({ orderId: z.number(), type: z.string(), status: z.string() })
   .loose();
 
 export const futuresOrderSchema = z
@@ -180,4 +223,5 @@ export const futuresUserTradesSchema = z.array(
 );
 
 export type SpotOrder = z.infer<typeof spotOrderSchema>;
+export type OrderListReports = z.infer<typeof orderListReportsSchema>;
 export type FuturesOrder = z.infer<typeof futuresOrderSchema>;

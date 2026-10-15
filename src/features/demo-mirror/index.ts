@@ -3,6 +3,7 @@
 export { MIRROR } from "./config/mirror";
 export {
   type MirrorDecision,
+  type MirrorListing,
   type MirrorOrderRequest,
   type MirrorTradeInput,
   mirrorLevels,
