@@ -10,13 +10,16 @@ const SRC = path.resolve(import.meta.dirname, "../../..");
 const sources = readdirSync(SRC, { recursive: true, encoding: "utf8" })
   .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file))
   .map((file) => readFileSync(path.join(SRC, file), "utf8"));
+// Вызов — с явным дженериком или без; объявление `function defineSortTable<K…>(` вызовом не считается.
 const calls = sources.flatMap((text) => [
-  ...text.matchAll(/\bdefineSortTable\(/g),
+  ...text.matchAll(/(?<!function )\bdefineSortTable\s*(?:<[^>]*>)?\(/g),
 ]);
 const names = sources.flatMap((text) =>
-  [...text.matchAll(/\bdefineSortTable\(\s*"([^"]+)"/g)].map(
-    (match) => match[1],
-  ),
+  [
+    ...text.matchAll(
+      /(?<!function )\bdefineSortTable\s*(?:<[^>]*>)?\(\s*"([^"]+)"/g,
+    ),
+  ].map((match) => match[1]),
 );
 
 describe("имена таблиц с сортировкой", () => {
