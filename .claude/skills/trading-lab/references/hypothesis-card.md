@@ -22,10 +22,20 @@
 {
   id: "F21",
   name: "MACD без фильтра ADX",
-  hypothesis: "F11 даёт 0,44R на сделку, но 25 сделок за 4 дня: без ADX > 25 сделок втрое больше — проверяем, что перевес не в фильтре.",
-  config: { ...F11, entry: { type: "macd" } },
+  hypothesis:
+    "F11 даёт 0,44R на сделку, но 25 сделок за 4 дня: без ADX > 25 сделок втрое больше — проверяем, что перевес не в фильтре.",
+  config: {
+    timeframe: "1h",
+    entry: { type: "macd" },
+    exit: { ...ATR15_RR2, breakevenAtR: 1 },
+    universe: TOP30,
+    directions: BOTH,
+    maxOpen: 5,
+  },
 },
 ```
+Константы (`TOP30`, `BOTH`, `ATR15_RR2`, `trail(n)`, `S04`, `F06`…) — только существующие в `catalog.ts`; нет
+подходящей — пиши конфиг явно.
 Обновить `catalog.test.ts` (список id). Новый тип входа/выхода — `strategies.ts`/`exits.ts` + тесты,
 `describeConfig.ts` — иначе не пишется.
 

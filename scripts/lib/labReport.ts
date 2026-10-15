@@ -1,10 +1,10 @@
 // Отчёт лаборатории для разбора экспериментов (`pnpm lab:report`, flow lab). Чистые функции: на входе —
 // эксперименты и сделки эпохи (+ контекст рынка), на выходе — метрики, разрезы, семейства, подсказки и
 // markdown/CSV для агента quant и скилла trading-lab (.claude/skills/trading-lab). Агрегаты PnL/PF/просадки —
-// общие с /stats (entities/experiment).
+// общие с /stats (entities/experiment). Считается всегда по всем экспериментам: семействам, архетипам и контролю
+// нужны соседи; «фокус» лишь выбирает, по каким экспериментам писать подробные разделы.
 import {
   type EntryRule,
-  type Experiment,
   type ExperimentMarket,
   type PaperTrade,
   TIMEFRAME_MS,
@@ -13,23 +13,16 @@ import {
   type ConfigLine,
   computeStats,
   describeConfig,
+  describeEntry,
   filterTrades,
   groupStats,
+  type LabExperiment,
   type TradeStats,
 } from "@/entities/experiment";
 import { describeMarket, type MarketContext } from "./labMarket";
 
 const DAY = 86_400_000;
 const MINUTE = 60_000;
-
-/** Контрольные эксперименты рынка (catalog.ts): случайный вход и buy & hold BTC. */
-export const CONTROLS: Record<
-  ExperimentMarket,
-  { random: string; hold: string }
-> = {
-  spot: { random: "S19", hold: "S20" },
-  futures: { random: "F19", hold: "F20" },
-};
 
 /** Пороги выборки закрытых сделок (trading-lab → references/metrics.md). */
 export const SAMPLE_THRESHOLDS = {
@@ -54,6 +47,17 @@ export const HINT_RULES = {
   rareSignalDays: 30,
   /** |t| ниже — перевес неотличим от нуля. */
   noEdgeT: 1,
+  /** t не выше — вход устойчиво против (кандидат на инверсию). */
+  negativeEdgeT: -2,
+} as const;
+
+/** Пороги флагов «подозрительно хорошо» — сначала искать ошибку (references/metrics.md). */
+export const FLAG_RULES = {
+  minClosed: SAMPLE_THRESHOLDS.preliminary,
+  winRate: 0.9,
+  profitFactor: 5,
+  /** На сколько R выход по tp может превышать цель из-за округлений. */
+  overTargetR: 0.25,
 } as const;
 
 export type SampleLevel =
@@ -97,6 +101,7 @@ export function archetypeOf(entry: EntryRule): Archetype {
 
 export type Hint =
   | "no-edge"
+  | "negative-edge"
   | "exit-cuts-winners"
   | "exit-gives-back"
   | "stop-in-noise"
@@ -108,19 +113,21 @@ export type Hint =
 
 export interface LabDataset {
   run: { id: number; startedAt: string };
-  experiments: Experiment[];
+  experiments: LabExperiment[];
   trades: PaperTrade[];
 }
 
 export interface LabReportOptions {
   /** Время отчёта, мс (снаружи — функции чистые). */
   now: number;
-  /** Только эти эксперименты; пусто — все. */
-  experimentIds?: string[];
+  /** Фокус: подробные разделы только по этим id; расчёты — по всем. Неизвестный id — ошибка. */
+  focus?: string[];
   /** Начало периода, мс; null — вся эпоха. */
   since?: number | null;
   /** Контекст рынка; null — не загружен (`--no-market` или сеть). */
   market?: MarketContext | null;
+  /** К какой БД подключались (describeDatabase) — в шапку отчёта. */
+  database?: string;
 }
 
 /** Компактная строка разреза. */
@@ -161,6 +168,12 @@ export interface ExperimentReport {
   demoMirror: boolean;
   archetype: Archetype;
   config: ConfigLine[];
+  /** Начало учёта эксперимента в отчёте: старт периода или его отдельный сброс, если он позже. */
+  accountedFrom: string;
+  /** Дней учёта эксперимента (темп сделок считается по ним). */
+  periodDays: number;
+  /** Дата отдельного сброса paper-учёта; null — не сбрасывался. */
+  resetAt: string | null;
   stats: TradeStats;
   /** PnL до вычета комиссий, USD — сколько съели издержки. */
   pnlBeforeFees: number;
@@ -191,7 +204,7 @@ export interface ExperimentReport {
     topTradeShare: number | null;
     avgReturnPctWithoutTop: number | null;
   };
-  /** Разница средней доходности сделки с контролем «случайный вход» своего рынка, п. п. */
+  /** Разница средней доходности сделки с контролем «случайный вход» своего рынка, п. п.; null — контроля нет. */
   vsRandomPct: number | null;
   byDirection: SliceRow[];
   byExitReason: SliceRow[];
@@ -240,16 +253,33 @@ export interface ArchetypeRow {
   avgR: number | null;
 }
 
+export type Controls = Record<
+  ExperimentMarket,
+  { random: string | null; hold: string | null }
+>;
+
 export interface LabReport {
   generatedAt: string;
+  database: string | null;
   run: { id: number; startedAt: string };
   periodStart: string;
   periodDays: number;
+  /** id экспериментов фокуса (подробные разделы); пусто — все. */
+  focus: string[];
+  controls: Controls;
   market: MarketContext | null;
   archetypes: ArchetypeRow[];
   families: Family[];
   experiments: ExperimentReport[];
+  /** Единицы полей JSON — чтобы агент не путал доли и проценты. */
+  legend: string;
 }
+
+export const LEGEND =
+  "Доли (0,05 = 5 %): winRate, maxDrawdownPct, topShare, topTradeShare, stopsInFirstBarShare, " +
+  "market.periodMaxDrawdownPct. Проценты (0,5 = 0,5 %): returnPct, avgReturnPct, avgReturnPctWithoutTop, " +
+  "vsRandomPct (п. п.), market.periodReturnPct, market.atrPct14_4h, market.daily.returnPct. " +
+  "R — кратные риска до начального стопа. USD: pnl, realizedPnl, pnlBeforeFees, fees, maxDrawdown.";
 
 type ClosedTrade = PaperTrade & { closedAt: string; pnl: number };
 
@@ -306,6 +336,21 @@ export function mfeR(t: PaperTrade): number | null {
       : sign * (t.exitPrice - t.entryPrice),
   );
   return best / risk;
+}
+
+/** Контрольные эксперименты каждого рынка — по типу входа, а не по зашитым id. */
+export function controlsOf(
+  experiments: Pick<LabExperiment, "id" | "market" | "config">[],
+): Controls {
+  const controls: Controls = {
+    spot: { random: null, hold: null },
+    futures: { random: null, hold: null },
+  };
+  for (const e of experiments) {
+    const type = e.config.entry.type;
+    if (type === "random" || type === "hold") controls[e.market][type] ??= e.id;
+  }
+  return controls;
 }
 
 const holdMs = (t: ClosedTrade) =>
@@ -390,32 +435,29 @@ function concentration(
 }
 
 function suspiciousFlags(
-  e: Experiment,
+  e: LabExperiment,
   stats: TradeStats,
   closed: ClosedTrade[],
 ): string[] {
   const flags: string[] = [];
-  if (
-    stats.closed >= SAMPLE_THRESHOLDS.preliminary &&
-    (stats.winRate ?? 0) > 0.9 &&
-    stats.maxDrawdownPct < 0.05
-  )
-    flags.push("win rate > 90% при просадке < 5%");
-  if (stats.closed >= SAMPLE_THRESHOLDS.preliminary && stats.losses === 0)
+  const enough = stats.closed >= FLAG_RULES.minClosed;
+  if (enough && (stats.winRate ?? 0) > FLAG_RULES.winRate)
+    flags.push(`win rate > ${FLAG_RULES.winRate * 100}% на 30+ закрытых`);
+  if (enough && stats.losses === 0)
     flags.push("нет убыточных сделок на 30+ закрытых");
   if (
-    stats.closed >= SAMPLE_THRESHOLDS.preliminary &&
+    enough &&
     stats.profitFactor !== null &&
-    stats.profitFactor > 5
+    stats.profitFactor > FLAG_RULES.profitFactor
   )
-    flags.push("profit factor > 5 на 30+ закрытых");
+    flags.push(`profit factor > ${FLAG_RULES.profitFactor} на 30+ закрытых`);
   const tp = e.config.exit.takeProfit;
   if (tp?.type === "rr") {
     const over = closed.filter(
       (t) =>
         t.exitReason === "tp" &&
         t.rMultiple !== null &&
-        t.rMultiple > tp.r + 0.25,
+        t.rMultiple > tp.r + FLAG_RULES.overTargetR,
     ).length;
     if (over > 0) flags.push(`${over} сделок по tp с R выше цели ${tp.r}R`);
   }
@@ -450,13 +492,15 @@ export function hintsOf(r: HintInput): Hint[] {
   const hints: Hint[] = [];
   const { stats, mfe } = r;
   const enough = stats.closed >= HINT_RULES.minClosed;
-  if (
-    stats.closed >= SAMPLE_THRESHOLDS.preliminary &&
-    r.returnPct.t !== null &&
-    r.returnPct.t < HINT_RULES.noEdgeT &&
-    (r.vsRandomPct === null || r.vsRandomPct <= 0)
-  )
-    hints.push("no-edge");
+  const t = r.returnPct.t;
+  if (stats.closed >= SAMPLE_THRESHOLDS.preliminary && t !== null) {
+    if (t <= HINT_RULES.negativeEdgeT) hints.push("negative-edge");
+    else if (
+      Math.abs(t) < HINT_RULES.noEdgeT &&
+      (r.vsRandomPct === null || r.vsRandomPct <= 0)
+    )
+      hints.push("no-edge");
+  }
   if (
     enough &&
     mfe.winnersAvgR !== null &&
@@ -506,50 +550,57 @@ function daysTo(target: number, closed: number, perDay: number): number | null {
   return perDay > 0 ? (target - closed) / perDay : null;
 }
 
-const CONSTANT_LABELS = new Set(["Таймфрейм", "Вход"]);
+const familyKey = (e: LabExperiment) =>
+  `${e.config.timeframe}|${JSON.stringify(e.config.entry)}`;
 
-/** Семейства: одинаковые вход и таймфрейм; в `variant` — только строки конфига, которые различаются. */
-export function buildFamilies(experiments: ExperimentReport[]): Family[] {
-  const byKey = new Map<string, ExperimentReport[]>();
+/**
+ * Семейства: одинаковые вход и таймфрейм (по конфигу, не по подписям); контроль не группируется.
+ * В `variant` — только строки конфига, которые различаются между членами.
+ */
+export function buildFamilies(
+  experiments: LabExperiment[],
+  reports: ExperimentReport[],
+): Family[] {
+  const reportOf = new Map(reports.map((r) => [r.id, r]));
+  const byKey = new Map<string, LabExperiment[]>();
   for (const e of experiments) {
-    const tf = e.config.find((c) => c.label === "Таймфрейм")?.value ?? "";
-    const entry = e.config.find((c) => c.label === "Вход")?.value ?? "";
-    const key = `${tf}|${entry}`;
+    if (archetypeOf(e.config.entry) === "control") continue;
+    const key = familyKey(e);
     byKey.set(key, [...(byKey.get(key) ?? []), e]);
   }
   const families: Family[] = [];
   for (const [key, members] of byKey) {
     if (members.length < 2) continue;
+    const configs = members.map((m) => ({
+      e: m,
+      r: reportOf.get(m.id),
+      lines: describeConfig(m.config),
+    }));
     const labels = [
-      ...new Set(members.flatMap((m) => m.config.map((c) => c.label))),
-    ].filter((l) => !CONSTANT_LABELS.has(l));
+      ...new Set(configs.flatMap((c) => c.lines.map((l) => l.label))),
+    ].filter((l) => l !== "Таймфрейм" && l !== "Вход");
+    const lineValue = (lines: ConfigLine[], label: string) =>
+      lines.find((l) => l.label === label)?.value ?? "—";
     const differing = labels.filter(
       (label) =>
-        new Set(
-          members.map(
-            (m) => m.config.find((c) => c.label === label)?.value ?? "—",
-          ),
-        ).size > 1,
+        new Set(configs.map((c) => lineValue(c.lines, label))).size > 1,
     );
-    const [tf, entry] = key.split("|");
+    const [first] = members;
     families.push({
       key,
-      label: `${entry}, ${tf}`,
-      members: members.map((m) => ({
-        id: m.id,
-        market: m.market,
-        name: m.name,
+      label: `${describeEntry(first.config.entry)}, ${first.config.timeframe}`,
+      members: configs.map(({ e, r, lines }) => ({
+        id: e.id,
+        market: e.market,
+        name: e.name,
         variant: differing
-          .map(
-            (label) =>
-              `${label}: ${m.config.find((c) => c.label === label)?.value ?? "—"}`,
-          )
+          .map((label) => `${label}: ${lineValue(lines, label)}`)
           .join("; "),
-        closed: m.stats.closed,
-        pnl: m.stats.realizedPnl,
-        avgR: m.r.mean,
-        tR: m.r.t,
-        avgReturnPct: m.returnPct.mean,
+        closed: r?.stats.closed ?? 0,
+        pnl: r?.stats.realizedPnl ?? 0,
+        avgR: r?.r.mean ?? null,
+        tR: r?.r.t ?? null,
+        avgReturnPct: r?.returnPct.mean ?? null,
       })),
     });
   }
@@ -592,106 +643,134 @@ export function buildArchetypes(
   return rows;
 }
 
-/** Отчёт по экспериментам эпохи (или периоду), отсортированный по средней доходности сделки. */
+interface ReportContext {
+  now: number;
+  /** Начало периода отчёта, мс. */
+  start: number;
+  /** Средняя доходность сделки контроля «случайный вход» рынка; null — контроля или сделок нет. */
+  randomAvgReturn: Record<ExperimentMarket, number | null>;
+  controls: Controls;
+}
+
+function experimentReport(
+  e: LabExperiment,
+  own: PaperTrade[],
+  ctx: ReportContext,
+): ExperimentReport {
+  const closed = own.filter(isClosed);
+  const stats = computeStats(own, e.initialBudget);
+  const resetAt = e.resetAt ? Date.parse(e.resetAt) : null;
+  const accountedFrom =
+    resetAt !== null && resetAt > ctx.start ? resetAt : ctx.start;
+  const periodDays = Math.max((ctx.now - accountedFrom) / DAY, 1 / 24);
+  const ret = meanStat(closed.map(returnPct));
+  const avgWin = avg(closed.filter((t) => t.pnl > 0).map((t) => t.pnl));
+  const avgLoss = avg(closed.filter((t) => t.pnl < 0).map((t) => -t.pnl));
+  const perDay = stats.closed / periodDays;
+  const isRandomControl = ctx.controls[e.market].random === e.id;
+  const randomAvg = isRandomControl ? null : ctx.randomAvgReturn[e.market];
+  const bySymbol = sliceRows(closed, (t) => t.symbol);
+  const tfMs = TIMEFRAME_MS[e.config.timeframe];
+  const holdMinutes = avg(closed.map((t) => holdMs(t) / MINUTE));
+  const stops = closed.filter((t) => t.exitReason === "sl");
+  const partial: HintInput = {
+    archetype: archetypeOf(e.config.entry),
+    stats,
+    pnlBeforeFees: stats.realizedPnl + stats.fees,
+    returnPct: ret,
+    vsRandomPct:
+      ret.mean !== null && randomAvg !== null ? ret.mean - randomAvg : null,
+    mfe: mfeStats(closed),
+    stopsInFirstBarShare: stops.length
+      ? stops.filter((t) => holdMs(t) < tfMs).length / stops.length
+      : null,
+    byDirection: sliceRows(closed, (t) => t.direction),
+    daysTo: {
+      preliminary: daysTo(SAMPLE_THRESHOLDS.preliminary, stats.closed, perDay),
+      decidable: daysTo(SAMPLE_THRESHOLDS.decidable, stats.closed, perDay),
+    },
+    concentration: concentration(closed),
+    flags: suspiciousFlags(e, stats, closed),
+  };
+  return {
+    id: e.id,
+    market: e.market,
+    name: e.name,
+    hypothesis: e.hypothesis,
+    enabled: e.enabled,
+    demoMirror: e.demoMirror,
+    config: describeConfig(e.config),
+    accountedFrom: new Date(accountedFrom).toISOString(),
+    periodDays,
+    resetAt: e.resetAt,
+    ...partial,
+    sample: sampleLevel(stats.closed),
+    r: meanStat(
+      closed.map((t) => t.rMultiple).filter((r): r is number => r !== null),
+    ),
+    payoff:
+      avgWin !== null && avgLoss !== null && avgLoss > 0
+        ? avgWin / avgLoss
+        : null,
+    tradesPerDay: perDay,
+    avgHoldMinutes: holdMinutes,
+    avgHoldBars: holdMinutes === null ? null : (holdMinutes * MINUTE) / tfMs,
+    byExitReason: sliceRows(closed, (t) => t.exitReason ?? "—"),
+    byHourUtc: sliceRows(closed, (t) => hourBucket(t.openedAt)).sort((a, b) =>
+      a.key.localeCompare(b.key),
+    ),
+    byDay: sliceRows(closed, (t) => dayOf(t.closedAt)).sort((a, b) =>
+      a.key.localeCompare(b.key),
+    ),
+    byWeekpart: sliceRows(closed, (t) => weekpart(t.openedAt)),
+    bestSymbols: bySymbol.filter((r) => r.pnl > 0).slice(0, 5),
+    worstSymbols: bySymbol
+      .filter((r) => r.pnl < 0)
+      .slice(-5)
+      .reverse(),
+    hints: hintsOf(partial),
+  };
+}
+
+/** Отчёт по всем экспериментам эпохи (или периода), отсортированный по средней доходности сделки. */
 export function buildLabReport(
   data: LabDataset,
   opts: LabReportOptions,
 ): LabReport {
+  const known = new Set(data.experiments.map((e) => e.id));
+  const focus = opts.focus ?? [];
+  const unknown = focus.filter((id) => !known.has(id));
+  if (unknown.length)
+    throw new Error(
+      `--experiment: нет экспериментов ${unknown.join(", ")}; есть: ${[...known].join(", ")}`,
+    );
+
   const runStart = Date.parse(data.run.startedAt);
   const start = Math.max(runStart, opts.since ?? runStart);
-  const periodDays = Math.max((opts.now - start) / DAY, 1 / 24);
-  const trades = filterTrades(data.trades, {
-    since: opts.since ?? null,
-  });
-  const ids = opts.experimentIds?.length ? new Set(opts.experimentIds) : null;
-
+  const trades = filterTrades(data.trades, { since: opts.since ?? null });
   const byExperiment = new Map<string, PaperTrade[]>();
   for (const t of trades) {
     const list = byExperiment.get(t.experimentId) ?? [];
     list.push(t);
     byExperiment.set(t.experimentId, list);
   }
-  const avgReturnOf = (id: string): number | null =>
-    avg((byExperiment.get(id) ?? []).filter(isClosed).map(returnPct));
+  const controls = controlsOf(data.experiments);
+  const avgReturnOf = (id: string | null): number | null =>
+    id === null
+      ? null
+      : avg((byExperiment.get(id) ?? []).filter(isClosed).map(returnPct));
+  const ctx: ReportContext = {
+    now: opts.now,
+    start,
+    controls,
+    randomAvgReturn: {
+      spot: avgReturnOf(controls.spot.random),
+      futures: avgReturnOf(controls.futures.random),
+    },
+  };
 
   const experiments = data.experiments
-    .filter((e) => ids === null || ids.has(e.id))
-    .map((e): ExperimentReport => {
-      const own = byExperiment.get(e.id) ?? [];
-      const closed = own.filter(isClosed);
-      const stats = computeStats(own, e.initialBudget);
-      const ret = meanStat(closed.map(returnPct));
-      const wins = closed.filter((t) => t.pnl > 0).map((t) => t.pnl);
-      const losses = closed.filter((t) => t.pnl < 0).map((t) => -t.pnl);
-      const avgWin = avg(wins);
-      const avgLoss = avg(losses);
-      const perDay = stats.closed / periodDays;
-      const randomId = CONTROLS[e.market].random;
-      const randomAvg = e.id === randomId ? null : avgReturnOf(randomId);
-      const bySymbol = sliceRows(closed, (t) => t.symbol);
-      const tfMs = TIMEFRAME_MS[e.config.timeframe];
-      const holdMinutes = avg(closed.map((t) => holdMs(t) / MINUTE));
-      const stops = closed.filter((t) => t.exitReason === "sl");
-      const partial = {
-        archetype: archetypeOf(e.config.entry),
-        stats,
-        pnlBeforeFees: stats.realizedPnl + stats.fees,
-        returnPct: ret,
-        vsRandomPct:
-          ret.mean !== null && randomAvg !== null ? ret.mean - randomAvg : null,
-        mfe: mfeStats(closed),
-        stopsInFirstBarShare: stops.length
-          ? stops.filter((t) => holdMs(t) < tfMs).length / stops.length
-          : null,
-        byDirection: sliceRows(closed, (t) => t.direction),
-        daysTo: {
-          preliminary: daysTo(
-            SAMPLE_THRESHOLDS.preliminary,
-            stats.closed,
-            perDay,
-          ),
-          decidable: daysTo(SAMPLE_THRESHOLDS.decidable, stats.closed, perDay),
-        },
-        concentration: concentration(closed),
-        flags: suspiciousFlags(e, stats, closed),
-      };
-      return {
-        id: e.id,
-        market: e.market,
-        name: e.name,
-        hypothesis: e.hypothesis,
-        enabled: e.enabled,
-        demoMirror: e.demoMirror,
-        config: describeConfig(e.config),
-        ...partial,
-        sample: sampleLevel(stats.closed),
-        r: meanStat(
-          closed.map((t) => t.rMultiple).filter((r): r is number => r !== null),
-        ),
-        payoff:
-          avgWin !== null && avgLoss !== null && avgLoss > 0
-            ? avgWin / avgLoss
-            : null,
-        tradesPerDay: perDay,
-        avgHoldMinutes: holdMinutes,
-        avgHoldBars:
-          holdMinutes === null ? null : (holdMinutes * MINUTE) / tfMs,
-        byExitReason: sliceRows(closed, (t) => t.exitReason ?? "—"),
-        byHourUtc: sliceRows(closed, (t) => hourBucket(t.openedAt)).sort(
-          (a, b) => a.key.localeCompare(b.key),
-        ),
-        byDay: sliceRows(closed, (t) => dayOf(t.closedAt)).sort((a, b) =>
-          a.key.localeCompare(b.key),
-        ),
-        byWeekpart: sliceRows(closed, (t) => weekpart(t.openedAt)),
-        bestSymbols: bySymbol.filter((r) => r.pnl > 0).slice(0, 5),
-        worstSymbols: bySymbol
-          .filter((r) => r.pnl < 0)
-          .slice(-5)
-          .reverse(),
-        hints: hintsOf(partial),
-      };
-    })
+    .map((e) => experimentReport(e, byExperiment.get(e.id) ?? [], ctx))
     .sort(
       (a, b) =>
         (b.returnPct.mean ?? Number.NEGATIVE_INFINITY) -
@@ -700,13 +779,17 @@ export function buildLabReport(
 
   return {
     generatedAt: new Date(opts.now).toISOString(),
+    database: opts.database ?? null,
     run: data.run,
     periodStart: new Date(start).toISOString(),
-    periodDays,
+    periodDays: Math.max((opts.now - start) / DAY, 1 / 24),
+    focus,
+    controls,
     market: opts.market ?? null,
     archetypes: buildArchetypes(experiments, trades),
-    families: buildFamilies(experiments),
+    families: buildFamilies(data.experiments, experiments),
     experiments,
+    legend: LEGEND,
   };
 }
 
@@ -736,7 +819,7 @@ const CSV_COLUMNS = [
   "holdMinutes",
 ] as const;
 
-/** Все сделки периода (и открытые) — для своих расчётов поверх отчёта. */
+/** Сделки периода (и открытые) — для своих расчётов поверх отчёта. */
 export function renderTradesCsv(trades: PaperTrade[]): string {
   const cell = (v: unknown): string =>
     v === null || v === undefined
@@ -775,6 +858,7 @@ const signedPct = (v: number | null, digits = 3): string =>
   v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
 const days = (v: number | null): string =>
   v === null ? "∞" : v === 0 ? "есть" : `${Math.ceil(v)} дн.`;
+const dateOnly = (iso: string) => iso.slice(0, 16).replace("T", " ");
 
 function sliceTable(title: string, rows: SliceRow[]): string[] {
   if (!rows.length) return [];
@@ -812,13 +896,16 @@ function dayLine(e: ExperimentReport): string {
 function experimentSection(e: ExperimentReport): string[] {
   const s = e.stats;
   const head = `### ${e.id} · ${e.name}${e.enabled ? "" : " (выключен)"}${e.demoMirror ? " · демо-зеркало" : ""}`;
+  const accounted = e.resetAt
+    ? `Учёт с ${dateOnly(e.accountedFrom)} UTC (сброс эксперимента), ${num(e.periodDays, 1)} дн.`
+    : "";
   if (s.closed === 0)
     return [
       head,
       "",
       `Гипотеза: ${e.hypothesis}`,
       "",
-      `Архетип: ${ARCHETYPE_LABEL[e.archetype]}. Закрытых сделок нет (открыто ${s.open}).`,
+      `Архетип: ${ARCHETYPE_LABEL[e.archetype]}. Закрытых сделок нет (открыто ${s.open}).${accounted ? ` ${accounted}` : ""}`,
       "",
     ];
   return [
@@ -829,6 +916,7 @@ function experimentSection(e: ExperimentReport): string[] {
     `- Архетип: ${ARCHETYPE_LABEL[e.archetype]}`,
     ...e.config.map((c) => `- ${c.label}: ${c.value}`),
     "",
+    ...(accounted ? [accounted] : []),
     `Выборка: ${s.closed} закрытых (${SAMPLE_LABEL[e.sample]}), открыто ${s.open}; ${num(e.tradesPerDay, 1)} сделок/день; до 30 — ${days(e.daysTo.preliminary)}, до 100 — ${days(e.daysTo.decidable)}.`,
     `Результат: PnL ${usd(s.realizedPnl)} $ (до комиссий ${usd(e.pnlBeforeFees)} $), win rate ${pct(s.winRate)}, PF ${num(s.profitFactor)}, payoff ${num(e.payoff)}, просадка ${pct(s.maxDrawdownPct, 1)}.`,
     `Ожидание: R ${num(e.r.mean)} (sd ${num(e.r.sd)}, t ${num(e.r.t)}, n ${e.r.n}); доходность ${signedPct(e.returnPct.mean)}% (t ${num(e.returnPct.t)}); к случайному входу рынка ${e.vsRandomPct === null ? "—" : `${signedPct(e.vsRandomPct)} п. п.`}`,
@@ -899,17 +987,32 @@ function familiesSection(families: Family[]): string[] {
   ];
 }
 
+const controlLine = (c: Controls): string => {
+  const one = (market: ExperimentMarket) =>
+    `${market} — ${c[market].random ?? "нет"} (случайный вход), ${c[market].hold ?? "нет"} (hold BTC)`;
+  return `Контроль: ${one("spot")}; ${one("futures")}.`;
+};
+
 export function renderLabReport(report: LabReport): string {
+  const focus = new Set(report.focus);
+  const detailed = focus.size
+    ? report.experiments.filter((e) => focus.has(e.id))
+    : report.experiments;
   const rows = report.experiments.map(
     (e) =>
-      `| ${e.id} | ${e.name} | ${e.market} | ${ARCHETYPE_LABEL[e.archetype]} | ${e.stats.closed} | ${SAMPLE_LABEL[e.sample]} | ${usd(e.stats.realizedPnl)} | ${pct(e.stats.winRate)} | ${num(e.stats.profitFactor)} | ${num(e.r.mean)} | ${num(e.r.t)} | ${signedPct(e.returnPct.mean)} | ${[...(e.flags.length ? ["⚠️"] : []), ...e.hints].join(" ")} |`,
+      `| ${focus.has(e.id) ? `**${e.id}**` : e.id} | ${e.name} | ${e.market} | ${ARCHETYPE_LABEL[e.archetype]} | ${e.stats.closed} | ${SAMPLE_LABEL[e.sample]} | ${usd(e.stats.realizedPnl)} | ${pct(e.stats.winRate)} | ${num(e.stats.profitFactor)} | ${num(e.r.mean)} | ${num(e.r.t)} | ${signedPct(e.returnPct.mean)} | ${[...(e.flags.length ? ["⚠️"] : []), ...e.hints].join(" ")} |`,
   );
   return [
     "# Отчёт лаборатории",
     "",
-    `Сформирован ${report.generatedAt}. Эпоха #${report.run.id} с ${report.run.startedAt}; период с ${report.periodStart} (${num(report.periodDays, 1)} дн.).`,
+    `Сформирован ${report.generatedAt}. БД: ${report.database ?? "не указана"}. Эпоха #${report.run.id} с ${report.run.startedAt}; период с ${report.periodStart} (${num(report.periodDays, 1)} дн.).`,
     "Только закрытые сделки текущего учёта; PnL — за вычетом комиссий и слиппеджа. Как читать — скилл trading-lab; подсказки — references/failure-modes.md.",
-    `Контроль: spot — ${CONTROLS.spot.random} (случайный вход), ${CONTROLS.spot.hold} (hold BTC); futures — ${CONTROLS.futures.random}, ${CONTROLS.futures.hold}.`,
+    controlLine(report.controls),
+    ...(focus.size
+      ? [
+          `Фокус: ${report.focus.join(", ")} — подробные разделы только по ним; сводка, архетипы, семейства и контроль — по всем.`,
+        ]
+      : []),
     "",
     ...marketSection(report.market),
     "## Сводка (по средней доходности сделки)",
@@ -922,6 +1025,6 @@ export function renderLabReport(report: LabReport): string {
     ...familiesSection(report.families),
     "## Эксперименты",
     "",
-    ...report.experiments.flatMap(experimentSection),
+    ...detailed.flatMap(experimentSection),
   ].join("\n");
 }

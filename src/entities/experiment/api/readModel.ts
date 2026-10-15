@@ -158,14 +158,17 @@ function groupLabel(
   }
 }
 
+/** Эксперимент каталога плюс дата его отдельного сброса paper-учёта (null — не сбрасывался). */
+export type LabExperiment = Experiment & { resetAt: string | null };
+
 /**
- * Разрезы /stats: сделки выбранной (по умолчанию текущей) эпохи под фильтры, сгруппированные
- * по эксперименту, рынку, монете или направлению. null — нет такой эпохи.
+ * Все эксперименты и учтённые сделки текущей эпохи — для отчёта лаборатории (`pnpm lab:report`).
+ * Сделки уже отфильтрованы по сбросу эксперимента (countedTrade); дата сброса отдаётся, чтобы отчёт
+ * считал темп сделок и период эксперимента с неё.
  */
-/** Все эксперименты и учтённые сделки текущей эпохи — для отчёта лаборатории (`pnpm lab:report`). */
 export async function readLabDataset(db: Db): Promise<{
   run: ExperimentsResponse["run"];
-  experiments: Experiment[];
+  experiments: LabExperiment[];
   trades: PaperTrade[];
 }> {
   const run = await currentRun(db);
@@ -175,7 +178,10 @@ export async function readLabDataset(db: Db): Promise<{
   ]);
   return {
     run,
-    experiments: rows.map((r) => experimentSchema.parse(r)),
+    experiments: rows.map((r) => ({
+      ...experimentSchema.parse(r),
+      resetAt: r.resetAt?.toISOString() ?? null,
+    })),
     trades,
   };
 }
@@ -201,6 +207,10 @@ export async function readExperimentFlags(
     );
 }
 
+/**
+ * Разрезы /stats: сделки выбранной (по умолчанию текущей) эпохи под фильтры, сгруппированные
+ * по эксперименту, рынку, монете или направлению. null — нет такой эпохи.
+ */
 export async function readTradeStats(
   db: Db,
   query: StatsQuery,

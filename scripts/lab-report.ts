@@ -1,12 +1,16 @@
 // `pnpm lab:report [--experiment <id>]… [--since 7d|24h|<ISO>] [--out <каталог>] [--no-market]` — отчёт
 // лаборатории по текущей эпохе из БД (.env.local: DATABASE_URL или локальный PGlite) для разбора экспериментов
-// (flow lab, агент quant, скилл trading-lab). Только чтение. С --out пишет report.md, report.json и trades.csv;
+// (flow lab, агент quant, скилл trading-lab). Только чтение; печатает, к какой БД подключён.
+// Считает всегда по всем экспериментам (семейства, архетипы, контроль нужны целиком); --experiment — фокус:
+// подробные разделы только по этим id. С --out пишет report.md, report.json и trades.csv (сделки периода);
 // без — печатает md. Контекст рынка (BTC 4h/1d с публичного API Binance) — если нет --no-market и есть сеть.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { readLabDataset } from "@/entities/experiment";
+import { filterTrades, readLabDataset } from "@/entities/experiment";
+import { getDatabaseConfig } from "@/shared/config/env.server";
 import { closeDb, getDb } from "@/shared/db/client.server";
+import { describeDatabase } from "./lib/dbTarget";
 import { loadMarketContext, type MarketContext } from "./lib/labMarket";
 import {
   buildLabReport,
@@ -41,6 +45,8 @@ async function main() {
     },
   });
   if (existsSync(".env.local")) process.loadEnvFile(".env.local");
+  const database = describeDatabase(getDatabaseConfig());
+  console.log(`[lab:report] БД: ${database}`);
   const now = Date.now();
   const data = await readLabDataset(getDb());
   const since = values.since ? parseSince(values.since, now) : null;
@@ -48,9 +54,10 @@ async function main() {
   const market = await marketContext(!values["no-market"], periodStart, now);
   const report = buildLabReport(data, {
     now,
-    experimentIds: values.experiment?.map((id) => id.toUpperCase()),
+    focus: values.experiment?.map((id) => id.toUpperCase()),
     since,
     market,
+    database,
   });
   const md = renderLabReport(report);
   if (values.out) {
@@ -62,11 +69,7 @@ async function main() {
     );
     writeFileSync(
       path.join(values.out, "trades.csv"),
-      renderTradesCsv(
-        data.trades.filter((t) =>
-          report.experiments.some((e) => e.id === t.experimentId),
-        ),
-      ),
+      renderTradesCsv(filterTrades(data.trades, { since })),
     );
     console.log(
       `[lab:report] ${report.experiments.length} экспериментов → ${path.join(values.out, "report.md")} (+ report.json, trades.csv)`,
@@ -78,6 +81,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("[lab:report]", error);
+  console.error("[lab:report]", error instanceof Error ? error.message : error);
   process.exit(1);
 });

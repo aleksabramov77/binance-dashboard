@@ -18,6 +18,7 @@ export {
 } from "./api/mirrorDb";
 // Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
 export {
+  type LabExperiment,
   readExperimentDetail,
   readExperimentFlags,
   readExperimentsOverview,

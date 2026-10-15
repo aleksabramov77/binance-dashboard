@@ -1,11 +1,14 @@
 import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { runsTable } from "../model/db";
+import { experimentsTable, runsTable } from "../model/db";
 import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
 import {
   readExperimentDetail,
+  readExperimentFlags,
   readExperimentsOverview,
+  readLabDataset,
   readTradeStats,
 } from "./readModel";
 
@@ -212,5 +215,58 @@ describe("разрезы /stats", () => {
         NOW,
       ),
     ).toBeNull();
+  });
+});
+
+describe("данные для отчёта лаборатории (pnpm lab:report, lab:apply)", () => {
+  it("readLabDataset: дата сброса эксперимента и сделки только текущей эпохи и текущего учёта", async () => {
+    await seedExperiments(db, [exp("F01"), exp("F02")]);
+    const store = createDbExperimentStore(db);
+    const old = await ensureRun(db);
+    await store.insertTrade(trade("old", old, "F01", 1, 500));
+    const [{ id: run }] = await db
+      .insert(runsTable)
+      .values({ note: "вторая" })
+      .returning({ id: runsTable.id });
+    await store.insertTrade(trade("a", run, "F01", 2, 10));
+    await store.insertTrade(trade("b", run, "F01", 4, -4));
+    await store.insertTrade(trade("x", run, "F02", 3, 7));
+    // сброс F02 после открытия x — сделка выпадает из его учёта
+    await db
+      .update(experimentsTable)
+      .set({ resetAt: new Date("2026-10-10T05:00:00.000Z") })
+      .where(eq(experimentsTable.id, "F02"));
+
+    const data = await readLabDataset(db);
+    expect(data.run.id).toBe(run);
+    expect(data.experiments.map((e) => [e.id, e.resetAt])).toEqual([
+      ["F01", null],
+      ["F02", "2026-10-10T05:00:00.000Z"],
+    ]);
+    expect(data.trades.map((t) => t.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("readExperimentFlags: тумблеры эксперимента и демо-зеркала по id", async () => {
+    await seedExperiments(db, [exp("F01"), exp("F02")]);
+    await db
+      .update(experimentsTable)
+      .set({ enabled: false, demoMirror: true })
+      .where(eq(experimentsTable.id, "F02"));
+    expect(await readExperimentFlags(db)).toEqual([
+      {
+        id: "F01",
+        name: "F01",
+        market: "futures",
+        enabled: true,
+        demoMirror: false,
+      },
+      {
+        id: "F02",
+        name: "F02",
+        market: "futures",
+        enabled: false,
+        demoMirror: true,
+      },
+    ]);
   });
 });

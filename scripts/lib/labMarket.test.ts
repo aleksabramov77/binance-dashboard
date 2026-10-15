@@ -4,7 +4,9 @@ import {
   computeMarketContext,
   D1,
   describeMarket,
+  describeRegime,
   H4,
+  type MarketContext,
   regimeOf,
 } from "./labMarket";
 
@@ -37,6 +39,21 @@ function d1(n: number, price: (day: number) => number): Candle[] {
   }));
 }
 
+const market = (over: Partial<MarketContext>): MarketContext => ({
+  symbol: "BTCUSDT",
+  lastPrice: 100,
+  periodReturnPct: -3.21,
+  periodMaxDrawdownPct: 0.051,
+  ema200_4h: 105,
+  aboveEma200: false,
+  adx14_4h: 18.4,
+  atrPct14_4h: 1.234,
+  regime: "range",
+  regimeAtStart: "range",
+  daily: [],
+  ...over,
+});
+
 describe("regimeOf", () => {
   it("тренд по ADX ≥ 25, флэт < 20, между — дрейф", () => {
     expect(regimeOf(true, 30)).toBe("trend-up");
@@ -49,7 +66,7 @@ describe("regimeOf", () => {
 });
 
 describe("computeMarketContext", () => {
-  it("устойчивый рост: выше EMA200, тренд вверх, доходность и просадка за период", () => {
+  it("устойчивый рост: выше EMA200, тренд вверх и на старте, и сейчас; доходность и просадка за период", () => {
     const n = 300;
     const candles = h4(n, (i) => 100 * 1.003 ** i);
     const now = candles[n - 1].openTime + H4 / 2; // последняя свеча ещё идёт
@@ -64,6 +81,7 @@ describe("computeMarketContext", () => {
     expect(ctx.aboveEma200).toBe(true);
     expect(ctx.adx14_4h).not.toBeNull();
     expect(ctx.regime).toBe("trend-up");
+    expect(ctx.regimeAtStart).toBe("trend-up");
     expect(ctx.periodReturnPct).toBeCloseTo((1.003 ** 60 - 1) * 100, 5);
     expect(ctx.periodMaxDrawdownPct).toBe(0);
     expect(ctx.atrPct14_4h).toBeGreaterThan(0);
@@ -73,6 +91,21 @@ describe("computeMarketContext", () => {
       new Date(firstDay).toISOString().slice(0, 10),
     );
     expect(ctx.daily.at(-1)?.returnPct).toBeCloseTo(1.8, 5);
+  });
+
+  it("на старте периода данных на EMA200 ещё нет — режим «не определён», сейчас — тренд", () => {
+    const n = 260;
+    const candles = h4(n, (i) => 100 * 1.003 ** i);
+    const ctx = computeMarketContext({
+      symbol: "BTCUSDT",
+      h4: candles,
+      d1: [],
+      periodStart: candles[100].openTime, // к этому моменту закрыто 100 свечей
+      now: candles[n - 1].openTime + H4,
+    });
+    expect(ctx.regimeAtStart).toBe("unknown");
+    expect(ctx.regime).toBe("trend-up");
+    expect(describeRegime(ctx)).toBe("режим сейчас: тренд вверх");
   });
 
   it("период раньше первой свечи — доходность не считается; мало свечей — EMA200 нет", () => {
@@ -106,22 +139,17 @@ describe("computeMarketContext", () => {
     expect(ctx.periodReturnPct).toBeCloseTo(-1, 5);
     expect(ctx.periodMaxDrawdownPct).toBeCloseTo(0.25, 5);
   });
+});
 
-  it("описание одной строкой", () => {
-    const text = describeMarket({
-      symbol: "BTCUSDT",
-      lastPrice: 100,
-      periodReturnPct: -3.21,
-      periodMaxDrawdownPct: 0.051,
-      ema200_4h: 105,
-      aboveEma200: false,
-      adx14_4h: 18.4,
-      atrPct14_4h: 1.234,
-      regime: "range",
-      daily: [],
-    });
-    expect(text).toBe(
-      "BTCUSDT: за период -3.2%, просадка 5.1%, цена ниже EMA200 4h, ADX(14) 4h 18, ATR 1.23% → режим: флэт.",
+describe("describeMarket / describeRegime", () => {
+  it("одной строкой, без смены режима", () => {
+    expect(describeMarket(market({}))).toBe(
+      "BTCUSDT: за период -3.2%, просадка 5.1%, цена ниже EMA200 4h, ADX(14) 4h 18, ATR 1.23% → режим за период: флэт (без смены).",
     );
+  });
+  it("смена режима показывается стрелкой", () => {
+    expect(
+      describeRegime(market({ regimeAtStart: "trend-up", regime: "range" })),
+    ).toBe("режим за период: тренд вверх → флэт");
   });
 });

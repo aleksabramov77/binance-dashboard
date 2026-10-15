@@ -1,5 +1,5 @@
-// Контекст рынка для отчёта лаборатории: режим BTC за период (тренд / флэт по EMA200 и ADX на 4h),
-// доходность и просадка за период, доходность по дням. Чистый расчёт — computeMarketContext; загрузка свечей
+// Контекст рынка для отчёта лаборатории: режим BTC на начало и на конец периода (тренд / флэт по EMA200 и ADX на
+// 4h), доходность и просадка за период, доходность по дням. Чистый расчёт — computeMarketContext; загрузка свечей
 // публичным API Binance (без ключа) — loadMarketContext. Нужен скиллу trading-lab, чтобы отличать «стратегия
 // сломалась» от «сменился режим».
 import { adxSeries, atrSeries, ema } from "@binance-dashboard/trading-core";
@@ -36,12 +36,15 @@ export interface MarketContext {
   periodReturnPct: number | null;
   /** Наибольшая просадка по закрытиям 4h за период, доли (0,05 = 5 %). */
   periodMaxDrawdownPct: number | null;
+  /** Индикаторы на момент отчёта (по закрытым свечам 4h). */
   ema200_4h: number | null;
   aboveEma200: boolean | null;
   adx14_4h: number | null;
   /** ATR(14) 4h в % от цены — мера волатильности. */
   atrPct14_4h: number | null;
+  /** Режим на момент отчёта и на начало периода: смена режима объясняет смену знака у архетипов. */
   regime: Regime;
+  regimeAtStart: Regime;
   /** Доходность по UTC-дням периода, % (open → close дневной свечи). */
   daily: { date: string; returnPct: number }[];
 }
@@ -60,14 +63,29 @@ const lastFinite = (values: number[]): number | null => {
   return null;
 };
 
-const closedOnly = (candles: Candle[], intervalMs: number, now: number) =>
-  candles.filter((c) => c.openTime + intervalMs <= now);
+/** Свечи, закрывшиеся к моменту `at`. */
+const closedBy = (candles: Candle[], intervalMs: number, at: number) =>
+  candles.filter((c) => c.openTime + intervalMs <= at);
 
 export function regimeOf(aboveEma: boolean | null, adx: number | null): Regime {
   if (aboveEma === null || adx === null) return "unknown";
   if (adx >= REGIME.trendAdx) return aboveEma ? "trend-up" : "trend-down";
   if (adx < REGIME.rangeAdx) return "range";
   return aboveEma ? "drift-up" : "drift-down";
+}
+
+/** EMA200, ADX и ATR по ряду закрытых свечей; цена для сравнения с EMA — `price`. */
+function snapshot(closed: Candle[], price: number | null) {
+  const ema200 = lastFinite(
+    ema(
+      closed.map((c) => c.close),
+      200,
+    ),
+  );
+  const adx = lastFinite(adxSeries(closed, 14));
+  const atr = lastFinite(atrSeries(closed, 14));
+  const above = ema200 === null || price === null ? null : price > ema200;
+  return { ema200, adx, atr, above, regime: regimeOf(above, adx) };
 }
 
 /** Контекст рынка по свечам 4h (индикаторы — по закрытым) и 1d (по дням). */
@@ -77,12 +95,12 @@ export function computeMarketContext(input: MarketInput): MarketContext {
   if (!last) throw new Error(`нет свечей 4h для ${symbol}`);
   const lastPrice = last.close;
 
-  const closed = closedOnly(h4, H4, now);
-  const closes = closed.map((c) => c.close);
-  const ema200 = lastFinite(ema(closes, 200));
-  const adx = lastFinite(adxSeries(closed, 14));
-  const atr = lastFinite(atrSeries(closed, 14));
-  const aboveEma200 = ema200 === null ? null : lastPrice > ema200;
+  const current = snapshot(closedBy(h4, H4, now), lastPrice);
+  const atStartCandles = closedBy(h4, H4, periodStart);
+  const atStart = snapshot(
+    atStartCandles,
+    atStartCandles.at(-1)?.close ?? null,
+  );
 
   // Период: цена на старте — open свечи, в которую попало начало периода; просадка — по закрытиям с этой свечи.
   const startIndex = h4.findIndex((c) => c.openTime + H4 > periodStart);
@@ -113,11 +131,12 @@ export function computeMarketContext(input: MarketInput): MarketContext {
     lastPrice,
     periodReturnPct,
     periodMaxDrawdownPct,
-    ema200_4h: ema200,
-    aboveEma200,
-    adx14_4h: adx,
-    atrPct14_4h: atr === null ? null : (atr / lastPrice) * 100,
-    regime: regimeOf(aboveEma200, adx),
+    ema200_4h: current.ema200,
+    aboveEma200: current.above,
+    adx14_4h: current.adx,
+    atrPct14_4h: current.atr === null ? null : (current.atr / lastPrice) * 100,
+    regime: current.regime,
+    regimeAtStart: atStart.regime,
     daily,
   };
 }
@@ -135,6 +154,14 @@ export async function loadMarketContext(
   return computeMarketContext({ symbol, h4, d1, periodStart, now });
 }
 
+export function describeRegime(m: MarketContext): string {
+  const end = REGIME_LABEL[m.regime];
+  if (m.regimeAtStart === "unknown") return `режим сейчас: ${end}`;
+  if (m.regimeAtStart === m.regime)
+    return `режим за период: ${end} (без смены)`;
+  return `режим за период: ${REGIME_LABEL[m.regimeAtStart]} → ${end}`;
+}
+
 export function describeMarket(m: MarketContext): string {
   const pct = (v: number | null, d = 1) =>
     v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(d)}%`;
@@ -147,5 +174,5 @@ export function describeMarket(m: MarketContext): string {
     `ADX(14) 4h ${m.adx14_4h === null ? "—" : m.adx14_4h.toFixed(0)}`,
     `ATR ${m.atrPct14_4h === null ? "—" : `${m.atrPct14_4h.toFixed(2)}%`}`,
   ];
-  return `${m.symbol}: ${parts.join(", ")} → режим: ${REGIME_LABEL[m.regime]}.`;
+  return `${m.symbol}: ${parts.join(", ")} → ${describeRegime(m)}.`;
 }

@@ -1,10 +1,12 @@
-import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
+import type { PaperTrade } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
+import type { LabExperiment } from "@/entities/experiment";
 import { EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import type { MarketContext } from "./labMarket";
 import {
   archetypeOf,
   buildLabReport,
+  controlsOf,
   type LabDataset,
   meanStat,
   mfeR,
@@ -18,10 +20,13 @@ const HOUR = 3_600_000;
 const START = Date.parse("2026-10-01T00:00:00Z");
 const NOW = START + 10 * 24 * HOUR;
 
-const experiment = (id: string): Experiment => {
+const experiment = (
+  id: string,
+  resetAt: string | null = null,
+): LabExperiment => {
   const e = EXPERIMENT_CATALOG.find((x) => x.id === id);
   if (!e) throw new Error(id);
-  return e;
+  return { ...e, resetAt };
 };
 
 let seq = 0;
@@ -66,7 +71,7 @@ const many = (n: number, make: (i: number) => PaperTrade) =>
   Array.from({ length: n }, (_, i) => make(i));
 
 const dataset = (
-  experiments: Experiment[],
+  experiments: LabExperiment[],
   trades: PaperTrade[],
 ): LabDataset => ({
   run: { id: 1, startedAt: new Date(START).toISOString() },
@@ -117,6 +122,17 @@ describe("archetypeOf", () => {
   });
 });
 
+describe("controlsOf", () => {
+  it("контроль каждого рынка — по типу входа, отсутствующий — null", () => {
+    expect(
+      controlsOf([experiment("S19"), experiment("S20"), experiment("F19")]),
+    ).toEqual({
+      spot: { random: "S19", hold: "S20" },
+      futures: { random: "F19", hold: null },
+    });
+  });
+});
+
 describe("mfeR", () => {
   it("long и short в R от начального стопа", () => {
     expect(mfeR(trade("S04", 0, { extreme: 102 }))).toBeCloseTo(2);
@@ -159,13 +175,16 @@ describe("buildLabReport", () => {
     ];
     const report = buildLabReport(
       dataset([experiment("S04"), experiment("S19")], trades),
-      { now: NOW },
+      { now: NOW, database: "Postgres test" },
     );
+    expect(report.database).toBe("Postgres test");
+    expect(report.controls.spot).toEqual({ random: "S19", hold: null });
     const s04 = report.experiments.find((e) => e.id === "S04");
     expect(s04?.archetype).toBe("trend");
     expect(s04?.stats.closed).toBe(5);
     expect(s04?.sample).toBe("insufficient");
     expect(s04?.r.mean).toBeCloseTo(0.2);
+    expect(s04?.periodDays).toBeCloseTo(10);
     expect(s04?.tradesPerDay).toBeCloseTo(0.5);
     expect(s04?.daysTo.preliminary).toBeCloseTo(50);
     expect(s04?.avgHoldMinutes).toBeCloseTo(30);
@@ -194,6 +213,13 @@ describe("buildLabReport", () => {
         closed: 3,
       }),
     ]);
+    expect(report.legend).toContain("Доли");
+  });
+
+  it("без контроля в выборке сравнение с ним — null", () => {
+    expect(only("S04", [trade("S04", 1), trade("S04", 1)]).vsRandomPct).toBe(
+      null,
+    );
   });
 
   it("PnL до комиссий и разрезы по направлению, причине выхода, часу и дню", () => {
@@ -208,6 +234,8 @@ describe("buildLabReport", () => {
           }),
           trade("F04", -1, {
             direction: "short",
+            initialStop: 101,
+            exitPrice: 101,
             fees: 0.1,
             openedAt: "2026-10-03T13:00:00Z", // суббота
             closedAt: "2026-10-03T14:00:00Z",
@@ -228,6 +256,34 @@ describe("buildLabReport", () => {
     ]);
   });
 
+  it("сброс эксперимента: учёт и темп сделок — с даты сброса", () => {
+    const resetAt = new Date(START + 8 * 24 * HOUR).toISOString();
+    const [s04] = buildLabReport(
+      dataset(
+        [experiment("S04", resetAt)],
+        [
+          trade("S04", 1, {
+            openedAt: new Date(START + 9 * 24 * HOUR).toISOString(),
+            closedAt: new Date(START + 9 * 24 * HOUR + HOUR).toISOString(),
+          }),
+        ],
+      ),
+      { now: NOW },
+    ).experiments;
+    expect(s04.resetAt).toBe(resetAt);
+    expect(s04.accountedFrom).toBe(resetAt);
+    expect(s04.periodDays).toBeCloseTo(2);
+    expect(s04.tradesPerDay).toBeCloseTo(0.5);
+    expect(s04.hints).toEqual(["rare-signal"]); // 29 сделок при 0,5/день — 58 дней
+    expect(
+      renderLabReport(
+        buildLabReport(dataset([experiment("S04", resetAt)], []), {
+          now: NOW,
+        }),
+      ),
+    ).toContain("Учёт с 2026-10-09 00:00 UTC (сброс эксперимента)");
+  });
+
   it("концентрация: доля лучшей монеты, крупнейшей сделки и доходность без неё", () => {
     const c = only("S07", [
       trade("S07", 3, { symbol: "SOLUSDT" }),
@@ -241,7 +297,7 @@ describe("buildLabReport", () => {
     expect(c.avgReturnPctWithoutTop).toBeCloseTo(0);
   });
 
-  it("семейства: один вход и ТФ, в отличиях — только несовпадающие строки конфига", () => {
+  it("семейства: один вход и ТФ по конфигу, контроль не группируется, в отличиях — только несовпадающее", () => {
     const report = buildLabReport(
       dataset(
         [
@@ -249,6 +305,8 @@ describe("buildLabReport", () => {
           experiment("S05"),
           experiment("F04"),
           experiment("S07"),
+          experiment("S19"),
+          experiment("F19"),
         ],
         [trade("S04", 1), trade("S05", -1), trade("F04", 1)],
       ),
@@ -265,6 +323,7 @@ describe("buildLabReport", () => {
     const s05 = family.members.find((m) => m.id === "S05");
     expect(s05?.variant).toContain("Трейлинг: 3 × ATR");
     expect(s05?.variant).not.toContain("Юниверс");
+    expect(s05?.closed).toBe(1);
   });
 
   it("закрытие в ту же минуту, что вход, — флаг; в следующую — нет", () => {
@@ -287,7 +346,7 @@ describe("buildLabReport", () => {
       many(30, () => trade("S04", 2, { rMultiple: 3 })),
     );
     expect(s04.flags).toEqual([
-      "win rate > 90% при просадке < 5%",
+      "win rate > 90% на 30+ закрытых",
       "нет убыточных сделок на 30+ закрытых",
       "30 сделок по tp с R выше цели 2R",
     ]);
@@ -367,9 +426,45 @@ describe("buildLabReport", () => {
       expect(s04.returnPct.t).toBeCloseTo(0);
       expect(s04.hints).toEqual(["no-edge"]);
     });
+
+    it("negative-edge: устойчиво против — не no-edge, а кандидат на инверсию", () => {
+      const s04 = only(
+        "S04",
+        many(30, (i) => trade("S04", i % 2 ? -1 : -0.5)),
+      );
+      expect(s04.returnPct.t).toBeLessThan(-2);
+      expect(s04.hints).toEqual(["negative-edge"]);
+    });
   });
 
-  it("фильтры по эксперименту и периоду; открытые сделки не в ожидании", () => {
+  it("фокус: расчёты по всем, подробные разделы — по выбранным; неизвестный id — ошибка", () => {
+    const data = dataset(
+      [experiment("S04"), experiment("S05"), experiment("S19")],
+      [trade("S04", 2), trade("S05", -1), trade("S19", -1)],
+    );
+    const report = buildLabReport(data, {
+      now: NOW,
+      focus: ["S04"],
+      since: parseSince("3d", NOW),
+    });
+    expect(report.focus).toEqual(["S04"]);
+    expect(report.periodDays).toBeCloseTo(3);
+    expect(report.experiments.map((e) => e.id).sort()).toEqual([
+      "S04",
+      "S05",
+      "S19",
+    ]);
+    const md = renderLabReport(report);
+    expect(md).toContain("Фокус: S04");
+    expect(md).toContain("| **S04** |");
+    expect(md).toContain("### S04 ·");
+    expect(md).not.toContain("### S05 ·");
+    expect(() => buildLabReport(data, { now: NOW, focus: ["S99"] })).toThrow(
+      /нет экспериментов S99/,
+    );
+  });
+
+  it("период --since: сделки до него не учитываются, открытые — не в ожидании", () => {
     const old = trade("S04", 2, {
       openedAt: "2026-10-01T05:00:00Z",
       closedAt: "2026-10-01T06:00:00Z",
@@ -385,24 +480,16 @@ describe("buildLabReport", () => {
       openedAt: "2026-10-09T05:00:00Z",
       closedAt: "2026-10-09T06:00:00Z",
     });
-    const report = buildLabReport(
-      dataset(
-        [experiment("S04"), experiment("S05")],
-        [old, open, fresh, trade("S05", 1)],
-      ),
-      {
-        now: NOW,
-        experimentIds: ["S04"],
-        since: parseSince("3d", NOW),
-      },
-    );
-    expect(report.experiments.map((e) => e.id)).toEqual(["S04"]);
-    expect(report.periodDays).toBeCloseTo(3);
-    expect(report.experiments[0].stats.closed).toBe(1);
-    expect(report.experiments[0].r.mean).toBe(-1);
+    const [s04] = buildLabReport(
+      dataset([experiment("S04")], [old, open, fresh]),
+      { now: NOW, since: parseSince("3d", NOW) },
+    ).experiments;
+    expect(s04.stats.closed).toBe(1);
+    expect(s04.stats.open).toBe(1);
+    expect(s04.r.mean).toBe(-1);
   });
 
-  it("markdown: рынок, сводка, архетипы, семейства и разделы экспериментов", () => {
+  it("markdown: БД, рынок, сводка, архетипы, семейства и разделы экспериментов", () => {
     const market: MarketContext = {
       symbol: "BTCUSDT",
       lastPrice: 100,
@@ -413,15 +500,21 @@ describe("buildLabReport", () => {
       adx14_4h: 24,
       atrPct14_4h: 1.08,
       regime: "drift-down",
+      regimeAtStart: "range",
       daily: [{ date: "2026-10-01", returnPct: 0.4 }],
     };
     const data = dataset(
       [experiment("S04"), experiment("S05")],
       [trade("S04", 2), trade("S04", -1)],
     );
-    const md = renderLabReport(buildLabReport(data, { now: NOW, market }));
+    const md = renderLabReport(
+      buildLabReport(data, { now: NOW, market, database: "Postgres x/y" }),
+    );
+    expect(md).toContain("БД: Postgres x/y.");
     expect(md).toContain("**Рынок.** BTCUSDT: за период -1.6%");
+    expect(md).toContain("режим за период: флэт → слабое снижение");
     expect(md).toContain("BTC по дням: 10-01 +0.4%.");
+    expect(md).toContain("Контроль: spot — нет (случайный вход)");
     expect(md).toContain("## Сводка");
     expect(md).toContain("## Архетипы");
     expect(md).toContain("## Семейства");

@@ -7,6 +7,8 @@ export interface ApplyPlan {
   mirrorOn: string[];
   mirrorOff: string[];
   dryRun: boolean;
+  /** Разрешить запись в локальную PGlite (без DATABASE_URL); иначе скрипт отказывается — это не прод. */
+  local: boolean;
   /** Каталог прогона: туда дописывается apply.md. */
   out?: string;
 }
@@ -47,6 +49,7 @@ export function planApply(values: {
   "mirror-on"?: string[];
   "mirror-off"?: string[];
   "dry-run"?: boolean;
+  local?: boolean;
   out?: string;
 }): ApplyPlan {
   const plan: ApplyPlan = {
@@ -55,6 +58,7 @@ export function planApply(values: {
     mirrorOn: normalize(values["mirror-on"], "--mirror-on"),
     mirrorOff: normalize(values["mirror-off"], "--mirror-off"),
     dryRun: values["dry-run"] ?? false,
+    local: values.local ?? false,
     out: values.out,
   };
   const both = [
@@ -113,15 +117,18 @@ const state = (c: ApplyChange, v: boolean) =>
 
 export function renderApplyMarkdown(
   at: string,
+  database: string,
   changes: ApplyChange[],
   dryRun: boolean,
 ): string {
   const title = `## ${at}${dryRun ? " (dry-run, не применено)" : ""}`;
+  const head = [title, "", `БД: ${database}.`, ""];
   if (!changes.length)
-    return `${title}\n\nИзменений нет — всё уже в нужном состоянии.\n`;
+    return [...head, "Изменений нет — всё уже в нужном состоянии.", ""].join(
+      "\n",
+    );
   return [
-    title,
-    "",
+    ...head,
     "| id | Эксперимент | Что | Было | Стало |",
     "|---|---|---|---|---|",
     ...changes.map(

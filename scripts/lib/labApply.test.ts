@@ -17,8 +17,10 @@ describe("planApply", () => {
       mirrorOn: ["F11"],
       mirrorOff: [],
       dryRun: false,
+      local: false,
       out: undefined,
     });
+    expect(planApply({ enable: ["S05"], local: true }).local).toBe(true);
   });
   it("отклоняет пустой набор, чужие id и противоречия", () => {
     expect(() => planApply({})).toThrow(/нечего применять/);
@@ -45,13 +47,18 @@ describe("diffApply", () => {
 });
 
 describe("renderApplyMarkdown", () => {
-  it("таблица было → стало", () => {
+  it("таблица было → стало с целью подключения", () => {
     const md = renderApplyMarkdown(
       "2026-10-15T10:00:00.000Z",
+      "Postgres db.example:6543/postgres",
       diffApply(planApply({ disable: ["F17"] }), current),
       true,
     );
     expect(md).toContain("(dry-run, не применено)");
+    expect(md).toContain("БД: Postgres db.example:6543/postgres.");
     expect(md).toContain("| F17 | Скальп | эксперимент | включён | выключен |");
+  });
+  it("без изменений — так и пишет", () => {
+    expect(renderApplyMarkdown("t", "x", [], false)).toContain("Изменений нет");
   });
 });
