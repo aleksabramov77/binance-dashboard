@@ -1,0 +1,68 @@
+# /flow release — выкатить то, что влито в main: миграции БД, Edge Function движка, кроны, переменные Vercel,
+# деплой Vercel и смоук-проверки. Последний этап flow feature и bug; запускается и сам.
+# Этап выполняется, только если выполнено условие из его note; иначе пропускается с причиной.
+description: Выкатка влитого в main — миграции Supabase, Edge Function, кроны, env Vercel, деплой Vercel, смоук-проверки.
+inputs: [merge]
+stages:
+  - id: sync
+    note: >
+      Рабочее дерево должно быть чистым. Если в checkout открыта ветка другой задачи — остановись и спроси, не
+      переключай.
+    run: git switch main && git pull --ff-only && git fetch --prune
+
+  - id: changes
+    uses: [merge]
+    note: >
+      Что выкатываем: коммит из merge, без него — HEAD main (squash-мерж одного PR); влито несколько PR — спроси,
+      с какого коммита. По `git show --stat` отметь, какие этапы ниже нужны (условия — в их note), остальные
+      пропусти с причиной.
+    produces: изменённые файлы и нужные этапы
+
+  - id: migrate
+    uses: [changes]
+    note: >
+      Только если менялся drizzle/. Таймаут пулера Supabase (CONNECT_TIMEOUT) — повод повторить, а не чинить.
+    run: pnpm db:migrate
+
+  - id: edge
+    uses: [changes]
+    note: >
+      Только если менялся код, который грузит Edge Function engine-tick (import map
+      supabase/functions/engine-tick/deno.json): supabase/functions/, packages/trading-core/, src/features/paper-engine/,
+      src/entities/experiment/engine.ts и его импорты (api/dbStore.ts, api/accounting.ts, api/tickLock.ts, model/),
+      src/app/server/engineTick.ts, src/shared/api/binance/marketApi.ts.
+    run: >-
+      pnpm check:edge && set -a && . ./.env.local && set +a &&
+      pnpm dlx supabase@2.120.0 functions deploy engine-tick --project-ref "$SUPABASE_PROJECT_REF" --use-api
+
+  - id: cron
+    uses: [changes]
+    note: >
+      Только для нового supabase/migrations/*_cron.sql: cron-install соответствующего скрипта —
+      pnpm engine:supabase | earn:supabase | monitor:supabase | mirror:supabase.
+
+  - id: env
+    uses: [changes]
+    note: >
+      Только если в .env.example появилась переменная, нужная в проде. Значения не выводить. На Vercel их загружает
+      пользователь командой `! …` (агенту это блокирует классификатор), после неё — передеплой Vercel.
+    gate: user-approval
+
+  - id: vercel
+    note: Дождаться статуса Vercel у HEAD main (GitHub commit status, context «Vercel»); failure или error — стоп и разбор.
+    run: >-
+      sha=$(git rev-parse HEAD); for i in $(seq 1 60); do
+      s=$(GH_CONFIG_DIR="$HOME/.config/gh-personal" gh api "repos/aleksabramov77/binance-dashboard/commits/$sha/status"
+      -q '.statuses[] | select(.context=="Vercel") | .state' | head -1);
+      case "$s" in success) echo "Vercel: success"; exit 0;; failure|error) echo "Vercel: $s"; exit 1;; esac;
+      perl -e 'select(undef,undef,undef,10)'; done; echo "Vercel: нет итогового статуса за 10 минут"; exit 1
+
+  - id: smoke
+    note: >
+      Тик движка без ошибок (ручной вызов всегда завершается с кодом 0 — проверяем ответ), зеркало отвечает 200,
+      сайт открывается.
+    run: >-
+      pnpm -s engine:supabase invoke | grep -Eq '"status":"(ok|disabled)"' &&
+      pnpm -s mirror:supabase run | grep -q '^200' &&
+      curl -sf -o /dev/null https://binance-dashboard-gold.vercel.app/login
+    produces: отчёт о выкатке

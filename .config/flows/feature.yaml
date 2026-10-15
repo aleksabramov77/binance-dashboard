@@ -1,0 +1,85 @@
+# /flow feature "<требование>" — новое требование целиком. Каждая задача — в своём worktree (скилл worktree,
+# `pnpm wt`); проверка на локальном сервере worktree агентом-тестировщиком до PR и ещё раз после правок по ревью;
+# мерж — только по команде пользователя; после мержа — выкатка и удаление worktree.
+# Как выполнять этапы (Analyst, задания агентам) — .claude/skills/feature/SKILL.md. Правила CLAUDE.md главнее.
+description: Новое требование целиком — worktree, ТЗ, разработка, проверка на локальном сервере, PR и ревью с перепроверкой, мерж по команде, выкатка, удаление worktree.
+stages:
+  - id: worktree
+    note: >
+      Шаги 1.3–1.4 из .claude/skills/feature/SKILL.md. Номер задачи — `pnpm -s wt next`, slug — kebab-case по
+      требованию; из основного checkout `pnpm wt new feature/NNNN-slug`. Все следующие этапы задачи — в этом
+      worktree; в основном checkout ветки не переключать и файлов не создавать.
+    produces: номер задачи и путь к worktree
+
+  - id: spec
+    uses: [worktree]
+    note: >
+      Остальные шаги «1. Analyst» из SKILL.md, в worktree: вопросы, требование в PRD, docs/specs/NNNN-slug.md,
+      строка docs/HISTORY.md «в работе»; утверждение ТЗ.
+    produces: путь к spec
+    gate: user-approval
+
+  - id: develop
+    uses: [spec, worktree]
+    note: >
+      Утверждённое ТЗ — первым коммитом ветки (spec в статусе approved, PRD, строка журнала; `NNNN: ТЗ — <название>`).
+      Затем субагент developer реализует spec в worktree (шаг «2. Developer» в SKILL.md); вопросы — пользователю.
+    produces: ветка задачи
+
+  - id: check
+    uses: [worktree]
+    note: В worktree. Красное — назад в develop.
+    run: pnpm check && pnpm build
+
+  - id: serve
+    uses: [worktree]
+    note: В worktree. Сервер работает на своей PGlite и без входа — прод не трогается.
+    run: pnpm wt serve
+    produces: адрес локального сервера
+
+  - id: test
+    uses: [spec, serve]
+    note: >
+      Субагент tester проверяет все критерии приёмки на адресе из serve (шаг «3. Tester» в SKILL.md), свой сервер не
+      запускает. FAIL → develop → check → test, до 3 кругов, потом — к пользователю. PASS → таблица AC и скриншоты
+      пользователю: «на экране то, что заказывал?».
+    gate: user-approval
+
+  - id: pr
+    uses: [spec]
+    note: >
+      Developer открывает PR (шаг «4. PR»): заголовок `NNNN: что сделано`, в описании — что сделано, сначала кратко,
+      потом подробнее.
+    produces: номер PR
+
+  - id: review
+    uses: [pr, spec, serve]
+    note: >
+      Субагент reviewer (шаг «5. Reviewer»). CHANGES REQUESTED → developer правит → check → tester снова проходит все
+      AC на локальном сервере worktree (перезапуск — `pnpm wt serve`), чтобы правки ничего не сломали → снова
+      reviewer. До 3 кругов, потом — к пользователю. Итог — label ai-approved.
+
+  - id: ready
+    uses: [pr]
+    note: >
+      Шаг «6. Финал»: последним коммитом — статусы spec и PRD, строка docs/HISTORY.md (✅, PR); зелёный CI. Покажи
+      пользователю PR и спроси, мержить ли.
+    run: GH_CONFIG_DIR="$HOME/.config/gh-personal" gh pr checks --watch
+    gate: user-approval
+
+  - id: merge
+    uses: [pr]
+    note: >
+      Мерж по команде пользователя («мерж»): из основного checkout выполни .claude/skills/merge/SKILL.md для этого PR.
+      Скилл merge вызывает только пользователь, поэтому этап идёт по его тексту.
+    produces: коммит в main
+
+  - id: release
+    flow: release
+    uses: [merge]
+
+  - id: cleanup
+    uses: [worktree]
+    note: >
+      После мержа и выкатки, из основного checkout: `pnpm wt remove <ветка задачи>` — остановит локальный сервер,
+      удалит worktree и локальную ветку.

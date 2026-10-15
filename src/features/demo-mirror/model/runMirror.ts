@@ -1,5 +1,10 @@
 import type { MirrorOrderRequest } from "../lib/planMirror";
-import { type MirrorTradeInput, planMirror } from "../lib/planMirror";
+import {
+  listingKey,
+  type MirrorListing,
+  type MirrorTradeInput,
+  planMirror,
+} from "../lib/planMirror";
 
 // Прогон demo-зеркала (spec 008). Хранилище и биржа — зависимости: их собирает
 // src/app/server/demoMirror.ts (feature не импортирует feature execute-trade).
@@ -16,6 +21,11 @@ export interface MirrorDeps {
   configured: boolean;
   listCandidates: (since: Date) => Promise<MirrorTradeInput[]>;
   busySymbols: () => Promise<Set<string>>;
+  /**
+   * Есть ли символ на демо-рынке: false — точно нет (вход пропускается), исключение — сеть
+   * (кандидат ждёт следующего прогона). Проверяется до захвата сделки и запроса на вход.
+   */
+  hasSymbol: (market: "spot" | "futures", symbol: string) => Promise<boolean>;
   /** Захват сделки (вставка pending). false — её уже взял другой прогон. */
   claim: (tradeId: string) => Promise<boolean>;
   open: (req: MirrorOrderRequest) => Promise<{
@@ -91,7 +101,12 @@ export async function runMirror(deps: MirrorDeps): Promise<MirrorRunResult> {
 
   const now = deps.now();
   const candidates = await deps.listCandidates(new Date(now - 60 * 60_000));
-  const decisions = planMirror(candidates, await deps.busySymbols(), now);
+  const decisions = planMirror(
+    candidates,
+    await deps.busySymbols(),
+    now,
+    await checkListing(deps, candidates),
+  );
   for (const d of decisions) {
     if (!(await deps.claim(d.tradeId))) continue;
     if (d.kind === "skip") {
@@ -108,4 +123,24 @@ export async function runMirror(deps: MirrorDeps): Promise<MirrorRunResult> {
     });
   }
   return result;
+}
+
+/** Проверка символов кандидатов на демо: по разу на market:symbol. */
+async function checkListing(
+  deps: Pick<MirrorDeps, "hasSymbol">,
+  candidates: MirrorTradeInput[],
+): Promise<MirrorListing> {
+  const listing: MirrorListing = { missing: new Set(), unknown: new Set() };
+  const seen = new Set<string>();
+  for (const t of candidates) {
+    const k = listingKey(t);
+    if (seen.has(k) || !t.symbol.endsWith("USDT")) continue;
+    seen.add(k);
+    try {
+      if (!(await deps.hasSymbol(t.market, t.symbol))) listing.missing.add(k);
+    } catch {
+      listing.unknown.add(k);
+    }
+  }
+  return listing;
 }

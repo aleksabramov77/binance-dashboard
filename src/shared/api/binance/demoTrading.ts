@@ -2,10 +2,17 @@ import { isStablecoin } from "@/shared/config";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getJsonWithRetry, HttpError } from "@/shared/lib/fetchRetry";
 import {
+  type SpotEntryListParams,
+  type SpotEntryListResult,
+  spotEntryListRequest,
+  summarizeSpotEntryList,
+} from "./demoOrderLists";
+import {
   type DemoSymbolOrders,
   toFuturesSymbolOrders,
   toSpotSymbolOrders,
 } from "./demoOrders";
+import { type SymbolRules, toRules } from "./demoRules";
 import {
   algoHistorySchema,
   algoOrderSchema,
@@ -16,6 +23,7 @@ import {
   futuresBalancesSchema,
   futuresOrderSchema,
   futuresUserTradesSchema,
+  orderListReportsSchema,
   orderListSchema,
   positionRiskSchema,
   priceSchema,
@@ -24,6 +32,7 @@ import {
   spotAllOrdersSchema,
   spotMyTradesSchema,
   spotOrderSchema,
+  spotOrderStatusSchema,
   symbolRowsSchema,
 } from "./demoSchemas";
 import type { Market } from "./market";
@@ -37,13 +46,6 @@ const DEMO_URL: Record<Market, string> = {
 const PREFIX: Record<Market, string> = { spot: "/api/v3", futures: "/fapi/v1" };
 const RULES_TTL_MS = 10 * 60_000;
 
-export interface SymbolRules {
-  tickSize: string;
-  stepSize: string;
-  minQty: number;
-  minNotional: number;
-}
-
 /** Справочник демо-фьючерсов (~900 КБ) — грузим редко, держим последнюю удачную копию. */
 let futuresRules: { at: number; bySymbol: Map<string, SymbolRules> } | null =
   null;
@@ -55,27 +57,11 @@ const isInvalidSymbol = (error: unknown) =>
   error instanceof HttpError &&
   (error.body as { code?: number } | null)?.code === -1121;
 
-function toRules(
-  filters: { filterType: string; [k: string]: unknown }[],
-): SymbolRules | null {
-  const get = (type: string) => filters.find((f) => f.filterType === type);
-  const price = get("PRICE_FILTER");
-  const lot = get("LOT_SIZE");
-  const notional = get("NOTIONAL") ?? get("MIN_NOTIONAL");
-  if (!price || !lot) return null;
-  return {
-    tickSize: String(price.tickSize),
-    stepSize: String(lot.stepSize),
-    minQty: Number(lot.minQty ?? 0),
-    minNotional: Number(notional?.minNotional ?? notional?.notional ?? 0),
-  };
-}
-
-function indexRules(raw: unknown): Map<string, SymbolRules> {
+function indexRules(market: Market, raw: unknown): Map<string, SymbolRules> {
   const info = exchangeInfoSchema.parse(raw);
   const bySymbol = new Map<string, SymbolRules>();
   for (const s of info.symbols) {
-    const rules = s.status === "TRADING" ? toRules(s.filters) : null;
+    const rules = s.status === "TRADING" ? toRules(market, s) : null;
     if (rules) bySymbol.set(s.symbol, rules);
   }
   return bySymbol;
@@ -94,7 +80,7 @@ export async function fetchDemoSymbolRules(
       const raw = await getJson(
         `${DEMO_URL.spot}${PREFIX.spot}/exchangeInfo?symbol=${symbol}`,
       );
-      return indexRules(raw).get(symbol) ?? null;
+      return indexRules("spot", raw).get(symbol) ?? null;
     } catch (error) {
       if (isInvalidSymbol(error)) return null;
       throw error;
@@ -106,7 +92,10 @@ export async function fetchDemoSymbolRules(
       const raw = await getJson(
         `${DEMO_URL.futures}${PREFIX.futures}/exchangeInfo`,
       );
-      futuresRules = { at: Date.now(), bySymbol: indexRules(raw) };
+      futuresRules = {
+        at: Date.now(),
+        bySymbol: indexRules("futures", raw),
+      };
     } catch (error) {
       // Устаревший справочник лучше, чем никакого: шаги цены меняются редко.
       if (!futuresRules) throw error;
@@ -216,6 +205,43 @@ export async function demoSpotOcoSell(
       belowStopPrice: stopLoss,
     },
   );
+}
+
+/**
+ * Покупка и защита одной составной заявкой (spec 0012): OTOCO (тейк + стоп) или OTO (только стоп).
+ * Биржа проверяет все три ордера сразу: стоп за фильтром цены — отказ всей заявки, монеты не куплены.
+ */
+export async function demoSpotBuyProtected(
+  creds: BinanceCredentials,
+  p: SpotEntryListParams,
+): Promise<SpotEntryListResult> {
+  const { path, params } = spotEntryListRequest(p);
+  const res = await signedRequest(
+    DEMO_URL.spot,
+    creds,
+    "POST",
+    path,
+    orderListReportsSchema,
+    params,
+  );
+  return summarizeSpotEntryList(res, p.symbol.replace(/USDT$/, ""));
+}
+
+/** Статус ордера спота (NEW, FILLED, EXPIRED…). */
+export async function fetchDemoSpotOrderStatus(
+  creds: BinanceCredentials,
+  symbol: string,
+  orderId: number,
+): Promise<string> {
+  const order = await signedRequest(
+    DEMO_URL.spot,
+    creds,
+    "GET",
+    "/api/v3/order",
+    spotOrderStatusSchema,
+    { symbol, orderId },
+  );
+  return order.status;
 }
 
 /** Изолированная маржа и плечо для символа. «Уже установлено» — не ошибка. */

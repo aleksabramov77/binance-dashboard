@@ -59,15 +59,28 @@ export function mirrorLevels(t: MirrorTradeInput): {
   return { stopLoss, takeProfit };
 }
 
+/** Есть ли символы на демо-рынке (ключи market:symbol, см. listingKey). */
+export interface MirrorListing {
+  /** Символа точно нет на демо — пропуск без запроса на вход. */
+  missing: Set<string>;
+  /** Проверить не удалось (сеть) — кандидат ждёт следующего прогона. */
+  unknown: Set<string>;
+}
+
+export const listingKey = key;
+
+const MARKET_NAME = { spot: "демо-споте", futures: "демо-фьючерсах" } as const;
+
 /**
  * Что делать с кандидатами: открыть зеркало или пропустить (с причиной).
  * Один символ рынка — одна демо-позиция: TP/SL на фьючерсах общие для символа, на споте OCO
- * продал бы монеты другой сделки. Старые входы пропускаем.
+ * продал бы монеты другой сделки. Старые входы и монеты, которых нет на демо, пропускаем.
  */
 export function planMirror(
   candidates: MirrorTradeInput[],
   busy: Set<string>,
   now: number,
+  listing: MirrorListing = { missing: new Set(), unknown: new Set() },
 ): MirrorDecision[] {
   const taken = new Set(busy);
   const decisions: MirrorDecision[] = [];
@@ -97,6 +110,16 @@ export function planMirror(
       });
       continue;
     }
+    if (listing.missing.has(key(t))) {
+      decisions.push({
+        tradeId: t.tradeId,
+        kind: "skip",
+        reason: `${t.symbol}: нет на ${MARKET_NAME[t.market]}.`,
+      });
+      continue;
+    }
+    // Справочник демо не загрузился — не пропускаем навсегда, повторим на следующей минуте.
+    if (listing.unknown.has(key(t))) continue;
     if (taken.has(key(t))) {
       decisions.push({
         tradeId: t.tradeId,

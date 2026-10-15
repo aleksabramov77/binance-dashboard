@@ -1,0 +1,18 @@
+{
+  "worktree": { "bgIsolation": "none" },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && pnpm -s wt prune --quiet --older-than 24h 2>/dev/null || true",
+            "timeout": 60,
+            "statusMessage": "Проверяю забытые worktree"
+          }
+        ]
+      }
+    ]
+  }
+}

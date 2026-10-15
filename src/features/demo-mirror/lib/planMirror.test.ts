@@ -87,3 +87,39 @@ describe("planMirror", () => {
     expect(d.kind === "open" && d.request.stopOnly).toBe(true);
   });
 });
+
+describe("planMirror: монеты, которых нет на демо (spec 0012, AC2)", () => {
+  it("нет на демо-фьючерсах / демо-споте — пропуск с причиной, без входа", () => {
+    const d = planMirror(
+      [
+        trade({ tradeId: "f", symbol: "BTWUSDT" }),
+        trade({ tradeId: "s", symbol: "DOSUSDT", market: "spot" }),
+        trade({ tradeId: "ok", symbol: "ETHUSDT" }),
+      ],
+      new Set(),
+      NOW,
+      {
+        missing: new Set(["futures:BTWUSDT", "spot:DOSUSDT"]),
+        unknown: new Set(),
+      },
+    );
+    expect(d).toEqual([
+      { tradeId: "f", kind: "skip", reason: "BTWUSDT: нет на демо-фьючерсах." },
+      { tradeId: "s", kind: "skip", reason: "DOSUSDT: нет на демо-споте." },
+      expect.objectContaining({ tradeId: "ok", kind: "open" }),
+    ]);
+  });
+
+  it("справочник не загрузился — кандидат ждёт следующего прогона, монету не занимает", () => {
+    const d = planMirror(
+      [
+        trade({ tradeId: "a", symbol: "TRUTHUSDT" }),
+        trade({ tradeId: "b", symbol: "TRUTHUSDT" }),
+      ],
+      new Set(),
+      NOW,
+      { missing: new Set(), unknown: new Set(["futures:TRUTHUSDT"]) },
+    );
+    expect(d).toEqual([]);
+  });
+});
