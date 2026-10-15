@@ -15,6 +15,7 @@ import {
 import { ENGINE_KEYS, EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import { createMemoryDb } from "@/shared/db/client.server";
 import {
+  buildTickDeps,
   createPerpetualsSource,
   type EngineTickEnv,
   prepareEngineDb,
@@ -214,6 +215,22 @@ describe.skipIf(!pgUrl)("withEngineTickLock на Postgres: два сеанса",
     } finally {
       await Promise.all([a.end(), b.end()]);
     }
+  });
+});
+
+describe("buildTickDeps: свечи", () => {
+  it("прокидывает startTime в fetchKlines и режет limit до 1000 (баг 0028)", async () => {
+    const fetchKlines = vi.fn(market.fetchKlines);
+    const deps = buildTickDeps(
+      env({ market: { ...market, fetchKlines } }),
+      createDbExperimentStore(db),
+    );
+    await deps.candles("futures", "BTCUSDT", "1m", 1500, 1_000_000);
+    await deps.candles("spot", "BTCUSDT", "1h", 301);
+    expect(fetchKlines.mock.calls).toEqual([
+      ["futures", "BTCUSDT", "1m", 1000, 1_000_000],
+      ["spot", "BTCUSDT", "1h", 301, undefined],
+    ]);
   });
 });
 
