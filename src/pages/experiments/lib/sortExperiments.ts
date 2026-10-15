@@ -1,9 +1,10 @@
-import type { ExperimentSummary } from "@/entities/experiment";
+import { ASSET_GROUPS, type ExperimentSummary } from "@/entities/experiment";
 import type { SortDir } from "@/shared/lib";
 import type { MarketFilter } from "../model/useExperimentsView";
 
 export const SORT_KEYS = [
   "id",
+  "ag",
   "trades",
   "winRate",
   "pnl",
@@ -14,9 +15,15 @@ export const SORT_KEYS = [
   "demoTrades",
   "demoWinRate",
   "demoPnl",
+  "demoProfitFactor",
+  "demoMaxDrawdown",
+  "demoEquity",
 ] as const;
 
 export type SortKey = (typeof SORT_KEYS)[number];
+
+/** Порядок групп активов для сортировки по AG: как в карте ASSET_GROUPS (Spot, USDⓈ-M). */
+const AG_ORDER = Object.keys(ASSET_GROUPS);
 
 /** Значение колонки для сортировки; null (нет данных) — всегда в конце. */
 function sortValue(e: ExperimentSummary, key: SortKey): number | null {
@@ -24,6 +31,8 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
   switch (key) {
     case "id":
       return null;
+    case "ag":
+      return AG_ORDER.indexOf(e.market);
     case "trades":
       return s.trades;
     case "winRate":
@@ -48,6 +57,15 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
       return e.demo.closed ? e.demo.wins / e.demo.closed : null;
     case "demoPnl":
       return e.demo.closed ? e.demo.pnl : null;
+    case "demoProfitFactor":
+      return e.demo.closed
+        ? (e.demo.profitFactor ??
+            (e.demo.grossProfit > 0 ? Number.POSITIVE_INFINITY : null))
+        : null;
+    case "demoMaxDrawdown":
+      return e.demo.closed ? e.demo.maxDrawdownPct : null;
+    case "demoEquity":
+      return e.demo.closed ? e.demo.equity : null;
   }
 }
 

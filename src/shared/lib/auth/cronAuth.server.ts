@@ -20,3 +20,16 @@ export function checkCronAuth(
     ? "ok"
     : "unauthorized";
 }
+
+/**
+ * Проверка секрета в заголовке входящего webhook (например, X-Telegram-Bot-Api-Secret-Token).
+ * Без секрета закрыто всегда, и локально тоже: webhook приходит только от внешнего сервиса.
+ */
+export function checkSecretHeader(
+  value: string | null,
+  secret: string | null,
+): CronAuthResult {
+  if (!secret) return "unavailable";
+  if (!value) return "unauthorized";
+  return timingSafeEqual(digest(value), digest(secret)) ? "ok" : "unauthorized";
+}

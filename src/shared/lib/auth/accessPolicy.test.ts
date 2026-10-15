@@ -6,7 +6,7 @@ import {
   isPublicPath,
   parseAllowedLogins,
 } from "./accessPolicy";
-import { checkCronAuth } from "./cronAuth.server";
+import { checkCronAuth, checkSecretHeader } from "./cronAuth.server";
 
 const full = {
   AUTH_SECRET: "s",
@@ -90,6 +90,15 @@ describe("decideAccess", () => {
     expect(isPublicPath("/api/authx")).toBe(false);
   });
 
+  it("webhook Telegram открыт без сессии, остальные API — нет", () => {
+    expect(decide("/api/telegram/webhook", null)).toBe("allow");
+    expect(isPublicPath("/api/telegramx")).toBe(false);
+    expect(decide("/api/logs", null)).toBe("unauthorized");
+    expect(decide("/api/telegram/webhook", null, "misconfigured")).toBe(
+      "unavailable",
+    );
+  });
+
   it("не настроено — закрыто всё, включая вход; выключено — всё открыто", () => {
     expect(decide("/login", null, "misconfigured")).toBe("unavailable");
     expect(decide("/api/auth/signin", null, "misconfigured")).toBe(
@@ -109,5 +118,19 @@ describe("checkCronAuth", () => {
   it("без секрета: production закрыт, локально открыт", () => {
     expect(checkCronAuth(null, null, true)).toBe("unavailable");
     expect(checkCronAuth(null, null, false)).toBe("ok");
+  });
+});
+
+describe("checkSecretHeader", () => {
+  it("верный секрет — ok, неверный или без заголовка — unauthorized", () => {
+    expect(checkSecretHeader("s3cret", "s3cret")).toBe("ok");
+    expect(checkSecretHeader("s3cres", "s3cret")).toBe("unauthorized");
+    expect(checkSecretHeader("", "s3cret")).toBe("unauthorized");
+    expect(checkSecretHeader(null, "s3cret")).toBe("unauthorized");
+  });
+
+  it("секрет не задан — unavailable, даже если заголовок есть", () => {
+    expect(checkSecretHeader("x", null)).toBe("unavailable");
+    expect(checkSecretHeader(null, null)).toBe("unavailable");
   });
 });

@@ -40,9 +40,9 @@ Zustand (клиентское состояние, если понадобитс�
 | Earn | `pages/earn` (вкладки Simple / Dual / Стейкинг и DeFi / Гид), `widgets/{best-offers,changes-feed,offers-table,dual-offers-table,yield-products-table,kind-summary,earn-guide,allocation-plan}`, `features/{collect-snapshot,refresh-snapshot,offer-filters,load-earn-catalog,allocation-advice}`, `entities/{earn-offer,earn-product}` (сложные продукты, гид — spec 0019) | `/api/earn/*` (в т.ч. `/api/earn/summary` — публичная сводка, `/api/earn/advanced` — каталоги по ключу), `/api/cron/earn-snapshot` | таблица `earn_snapshots` (`entities/earn-offer/model/db.ts`); каталоги сложных продуктов — только кэш в памяти 5 мин |
 | Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
-| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`), `/api/cron/tick`, `/api/cron/demo-mirror` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state`, `demo_mirror_orders` |
+| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`, группы активов AG — `model/assetGroup.ts`, демо-метрики — `computeDemoStats`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`), `/api/cron/tick`, `/api/cron/demo-mirror` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state`, `demo_mirror_orders` |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
-| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → Telegram), `src/app/server/{logs,logMonitor}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs`, `/api/cron/log-monitor`, `/api/auth/*`, страница `/login` | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
+| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login,help}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → Telegram), `features/db-space` (свободное место в базе: пороги, тексты бота), `src/app/server/{logs,logMonitor,alertState,dbSpace,telegramBot}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs` (фильтры `level`/`event`/`experiment`/`days`), `/api/cron/log-monitor`, `/api/telegram/webhook`, `/api/auth/*`, страница `/login`, страница `/help` (глоссарий из `docs/ai/glossary.md` через `pnpm glossary`) | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
 
 Правила:
 - **Нет импортов между доменами** ни на каком слое. Фича лаборатории не импортирует `entities/trade`,
@@ -113,8 +113,9 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - Режим — `getAuthConfig()` (`shared/config/env.server.ts`): без `AUTH_SECRET` вне production — защита
   выключена (локальная разработка, `/api/auth/*` → 404); в production без полного набора `AUTH_*` или при
   частичной настройке — **закрыто всё** (503, fail-closed).
-- Без сессии открыты только `/login`, `/api/auth/*` и `/api/cron/*`. Cron защищён своим секретом:
-  `Authorization: Bearer $CRON_SECRET` (`shared/lib/auth/cronAuth.server.ts`, сравнение за постоянное время).
+- Без сессии открыты только `/login`, `/api/auth/*`, `/api/cron/*` и `/api/telegram/*`. Cron защищён своим секретом:
+  `Authorization: Bearer $CRON_SECRET` (`shared/lib/auth/cronAuth.server.ts`, сравнение за постоянное время);
+  webhook Telegram — заголовком `X-Telegram-Bot-Api-Secret-Token` = `TELEGRAM_WEBHOOK_SECRET` (`checkSecretHeader`, без секрета — 503).
 - UI: `features/auth` — кнопка «Войти через GitHub», меню пользователя в хедере (аватар, логин, «Выйти»).
 
 | Переменная | Назначение |
@@ -131,9 +132,22 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - Монитор журнала (`features/log-monitor`, `POST /api/cron/log-monitor`, pg_cron каждые 15 мин): всплески ошибок,
   5xx по ручкам, движок не тикает, упавший cron, старый Earn → разбор ИИ (`LOG_ANALYSIS_MODEL`) → Telegram;
   повтор не чаще 2 ч, «восстановлено» один раз. Журнал хранится 14 дней.
+- Свободное место в базе (spec 0021, `features/db-space`, `src/app/server/dbSpace.ts`): тот же cron замеряет размер
+  базы (`getDbUsage`: `pg_database_size` и топ таблиц по `pg_total_relation_size`; на этапе 3 миграции меняется только
+  она) относительно `DB_SIZE_LIMIT_MB` (500) и шлёт одно сообщение на каждый порог свободного места 50/40/30/20/10/5 %
+  (за прогон — о самом низком); свободно больше «порог + 2 п.п.» — порог перезаряжается. Состояние — `alert_state`
+  (`db.space.<N>`, статусы `sent`/`cleared`; общий модуль `src/app/server/alertState.ts`), сбой замера не ломает
+  монитор (`dbSpace: { error }`).
+- Бот `@binance_dashboard_gold_bot` отвечает владельцу (`TELEGRAM_CHAT_ID`) на `/db` (место в базе) и `/start`, `/help`
+  (список команд): `POST /api/telegram/webhook` → `src/app/server/telegramBot.ts`; чужие чаты — без ответа, warn
+  `telegram.foreign`. Webhook и меню команд — `pnpm telegram:setup` (`--delete` — снять; пока webhook включён,
+  `getUpdates`/`pnpm monitor:supabase chat-id` не работают).
 - Каждый API-роут обёрнут `withLogging` (`shared/lib/route.server.ts`): непредвиденная ошибка →
   JSON `{ error }` (502 — сбой внешнего сервиса, 500 — наш), стек в журнале.
-- Ошибки браузера уходят в `POST /api/logs`. Страница `/logs` показывает журнал.
+- Ошибки браузера уходят в `POST /api/logs`. Страница `/logs` показывает журнал; фильтры — в URL и в
+  `GET /api/logs`: `level`, `event` (список через запятую), `experiment` (`data->>'experimentId'`), `days` (1…14)
+  — `entities/log-entry/model/filters.ts`. Демо-зеркало пишет каждый отказ/пропуск отдельной записью
+  `mirror.rejected` / `mirror.skipped` с `experimentId` (spec 0016).
 
 ## Данные на диске
 `data/` в `.gitignore`: `snapshots/` (снимки Earn), `logs/`, `pglite/` (локальная БД).

@@ -9,6 +9,7 @@
 | [`architecture.md`](architecture.md) | FSD-слои, сервер/клиент, данные, логирование, где что лежит |
 | [`conventions.md`](conventions.md) | Нейминг, тесты, номер задачи, коммиты, ветки, PR, Definition of Done |
 | [`workflow.md`](workflow.md) | AI-конвейер: `/feature`, `/bug`, `/merge`, процессы `/flow`, worktree на задачу, роли агентов |
+| [`glossary.md`](glossary.md) | Глоссарий терминов и сокращений (AG, Paper/Demo/Real, эпоха, PF…) — источник истины для `/help` (`pnpm glossary`) |
 | [`deploy-supabase.md`](deploy-supabase.md) | **Основной деплой:** Supabase (БД, тик) + Vercel (интерфейс, регион Tokyo) |
 | [`deploy.md`](deploy.md) | Резервный деплой на Oracle Cloud (Dubai): VM, HTTPS, Supabase, GitHub OAuth, автодеплой, ключи на сервере |
 | [`../specs/`](../specs/) | ТЗ на каждую фичу и баг (`NNNN-slug.md`) + шаблоны |
@@ -34,6 +35,7 @@ README внутри сложных модулей (читать перед пр�
 | `pnpm format` | автоформат Biome |
 | `pnpm lab:report` | read-only отчёт лаборатории по текущей эпохе из БД: метрики, t, MFE, контекст рынка BTC, семейства, подсказки (`--experiment F06`, `--since 7d`, `--out <каталог>`, `--no-market`) — вход для `/flow lab` |
 | `pnpm lab:apply` | применить решения разбора: `--disable`/`--enable` эксперимент, `--mirror-on`/`--mirror-off` демо-зеркало, `--dry-run`, `--out <каталог>` (пишет apply.md) — те же тумблеры, что в /settings; печатает, к какой БД подключён, без `DATABASE_URL` отказывается (нужен `--local`); только по подтверждению пользователя |
+| `pnpm telegram:setup [--delete]` | webhook бота Telegram на прод (`${SITE_URL}/api/telegram/webhook`, секрет `TELEGRAM_WEBHOOK_SECRET`) и меню команд; `--delete` — снять webhook |
 | `pnpm hooks:install` | включить pre-push хук (запрет push в main + `pnpm check`) |
 | `pnpm lab:private [--dry-run] [--prod] [--file <path>]` | записать приватные эксперименты из `private/experiments.json` в БД: в прод (Postgres) — только с `--prod`; для локального сервера worktree — `DATABASE_URL= pnpm lab:private` при остановленном сервере (`architecture.md` → «Приватные эксперименты») |
 
