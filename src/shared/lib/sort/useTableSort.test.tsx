@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { Activity, StrictMode } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+import { Activity, type ReactNode, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineSortTable, type SavedSort, type SortTable } from "./sortStorage";
 import { type SortHeadProps, useTableSort } from "./useTableSort";
@@ -10,6 +16,7 @@ import { type SortHeadProps, useTableSort } from "./useTableSort";
 const KEYS = ["pnl", "trades"] as const;
 type Key = (typeof KEYS)[number];
 const ITEMS = defineSortTable("page/[id]:items", KEYS);
+const ITEMS_KEY = "binance-dashboard:sort:page/[id]:items";
 const OTHER = defineSortTable("page/[id]:other", KEYS);
 const BLOCKED = defineSortTable("page/[id]:blocked", KEYS);
 const FALLBACK: SavedSort<Key> = { key: "trades", dir: "asc" };
@@ -50,11 +57,15 @@ function TableWithDefault(props: { label: string }) {
   return <View label={props.label} sort={sort} head={head} />;
 }
 
-/** Страница: видима — открыта, скрыта — Next спрятал её в <Activity> после ухода через меню. */
-function Page(props: { visible: boolean; label: string }) {
+/**
+ * Страница в <Activity>, как сегмент Next: видима — открыта, скрыта — ушли через меню. Элемент таблицы
+ * создают один раз и передают детьми: при показе React не перерисовывает его вместе с родителем, и
+ * свежую сортировку даёт только сверка снимка хранилища при повторном подключении эффектов.
+ */
+function Page(props: { visible: boolean; children: ReactNode }) {
   return (
     <Activity mode={props.visible ? "visible" : "hidden"}>
-      <Table label={props.label} />
+      {props.children}
     </Activity>
   );
 }
@@ -76,36 +87,46 @@ describe("useTableSort — сортировка таблицы в localStorage",
     expect(shown("A")).toBe("по умолчанию");
     click("A: PnL ↓");
     expect(shown("A")).toBe("pnl desc (PnL активна)");
-    expect(
-      window.localStorage.getItem("binance-dashboard:sort:page/[id]:items"),
-    ).toBe('{"key":"pnl","dir":"desc"}');
+    expect(window.localStorage.getItem(ITEMS_KEY)).toBe(
+      '{"key":"pnl","dir":"desc"}',
+    );
   });
 
-  it("показ → <Activity mode=hidden> → показ: таблица с сохранённой сортировкой", () => {
-    const { rerender } = render(<Page visible label="A" />);
+  it("показ → <Activity mode=hidden> → показ: сортировка на месте, изменённая за это время в другой вкладке — подхватывается", () => {
+    const a = <Table label="A" />;
+    const { rerender } = render(<Page visible>{a}</Page>);
     click("A: PnL ↓");
-    rerender(<Page visible={false} label="A" />);
-    rerender(<Page visible label="A" />);
+    rerender(<Page visible={false}>{a}</Page>);
+    rerender(<Page visible>{a}</Page>);
     expect(shown("A")).toBe("pnl desc (PnL активна)");
+
+    // Пока страница скрыта, сортировку этой таблицы поменяли в другой вкладке.
+    rerender(<Page visible={false}>{a}</Page>);
+    act(() => {
+      window.localStorage.setItem(ITEMS_KEY, '{"key":"trades","dir":"asc"}');
+      window.dispatchEvent(new StorageEvent("storage", { key: ITEMS_KEY }));
+    });
+    rerender(<Page visible>{a}</Page>);
+    expect(shown("A")).toBe("trades asc");
   });
 
   it("два экземпляра одной таблицы видят изменение сразу, в том числе скрытый в <Activity>", () => {
-    function TwoPages(props: { secondVisible: boolean }) {
-      return (
-        <>
-          <Page visible label="A" />
-          <Page visible={props.secondVisible} label="B" />
-        </>
-      );
-    }
-    const { rerender } = render(<TwoPages secondVisible />);
+    const a = <Table label="A" />;
+    const b = <Table label="B" />;
+    const pages = (secondVisible: boolean) => (
+      <>
+        <Page visible>{a}</Page>
+        <Page visible={secondVisible}>{b}</Page>
+      </>
+    );
+    const { rerender } = render(pages(true));
     click("A: PnL ↓");
     expect(shown("B")).toBe("pnl desc (PnL активна)");
 
     // B спрятан (ушли на другую страницу маршрута), сортировку меняют на A, затем возвращаются к B.
-    rerender(<TwoPages secondVisible={false} />);
+    rerender(pages(false));
     click("A: Сделки ↑");
-    rerender(<TwoPages secondVisible />);
+    rerender(pages(true));
     expect(shown("B")).toBe("trades asc");
 
     click("B: сбросить");
@@ -127,9 +148,7 @@ describe("useTableSort — сортировка таблицы в localStorage",
     expect(shown("A")).toBe("pnl desc (PnL активна)");
     click("A: сбросить");
     expect(shown("A")).toBe("trades asc");
-    expect(
-      window.localStorage.getItem("binance-dashboard:sort:page/[id]:items"),
-    ).toBeNull();
+    expect(window.localStorage.getItem(ITEMS_KEY)).toBeNull();
   });
 
   it("таблицы с разными именами независимы", () => {
@@ -146,8 +165,12 @@ describe("useTableSort — сортировка таблицы в localStorage",
   it("StrictMode: подписка снимается и ставится заново без потери сортировки", () => {
     render(
       <StrictMode>
-        <Page visible label="A" />
-        <Page visible label="B" />
+        <Page visible>
+          <Table label="A" />
+        </Page>
+        <Page visible>
+          <Table label="B" />
+        </Page>
       </StrictMode>,
     );
     click("A: PnL ↓");
