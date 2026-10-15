@@ -65,7 +65,9 @@ export interface MirrorDeps<
    * Сверка своих ног открытых зеркал: своя нога сработала — вторая снимается, строка закрыта биржей
    * (не дожидаясь paper-сделки). Возвращает такие зеркала; сбой — пусто (повтор на следующем прогоне).
    */
-  sweepLegs: () => Promise<{ tradeId: string; symbol: string }[]>;
+  sweepLegs: (
+    overBudget: () => boolean,
+  ) => Promise<{ tradeId: string; symbol: string }[]>;
   /** id демо-позиций на закрытие (без захвата). */
   listToClose: () => Promise<string[]>;
   /** Захват одной позиции на закрытие; null — её уже взял другой прогон. */
@@ -118,7 +120,7 @@ export async function runMirror<
   const overBudget = () => deps.now() - startedAt > MIRROR.runBudgetMs;
 
   // Сначала свои ноги: висящий reduceOnly-ордер сработавшего зеркала закрыл бы объём соседнего.
-  result.swept = await deps.sweepLegs();
+  result.swept = await deps.sweepLegs(overBudget);
 
   // Захват по одному: после бюджета строки не уходят в closing и достаются следующему прогону.
   const toClose = await deps.listToClose();

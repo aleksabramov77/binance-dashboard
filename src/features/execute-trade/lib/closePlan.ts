@@ -7,8 +7,10 @@ import { SPOT_TAKER_FEE } from "../config/spot";
 export interface OwnLeg {
   active: boolean;
   triggered: boolean;
-  /** Спот: сколько уже продано этим ордером (частичное исполнение тейка). */
+  /** Сколько уже закрыто этим ордером (спот — частичный тейк, фьючерсы — сработавшая нога). */
   executedQty: number;
+  /** Сработал, а исполненный объём узнать не удалось (фьючерсы) — докрывать нельзя (PR 2d). */
+  executedUnknown?: boolean;
 }
 
 /** Ордера нет на бирже (снят без исполнения давно, не нашли) — ни снимать, ни считать сработавшим. */
@@ -20,17 +22,26 @@ const GONE: OwnLeg = { active: false, triggered: false, executedQty: 0 };
  */
 export function algoLeg(
   q: { algoStatus: string; actualOrderId: number | null } | null,
+  executedQty: number | null = null,
 ): OwnLeg {
   if (!q) return GONE;
   const triggered =
     q.actualOrderId !== null ||
     ["TRIGGERING", "TRIGGERED", "FINISHED"].includes(q.algoStatus);
+  // Сработавшая нога закрыла executedQty своего объёма (actualQty или ордер по actualOrderId).
+  const known = executedQty !== null && executedQty > 0;
   return {
     active: !triggered && q.algoStatus === "NEW",
     triggered,
-    executedQty: 0,
+    executedQty: triggered && known ? executedQty : 0,
+    ...(triggered && !known ? { executedUnknown: true } : {}),
   };
 }
+
+/** Фьючерсы: сработала ли нога (до запроса исполненного объёма). */
+export const algoTriggered = (
+  q: { algoStatus: string; actualOrderId: number | null } | null,
+) => algoLeg(q).triggered;
 
 /**
  * Ордер спота: FILLED — сработал (монеты проданы); NEW/PENDING_NEW/PARTIALLY_FILLED — стоит
@@ -54,8 +65,10 @@ export interface ClosePlan {
   cancel: ("stop" | "takeProfit")[];
   /** Сработал свой стоп/тейк — позицию уже закрыла биржа, докрывать нечего. */
   closedByExchange: boolean;
-  /** Спот: продано своими ордерами частично — на столько меньше докрывать. */
+  /** Закрыто своими ордерами (спот — частичный тейк, фьючерсы — сработавшая нога) — на столько меньше докрывать. */
   soldByLegs: number;
+  /** Своя нога сработала, а объём неизвестен — не докрывать (иначе можно закрыть объём соседей). */
+  soldUnknown: boolean;
 }
 
 /**
@@ -74,6 +87,7 @@ export function planOwnClose(legs: {
     cancel: entries.filter(([, l]) => l?.active).map(([k]) => k),
     closedByExchange: entries.some(([, l]) => l?.triggered),
     soldByLegs: entries.reduce((s, [, l]) => s + (l?.executedQty ?? 0), 0),
+    soldUnknown: entries.some(([, l]) => l?.executedUnknown === true),
   };
 }
 
@@ -153,9 +167,11 @@ export function afterAlgoUnknown(
  * не всё закрыл) — докрываем, а не объявляем «закрыта биржей».
  */
 export function closeVerdict(
-  plan: Pick<ClosePlan, "closedByExchange">,
+  plan: Pick<ClosePlan, "closedByExchange" | "soldUnknown">,
   qty: number,
 ): "close" | "closedByExchange" | "nothingLeft" {
+  // Сколько закрыла своя нога — неизвестно: на стороне могут быть соседи, лучше оставить свой хвост.
+  if (plan.closedByExchange && plan.soldUnknown) return "closedByExchange";
   if (qty > 0) return "close";
   return plan.closedByExchange ? "closedByExchange" : "nothingLeft";
 }
@@ -169,14 +185,20 @@ export function closeVerdict(
 export function orphanLegCandidate(
   refs: { stop: StoredAlgoRef | null; takeProfit: StoredAlgoRef | null },
   openAlgos: { algoId: number; clientAlgoId: string | null }[],
-): { missing: "stop" | "takeProfit"; remaining: "stop" | "takeProfit" } | null {
-  if (!refs.stop || !refs.takeProfit) return null;
+): {
+  missing: "stop" | "takeProfit";
+  remaining: "stop" | "takeProfit" | null;
+} | null {
   const isOpen = (r: StoredAlgoRef) =>
     openAlgos.some(
       (a) =>
         (r.algoId !== null && a.algoId === r.algoId) ||
         (r.clientAlgoId !== null && a.clientAlgoId === r.clientAlgoId),
     );
+  // Одна нога (stopOnly): пропала из открытых — кандидат «сработала», снимать нечего.
+  if (refs.stop && !refs.takeProfit)
+    return isOpen(refs.stop) ? null : { missing: "stop", remaining: null };
+  if (!refs.stop || !refs.takeProfit) return null;
   const stopOpen = isOpen(refs.stop);
   const tpOpen = isOpen(refs.takeProfit);
   if (stopOpen === tpOpen) return null;

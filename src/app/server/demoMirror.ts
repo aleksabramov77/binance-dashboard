@@ -85,8 +85,11 @@ export async function runDemoMirror() {
       if (c && r.status === "rejected")
         writeMirrorLog(mirrorLogEntry("rejected", c, r.message));
     },
-    sweepLegs: async () => {
-      const swept = await sweepTriggeredLegs(await listOpenMirrorLegs(db));
+    sweepLegs: async (overBudget) => {
+      const swept = await sweepTriggeredLegs(
+        await listOpenMirrorLegs(db),
+        overBudget,
+      );
       const closed: { tradeId: string; symbol: string }[] = [];
       for (const m of swept)
         if (

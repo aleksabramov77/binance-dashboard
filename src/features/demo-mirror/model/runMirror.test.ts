@@ -228,4 +228,23 @@ describe("runMirror", () => {
     expect(order).toEqual(["sweep", "list"]);
     expect(r.swept).toEqual([{ tradeId: "m1", symbol: "ADAUSDT" }]);
   });
+
+  it("сверка ног получает бюджет прогона: после 200 с — true", async () => {
+    let clock = NOW;
+    let budgetCheck: (() => boolean) | null = null;
+    await runMirror(
+      deps({
+        now: () => clock,
+        sweepLegs: async (overBudget) => {
+          budgetCheck = overBudget;
+          return [];
+        },
+      }),
+    );
+    expect(budgetCheck).not.toBeNull();
+    const check = budgetCheck as unknown as () => boolean;
+    expect(check()).toBe(false);
+    clock += 201_000;
+    expect(check()).toBe(true);
+  });
 });

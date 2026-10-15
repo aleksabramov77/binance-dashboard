@@ -37,13 +37,14 @@ const LEG = { stop: "стоп", takeProfit: "тейк" } as const;
  */
 export async function sweepTriggeredLegs(
   mirrors: OpenMirrorLegs[],
+  overBudget: () => boolean = () => false,
 ): Promise<SweptMirror[]> {
   const config = getDemoTradingConfig();
+  // Зеркала с хотя бы одной своей ногой; одна нога (stopOnly) — сработала: строка закрыта, снимать нечего.
   const futures = mirrors.filter(
     (m) =>
       m.protectRefs.market === "futures" &&
-      m.protectRefs.stop &&
-      m.protectRefs.takeProfit,
+      (m.protectRefs.stop || m.protectRefs.takeProfit),
   );
   if (!config || futures.length === 0) return [];
   const creds = config.credentials;
@@ -59,37 +60,44 @@ export async function sweepTriggeredLegs(
   }
   const swept: SweptMirror[] = [];
   for (const m of futures) {
+    // Бюджет прогона: остальные зеркала сверим на следующей минуте.
+    if (overBudget()) break;
     const refs = m.protectRefs;
     if (refs.market !== "futures") continue;
     const candidate = orphanLegCandidate(refs, openAlgos);
     if (!candidate) continue;
+    const remaining = candidate.remaining;
     const missingRef = refs[candidate.missing];
-    const remainingRef = refs[candidate.remaining];
     const missingLookup = missingRef && algoLookup(missingRef);
-    const remainingLookup = remainingRef && algoLookup(remainingRef);
-    if (!missingLookup || !remainingLookup) continue;
+    const remainingRef = remaining ? refs[remaining] : null;
+    const remainingLookup = remainingRef ? algoLookup(remainingRef) : null;
+    if (!missingLookup || (remaining && !remainingLookup)) continue;
     const steps: TradeStep[] = [];
     try {
       const q = await fetchDemoAlgoOrder(creds, missingLookup);
       // Нога снята не срабатыванием (вручную, истекла) — не наше дело: закроется по paper-сделке.
       if (!algoLeg(q).triggered) continue;
-      const cancelled = await demoCancelAlgoOrder(creds, remainingLookup);
       steps.push({
         label: `Сработал свой ${LEG[candidate.missing]}`,
         ok: true,
         detail: `${q?.algoStatus}, ордер #${q?.actualOrderId}, ~${q?.actualPrice || "—"}`,
       });
-      steps.push({
-        label: `Снять свой ${LEG[candidate.remaining]}`,
-        ok: true,
-        detail: cancelled ? "Снят" : "Уже не активен",
-      });
+      if (remaining && remainingLookup) {
+        const cancelled = await demoCancelAlgoOrder(creds, remainingLookup);
+        steps.push({
+          label: `Снять свой ${LEG[remaining]}`,
+          ok: true,
+          detail: cancelled ? "Снят" : "Уже не активен",
+        });
+      }
       swept.push({
         tradeId: m.tradeId,
         symbol: m.symbol,
         closedBy: candidate.missing,
         exitPrice: q && q.actualPrice > 0 ? q.actualPrice : null,
-        message: `Позиция закрыта биржей: сработал ${LEG[candidate.missing]}, ${LEG[candidate.remaining]} снят.`,
+        message: remaining
+          ? `Позиция закрыта биржей: сработал ${LEG[candidate.missing]}, ${LEG[remaining]} снят.`
+          : `Позиция закрыта биржей: сработал ${LEG[candidate.missing]}.`,
         steps,
       });
     } catch (error) {

@@ -1,5 +1,6 @@
 import type { TradeStep } from "@/entities/trade";
 import {
+  type AlgoOrderQuery,
   clientIdGroup,
   type DemoProtectRefs,
   demoCancelAlgoOrder,
@@ -11,6 +12,7 @@ import {
   demoSpotMarketOrder,
   type FuturesSide,
   fetchDemoAlgoOrder,
+  fetchDemoFuturesOrder,
   fetchDemoFuturesSymbolState,
   fetchDemoPositionMode,
   fetchDemoPrice,
@@ -25,6 +27,7 @@ import { log } from "@/shared/lib/logger.server";
 import {
   algoLeg,
   algoLookup,
+  algoTriggered,
   averagePrice,
   type ClosePlan,
   closeVerdict,
@@ -232,7 +235,10 @@ async function readOwnLegs(
     const [stop, takeProfit] = await Promise.all(
       [refs.stop, refs.takeProfit].map(async (r) => {
         const lookup = r && algoLookup(r);
-        return lookup ? algoLeg(await fetchDemoAlgoOrder(creds, lookup)) : null;
+        if (!lookup) return null;
+        const q = await fetchDemoAlgoOrder(creds, lookup);
+        if (!q || !algoTriggered(q)) return algoLeg(q);
+        return algoLeg(q, await triggeredQty(creds, symbol, q));
       }),
     );
     return planOwnClose({ stop: stop ?? null, takeProfit: takeProfit ?? null });
@@ -247,6 +253,27 @@ async function readOwnLegs(
     ),
   );
   return planOwnClose({ stop: stop ?? null, takeProfit: takeProfit ?? null });
+}
+
+/**
+ * Сколько закрыла своя сработавшая algo-нога: actualQty, иначе executedQty рыночного ордера
+ * actualOrderId. null — узнать не удалось (тогда закрытие не докрывает остаток).
+ */
+async function triggeredQty(
+  creds: BinanceCredentials,
+  symbol: string,
+  q: AlgoOrderQuery,
+): Promise<number | null> {
+  if (q.actualQty > 0) return q.actualQty;
+  if (q.actualOrderId === null) return null;
+  try {
+    const order = await fetchDemoFuturesOrder(creds, symbol, {
+      orderId: q.actualOrderId,
+    });
+    return order && order.executedQty > 0 ? order.executedQty : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Снять свой ордер. Спот: снятие ордера из списка (OCO/OTOCO) снимает весь список. */
@@ -328,6 +355,14 @@ async function closeOwn(
           ? `Сработал свой стоп/тейк на бирже; ${detail}`
           : detail,
     });
+    // Объём своей сработавшей ноги неизвестен — остаток не докрываем (на стороне могут быть соседи).
+    // Статус closed: нога reduceOnly закрывает свой объём, а повтор close_failed каждую минуту риск
+    // не снимет; хвост, если он есть, виден в «Демо-сделках».
+    if (verdict === "closedByExchange" && plan.soldUnknown)
+      return finish(
+        "closed",
+        "Позиция закрыта биржей (сработал стоп/тейк); исполненный объём своей ноги неизвестен — остаток не докрывали, чтобы не закрыть объём других зеркал.",
+      );
     return finish(
       "closed",
       verdict === "closedByExchange"
@@ -351,7 +386,8 @@ async function closeOwn(
         side,
       );
       const qty = floorToStep(
-        ownCloseQuantity(req.quantity, 0, position.amount),
+        // Минус закрытое своей сработавшей ногой: остальное на стороне — чужое.
+        ownCloseQuantity(req.quantity, plan.soldByLegs, position.amount),
         rules.stepSize,
       );
       if (closeVerdict(plan, Number(qty)) !== "close")

@@ -265,6 +265,8 @@ export const algoOrderQuerySchema = z
     actualOrderId: actualOrderIdSchema,
     // Средняя цена исполнения сработавшего ордера; не срабатывал — 0.
     actualPrice: decimal.catch(0),
+    // Исполненный объём сработавшего ордера; поле есть только после исполнения — иначе 0.
+    actualQty: decimal.catch(0),
   })
   .loose();
 export type AlgoOrderQuery = z.infer<typeof algoOrderQuerySchema>;
