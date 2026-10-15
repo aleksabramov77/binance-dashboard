@@ -1,7 +1,7 @@
 # 0028 · Выходы paper-движка теряют 1m-свечи после простоя движка
 
 - **Тип:** bug
-- **Статус:** approved
+- **Статус:** testing
 - **Серьёзность:** major
 - **Дата:** 2026-10-15
 
@@ -27,7 +27,17 @@
 Edge Function `engine-tick` (`src/app/server/engineTick.ts` → `buildTickDeps`).
 
 ## Причина
-Заполняет Developer после диагностики: где и почему.
+`runTick`, этап «1. Выходы»: свечи для `walkExits` запрашивались без `startTime` — Binance отдаёт **последние**
+`limit` свечей, а `limit` упирался в 1000 (`ENGINE.maxMinuteCandles`, лимит одного запроса). При разрыве
+`checked_until → now` больше 1000 минут первая полученная свеча начиналась позже `checked_until`. `walkExits`
+пропускает только свечи раньше `checkedUntil` и не проверяет, что первая свеча идёт встык, — он проходил хвост и
+ставил `checkedUntil` на конец прочитанного, так что минуты в начале разрыва не проверялись никогда. Тест
+`runTick.test.ts` «после простоя 1500 минут закрывает по стопу…» воспроизводит это до фикса.
+
+Фикс: `startTime` в `fetchKlines` (`shared/api/binance/marketApi.ts`), `TickDeps.candles` и `buildTickDeps`;
+выходы читают 1m-свечи от `checkedUntil` страницами по 1000 до текущей минуты, не больше
+`ENGINE.maxMinutePages` (3) страниц на символ за тик, остаток — следующими тиками с `warn engine.minute-gap`.
+Свечи входов (таймфреймы эксперимента) не менялись — без `startTime`, как раньше.
 
 ## Критерии приёмки
 - [ ] AC1. Свечи выходов запрашиваются от `checked_until` (параметр `startTime` у `deps.candles` и у
@@ -53,3 +63,4 @@ Edge Function `engine-tick` (`src/app/server/engineTick.ts` → `buildTickDeps`)
 | Дата | Событие |
 |---|---|
 | 2026-10-15 | Баг заведён: найден при разборе лаборатории (задача 0024) |
+| 2026-10-15 | Developer, ветка `bug/0028-exit-candles-gap`: падающий тест (AC2), фикс — `startTime` и постраничная догрузка 1m-свечей выходов с лимитом 3 страницы за тик и `warn` (AC1, AC3, AC4), README движка (AC5); статус — testing |
