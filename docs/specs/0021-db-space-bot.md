@@ -1,7 +1,7 @@
 # 0021 · Telegram-бот: свободное место в базе
 
 - **Тип:** feature
-- **Статус:** approved
+- **Статус:** done
 - **Раздел PRD:** §3.6 [Логи и обработка ошибок](../PRD.md#36-логи-и-обработка-ошибок--запрос-пользователя-2026-10-09)
 - **Дата:** 2026-10-15
 
@@ -80,3 +80,12 @@
 |---|---|
 | 2026-10-15 | ТЗ утверждено |
 | 2026-10-15 | Разработка в ветке `feature/0021-db-space-bot`: слайс `features/db-space` (пороги, `planSpaceAlerts`, тексты), `src/app/server/{alertState,dbSpace,telegramBot}.ts`, `POST /api/telegram/webhook`, проверка места в `POST /api/cron/log-monitor`, `pnpm telegram:setup [--delete]`, env `TELEGRAM_WEBHOOK_SECRET` и `DB_SIZE_LIMIT_MB`, тесты; `pnpm check` и `pnpm build` зелёные |
+| 2026-10-15 | Tester: PASS 10/10 на локальном сервере worktree (круг 1); пользователь подтвердил приёмку |
+| 2026-10-15 | PR #57; в ветку влит `main` с PR #54 (конфликт только в `docs/ai/architecture.md`) |
+| 2026-10-15 | Reviewer: APPROVED с первого круга, label `ai-approved`, замечания только nit |
+
+## Дальше (nit из ревью, не долг задачи)
+- Проверку места запускать независимо от монитора журнала (`Promise.allSettled` в `app/api/cron/log-monitor/route.ts`): сейчас сбой отправки монитора даёт 500 и пропуск проверки в этом прогоне.
+- Тест на ветки `checkDbSpace` (`src/app/server/dbSpace.ts`): Telegram упал → сохраняются только `cleared`; Telegram не настроен → `lastSent: null`.
+- `Math.round` для дробного `DB_SIZE_LIMIT_MB` (`src/shared/config/env.server.ts`).
+- `scripts/{mirror,monitor}-supabase.ts` перевести на `getSiteUrl()`; ответы Telegram API разбирать через Zod.
