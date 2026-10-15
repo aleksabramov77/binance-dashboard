@@ -12,7 +12,7 @@ export const ENGINE = {
   moversMinQuoteVolume: 20_000_000,
   /** Объём каждой paper-сделки, USD (решение пользователя 2026-10-10). */
   tradeNotionalUsd: 50,
-  /** Плечо paper-фьючерсов: маржа = объём. */
+  /** Плечо paper-фьючерсов (USDⓈ-M и COIN-M): маржа = объём. */
   futuresLeverage: 1,
   /**
    * Окно свежести сигнала: вход — только если свеча TF закрылась не раньше max(3 мин, 5% TF) назад
@@ -24,8 +24,12 @@ export const ENGINE = {
   atrPeriod: 14,
 } as const;
 
-/** Котировка юниверса. */
-export const QUOTE = "USDT";
+/** Хвост символа группы после базы: BTCUSDT, BTCUSD_PERP (бессрочный COIN-M). */
+export const SYMBOL_SUFFIX = {
+  spot: "USDT",
+  usdm: "USDT",
+  coinm: "USD_PERP",
+} as const;
 
 /** Плечевые токены Binance — не торгуем. */
 export const LEVERAGED_TOKEN = /(UP|DOWN|BULL|BEAR)USDT$/;

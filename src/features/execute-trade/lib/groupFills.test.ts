@@ -3,7 +3,7 @@ import type { DemoFill } from "@/shared/api/binance/demo.server";
 import { groupFills, orderKey } from "./groupFills";
 
 const fill = (over: Partial<DemoFill>): DemoFill => ({
-  market: "futures",
+  market: "usdm",
   symbol: "BATUSDT",
   orderId: 1,
   time: 1_000,
@@ -43,7 +43,7 @@ describe("groupFills", () => {
       }),
     ]);
     expect(orders).toHaveLength(2);
-    expect(orders.find((o) => o.market === "futures")?.realizedPnl).toBe(-2);
+    expect(orders.find((o) => o.market === "usdm")?.realizedPnl).toBe(-2);
     expect(orders.find((o) => o.market === "spot")?.realizedPnl).toBeNull();
   });
 
@@ -54,9 +54,9 @@ describe("groupFills", () => {
       fill({ orderId: 3, time: 2 }),
     ]);
     expect(orders.map(orderKey)).toEqual([
-      "futures-BATUSDT-2",
-      "futures-BATUSDT-3",
-      "futures-BATUSDT-1",
+      "usdm-BATUSDT-2",
+      "usdm-BATUSDT-3",
+      "usdm-BATUSDT-1",
     ]);
   });
 });

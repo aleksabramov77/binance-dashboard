@@ -1,11 +1,13 @@
 // Композиция /settings лаборатории (spec 003, задача 3d): сброс тестовых капиталов (новая эпоха),
 // стартовый бюджет следующей эпохи, вкл/выкл экспериментов, отдельный сброс paper-капитала
 // эксперимента. Демо-сброс — src/app/server/demoMirror.ts. Только сервер.
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import {
+  ASSET_GROUPS,
   budgetFormSchema,
   createDbExperimentStore,
   DEFAULT_INITIAL_BUDGET,
+  type ExperimentMarket,
   type ExperimentResetResult,
   experimentsTable,
   getEpoch,
@@ -123,13 +125,25 @@ export async function toggleExperiment(
   return getLabSettings();
 }
 
-/** Demo-зеркало эксперимента (spec 008); null — эксперимента нет. Открытые зеркала не трогаем. */
+/**
+ * Demo-зеркало эксперимента (spec 008); null — эксперимента нет, { blocked } — группа не умеет зеркало
+ * (COIN-M, spec 0023: «Демо-зеркало COIN-M — позже»). Открытые зеркала не трогаем.
+ */
 export async function toggleDemoMirror(
   id: string,
   demoMirror: boolean,
-): Promise<LabSettings | null> {
+): Promise<LabSettings | null | { blocked: string }> {
   await ensureEngineReady();
-  if (!(await setExperimentDemoMirror(getDb(), id, demoMirror))) return null;
+  const db = getDb();
+  const [row] = await db
+    .select({ market: experimentsTable.market })
+    .from(experimentsTable)
+    .where(eq(experimentsTable.id, id));
+  if (!row) return null;
+  const group = ASSET_GROUPS[row.market as ExperimentMarket];
+  if (demoMirror && group?.demoMirrorBlocked)
+    return { blocked: group.demoMirrorBlocked };
+  if (!(await setExperimentDemoMirror(db, id, demoMirror))) return null;
   log.info(
     "experiments.mirror",
     `${id}: demo-зеркало ${demoMirror ? "включено" : "выключено"}`,
@@ -139,7 +153,7 @@ export async function toggleDemoMirror(
 
 /** Последние цены по рынкам открытых сделок; рынок не ответил — его сделки закроются без цены. */
 async function lastPrices(
-  markets: Set<"spot" | "futures">,
+  markets: Set<ExperimentMarket>,
 ): Promise<Record<string, number>> {
   const prices: Record<string, number> = {};
   await Promise.all(

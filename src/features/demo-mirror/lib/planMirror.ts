@@ -4,7 +4,7 @@ import { MIRROR } from "../config/mirror";
 
 export interface MirrorTradeInput {
   tradeId: string;
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
   symbol: string;
   direction: "long" | "short";
   openedAt: string;
@@ -16,7 +16,7 @@ export interface MirrorTradeInput {
 
 export interface MirrorOrderRequest {
   symbol: string;
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
   direction: "long" | "short";
   quantity: number;
   stopLoss: number;
@@ -69,7 +69,7 @@ export interface MirrorListing {
 
 export const listingKey = key;
 
-const MARKET_NAME = { spot: "демо-споте", futures: "демо-фьючерсах" } as const;
+const MARKET_NAME = { spot: "демо-споте", usdm: "демо-фьючерсах" } as const;
 
 /**
  * Что делать с кандидатами: открыть зеркало или пропустить (с причиной).
@@ -140,7 +140,7 @@ export function planMirror(
         market: t.market,
         direction: t.direction,
         quantity: t.quantity,
-        leverage: t.market === "futures" ? MIRROR.leverage : 1,
+        leverage: t.market === "usdm" ? MIRROR.leverage : 1,
         fitMinNotional: true,
         stopOnly: t.takeProfit === null,
         ...mirrorLevels(t),

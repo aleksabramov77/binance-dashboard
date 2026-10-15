@@ -4,7 +4,7 @@ import { type MirrorTradeInput, mirrorLevels, planMirror } from "./planMirror";
 const NOW = Date.parse("2026-10-11T12:00:00Z");
 const trade = (over: Partial<MirrorTradeInput> = {}): MirrorTradeInput => ({
   tradeId: "t1",
-  market: "futures",
+  market: "usdm",
   symbol: "ETHUSDT",
   direction: "long",
   openedAt: "2026-10-11T11:59:00Z",
@@ -47,7 +47,7 @@ describe("planMirror", () => {
       kind: "open",
       request: {
         symbol: "ETHUSDT",
-        market: "futures",
+        market: "usdm",
         direction: "long",
         quantity: 0.5,
         leverage: 1,
@@ -69,7 +69,7 @@ describe("planMirror", () => {
         trade({ tradeId: "b" }),
         trade({ tradeId: "spot", market: "spot" }),
       ],
-      new Set(["futures:BTCUSDT"]),
+      new Set(["usdm:BTCUSDT"]),
       NOW,
     );
     expect(decisions.map((d) => [d.tradeId, d.kind])).toEqual([
@@ -99,7 +99,7 @@ describe("planMirror: монеты, которых нет на демо (spec 00
       new Set(),
       NOW,
       {
-        missing: new Set(["futures:BTWUSDT", "spot:DOSUSDT"]),
+        missing: new Set(["usdm:BTWUSDT", "spot:DOSUSDT"]),
         unknown: new Set(),
       },
     );
@@ -118,7 +118,7 @@ describe("planMirror: монеты, которых нет на демо (spec 00
       ],
       new Set(),
       NOW,
-      { missing: new Set(), unknown: new Set(["futures:TRUTHUSDT"]) },
+      { missing: new Set(), unknown: new Set(["usdm:TRUTHUSDT"]) },
     );
     expect(d).toEqual([]);
   });

@@ -120,6 +120,7 @@
         "src/entities/experiment/model/**",
         "src/shared/api/binance/marketApi.ts",
         "src/shared/api/binance/marketSchemas.ts",
+        "src/shared/api/binance/markets.ts",
         "!**/*.test.ts"
       ],
       "linter": {
@@ -168,7 +169,8 @@
         "src/entities/experiment/**",
         "src/app/server/engineTick.ts",
         "src/shared/api/binance/marketApi.ts",
-        "src/shared/api/binance/marketSchemas.ts"
+        "src/shared/api/binance/marketSchemas.ts",
+        "src/shared/api/binance/markets.ts"
       ],
       "linter": {
         "rules": {

@@ -1,3 +1,4 @@
+import { normalizeMarket } from "@binance-dashboard/trading-core";
 import { z } from "zod";
 
 // Demo-зеркало (spec 008): статусы зеркальной сделки на Binance Demo.
@@ -66,21 +67,33 @@ const spotOrderRefSchema = z.object({
   orderId: z.number().nullable(),
   clientOrderId: z.string(),
 });
-export const mirrorProtectRefsSchema = z.discriminatedUnion("market", [
-  z.object({
-    market: z.literal("futures"),
-    entryOrderId: z.number().nullable(),
-    stop: algoRefSchema.nullable(),
-    takeProfit: algoRefSchema.nullable(),
-  }),
-  z.object({
-    market: z.literal("spot"),
-    orderListId: z.number().nullable(),
-    netQuantity: z.number().nullable().optional(),
-    stop: spotOrderRefSchema.nullable(),
-    takeProfit: spotOrderRefSchema.nullable(),
-  }),
-]);
+/** Старый market "futures" (строки до spec 0023, если миграция их не застала) читается как usdm. */
+const legacyRefs = (value: unknown): unknown =>
+  value !== null &&
+  typeof value === "object" &&
+  "market" in value &&
+  value.market !== normalizeMarket(value.market)
+    ? { ...value, market: normalizeMarket(value.market) }
+    : value;
+
+export const mirrorProtectRefsSchema = z.preprocess(
+  legacyRefs,
+  z.discriminatedUnion("market", [
+    z.object({
+      market: z.literal("usdm"),
+      entryOrderId: z.number().nullable(),
+      stop: algoRefSchema.nullable(),
+      takeProfit: algoRefSchema.nullable(),
+    }),
+    z.object({
+      market: z.literal("spot"),
+      orderListId: z.number().nullable(),
+      netQuantity: z.number().nullable().optional(),
+      stop: spotOrderRefSchema.nullable(),
+      takeProfit: spotOrderRefSchema.nullable(),
+    }),
+  ]),
+);
 export type MirrorProtectRefs = z.infer<typeof mirrorProtectRefsSchema>;
 
 export const mirrorViewSchema = z.object({

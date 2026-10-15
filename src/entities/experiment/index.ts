@@ -114,7 +114,11 @@ export {
   ASSET_GROUPS,
   type AssetGroup,
   assetGroupOf,
+  COINM_MIRROR_BLOCKED,
+  DEMO_MIRROR_MARKETS,
+  type DemoMirrorMarket,
   type Market,
+  parseMarketParam,
 } from "./model/assetGroup";
 export {
   type ExperimentBudgets,

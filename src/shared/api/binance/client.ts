@@ -1,5 +1,5 @@
 import { getJsonWithRetry } from "@/shared/lib/fetchRetry";
-import type { Market } from "./marketApi.ts";
+import type { BinanceMarket } from "./marketApi.ts";
 import {
   type EarnProduct,
   earnProductsResponseSchema,
@@ -10,9 +10,10 @@ import {
 const EARN_PRODUCTS_URL =
   "https://www.binance.com/bapi/earn/v1/friendly/finance-earn/simple/product/simpleEarnProducts";
 /** Последние цены всех пар: вес 4 (спот) и 2 (фьючерсы) против 80 и 40 у ticker/24hr (spec 0014). */
-const TICKER_PRICE_URL: Record<Market, string> = {
+const TICKER_PRICE_URL: Record<BinanceMarket, string> = {
   spot: "https://api.binance.com/api/v3/ticker/price",
-  futures: "https://fapi.binance.com/fapi/v1/ticker/price",
+  usdm: "https://fapi.binance.com/fapi/v1/ticker/price",
+  coinm: "https://dapi.binance.com/dapi/v1/ticker/price",
 };
 const PAGE_SIZE = 500;
 
@@ -35,7 +36,7 @@ export async function fetchEarnProducts(): Promise<EarnProduct[]> {
 
 /** Карта symbol → последняя цена для всех пар рынка (по умолчанию спот). */
 export async function fetchTickerPrices(
-  market: Market = "spot",
+  market: BinanceMarket = "spot",
 ): Promise<Map<string, number>> {
   const tickers = tickerPricesSchema.parse(
     await getJson(TICKER_PRICE_URL[market]),

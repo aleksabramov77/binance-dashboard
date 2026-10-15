@@ -4,7 +4,7 @@ import { markTrades, type SymbolState } from "./markTrades";
 
 let nextId = 1;
 const order = (over: Partial<OrderAggregate>): OrderAggregate => ({
-  market: "futures",
+  market: "usdm",
   symbol: "BATUSDT",
   orderId: nextId++,
   side: "SELL",
@@ -27,7 +27,7 @@ const state = (over: Partial<SymbolState> = {}): SymbolState => ({
 const statusOf = (marks: ReturnType<typeof markTrades>, o: OrderAggregate) =>
   marks.get(o.orderId)?.status;
 
-describe("markTrades — futures", () => {
+describe("markTrades — usdm", () => {
   it("шорт, закрытый по SL: у входа и выхода один статус «sl»", () => {
     const entry = order({ side: "SELL", time: 1 });
     const exit = order({ side: "BUY", time: 2, realizedPnl: -2.71 });

@@ -36,7 +36,7 @@ function symbolState(
   { positions, holdings }: DemoTradeSnapshot,
 ): SymbolState | null {
   if (!orders) return null;
-  if (market === "futures") {
+  if (market === "usdm") {
     const p = positions.get(symbol);
     return {
       ...orders,
@@ -74,7 +74,7 @@ export async function getTradeHistory(): Promise<TradeHistory> {
     return { configured: true, error: errorText(error), orders: [] };
   }
 
-  const pairs = (["spot", "futures"] as const)
+  const pairs = (["spot", "usdm"] as const)
     .flatMap((market) =>
       snapshot.symbols[market].map((symbol) => ({ market, symbol })),
     )
@@ -139,7 +139,7 @@ function toExecutedOrder(
     commissions: o.commissions,
     // Spot: PnL выхода считаем от средней цены входа; у входа PnL нет.
     realizedPnl:
-      o.market === "futures"
+      o.market === "usdm"
         ? o.realizedPnl
         : mark?.role === "exit"
           ? mark.pnl

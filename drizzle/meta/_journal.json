@@ -50,6 +50,13 @@
       "when": 1792031430523,
       "tag": "0006_mirror_protect_refs",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792067950639,
+      "tag": "0007_futures_to_usdm",
+      "breakpoints": true
     }
   ]
 }

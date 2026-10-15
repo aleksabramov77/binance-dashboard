@@ -1,8 +1,32 @@
 import { z } from "zod";
 
-export const MARKETS = ["spot", "futures"] as const;
+/**
+ * Группы активов (AG, spec 0016/0023): spot — Spot; usdm — USDⓈ-M Futures (маржа в стейблкоинах,
+ * fapi); coinm — COIN-M Futures (инверсные контракты с маржой в монете, dapi). Ключ БД и URL.
+ */
+export const MARKETS = ["spot", "usdm", "coinm"] as const;
 export const marketSchema = z.enum(MARKETS);
 export type ExperimentMarket = z.infer<typeof marketSchema>;
+
+/** Вид группы: фьючерсы умеют шорт, плечо и funding. Ветвления движка — по нему, а не по имени группы. */
+export type MarketKind = "spot" | "futures";
+export const MARKET_KIND: Record<ExperimentMarket, MarketKind> = {
+  spot: "spot",
+  usdm: "futures",
+  coinm: "futures",
+};
+export const isFuturesMarket = (market: ExperimentMarket) =>
+  MARKET_KIND[market] === "futures";
+
+/** Имя группы USDⓈ-M до spec 0023 — в журнале и старых ссылках (`?market=futures`) читается как usdm. */
+const LEGACY_MARKETS: Record<string, ExperimentMarket> = { futures: "usdm" };
+
+/** Старое имя группы → новое; остальные значения — как есть (проверит схема). */
+export const normalizeMarket = (value: unknown): unknown =>
+  typeof value === "string" ? (LEGACY_MARKETS[value] ?? value) : value;
+
+/** marketSchema, принимающая и старое имя группы: для журнала, URL и запросов от старых клиентов. */
+export const legacyMarketSchema = z.preprocess(normalizeMarket, marketSchema);
 
 export const directionSchema = z.enum(["long", "short"]);
 export type TradeDirection = z.infer<typeof directionSchema>;
@@ -90,7 +114,8 @@ export const exitSchema = z.object({
 });
 export type ExitRule = z.infer<typeof exitSchema>;
 
-export const MAJORS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"];
+/** Базы мейджоров: символ — по формату группы (BTCUSDT, BTCUSD_PERP). */
+export const MAJOR_BASES = ["BTC", "ETH", "SOL", "BNB", "XRP"];
 
 export const universeSchema = z.object({
   /** majors; top — top-N по обороту за 24 ч; movers — N лидеров роста и N падения; symbols — список. */

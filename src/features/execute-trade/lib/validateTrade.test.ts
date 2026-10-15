@@ -97,7 +97,7 @@ describe("validateTrade", () => {
   });
 
   it("сразу говорит, что кошелёк пуст, не дожидаясь отказа биржи", () => {
-    const futures = { ...long, market: "futures" as const, leverage: 2 };
+    const futures = { ...long, market: "usdm" as const, leverage: 2 };
     const result = validateTrade(futures, ctx({ availableUsd: 0 }));
     expect(result).toEqual({
       ok: false,
@@ -118,7 +118,7 @@ describe("validateTrade", () => {
   it("проверяет, хватает ли маржи с учётом плеча", () => {
     const futures = {
       ...long,
-      market: "futures" as const,
+      market: "usdm" as const,
       leverage: 2,
       quantity: 0.4,
       stopLoss: 1990,
@@ -176,7 +176,7 @@ describe("fitToMinNotional после округления (spec 0012, AC1)", ()
     const result = validateTrade(
       {
         symbol: "BTCUSDT",
-        market: "futures",
+        market: "usdm",
         direction: "long",
         quantity: 50 / 81_650,
         stopLoss: 80_000,
@@ -279,7 +279,7 @@ describe("стоп и тейк в пределах фильтра цены би�
     const result = validateTrade(
       {
         ...long,
-        market: "futures",
+        market: "usdm",
         quantity: 0.0257,
         stopLoss: 1000,
         takeProfit: 2100,
@@ -356,7 +356,7 @@ describe("спот: деньги на LIMIT FOK и минимум стопа (р
 
   it("на фьючерсах комиссия из маржи — минимум стопа не проверяем", () => {
     const result = validateTrade(
-      { ...batLong, market: "futures", quantity: 30 },
+      { ...batLong, market: "usdm", quantity: 30 },
       batCtx(),
     );
     expect(result.ok).toBe(true);

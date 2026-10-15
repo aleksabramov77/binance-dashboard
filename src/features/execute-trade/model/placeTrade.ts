@@ -250,7 +250,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   // перезаписал бы TP/SL первого (closePosition). Поэтому повторный вход не пускаем.
   try {
     const open = await fetchDemoOpenSymbols(creds, req.symbol);
-    if (open.futures.includes(req.symbol))
+    if (open.usdm.includes(req.symbol))
       return finish(
         "rejected",
         `По ${req.symbol} уже есть позиция или ордера на демо-фьючерсах — сначала закройте их на demo.binance.com.`,
@@ -390,7 +390,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     }
   }
   const futuresRefs = {
-    market: "futures" as const,
+    market: "usdm" as const,
     entryOrderId,
     stop: null as StoredAlgoRef | null,
     takeProfit: null as StoredAlgoRef | null,
@@ -560,7 +560,7 @@ async function rollbackFutures(c: {
     return c.done(afterFuturesRollback(false), c.entryPrice, c.filled);
   }
   try {
-    await demoCancelAllOrders(creds, "futures", req.symbol);
+    await demoCancelAllOrders(creds, "usdm", req.symbol);
     steps.push({
       label: "Снять ордера символа",
       ok: true,

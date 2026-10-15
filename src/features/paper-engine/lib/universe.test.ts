@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  coinmTicker,
   isEligibleSymbol,
   type MarketTicker,
   pickUniverse,
@@ -26,16 +27,16 @@ const tickers = [
 
 describe("юниверс", () => {
   it("без стейблкоинов, плечевых токенов, не-USDT и поставочных фьючерсов", () => {
-    expect(isEligibleSymbol("BTCUSDT")).toBe(true);
-    expect(isEligibleSymbol("USDCUSDT")).toBe(false);
-    expect(isEligibleSymbol("BTCUPUSDT")).toBe(false);
-    expect(isEligibleSymbol("ETHBEARUSDT")).toBe(false);
-    expect(isEligibleSymbol("ETHBTC")).toBe(false);
-    expect(isEligibleSymbol("BTCUSDT_251226")).toBe(false);
+    expect(isEligibleSymbol("BTCUSDT", "usdm")).toBe(true);
+    expect(isEligibleSymbol("USDCUSDT", "usdm")).toBe(false);
+    expect(isEligibleSymbol("BTCUPUSDT", "usdm")).toBe(false);
+    expect(isEligibleSymbol("ETHBEARUSDT", "usdm")).toBe(false);
+    expect(isEligibleSymbol("ETHBTC", "usdm")).toBe(false);
+    expect(isEligibleSymbol("BTCUSDT_251226", "usdm")).toBe(false);
   });
 
   it("top-N по обороту", () => {
-    expect(pickUniverse({ type: "top", n: 3 }, tickers)).toEqual([
+    expect(pickUniverse({ type: "top", n: 3 }, tickers, "usdm")).toEqual([
       "BTCUSDT",
       "ETHUSDT",
       "DOGEUSDT",
@@ -43,25 +44,85 @@ describe("юниверс", () => {
   });
 
   it("movers: лидеры роста и падения среди ликвидных", () => {
-    expect(pickUniverse({ type: "movers", n: 1 }, tickers)).toEqual([
+    expect(pickUniverse({ type: "movers", n: 1 }, tickers, "usdm")).toEqual([
       "PIXELUSDT",
       "OPUSDT",
     ]);
   });
 
   it("majors и symbols — только торгуемые; blacklist базой или символом", () => {
-    expect(pickUniverse({ type: "majors" }, tickers)).toEqual([
+    expect(pickUniverse({ type: "majors" }, tickers, "spot")).toEqual([
       "BTCUSDT",
       "ETHUSDT",
     ]);
     expect(
-      pickUniverse({ type: "symbols", symbols: ["doge", "XYZUSDT"] }, tickers),
+      pickUniverse(
+        { type: "symbols", symbols: ["doge", "XYZUSDT"] },
+        tickers,
+        "spot",
+      ),
     ).toEqual(["DOGEUSDT"]);
     expect(
       pickUniverse(
         { type: "movers", n: 2, blacklist: ["PIXEL", "OPUSDT"] },
         tickers,
+        "usdm",
       ),
     ).toEqual(["DOGEUSDT", "BTCUSDT", "ETHUSDT"]);
+  });
+
+  describe("COIN-M (spec 0023)", () => {
+    const coin = (
+      symbol: string,
+      volume: number,
+      contractSize = 10,
+      priceChangePercent = 0,
+    ) =>
+      coinmTicker(
+        { symbol, lastPrice: 1, priceChangePercent, volume },
+        contractSize,
+      );
+    const coinTickers = [
+      coin("BTCUSD_PERP", 1e7, 100, 2),
+      coin("ETHUSD_PERP", 2e7, 10, -3),
+      coin("DOGEUSD_PERP", 5e6),
+      coin("BTCUSD_251226", 9e9, 100),
+      coin("ADAUSD_PERP", 3e6, 10, 40),
+    ];
+
+    it("символ — …USD_PERP, поставочные контракты и …USDT не подходят", () => {
+      expect(isEligibleSymbol("BTCUSD_PERP", "coinm")).toBe(true);
+      expect(isEligibleSymbol("BTCUSD_251226", "coinm")).toBe(false);
+      expect(isEligibleSymbol("BTCUSDT", "coinm")).toBe(false);
+      expect(isEligibleSymbol("BTCUSD_PERP", "usdm")).toBe(false);
+    });
+
+    it("оборот в $ = контракты × размер контракта; размер контракта — в тикере", () => {
+      expect(coin("BTCUSD_PERP", 1e7, 100)).toMatchObject({
+        quoteVolume: 1e9,
+        contractSize: 100,
+      });
+    });
+
+    it("top-N по обороту в $, majors и symbols — по базе с хвостом USD_PERP", () => {
+      expect(pickUniverse({ type: "top", n: 2 }, coinTickers, "coinm")).toEqual(
+        ["BTCUSD_PERP", "ETHUSD_PERP"],
+      );
+      expect(pickUniverse({ type: "majors" }, coinTickers, "coinm")).toEqual([
+        "BTCUSD_PERP",
+        "ETHUSD_PERP",
+      ]);
+      expect(
+        pickUniverse(
+          {
+            type: "symbols",
+            symbols: ["doge", "ADAUSD_PERP", "XRP"],
+            blacklist: ["ADA"],
+          },
+          coinTickers,
+          "coinm",
+        ),
+      ).toEqual(["DOGEUSD_PERP"]);
+    });
   });
 });

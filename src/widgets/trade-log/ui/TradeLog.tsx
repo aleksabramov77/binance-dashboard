@@ -136,7 +136,7 @@ export function TradeLog({ overview }: { overview: TradeOverview }) {
           {overview.balances && (
             <span className="text-sm font-normal text-muted-foreground">
               Демо-баланс: Spot {formatUsd(overview.balances.spot)} · Futures{" "}
-              {formatUsd(overview.balances.futures)}
+              {formatUsd(overview.balances.usdm)}
             </span>
           )}
         </CardTitle>

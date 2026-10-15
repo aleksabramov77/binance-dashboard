@@ -22,7 +22,7 @@ export const SORT_KEYS = [
 
 export type SortKey = (typeof SORT_KEYS)[number];
 
-/** Порядок групп активов для сортировки по AG: как в карте ASSET_GROUPS (Spot, USDⓈ-M). */
+/** Порядок групп активов для сортировки по AG: как в карте ASSET_GROUPS (Spot, USDⓈ-M, COIN-M). */
 const AG_ORDER = Object.keys(ASSET_GROUPS);
 
 /** Значение колонки для сортировки; null (нет данных) — всегда в конце. */

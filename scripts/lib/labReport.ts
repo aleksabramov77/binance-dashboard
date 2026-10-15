@@ -6,6 +6,7 @@
 import {
   type EntryRule,
   type ExperimentMarket,
+  MARKETS,
   type PaperTrade,
   TIMEFRAME_MS,
 } from "@binance-dashboard/trading-core";
@@ -344,7 +345,8 @@ export function controlsOf(
 ): Controls {
   const controls: Controls = {
     spot: { random: null, hold: null },
-    futures: { random: null, hold: null },
+    usdm: { random: null, hold: null },
+    coinm: { random: null, hold: null },
   };
   for (const e of experiments) {
     const type = e.config.entry.type;
@@ -620,7 +622,8 @@ export function buildArchetypes(
     .filter(isClosed)
     .filter((t) => archetypeOfId.has(t.experimentId));
   const rows: ArchetypeRow[] = [];
-  for (const market of ["spot", "futures"] as const) {
+  // Группы активов — каждая отдельно (Spot, USDⓈ-M, COIN-M): архетип в разных группах не смешиваем.
+  for (const market of MARKETS) {
     for (const archetype of Object.keys(ARCHETYPE_LABEL) as Archetype[]) {
       const members = experiments.filter(
         (e) => e.market === market && e.archetype === archetype,
@@ -769,7 +772,8 @@ export function buildLabReport(
     controls,
     randomAvgReturn: {
       spot: avgReturnOf(controls.spot.random),
-      futures: avgReturnOf(controls.futures.random),
+      usdm: avgReturnOf(controls.usdm.random),
+      coinm: avgReturnOf(controls.coinm.random),
     },
   };
 
@@ -996,7 +1000,7 @@ function familiesSection(families: Family[]): string[] {
 const controlLine = (c: Controls): string => {
   const one = (market: ExperimentMarket) =>
     `${market} — ${c[market].random ?? "нет"} (случайный вход), ${c[market].hold ?? "нет"} (hold BTC)`;
-  return `Контроль: ${one("spot")}; ${one("futures")}.`;
+  return `Контроль: ${MARKETS.map(one).join("; ")}.`;
 };
 
 export function renderLabReport(report: LabReport): string {

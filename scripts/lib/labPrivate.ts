@@ -15,11 +15,20 @@ export const PRIVATE_DEFAULTS = {
   demoMirror: false,
 } as const;
 
-/** P + буква рынка + номер: PS01 — spot, PF01 — futures. Не пересекается с id каталога (S.., F..). */
-export const PRIVATE_ID_PATTERN = /^P([SF])\d{2,}$/;
+/**
+ * P + буква группы + номер: PS01 — spot, PF01 — usdm (USDⓈ-M), PC01 — coinm (COIN-M, spec 0023).
+ * Не пересекается с id каталога (S.., F..).
+ */
+export const PRIVATE_ID_PATTERN = /^P([SFC])\d{2,}$/;
 const PREFIX_MARKET: Record<string, ExperimentMarket> = {
   S: "spot",
-  F: "futures",
+  F: "usdm",
+  C: "coinm",
+};
+
+/** Демо-зеркало COIN-M — позже (spec 0023): включить его файлом нельзя, как и тумблером. */
+const MIRROR_BLOCKED: Partial<Record<ExperimentMarket, string>> = {
+  coinm: "Демо-зеркало COIN-M — позже",
 };
 
 /**
@@ -91,7 +100,7 @@ export function parsePrivateExperiments(
     const prefix = PRIVATE_ID_PATTERN.exec(e.id)?.[1];
     if (!prefix) {
       errors.push(
-        `${who}: поле id — нужен вид PS01 (spot) или PF01 (futures): «P», буква рынка и номер`,
+        `${who}: поле id — нужен вид PS01 (spot), PF01 (usdm) или PC01 (coinm): «P», буква группы и номер`,
       );
       return;
     }
@@ -99,6 +108,11 @@ export function parsePrivateExperiments(
       errors.push(
         `${who}: поле market — префикс P${prefix} означает ${PREFIX_MARKET[prefix]}, а указано ${e.market}`,
       );
+      return;
+    }
+    const blocked = MIRROR_BLOCKED[e.market];
+    if (e.demoMirror && blocked) {
+      errors.push(`${who}: поле demoMirror — ${blocked}`);
       return;
     }
     if (catalogIds.has(e.id)) {

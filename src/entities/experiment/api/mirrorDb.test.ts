@@ -29,7 +29,7 @@ afterEach(() => close());
 
 const exp = (id: string): Experiment => ({
   id,
-  market: "futures",
+  market: "usdm",
   name: id,
   hypothesis: "тест",
   config: {
@@ -54,7 +54,7 @@ const trade = (
   id,
   runId,
   experimentId,
-  market: "futures",
+  market: "usdm",
   symbol: "ETHUSDT",
   direction: "long",
   openedAt,
@@ -108,13 +108,13 @@ describe("demo-зеркало в БД", () => {
     expect(await claimMirror(db, c)).toBe(true);
     expect(await claimMirror(db, c)).toBe(false);
     expect(await listMirrorCandidates(db, SINCE)).toEqual([]);
-    expect(await activeMirrorSymbols(db)).toEqual(new Set(["futures:ETHUSDT"]));
+    expect(await activeMirrorSymbols(db)).toEqual(new Set(["usdm:ETHUSDT"]));
   });
 
   it("закрытая paper-сделка с открытым зеркалом захватывается на закрытие один раз", async () => {
     // Свои стоп/тейк (PR 2b): сохраняются при входе и приходят в захвате на закрытие.
     const protectRefs = {
-      market: "futures" as const,
+      market: "usdm" as const,
       entryOrderId: 11,
       stop: { algoId: 21, clientAlgoId: "bd1-S" },
       takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
@@ -146,7 +146,7 @@ describe("demo-зеркало в БД", () => {
     expect(await listMirrorsToClose(db)).toEqual(["a"]);
     expect(await claimMirrorToClose(db, "a")).toEqual({
       tradeId: "a",
-      market: "futures",
+      market: "usdm",
       symbol: "ETHUSDT",
       direction: "long",
       quantity: 0.5,
@@ -269,7 +269,7 @@ describe("демо-сводка и демо-сброс", () => {
     const candidate = (tradeId: string): MirrorCandidate => ({
       tradeId,
       experimentId: "F01",
-      market: "futures",
+      market: "usdm",
       symbol: "ETHUSDT",
       direction: "long",
       openedAt: "2026-10-11T11:55:00.000Z",

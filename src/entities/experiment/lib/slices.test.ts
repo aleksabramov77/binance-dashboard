@@ -33,16 +33,16 @@ const t = (
 });
 
 const TRADES: SliceTrade[] = [
-  t("F01", "futures", "BTCUSDT", "long", 50),
-  t("F01", "futures", "ETHUSDT", "short", -20),
-  t("F02", "futures", "BTCUSDT", "short", 30, "2026-10-05T00:00:00Z"),
+  t("F01", "usdm", "BTCUSDT", "long", 50),
+  t("F01", "usdm", "ETHUSDT", "short", -20),
+  t("F02", "usdm", "BTCUSDT", "short", 30, "2026-10-05T00:00:00Z"),
   t("S01", "spot", "SOLUSDT", "long", -40, "2026-10-01T06:00:00Z"),
   t("S01", "spot", "BTCUSDT", "long", null, null, "2026-10-10T11:00:00Z"),
 ];
 
 const EXPERIMENTS: SliceExperiment[] = [
-  { id: "F01", market: "futures", initialBudget: 1000 },
-  { id: "F02", market: "futures", initialBudget: 500 },
+  { id: "F01", market: "usdm", initialBudget: 1000 },
+  { id: "F02", market: "usdm", initialBudget: 500 },
   { id: "S01", market: "spot", initialBudget: 2000 },
 ];
 
@@ -52,11 +52,11 @@ describe("filterTrades", () => {
   });
 
   it("рынок, эксперимент, направление и монета сочетаются через «и»", () => {
-    expect(filterTrades(TRADES, { market: "futures" })).toHaveLength(3);
+    expect(filterTrades(TRADES, { market: "usdm" })).toHaveLength(3);
     expect(filterTrades(TRADES, { experiment: "S01" })).toHaveLength(2);
     expect(filterTrades(TRADES, { direction: "short" })).toHaveLength(2);
     expect(
-      filterTrades(TRADES, { market: "futures", symbol: "BTCUSDT" }).map(
+      filterTrades(TRADES, { market: "usdm", symbol: "BTCUSDT" }).map(
         (x) => x.experimentId,
       ),
     ).toEqual(["F01", "F02"]);
@@ -100,7 +100,7 @@ describe("sliceStats", () => {
 
   it("по рынку: бюджет — сумма бюджетов экспериментов рынка", () => {
     const groups = sliceStats(TRADES, "market", EXPERIMENTS);
-    expect(groups.map((g) => g.key)).toEqual(["futures", "spot"]);
+    expect(groups.map((g) => g.key)).toEqual(["usdm", "spot"]);
     expect(groups[0].stats).toMatchObject({
       closed: 3,
       realizedPnl: 60,
@@ -131,9 +131,9 @@ describe("sliceStats", () => {
     expect(long?.stats.winRate).toBe(0.5);
   });
 
-  it("фильтр + разрез: монеты futures в шортах", () => {
+  it("фильтр + разрез: монеты usdm в шортах", () => {
     const groups = sliceStats(
-      filterTrades(TRADES, { market: "futures", direction: "short" }),
+      filterTrades(TRADES, { market: "usdm", direction: "short" }),
       "symbol",
       EXPERIMENTS,
     );
@@ -147,14 +147,14 @@ describe("sliceStats", () => {
 describe("rankGroups и blacklistCandidates", () => {
   const groups = sliceStats(
     [
-      t("F01", "futures", "AAAUSDT", "long", 10),
-      t("F01", "futures", "BBBUSDT", "long", 40),
-      t("F01", "futures", "CCCUSDT", "long", -5),
-      t("F01", "futures", "DDDUSDT", "long", -50),
-      t("F01", "futures", "EEEUSDT", "long", 0),
-      t("F01", "futures", "FFFUSDT", "long", null),
-      t("F01", "futures", "GGGUSDT", "long", 25),
-      t("F01", "futures", "HHHUSDT", "long", 5),
+      t("F01", "usdm", "AAAUSDT", "long", 10),
+      t("F01", "usdm", "BBBUSDT", "long", 40),
+      t("F01", "usdm", "CCCUSDT", "long", -5),
+      t("F01", "usdm", "DDDUSDT", "long", -50),
+      t("F01", "usdm", "EEEUSDT", "long", 0),
+      t("F01", "usdm", "FFFUSDT", "long", null),
+      t("F01", "usdm", "GGGUSDT", "long", 25),
+      t("F01", "usdm", "HHHUSDT", "long", 5),
     ],
     "symbol",
     EXPERIMENTS,

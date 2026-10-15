@@ -43,7 +43,11 @@ function trade(
     id: `t${seq}`,
     runId: 1,
     experimentId,
-    market: experimentId.startsWith("F") ? "futures" : "spot",
+    market: experimentId.startsWith("F")
+      ? "usdm"
+      : experimentId.startsWith("PC")
+        ? "coinm"
+        : "spot",
     symbol: "BTCUSDT",
     direction: "long",
     openedAt,
@@ -128,8 +132,36 @@ describe("controlsOf", () => {
       controlsOf([experiment("S19"), experiment("S20"), experiment("F19")]),
     ).toEqual({
       spot: { random: "S19", hold: "S20" },
-      futures: { random: "F19", hold: null },
+      usdm: { random: "F19", hold: null },
+      coinm: { random: null, hold: null },
     });
+  });
+
+  it("COIN-M — своя группа: контроль и архетипы не смешиваются с USDⓈ-M (spec 0023)", () => {
+    // Фиктивная копия F19 в группе COIN-M (приватные эксперименты в тестах — только фиктивные).
+    const coinm: LabExperiment = {
+      ...experiment("F19"),
+      id: "PC99",
+      market: "coinm",
+    };
+    expect(controlsOf([experiment("F19"), coinm])).toMatchObject({
+      usdm: { random: "F19" },
+      coinm: { random: "PC99" },
+    });
+    const report = buildLabReport(
+      dataset(
+        [experiment("F19"), coinm],
+        [trade("F19", 1), trade("PC99", -1), trade("PC99", 1)],
+      ),
+      { now: NOW },
+    );
+    expect(
+      report.archetypes.map((a) => [a.market, a.archetype, a.closed]),
+    ).toEqual([
+      ["usdm", "control", 1],
+      ["coinm", "control", 2],
+    ]);
+    expect(renderLabReport(report)).toContain("coinm — PC99 (случайный вход)");
   });
 });
 

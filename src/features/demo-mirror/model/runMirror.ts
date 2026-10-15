@@ -19,7 +19,7 @@ export interface MirrorStep {
 /** Демо-позиция на закрытие. Остальные поля (свои ордера) runMirror не читает — передаёт в close. */
 export interface MirrorCloseItem {
   tradeId: string;
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
   symbol: string;
   direction: "long" | "short";
   quantity: number;
@@ -48,7 +48,7 @@ export interface MirrorDeps<
    * Есть ли символ на демо-рынке: false — точно нет (вход пропускается), исключение — сеть
    * (кандидат ждёт следующего прогона). Проверяется до захвата сделки и запроса на вход.
    */
-  hasSymbol: (market: "spot" | "futures", symbol: string) => Promise<boolean>;
+  hasSymbol: (market: "spot" | "usdm", symbol: string) => Promise<boolean>;
   /** Захват сделки (вставка pending). false — её уже взял другой прогон. */
   claim: (tradeId: string) => Promise<boolean>;
   open: (req: MirrorOrderRequest) => Promise<R>;

@@ -63,4 +63,35 @@ describe("sizePosition", () => {
       sizePosition(input({ stop: null, fixedNotionalUsd: 50 }))?.notional,
     ).toBeCloseTo(50);
   });
+
+  describe("COIN-M: целые контракты (spec 0023)", () => {
+    const coinm = (patch: Partial<SizeInput>) =>
+      sizePosition(
+        input({ stop: null, fixedNotionalUsd: 50, entry: 2500, ...patch }),
+      );
+
+    it("контракт $10: floor($50 / $10) = 5 контрактов, количество в монете = 5 × 10 / вход", () => {
+      const s = coinm({ contractSizeUsd: 10 });
+      expect(s?.notional).toBeCloseTo(50);
+      expect(s?.quantity).toBeCloseTo(50 / 2500);
+    });
+
+    it("контракт BTC $100: меньше одного контракта — округляется до минимума 1 контракт", () => {
+      const s = coinm({ contractSizeUsd: 100, entry: 60_000 });
+      expect(s?.notional).toBeCloseTo(100);
+      expect(s?.quantity).toBeCloseTo(100 / 60_000);
+      expect(s?.margin).toBeCloseTo(100);
+    });
+
+    it("дробный остаток отбрасывается: $50 / $15 → 3 контракта", () => {
+      expect(coinm({ contractSizeUsd: 15 })?.notional).toBeCloseTo(45);
+    });
+
+    it("свободных денег меньше одного контракта — не входим; хватает на часть — урезаем", () => {
+      expect(coinm({ contractSizeUsd: 100, availableUsd: 60 })).toBeNull();
+      expect(
+        coinm({ contractSizeUsd: 10, availableUsd: 25 })?.notional,
+      ).toBeCloseTo(20);
+    });
+  });
 });

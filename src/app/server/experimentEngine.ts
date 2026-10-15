@@ -19,11 +19,13 @@ import {
   readRunner,
   type TickResult,
 } from "@/features/paper-engine";
+import type { FuturesMarket, Perpetuals } from "@/shared/api/binance";
 import {
   fetch24hTickers,
+  fetchCoinmTickers,
   fetchFundingRates,
   fetchKlines,
-  fetchPerpetualSymbols,
+  fetchPerpetuals,
 } from "@/shared/api/binance/public.server";
 import {
   getDemoTradingConfig,
@@ -32,7 +34,7 @@ import {
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import {
-  createPerpetualsSource,
+  createPerpetualsSources,
   type EngineTickEnv,
   prepareEngineDb,
   runEngineTick,
@@ -51,7 +53,7 @@ interface EngineProcess {
   exclusive: Promise<unknown> | null;
   ready: Promise<void> | null;
   cache: CandleCache;
-  perpetuals: () => Promise<Set<string>>;
+  perpetuals: (market: FuturesMarket) => Promise<Perpetuals>;
   warnedRunner: boolean;
 }
 
@@ -68,8 +70,8 @@ function engine(): EngineProcess {
     exclusive: null,
     ready: null,
     cache: new Map(),
-    perpetuals: createPerpetualsSource(
-      fetchPerpetualSymbols,
+    perpetuals: createPerpetualsSources(
+      fetchPerpetuals,
       PERPETUALS_TTL_MS,
       Date.now,
     ),
@@ -115,7 +117,12 @@ function tickEnv(): EngineTickEnv {
   return {
     db: getDb(),
     runner: runnerRole(),
-    market: { fetchKlines, fetch24hTickers, fetchFundingRates },
+    market: {
+      fetchKlines,
+      fetch24hTickers,
+      fetchCoinmTickers,
+      fetchFundingRates,
+    },
     perpetuals: e.perpetuals,
     cache: e.cache,
     log: (level, event, message, data) => log[level](event, message, data),

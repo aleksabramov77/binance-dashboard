@@ -53,7 +53,8 @@ const DEFAULT_SORT: SavedSort<SortKey> = { key: "id", dir: "asc" };
 const MARKET_LABELS: Record<MarketFilter, string> = {
   all: "Все",
   spot: ASSET_GROUPS.spot.code,
-  futures: ASSET_GROUPS.futures.code,
+  usdm: ASSET_GROUPS.usdm.code,
+  coinm: ASSET_GROUPS.coinm.code,
 };
 
 const COLUMNS: {

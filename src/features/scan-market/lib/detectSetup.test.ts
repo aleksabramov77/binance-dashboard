@@ -67,7 +67,7 @@ describe("detectSetup", () => {
     const pumped = { change24h: 0.3 };
     const ind = { rsi1h: 80, distanceAtr: 4, ema20: 94, ema50: 90 };
     const short = detectSetup(mover(pumped, ind), candles);
-    expect(short).toMatchObject({ direction: "short", market: "futures" });
+    expect(short).toMatchObject({ direction: "short", market: "usdm" });
     expect(short?.stopLoss).toBeCloseTo(103.5);
     expect(
       detectSetup(mover({ ...pumped, futures: false }, ind), candles),

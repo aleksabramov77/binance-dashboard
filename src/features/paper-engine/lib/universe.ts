@@ -1,9 +1,13 @@
-import { MAJORS, type Universe } from "@binance-dashboard/trading-core";
+import {
+  type ExperimentMarket,
+  MAJOR_BASES,
+  type Universe,
+} from "@binance-dashboard/trading-core";
 import {
   ENGINE,
   LEVERAGED_TOKEN,
-  QUOTE,
   STABLECOINS,
+  SYMBOL_SUFFIX,
 } from "../config/engine.ts";
 
 /** Тикер 24 ч рынка — то, что нужно движку от Binance. */
@@ -12,44 +16,76 @@ export interface MarketTicker {
   lastPrice: number;
   /** Изменение за 24 ч, %. */
   priceChangePercent: number;
-  /** Оборот за 24 ч в котировке (USDT). */
+  /** Оборот за 24 ч в $: Spot и USDⓈ-M — в котировке (USDT), COIN-M — контракты × размер контракта. */
   quoteVolume: number;
+  /** COIN-M: размер контракта в $ (BTC — 100, остальные — 10) — по нему считается размер сделки. */
+  contractSize?: number;
 }
 
-const SYMBOL = /^[A-Z0-9]+USDT$/;
-
-/** Торгуемый символ: только …USDT (без поставочных фьючерсов вида BTCUSDT_251226), не стейбл и не плечевой токен. */
-export function isEligibleSymbol(symbol: string): boolean {
-  if (!SYMBOL.test(symbol) || LEVERAGED_TOKEN.test(symbol)) return false;
-  return !STABLECOINS.has(symbol.slice(0, -QUOTE.length));
-}
-
-/** PIXEL → PIXELUSDT: blacklist и symbols в каталоге можно писать базой. */
-export const toSymbol = (s: string) => {
-  const upper = s.toUpperCase();
-  return upper.endsWith(QUOTE) ? upper : `${upper}${QUOTE}`;
+/** Символ группы: Spot и USDⓈ-M — BTCUSDT, COIN-M — BTCUSD_PERP (без поставочных BTCUSDT_251226). */
+const SYMBOL: Record<ExperimentMarket, RegExp> = {
+  spot: /^[A-Z0-9]+USDT$/,
+  usdm: /^[A-Z0-9]+USDT$/,
+  coinm: /^[A-Z0-9]+USD_PERP$/,
 };
 
+/** Торгуемый символ группы: по шаблону символа, не стейбл и не плечевой токен. */
+export function isEligibleSymbol(
+  symbol: string,
+  market: ExperimentMarket,
+): boolean {
+  if (!SYMBOL[market].test(symbol) || LEVERAGED_TOKEN.test(symbol))
+    return false;
+  return !STABLECOINS.has(symbol.slice(0, -SYMBOL_SUFFIX[market].length));
+}
+
+/** PIXEL → PIXELUSDT (COIN-M: BTC → BTCUSD_PERP): blacklist и symbols в каталоге можно писать базой. */
+export const toSymbol = (s: string, market: ExperimentMarket) => {
+  const upper = s.toUpperCase();
+  const suffix = SYMBOL_SUFFIX[market];
+  return upper.endsWith(suffix) ? upper : `${upper}${suffix}`;
+};
+
+/** Тикер COIN-M для движка: оборот в $ = контракты за 24 ч × размер контракта. */
+export const coinmTicker = (
+  t: {
+    symbol: string;
+    lastPrice: number;
+    priceChangePercent: number;
+    /** Оборот за 24 ч в контрактах. */
+    volume: number;
+  },
+  contractSize: number,
+): MarketTicker => ({
+  symbol: t.symbol,
+  lastPrice: t.lastPrice,
+  priceChangePercent: t.priceChangePercent,
+  quoteVolume: t.volume * contractSize,
+  contractSize,
+});
+
 /**
- * Символы юниверса эксперимента по тикерам рынка. Тикеры futures — только бессрочные
+ * Символы юниверса эксперимента по тикерам рынка. Тикеры фьючерсов — только бессрочные
  * контракты (фильтрует поставщик тикеров). Порядок детерминирован.
  */
 export function pickUniverse(
   universe: Universe,
   tickers: MarketTicker[],
+  market: ExperimentMarket,
 ): string[] {
-  const blacklist = new Set((universe.blacklist ?? []).map(toSymbol));
+  const symbol = (s: string) => toSymbol(s, market);
+  const blacklist = new Set((universe.blacklist ?? []).map(symbol));
   const listed = tickers.filter(
-    (t) => isEligibleSymbol(t.symbol) && !blacklist.has(t.symbol),
+    (t) => isEligibleSymbol(t.symbol, market) && !blacklist.has(t.symbol),
   );
   const known = new Set(listed.map((t) => t.symbol));
   const n = universe.n ?? 20;
 
   switch (universe.type) {
     case "majors":
-      return MAJORS.filter((s) => known.has(s));
+      return MAJOR_BASES.map(symbol).filter((s) => known.has(s));
     case "symbols":
-      return (universe.symbols ?? []).map(toSymbol).filter((s) => known.has(s));
+      return (universe.symbols ?? []).map(symbol).filter((s) => known.has(s));
     case "top":
       return [...listed]
         .sort((a, b) => b.quoteVolume - a.quoteVolume)

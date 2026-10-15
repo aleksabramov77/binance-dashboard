@@ -12,7 +12,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
-  createPerpetualsSource,
+  createPerpetualsSources,
   prepareEngineDb,
   runEngineTick,
 } from "@/app/server/engineTick";
@@ -55,11 +55,12 @@ const getJson: GetJson = async (url) => {
 const market = createMarketApi(getJson);
 
 // Состояние экземпляра функции (живёт, пока Supabase держит воркер тёплым): подключение к БД,
-// кэш свечей, справочник фьючерсов, признак сида каталога.
+// кэш свечей, справочники фьючерсов, признак сида каталога.
 let client: ReturnType<typeof postgres> | null = null;
 const cache: CandleCache = new Map();
-const perpetuals = createPerpetualsSource(
-  () => market.fetchPerpetualSymbols(),
+// Справочники бессрочных контрактов USDⓈ-M и COIN-M (spec 0023) — у каждого свой кэш.
+const perpetuals = createPerpetualsSources(
+  (m) => market.fetchPerpetuals(m),
   PERPETUALS_TTL_MS,
   Date.now,
 );

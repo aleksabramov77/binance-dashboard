@@ -1,15 +1,18 @@
 import {
+  type CoinmTicker24h,
+  coinmTicker24hSchema,
   futuresExchangeInfoSchema,
   klinesSchema,
   premiumIndexSchema,
   type Ticker24h,
   ticker24hSchema,
 } from "./marketSchemas.ts";
+import type { BinanceMarket, FuturesMarket, Market } from "./markets.ts";
 
 // Публичные рыночные запросы Binance (без ключа), среда-независимые: Node на сервере и Deno в Edge
 // Function Supabase (spec 007b). Без @/…, node:* и env: транспорт (повторы, журнал) — аргумент getJson.
 
-export type Market = "spot" | "futures";
+export type { BinanceMarket, FuturesMarket, Market } from "./markets.ts";
 
 export interface Candle {
   openTime: number;
@@ -23,13 +26,45 @@ export interface Candle {
 /** GET JSON; бросает ошибку при сетевом сбое или статусе не 2xx. */
 export type GetJson = (url: string) => Promise<unknown>;
 
-const BASE: Record<Market, string> = {
+const BASE: Record<BinanceMarket, string> = {
   spot: "https://api.binance.com/api/v3",
-  futures: "https://fapi.binance.com/fapi/v1",
+  usdm: "https://fapi.binance.com/fapi/v1",
+  coinm: "https://dapi.binance.com/dapi/v1",
 };
 
+/** Котировка бессрочных контрактов: USDⓈ-M — к USDT, COIN-M — к USD (BTCUSD_PERP). */
+const PERPETUAL_QUOTE: Record<FuturesMarket, string> = {
+  usdm: "USDT",
+  coinm: "USD",
+};
+
+/** Бессрочный контракт в торговле: символ → размер контракта в USD (COIN-M) или null (USDⓈ-M: в монете). */
+export type Perpetuals = Map<string, number | null>;
+
 export function createMarketApi(getJson: GetJson) {
+  /**
+   * Бессрочные контракты рынка, по которым идёт торговля (USDⓈ-M — к USDT, COIN-M — к USD),
+   * с размером контракта COIN-M. У dapi статус — contractStatus.
+   */
+  async function fetchPerpetuals(market: FuturesMarket): Promise<Perpetuals> {
+    const info = futuresExchangeInfoSchema.parse(
+      await getJson(`${BASE[market]}/exchangeInfo`),
+    );
+    const out: Perpetuals = new Map();
+    for (const s of info.symbols)
+      if (
+        s.contractType === "PERPETUAL" &&
+        s.quoteAsset === PERPETUAL_QUOTE[market] &&
+        (s.status ?? s.contractStatus) === "TRADING"
+      )
+        out.set(s.symbol, market === "coinm" ? (s.contractSize ?? null) : null);
+    return out;
+  }
+
   return {
+    fetchPerpetuals,
+
+    /** Тикеры 24 ч Spot и USDⓈ-M (оборот в котировке — quoteVolume). COIN-M — fetchCoinmTickers. */
     async fetch24hTickers(market: Market): Promise<Ticker24h[]> {
       return ticker24hSchema.parse(
         await getJson(`${BASE[market]}/ticker/24hr`),
@@ -42,8 +77,15 @@ export function createMarketApi(getJson: GetJson) {
       return ticker24hSchema.element.parse(raw);
     },
 
+    /** Тикеры 24 ч COIN-M: оборот — в контрактах (volume), в $ его переводит размер контракта. */
+    async fetchCoinmTickers(): Promise<CoinmTicker24h[]> {
+      return coinmTicker24hSchema.parse(
+        await getJson(`${BASE.coinm}/ticker/24hr`),
+      );
+    },
+
     async fetchKlines(
-      market: Market,
+      market: BinanceMarket,
       symbol: string,
       interval: string,
       limit: number,
@@ -63,27 +105,17 @@ export function createMarketApi(getJson: GetJson) {
       }));
     },
 
-    /** Символы бессрочных USDT-фьючерсов, по которым идёт торговля. */
+    /** Символы бессрочных USDT-фьючерсов (USDⓈ-M), по которым идёт торговля. */
     async fetchPerpetualSymbols(): Promise<Set<string>> {
-      const info = futuresExchangeInfoSchema.parse(
-        await getJson(`${BASE.futures}/exchangeInfo`),
-      );
-      return new Set(
-        info.symbols
-          .filter(
-            (s) =>
-              s.contractType === "PERPETUAL" &&
-              s.quoteAsset === "USDT" &&
-              s.status === "TRADING",
-          )
-          .map((s) => s.symbol),
-      );
+      return new Set((await fetchPerpetuals("usdm")).keys());
     },
 
-    /** Текущие ставки funding бессрочных фьючерсов (доля за период): { BTCUSDT: 0.0001 }. */
-    async fetchFundingRates(): Promise<Record<string, number>> {
+    /** Текущие ставки funding бессрочных фьючерсов рынка (доля за период): { BTCUSDT: 0.0001 }. */
+    async fetchFundingRates(
+      market: FuturesMarket = "usdm",
+    ): Promise<Record<string, number>> {
       const list = premiumIndexSchema.parse(
-        await getJson(`${BASE.futures}/premiumIndex`),
+        await getJson(`${BASE[market]}/premiumIndex`),
       );
       const out: Record<string, number> = {};
       for (const p of list)

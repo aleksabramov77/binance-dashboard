@@ -9,6 +9,7 @@ import {
   evaluateStrategy,
   exitFill,
   FEE_RATE,
+  isFuturesMarket,
   type PaperTrade,
   settle,
   sizePosition,
@@ -57,10 +58,13 @@ export interface TickDeps {
     interval: Interval,
     limit: number,
   ): Promise<Candle[]>;
-  /** Тикеры 24 ч рынка; для futures — только бессрочные контракты. */
+  /**
+   * Тикеры 24 ч рынка; для фьючерсов — только бессрочные контракты, у COIN-M — с размером
+   * контракта и оборотом в $ (coinmTicker).
+   */
   tickers(market: ExperimentMarket): Promise<MarketTicker[]>;
-  /** Текущие ставки funding бессрочных фьючерсов (доля): { BTCUSDT: 0.0001 }. */
-  funding(): Promise<Record<string, number>>;
+  /** Текущие ставки funding бессрочных фьючерсов группы (доля): { BTCUSDT: 0.0001 }. */
+  funding(market: ExperimentMarket): Promise<Record<string, number>>;
   /** Кэш свечей между тиками (на VM — в памяти процесса). Нет — свечи грузятся заново. */
   cache?: CandleCache;
   log?: (
@@ -152,10 +156,17 @@ export async function runTick(
     }
     return p;
   };
-  let fundingMemo: Promise<Record<string, number>> | null = null;
-  const funding = () => {
-    fundingMemo ??= limit(() => deps.funding());
-    return fundingMemo;
+  const fundingMemo = new Map<
+    ExperimentMarket,
+    Promise<Record<string, number>>
+  >();
+  const funding = (market: ExperimentMarket) => {
+    let p = fundingMemo.get(market);
+    if (!p) {
+      p = limit(() => deps.funding(market));
+      fundingMemo.set(market, p);
+    }
+    return p;
   };
 
   // Свечи TF: один фетч на (market, symbol, tf) за тик, кэш между тиками дозагружает хвост.
@@ -304,6 +315,20 @@ export async function runTick(
   );
   const bars = barsParsed.success ? barsParsed.data : {};
 
+  // Рынок без тикеров (биржа недоступна, например dapi для COIN-M): одна запись в журнал за тик,
+  // его эксперименты ждут следующего тика, остальные группы торгуют.
+  const downMarkets = new Set<ExperimentMarket>();
+  const marketTickers = async (market: ExperimentMarket) => {
+    if (downMarkets.has(market)) return null;
+    try {
+      return await tickers(market);
+    } catch (error) {
+      downMarkets.add(market);
+      fail(`тикеры ${market}: рынок пропущен`, error);
+      return null;
+    }
+  };
+
   for (const exp of experiments) {
     if (!exp.enabled) continue;
     const { config } = exp;
@@ -315,8 +340,10 @@ export async function runTick(
       config.entry.type === "hold" &&
       open.filter((t) => t.experimentId === exp.id).length < config.maxOpen;
     if (seen && !holdGap) continue;
+    const list = await marketTickers(exp.market);
+    if (!list) continue;
     try {
-      await evaluateExperiment(exp, bar);
+      await evaluateExperiment(exp, bar, list);
       if (!seen) {
         bars[exp.id] = bar;
         result.evaluated.push(exp.id);
@@ -328,11 +355,14 @@ export async function runTick(
   }
   if (result.evaluated.length > 0) await store.setState(ENGINE_KEYS.bars, bars);
 
-  async function evaluateExperiment(exp: Experiment, bar: number) {
+  async function evaluateExperiment(
+    exp: Experiment,
+    bar: number,
+    list: MarketTicker[],
+  ) {
     const { config, market } = exp;
-    const list = await tickers(market);
     const ticker = new Map(list.map((t) => [t.symbol, t]));
-    const universe = pickUniverse(config.universe, list);
+    const universe = pickUniverse(config.universe, list, market);
     const mine = () => open.filter((t) => t.experimentId === exp.id);
     const symbols = [...new Set([...universe, ...mine().map((t) => t.symbol)])];
 
@@ -350,8 +380,8 @@ export async function runTick(
     );
     const ready = loaded.filter((x) => x !== null);
     const rates =
-      market === "futures" && config.entry.type === "funding"
-        ? await funding()
+      isFuturesMarket(market) && config.entry.type === "funding"
+        ? await funding(market)
         : {};
     const ranks = momentumRanks(exp, ready, universe);
     const inUniverse = new Set(universe);
@@ -399,7 +429,10 @@ export async function runTick(
         atr,
       );
       if (!levels) continue;
-      const leverage = market === "futures" ? ENGINE.futuresLeverage : 1;
+      const leverage = isFuturesMarket(market) ? ENGINE.futuresLeverage : 1;
+      // COIN-M — целые контракты: без размера контракта объём не посчитать.
+      const contractSizeUsd = market === "coinm" ? t?.contractSize : undefined;
+      if (market === "coinm" && contractSizeUsd === undefined) continue;
       const used = current.reduce(
         (s, x) => s + (x.entryPrice * x.quantity) / leverage,
         0,
@@ -411,6 +444,7 @@ export async function runTick(
         availableUsd: exp.initialBudget + (realized[exp.id] ?? 0) - used,
         leverage,
         fixedNotionalUsd: ENGINE.tradeNotionalUsd,
+        contractSizeUsd,
       });
       if (!size) continue;
 
@@ -479,10 +513,10 @@ export async function runTick(
   return result;
 }
 
-/** Spot — только long; плюс направления из конфига эксперимента. */
+/** Spot — только long, фьючерсы (USDⓈ-M, COIN-M) — оба; плюс направления из конфига эксперимента. */
 const allowed = (exp: Experiment, direction: TradeDirection) =>
   exp.config.directions.includes(direction) &&
-  (exp.market === "futures" || direction === "long");
+  (isFuturesMarket(exp.market) || direction === "long");
 
 /** Место символа по доходности за lookback среди юниверса (0 — лучший); только для momentum. */
 function momentumRanks(

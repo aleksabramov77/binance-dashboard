@@ -5,7 +5,7 @@ import { type MirrorDeps, runMirror } from "./runMirror";
 const NOW = Date.parse("2026-10-11T12:00:00Z");
 const trade = (over: Partial<MirrorTradeInput>): MirrorTradeInput => ({
   tradeId: "t1",
-  market: "futures",
+  market: "usdm",
   symbol: "ETHUSDT",
   direction: "long",
   openedAt: "2026-10-11T11:59:00Z",
@@ -177,7 +177,7 @@ describe("runMirror", () => {
     let clock = NOW;
     const claimToClose = vi.fn(async (tradeId: string) => ({
       tradeId,
-      market: "futures" as const,
+      market: "usdm" as const,
       symbol: "ETHUSDT",
       direction: "long" as const,
       quantity: 1,
