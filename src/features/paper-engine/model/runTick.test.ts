@@ -967,3 +967,32 @@ describe("runTick: контекст входа, MAE и отсечённые си
     expect(skipped.some((s) => s.id === "old")).toBe(false);
   });
 });
+
+describe("runTick: сбой свечей фильтра тренда (ревью 0030)", () => {
+  it("ошибка загрузки свечей старшего TF — вход по символу запрещён, остальные символы обрабатываются, одна ошибка на ключ", async () => {
+    const trend = {
+      ...ALWAYS_LONG,
+      universe: { type: "top", n: 3 },
+      trendFilter: { timeframe: "4h", period: 50 },
+    } satisfies Partial<ExperimentConfig>;
+    const store = enabledStore([exp("A", trend), exp("B", trend)]);
+    // Старший TF ниже цены (close 90) — тренд разрешает long; у ETH свечи 4h не грузятся.
+    const base = market(undefined, undefined, (_s, interval) =>
+      interval === "4h" ? { open: 90, high: 90.5, low: 89.5, close: 90 } : {},
+    ).deps(store);
+    const deps: TickDeps = {
+      ...base,
+      candles: (mk, symbol, interval, limit, start) =>
+        symbol === "ETHUSDT" && interval === "4h"
+          ? Promise.reject(new Error("нет сети"))
+          : base.candles(mk, symbol, interval, limit, start),
+    };
+    const r = await runTick(deps, T0);
+    expect(r.evaluated).toEqual(["A", "B"]);
+    expect(r.opened).toBe(4);
+    expect(store.trades().some((t) => t.symbol === "ETHUSDT")).toBe(false);
+    expect(r.errors.filter((e) => e.startsWith("тренд"))).toEqual([
+      "тренд futures ETHUSDT 4h: нет сети",
+    ]);
+  });
+});

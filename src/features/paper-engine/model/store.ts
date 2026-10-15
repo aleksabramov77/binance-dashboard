@@ -66,7 +66,6 @@ export interface ExperimentStore {
   insertTrade(trade: PaperTrade): Promise<void>;
   updateTrade(id: string, progress: TradeProgress): Promise<void>;
   closeTrade(id: string, close: TradeClose): Promise<void>;
-  /** Значение ключа engine_state; undefined — ключа нет. Форму проверяет вызывающий (Zod). */
   /** Отсечённые сигналы (spec 0030): записанные в эпохе — по эксперименту и причине (для лимита объёма). */
   skippedSignalCounts(
     runId: number,
@@ -76,6 +75,7 @@ export interface ExperimentStore {
   insertSkippedSignals(rows: SkippedSignal[]): Promise<void>;
   /** Удалить записи старше before (ISO) — срок хранения. */
   pruneSkippedSignals(before: string): Promise<void>;
+  /** Значение ключа engine_state; undefined — ключа нет. Форму проверяет вызывающий (Zod). */
   getState(key: string): Promise<unknown>;
   setState(key: string, value: unknown): Promise<void>;
 }

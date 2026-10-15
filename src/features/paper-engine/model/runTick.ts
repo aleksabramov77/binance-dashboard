@@ -272,6 +272,8 @@ export async function runTick(
 
   // Отсечённые сигналы тика (spec 0030) — пишутся одной пачкой в конце тика.
   const skipped: SkippedSignal[] = [];
+  // Сбой свечей фильтра тренда — одна ошибка тика на (рынок, символ, TF).
+  const trendReported = new Set<string>();
 
   const closeTrade = async (
     trade: PaperTrade,
@@ -637,7 +639,11 @@ export async function runTick(
     }
   }
 
-  /** Фильтр тренда старшего TF: long — цена выше EMA(period), short — ниже. */
+  /**
+   * Фильтр тренда старшего TF: long — цена выше EMA(period), short — ниже. Сбой загрузки свечей — вход запрещён,
+   * одна ошибка тика на (рынок, символ, TF), как у режима рынка: остальные символы эксперимента (их выходы по
+   * сигналу и входы) обрабатываются дальше.
+   */
   async function trendAllows(
     exp: Experiment,
     symbol: string,
@@ -646,7 +652,17 @@ export async function runTick(
   ) {
     const filter = exp.config.trendFilter;
     if (!filter) return true;
-    const candles = await signalCandles(exp.market, symbol, filter.timeframe);
+    let candles: Candle[];
+    try {
+      candles = await signalCandles(exp.market, symbol, filter.timeframe);
+    } catch (error) {
+      const key = candleKey(exp.market, symbol, filter.timeframe);
+      if (!trendReported.has(key)) {
+        trendReported.add(key);
+        fail(`тренд ${exp.market} ${symbol} ${filter.timeframe}`, error);
+      }
+      return false;
+    }
     const level = ema(
       candles.map((c) => c.close),
       filter.period,
