@@ -18,8 +18,11 @@ export {
 } from "./api/mirrorDb";
 // Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
 export {
+  type LabExperiment,
   readExperimentDetail,
+  readExperimentFlags,
   readExperimentsOverview,
+  readLabDataset,
   readTradeStats,
 } from "./api/readModel";
 // /settings лаборатории (задача 3d): атомарный сброс эпохи, тумблеры, контракт и хуки.
