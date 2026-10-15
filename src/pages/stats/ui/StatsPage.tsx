@@ -42,6 +42,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFrame,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -449,7 +450,7 @@ function GroupRow({
   const s = g.stats;
   return (
     <TableRow className={cn(flagged && "bg-destructive/5")}>
-      <TableCell className="max-w-md whitespace-normal">
+      <TableCell>
         <GroupLabel g={g} groupBy={groupBy} flagged={flagged} />
       </TableCell>
       <TableCell className="text-right font-mono tabular-nums">
@@ -628,7 +629,7 @@ function StatsDashboard() {
                 </p>
               )}
 
-              <div className="overflow-clip rounded-xl border bg-card">
+              <TableFrame>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -648,7 +649,7 @@ function StatsDashboard() {
                     ))}
                   </TableBody>
                 </Table>
-              </div>
+              </TableFrame>
             </>
           )}
 

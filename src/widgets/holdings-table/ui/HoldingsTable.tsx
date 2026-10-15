@@ -22,6 +22,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFrame,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -91,7 +92,7 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
     ? sortRows(holdings, SORT_VALUE[sort.key], sort.dir)
     : sortRows(holdings, SORT_VALUE.usd, "desc");
   return (
-    <div className="overflow-clip rounded-xl border bg-card">
+    <TableFrame>
       <Table>
         <TableHeader>
           <TableRow>
@@ -191,6 +192,6 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
           })}
         </TableBody>
       </Table>
-    </div>
+    </TableFrame>
   );
 }
