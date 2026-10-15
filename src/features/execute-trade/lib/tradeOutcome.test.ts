@@ -11,6 +11,7 @@ import {
   afterSell,
   afterSpotBuy,
   afterSpotRecheck,
+  afterStopBeforeEntry,
   afterStopLost,
   afterTakeProfitCancel,
 } from "./tradeOutcome";
@@ -189,6 +190,17 @@ describe("спот: стоп OTOCO снят биржей, тейк ещё сто
     expect(afterTakeProfitCancel(false)).toMatchObject({
       status: "unprotected",
       withEntry: true,
+    });
+  });
+});
+
+describe("фьючерсы: «стоп до входа» (AC10)", () => {
+  it("стоп не принят — вход не отправляется, rejected без цены", () => {
+    expect(afterStopBeforeEntry(true)).toBe("enter");
+    expect(afterStopBeforeEntry(false)).toEqual({
+      status: "rejected",
+      message: "Стоп не принят биржей — вход не отправлялся.",
+      withEntry: false,
     });
   });
 });

@@ -89,10 +89,6 @@ export function ownCloseQuantity(
   return Math.max(0, Math.min(own - soldByLegs, available));
 }
 
-/** Фьючерсы: сколько позиции в сторону сделки (позиция в другую сторону — не наша). */
-export const positionOnSide = (amount: number, direction: "long" | "short") =>
-  direction === "long" ? Math.max(amount, 0) : Math.max(-amount, 0);
-
 /**
  * Спот: сколько своих монет на балансе — купленное минус комиссия в покупаемой монете. Есть из
  * fills входа (protectRefs.netQuantity) — оно; нет — по ставке комиссии. Продавать больше нельзя:
