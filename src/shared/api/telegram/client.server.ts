@@ -1,31 +1,74 @@
-// Telegram Bot API: уведомления владельцу. Только сервер (токен бота).
+// Telegram Bot API: уведомления владельцу и команды бота. Только сервер (токен бота).
 const API = "https://api.telegram.org";
 
+/** Вызов метода Bot API; ошибка — с описанием от Telegram. */
+async function callTelegram(
+  token: string,
+  method: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const res = await fetch(`${API}/bot${token}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const body = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    description?: string;
+  } | null;
+  if (!res.ok || body?.ok === false)
+    throw new Error(
+      `Telegram ${method} ${res.status}: ${body?.description ?? res.statusText}`,
+    );
+}
+
 /** Отправить сообщение в чат (обычный текст, без разметки). */
-export async function sendTelegramMessage(
+export function sendTelegramMessage(
   token: string,
   chatId: string,
   text: string,
 ): Promise<void> {
-  const res = await fetch(`${API}/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      // Лимит Telegram — 4096 символов.
-      text: text.slice(0, 4000),
-      disable_web_page_preview: true,
-    }),
-    signal: AbortSignal.timeout(10_000),
+  return callTelegram(token, "sendMessage", {
+    chat_id: chatId,
+    // Лимит Telegram — 4096 символов.
+    text: text.slice(0, 4000),
+    disable_web_page_preview: true,
   });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as {
-      description?: string;
-    } | null;
-    throw new Error(
-      `Telegram ${res.status}: ${body?.description ?? res.statusText}`,
-    );
-  }
+}
+
+/**
+ * Включить webhook: Telegram шлёт сообщения боту POST-запросом на url с секретом в заголовке
+ * X-Telegram-Bot-Api-Secret-Token. Пока webhook включён, getUpdates не работает.
+ */
+export function setTelegramWebhook(
+  token: string,
+  input: { url: string; secret: string },
+): Promise<void> {
+  return callTelegram(token, "setWebhook", {
+    url: input.url,
+    secret_token: input.secret,
+    allowed_updates: ["message"],
+  });
+}
+
+/** Снять webhook — сообщения снова доступны через getUpdates. */
+export function deleteTelegramWebhook(token: string): Promise<void> {
+  return callTelegram(token, "deleteWebhook", {});
+}
+
+export interface TelegramCommand {
+  /** Без «/», 1–32 символа: латиница в нижнем регистре, цифры, «_». */
+  command: string;
+  description: string;
+}
+
+/** Меню команд бота (кнопка «/» в чате). */
+export function setTelegramCommands(
+  token: string,
+  commands: readonly TelegramCommand[],
+): Promise<void> {
+  return callTelegram(token, "setMyCommands", { commands });
 }
 
 /** Последние чаты, написавшие боту (после /start) — чтобы узнать chat id владельца. */

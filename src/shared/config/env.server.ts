@@ -112,15 +112,55 @@ export interface TelegramConfig {
   token: string;
   /** Чат владельца: бот пишет лично (chat id из /start). null — ещё не известен. */
   chatId: string | null;
+  /** Секрет webhook команд бота (заголовок X-Telegram-Bot-Api-Secret-Token). null — не задан. */
+  webhookSecret: string | null;
 }
 
-/** Бот уведомлений (монитор логов). null — токен не задан. */
+/** Бот уведомлений и команд. null — токен не задан. */
 export function getTelegramConfig(
   env: Record<string, string | undefined> = process.env,
 ): TelegramConfig | null {
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return null;
-  return { token, chatId: env.TELEGRAM_CHAT_ID?.trim() || null };
+  return {
+    token,
+    chatId: env.TELEGRAM_CHAT_ID?.trim() || null,
+    webhookSecret: env.TELEGRAM_WEBHOOK_SECRET?.trim() || null,
+  };
+}
+
+/** Адрес дашборда в production: ссылки в уведомлениях, адрес webhook бота. */
+export const getSiteUrl = (
+  env: Record<string, string | undefined> = process.env,
+): string =>
+  (env.SITE_URL?.trim() || "https://binance-dashboard-gold.vercel.app").replace(
+    /\/+$/,
+    "",
+  );
+
+const DEFAULT_DB_SIZE_LIMIT_MB = 500;
+
+export interface DbSizeLimitConfig {
+  limitBytes: number;
+  /** Значение DB_SIZE_LIMIT_MB, которое не распознано (тогда лимит по умолчанию); null — всё в порядке. */
+  invalid: string | null;
+}
+
+/** Лимит размера базы для свободного места: DB_SIZE_LIMIT_MB, по умолчанию 500 МБ (Supabase Free). */
+export function getDbSizeLimit(
+  env: Record<string, string | undefined> = process.env,
+): DbSizeLimitConfig {
+  const raw = env.DB_SIZE_LIMIT_MB?.trim();
+  const parsed = z.coerce
+    .number()
+    .positive()
+    .finite()
+    .safeParse(raw || DEFAULT_DB_SIZE_LIMIT_MB);
+  return {
+    limitBytes:
+      (parsed.success ? parsed.data : DEFAULT_DB_SIZE_LIMIT_MB) * 1024 * 1024,
+    invalid: parsed.success || !raw ? null : raw,
+  };
 }
 
 /** Модель для разбора сбоев монитором логов: дешёвая, отдельно от разбора сетапов. */

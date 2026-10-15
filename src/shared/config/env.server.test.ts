@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getDatabaseConfig, isServerless } from "./env.server";
+import {
+  getDatabaseConfig,
+  getDbSizeLimit,
+  getTelegramConfig,
+  isServerless,
+} from "./env.server";
 
 const URL =
   "postgresql://u:p@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres";
@@ -35,5 +40,47 @@ describe("getDatabaseConfig", () => {
     expect(() => getDatabaseConfig({ VERCEL: "1", DATABASE_URL: "" })).toThrow(
       /DATABASE_URL/,
     );
+  });
+});
+
+describe("getDbSizeLimit", () => {
+  const MB = 1024 * 1024;
+
+  it("по умолчанию 500 МБ (Supabase Free)", () => {
+    expect(getDbSizeLimit({})).toEqual({ limitBytes: 500 * MB, invalid: null });
+    expect(getDbSizeLimit({ DB_SIZE_LIMIT_MB: " " }).invalid).toBeNull();
+  });
+
+  it("берёт DB_SIZE_LIMIT_MB", () => {
+    expect(getDbSizeLimit({ DB_SIZE_LIMIT_MB: "8192" })).toEqual({
+      limitBytes: 8192 * MB,
+      invalid: null,
+    });
+  });
+
+  it("некорректное значение — 500 МБ и само значение для предупреждения", () => {
+    for (const raw of ["abc", "0", "-5", "Infinity"])
+      expect(getDbSizeLimit({ DB_SIZE_LIMIT_MB: raw })).toEqual({
+        limitBytes: 500 * MB,
+        invalid: raw,
+      });
+  });
+});
+
+describe("getTelegramConfig", () => {
+  it("секрет webhook — необязательный", () => {
+    expect(getTelegramConfig({ TELEGRAM_BOT_TOKEN: "t" })).toEqual({
+      token: "t",
+      chatId: null,
+      webhookSecret: null,
+    });
+    expect(
+      getTelegramConfig({
+        TELEGRAM_BOT_TOKEN: "t",
+        TELEGRAM_CHAT_ID: "42",
+        TELEGRAM_WEBHOOK_SECRET: "s",
+      }),
+    ).toEqual({ token: "t", chatId: "42", webhookSecret: "s" });
+    expect(getTelegramConfig({ TELEGRAM_WEBHOOK_SECRET: "s" })).toBeNull();
   });
 });

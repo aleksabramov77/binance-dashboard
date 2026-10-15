@@ -1,2 +1,14 @@
 // Только для сервера: использует токен бота.
-export { fetchTelegramChats, sendTelegramMessage } from "./client.server";
+export {
+  deleteTelegramWebhook,
+  fetchTelegramChats,
+  sendTelegramMessage,
+  setTelegramCommands,
+  setTelegramWebhook,
+  type TelegramCommand,
+} from "./client.server";
+export {
+  parseTelegramCommand,
+  type TelegramUpdate,
+  telegramUpdateSchema,
+} from "./update";

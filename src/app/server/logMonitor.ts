@@ -4,7 +4,7 @@ import { and, desc, gte, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { earnSnapshotsTable } from "@/entities/earn-offer";
 import { engineStateTable } from "@/entities/experiment";
-import { alertStateTable, appLogsTable } from "@/entities/log-entry";
+import { appLogsTable } from "@/entities/log-entry";
 import {
   type AlertRow,
   type Issue,
@@ -20,18 +20,15 @@ import { sendTelegramMessage } from "@/shared/api/telegram";
 import {
   getLlmConfig,
   getLogAnalysisModel,
+  getSiteUrl,
   getTelegramConfig,
 } from "@/shared/config/env.server";
-import { getDb } from "@/shared/db/client.server";
+import { getDb, rowsOf } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import { loadAlertState, saveAlertState } from "./alertState";
 import { pruneLogs } from "./logs";
 
-const SITE_URL =
-  process.env.SITE_URL ?? "https://binance-dashboard-gold.vercel.app";
-
 const iso = (ms: number) => new Date(ms).toISOString();
-const rowsOf = <T>(r: unknown): T[] =>
-  Array.isArray(r) ? (r as T[]) : ((r as { rows?: T[] }).rows ?? []);
 
 async function collect(now: number): Promise<MonitorSnapshot> {
   const db = getDb();
@@ -186,27 +183,13 @@ async function analyze(
   return data.summary.trim() || null;
 }
 
+/** Только строки монитора журнала: у порогов места в базе (db.space.*) свои статусы. */
 async function loadAlerts(): Promise<AlertRow[]> {
-  const rows = await getDb().select().from(alertStateTable);
-  return rows.map((r) => ({ ...r, status: r.status as AlertRow["status"] }));
-}
-
-async function saveAlerts(rows: AlertRow[]): Promise<void> {
-  const db = getDb();
-  for (const r of rows)
-    await db
-      .insert(alertStateTable)
-      .values(r)
-      .onConflictDoUpdate({
-        target: alertStateTable.key,
-        set: {
-          status: r.status,
-          title: r.title,
-          firstSeen: r.firstSeen,
-          lastSeen: r.lastSeen,
-          lastSent: r.lastSent,
-        },
-      });
+  return (await loadAlertState()).flatMap((r) =>
+    r.status === "active" || r.status === "resolved"
+      ? [{ ...r, status: r.status }]
+      : [],
+  );
 }
 
 /** Прогон монитора по расписанию. */
@@ -218,13 +201,13 @@ export async function runLogMonitor(): Promise<MonitorResult> {
     samples,
     analyze,
     loadAlerts,
-    saveAlerts,
+    saveAlerts: saveAlertState,
     notify:
       telegram && chatId
         ? (text) => sendTelegramMessage(telegram.token, chatId, text)
         : undefined,
     prune: () => pruneLogs(),
-    logsUrl: `${SITE_URL}/logs`,
+    logsUrl: `${getSiteUrl()}/logs`,
   });
   if (!telegram || !chatId)
     log.warn(
@@ -258,7 +241,7 @@ export async function sendMonitorTest(): Promise<{
   await sendTelegramMessage(
     telegram.token,
     telegram.chatId,
-    `✅ Binance Dashboard: уведомления работают. Монитор проверяет журнал каждые 15 минут.\n${SITE_URL}/logs`,
+    `✅ Binance Dashboard: уведомления работают. Монитор проверяет журнал каждые 15 минут.\n${getSiteUrl()}/logs`,
   );
   return { sent: true };
 }
