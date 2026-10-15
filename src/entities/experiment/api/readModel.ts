@@ -1,6 +1,7 @@
 import {
   type Experiment,
   experimentSchema,
+  marketSchema,
   type PaperTrade,
 } from "@binance-dashboard/trading-core";
 import { and, asc, desc, eq } from "drizzle-orm";
@@ -155,6 +156,55 @@ function groupLabel(
     case "symbol":
       return key;
   }
+}
+
+/** Эксперимент каталога плюс дата его отдельного сброса paper-учёта (null — не сбрасывался). */
+export type LabExperiment = Experiment & { resetAt: string | null };
+
+/**
+ * Все эксперименты и учтённые сделки текущей эпохи — для отчёта лаборатории (`pnpm lab:report`).
+ * Сделки уже отфильтрованы по сбросу эксперимента (countedTrade); дата сброса отдаётся, чтобы отчёт
+ * считал темп сделок и период эксперимента с неё.
+ */
+export async function readLabDataset(db: Db): Promise<{
+  run: ExperimentsResponse["run"];
+  experiments: LabExperiment[];
+  trades: PaperTrade[];
+}> {
+  const run = await currentRun(db);
+  const [rows, trades] = await Promise.all([
+    db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
+    runTrades(db, run.id),
+  ]);
+  return {
+    run,
+    experiments: rows.map((r) => ({
+      ...experimentSchema.parse(r),
+      resetAt: r.resetAt?.toISOString() ?? null,
+    })),
+    trades,
+  };
+}
+
+/** Тумблеры всех экспериментов — для `pnpm lab:apply` (сравнить «было → стало» перед записью). */
+export async function readExperimentFlags(
+  db: Db,
+): Promise<
+  Pick<Experiment, "id" | "name" | "market" | "enabled" | "demoMirror">[]
+> {
+  return db
+    .select({
+      id: experimentsTable.id,
+      name: experimentsTable.name,
+      market: experimentsTable.market,
+      enabled: experimentsTable.enabled,
+      demoMirror: experimentsTable.demoMirror,
+    })
+    .from(experimentsTable)
+    .orderBy(asc(experimentsTable.id))
+    .then((rows) =>
+      rows.map((r) => ({ ...r, market: marketSchema.parse(r.market) })),
+    );
 }
 
 /**
