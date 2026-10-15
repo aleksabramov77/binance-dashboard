@@ -8,6 +8,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { filterTrades, periodStart, sliceStats } from "../lib/slices";
 import { computeStats, equityCurve } from "../lib/stats";
+import { ASSET_GROUPS } from "../model/assetGroup";
 import { experimentsTable, paperTradesTable, runsTable } from "../model/db";
 import type {
   StatsGroupBy,
@@ -24,6 +25,7 @@ import {
   emptyMirrorSummary,
   mirrorStatuses,
   mirrorSummaries,
+  toDemoSummary,
 } from "./mirrorDb";
 
 // Чтение для страниц лаборатории (только сервер): эксперименты и сделки текущей эпохи
@@ -95,7 +97,10 @@ export async function readExperimentsOverview(
         enabled: e.enabled,
         demoMirror: e.demoMirror,
         stats: computeStats(byExperiment.get(e.id) ?? [], e.initialBudget),
-        demo: demo.get(e.id) ?? emptyMirrorSummary(),
+        demo: toDemoSummary(
+          demo.get(e.id) ?? emptyMirrorSummary(),
+          e.initialBudget,
+        ),
       };
     }),
   };
@@ -132,11 +137,13 @@ export async function readExperimentDetail(
     equity: equityCurve(trades, experiment.initialBudget, run.startedAt),
     trades: shown,
     mirrors: Object.fromEntries(mirrors),
-    demo: demo.get(id) ?? emptyMirrorSummary(),
+    demo: toDemoSummary(
+      demo.get(id) ?? emptyMirrorSummary(),
+      experiment.initialBudget,
+    ),
   };
 }
 
-const MARKET_LABELS = { spot: "Spot", futures: "Futures" } as const;
 const DIRECTION_LABELS = { long: "Long (B)", short: "Short (S)" } as const;
 
 function groupLabel(
@@ -150,7 +157,9 @@ function groupLabel(
       return name ? `${key} · ${name}` : key;
     }
     case "market":
-      return MARKET_LABELS[key as keyof typeof MARKET_LABELS] ?? key;
+      return key in ASSET_GROUPS
+        ? ASSET_GROUPS[key as keyof typeof ASSET_GROUPS].label
+        : key;
     case "direction":
       return DIRECTION_LABELS[key as keyof typeof DIRECTION_LABELS] ?? key;
     case "symbol":

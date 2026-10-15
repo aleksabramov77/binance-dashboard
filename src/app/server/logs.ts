@@ -1,8 +1,9 @@
 // Журнал приложения в БД (платформа): приёмник логгера и чтение для страницы «Логи». Только сервер.
-import { and, desc, gte, inArray, lt } from "drizzle-orm";
+import { and, desc, gte, inArray, lt, sql } from "drizzle-orm";
 import {
   appLogsTable,
   type LogEntry,
+  type LogFilters,
   type LogLevel,
 } from "@/entities/log-entry";
 import { isServerless } from "@/shared/config/env.server";
@@ -35,19 +36,28 @@ const levelsFrom = (min: LogLevel) =>
     (l) => LEVEL_RANK[l] >= LEVEL_RANK[min],
   );
 
-/** Последние записи за 2 суток, новые сверху. */
+/**
+ * Записи за filters.days суток, новые сверху; события и эксперимент (data.experimentId) —
+ * опционально (spec 0016). Значения — параметрами запроса, не склейкой SQL.
+ */
 export async function readLogs(
-  minLevel: LogLevel,
+  filters: LogFilters,
   limit: number,
 ): Promise<LogEntry[]> {
-  const since = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  const since = new Date(Date.now() - filters.days * 86_400_000).toISOString();
   const rows = await getDb()
     .select()
     .from(appLogsTable)
     .where(
       and(
         gte(appLogsTable.ts, since),
-        inArray(appLogsTable.level, levelsFrom(minLevel)),
+        inArray(appLogsTable.level, levelsFrom(filters.level)),
+        filters.events.length
+          ? inArray(appLogsTable.event, filters.events)
+          : undefined,
+        filters.experiment
+          ? sql`${appLogsTable.data}->>'experimentId' = ${filters.experiment}`
+          : undefined,
       ),
     )
     .orderBy(desc(appLogsTable.ts))

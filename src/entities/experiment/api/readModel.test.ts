@@ -206,7 +206,7 @@ describe("разрезы /stats", () => {
       NOW,
     );
     expect(byMarket?.groups.map((g) => [g.label, g.stats.realizedPnl])).toEqual(
-      [["Futures", 500]],
+      [["USDⓈ-M", 500]],
     );
     expect(
       await readTradeStats(
