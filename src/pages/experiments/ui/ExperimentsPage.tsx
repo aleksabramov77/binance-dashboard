@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useQueryState } from "nuqs";
 import { Suspense, useMemo } from "react";
 import {
+  ASSET_GROUP_DESCRIPTION,
+  ASSET_GROUPS,
+  assetGroupOf,
   DemoMisses,
   type ExperimentSummary,
   formatProfitFactor,
@@ -41,8 +44,8 @@ import {
 
 const MARKET_LABELS: Record<MarketFilter, string> = {
   all: "Все",
-  spot: "Spot",
-  futures: "Futures",
+  spot: ASSET_GROUPS.spot.code,
+  futures: ASSET_GROUPS.futures.code,
 };
 
 const COLUMNS: {
@@ -56,7 +59,13 @@ const COLUMNS: {
     label: "Эксперимент",
     numeric: false,
     description:
-      "Код, название, рынок и гипотеза эксперимента. Клик по строке — подробности, конфиг и сделки.",
+      "Код, название и гипотеза эксперимента. Клик по строке — подробности, конфиг и сделки.",
+  },
+  {
+    key: "ag",
+    label: "AG",
+    numeric: false,
+    description: ASSET_GROUP_DESCRIPTION,
   },
   {
     key: "trades",
@@ -212,15 +221,21 @@ function ExperimentRow({
               {e.id}
             </span>
             <span className="font-medium group-hover:underline">{e.name}</span>
-            <Badge variant="outline" className="text-[10px]">
-              {MARKET_LABELS[e.market]}
-            </Badge>
             {!e.enabled && <Badge variant="outline">выключен</Badge>}
           </span>
           <span className="line-clamp-1 text-xs text-muted-foreground">
             {e.hypothesis}
           </span>
         </Link>
+      </TableCell>
+      <TableCell>
+        <Badge
+          variant="outline"
+          className="font-mono text-[10px]"
+          title={assetGroupOf(e.market).description}
+        >
+          {assetGroupOf(e.market).code}
+        </Badge>
       </TableCell>
       <TableCell className="text-right font-mono tabular-nums">
         {s.closed}

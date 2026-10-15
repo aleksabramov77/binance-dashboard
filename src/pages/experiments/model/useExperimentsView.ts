@@ -5,6 +5,7 @@ import { parseAsStringLiteral, useQueryStates } from "nuqs";
 export const MARKET_FILTERS = ["all", "spot", "futures"] as const;
 export const SORT_KEYS = [
   "id",
+  "ag",
   "trades",
   "winRate",
   "pnl",

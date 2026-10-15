@@ -141,7 +141,7 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
             <dd className="font-mono tabular-nums">
               {demoBalances ? formatUsd(demoBalances.spot) : "—"}
             </dd>
-            <dt className="text-muted-foreground">Свободно Futures</dt>
+            <dt className="text-muted-foreground">Свободно USDⓈ-M</dt>
             <dd className="font-mono tabular-nums">
               {demoBalances ? formatUsd(demoBalances.futures) : "—"}
             </dd>

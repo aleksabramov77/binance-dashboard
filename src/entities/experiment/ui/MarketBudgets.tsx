@@ -2,12 +2,8 @@
 
 import { cn, formatUsd } from "@/shared/lib";
 import { useExperimentBudgets } from "../api/useExperimentBudgets";
+import { ASSET_GROUPS } from "../model/assetGroup";
 import type { MarketBudget } from "../model/budget";
-
-const MARKET_LABEL: Record<MarketBudget["market"], string> = {
-  spot: "Spot",
-  futures: "Futures",
-};
 
 const signed = (v: number, text: string) => (v > 0 ? `+${text}` : text);
 
@@ -19,7 +15,7 @@ const pct = (v: number) =>
 
 function tooltip(b: MarketBudget): string {
   return [
-    `${MARKET_LABEL[b.market]} — бюджет лаборатории в текущей эпохе`,
+    `${ASSET_GROUPS[b.market].label} — бюджет лаборатории в текущей эпохе`,
     `Старт: ${formatUsd(b.initial)}`,
     `Изменение: ${signed(b.change, formatUsd(b.change))} (${pct(b.changePct)})`,
     `Реализованный PnL (после комиссий): ${signed(b.realized, formatUsd(b.realized))}`,
@@ -43,7 +39,7 @@ function BudgetItem({ budget }: { budget: MarketBudget }) {
       title={tooltip(budget)}
     >
       <span className="font-sans text-muted-foreground">
-        {MARKET_LABEL[budget.market]}
+        {ASSET_GROUPS[budget.market].label}
       </span>
       <span>{formatUsd(budget.equity)}</span>
       <span className={tone}>
@@ -57,7 +53,7 @@ function BudgetItem({ budget }: { budget: MarketBudget }) {
   );
 }
 
-/** Equity лаборатории по рынкам (Spot / Futures) и изменение от старта эпохи. */
+/** Equity лаборатории по рынкам (Spot / USDⓈ-M) и изменение от старта эпохи. */
 export function MarketBudgets({ className }: { className?: string }) {
   const { data, error } = useExperimentBudgets();
   if (error)

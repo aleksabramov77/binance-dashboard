@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ASSET_GROUPS,
   formatSignedUsd,
   type LabSettings,
   pnlTone,
@@ -36,7 +37,10 @@ import {
 
 type Experiment = LabSettings["experiments"][number];
 
-const MARKET_LABEL = { spot: "Spot", futures: "Futures" } as const;
+const MARKET_LABEL = {
+  spot: ASSET_GROUPS.spot.label,
+  futures: ASSET_GROUPS.futures.label,
+} as const;
 
 const SORT_KEYS = [
   "id",
@@ -60,7 +64,7 @@ const SORT_VALUE: Record<SortKey, (e: Experiment) => SortValue> = {
 };
 
 const HELP: Record<SortKey, string> = {
-  id: "Код эксперимента: S — Spot (только покупки), F — Futures (лонг и шорт).",
+  id: "Код эксперимента: S — Spot (только покупки), F — USDⓈ-M (лонг и шорт).",
   name: "Название и гипотеза эксперимента.",
   enabled:
     "Включённый эксперимент открывает новые paper-сделки. Выключенный новых не открывает, а открытые доводит до выхода.",

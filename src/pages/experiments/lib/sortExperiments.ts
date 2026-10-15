@@ -1,9 +1,12 @@
-import type { ExperimentSummary } from "@/entities/experiment";
+import { ASSET_GROUPS, type ExperimentSummary } from "@/entities/experiment";
 import type {
   MarketFilter,
   SortDir,
   SortKey,
 } from "../model/useExperimentsView";
+
+/** Порядок групп активов для сортировки по AG: как в карте ASSET_GROUPS (Spot, USDⓈ-M). */
+const AG_ORDER = Object.keys(ASSET_GROUPS);
 
 /** Значение колонки для сортировки; null (нет данных) — всегда в конце. */
 function sortValue(e: ExperimentSummary, key: SortKey): number | null {
@@ -11,6 +14,8 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
   switch (key) {
     case "id":
       return null;
+    case "ag":
+      return AG_ORDER.indexOf(e.market);
     case "trades":
       return s.trades;
     case "winRate":

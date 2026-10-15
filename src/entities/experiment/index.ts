@@ -104,6 +104,14 @@ export {
   type StatsTrade,
   type TradeStats,
 } from "./lib/stats";
+// Группы активов (AG) — коды и названия для таблиц, фильтров и хедера (spec 0016).
+export {
+  ASSET_GROUP_DESCRIPTION,
+  ASSET_GROUPS,
+  type AssetGroup,
+  assetGroupOf,
+  type Market,
+} from "./model/assetGroup";
 export {
   type ExperimentBudgets,
   experimentBudgetsSchema,

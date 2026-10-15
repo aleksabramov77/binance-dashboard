@@ -64,6 +64,20 @@ describe("sortExperiments", () => {
       ).toBe("S01");
   });
 
+  it("ag: spot раньше futures по возрастанию, при равенстве — по id", () => {
+    const groups = [
+      summary("F02", "futures", []),
+      summary("S03", "spot", []),
+      summary("F01", "futures", []),
+    ];
+    expect(
+      sortExperiments(groups, "all", "ag", "asc").map((e) => e.id),
+    ).toEqual(["S03", "F01", "F02"]);
+    expect(
+      sortExperiments(groups, "all", "ag", "desc").map((e) => e.id),
+    ).toEqual(["F01", "F02", "S03"]);
+  });
+
   it("profit factor без убытков считается бесконечным", () => {
     expect(sortExperiments(list, "all", "profitFactor", "desc")[0].id).toBe(
       "F01",

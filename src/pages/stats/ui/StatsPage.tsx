@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useQueryState } from "nuqs";
 import { Suspense, useMemo } from "react";
 import {
+  ASSET_GROUPS,
   blacklistCandidates,
   formatProfitFactor,
   formatR,
@@ -64,7 +65,10 @@ const PERIOD_LABELS: Record<StatsPeriod, string> = {
   "24h": "24 ч",
   "7d": "7 дн",
 };
-const MARKET_LABELS = { spot: "Spot", futures: "Futures" } as const;
+const MARKET_LABELS = {
+  spot: ASSET_GROUPS.spot.label,
+  futures: ASSET_GROUPS.futures.label,
+} as const;
 const DIRECTION_LABELS = { long: "Long (B)", short: "Short (S)" } as const;
 /** Значение «все» в Select (у Radix пустое значение запрещено). */
 const ALL = "all";
