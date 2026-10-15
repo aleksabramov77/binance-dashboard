@@ -24,7 +24,9 @@ export const holding = (
   priceUsd: 1,
   apr: 0,
   productId: null,
+  positionId: null,
   durationDays: null,
   until: null,
+  yesterdayUsd: null,
   ...patch,
 });

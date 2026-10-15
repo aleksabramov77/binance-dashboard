@@ -31,6 +31,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFrame,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -264,9 +265,8 @@ function ExperimentRow({
           href={`/experiments/${encodeURIComponent(e.id)}`}
           className="group flex flex-col gap-0.5"
         >
-          {/* Код, название и бейджи — в одну строку; переносятся, только если так таблица помещается без прокрутки
-              (режим wrap, spec 0018, решения 5 и 7). */}
-          <span className="flex items-center gap-2 whitespace-nowrap group-data-[fit=wrap]/table:whitespace-normal">
+          {/* Код, название и бейджи — всегда в одну строку (spec 0022, решение 4). */}
+          <span className="flex items-center gap-2 whitespace-nowrap">
             <span className="font-mono text-xs text-muted-foreground">
               {e.id}
             </span>
@@ -381,7 +381,7 @@ function ExperimentsDashboard() {
       )}
 
       {data && (
-        <div className="overflow-clip rounded-xl border bg-card">
+        <TableFrame>
           <Table>
             <TableHeader>
               <TableRow>
@@ -400,7 +400,7 @@ function ExperimentsDashboard() {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </TableFrame>
       )}
 
       {data && (

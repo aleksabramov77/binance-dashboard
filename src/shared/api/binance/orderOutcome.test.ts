@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NetworkError } from "@/shared/lib/fetchRetry";
+import { CooldownError, NetworkError } from "@/shared/lib/fetchRetry";
 import {
   nextRecheckDelay,
   ORDER_RECV_WINDOW_MS,
@@ -57,6 +57,12 @@ describe("orderErrorOutcome", () => {
       orderErrorOutcome(new ResponseFormatError("не распознан", 200, {})),
     ).toBe("unknown");
     expect(orderErrorOutcome("что-то странное")).toBe("unknown");
+  });
+
+  it("пауза после 429/418 — ордер не отправлялся, значит отказ", () => {
+    expect(
+      orderErrorOutcome(new CooldownError("пауза до 12:00:00 UTC", 429)),
+    ).toBe("rejected");
   });
 });
 

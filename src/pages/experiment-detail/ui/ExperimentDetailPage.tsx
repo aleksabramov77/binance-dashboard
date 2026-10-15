@@ -37,6 +37,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFrame,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -225,7 +226,7 @@ function TradesTable({
       </p>
     );
   return (
-    <div className="overflow-clip rounded-xl border bg-card">
+    <TableFrame>
       <Table>
         <TableHeader>
           <TableRow>
@@ -327,7 +328,7 @@ function TradesTable({
           ))}
         </TableBody>
       </Table>
-    </div>
+    </TableFrame>
   );
 }
 
