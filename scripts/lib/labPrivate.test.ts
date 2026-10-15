@@ -94,6 +94,11 @@ describe("parsePrivateExperiments", () => {
     ]);
   });
 
+  it("старое имя группы futures в файле читается как usdm (файлы до spec 0023)", () => {
+    const r = parse([item({ id: "PF99", market: "futures" })]);
+    expect(r.ok && r.experiments[0].market).toBe("usdm");
+  });
+
   it("PC.. — группа COIN-M (spec 0023)", () => {
     const r = parse([item({ id: "PC99", market: "coinm" })]);
     expect(r.ok && r.experiments[0]).toMatchObject({

@@ -3,7 +3,9 @@ import {
   legacyMarketSchema,
   MARKET_KIND,
   type MarketKind,
+  normalizeMarket,
 } from "@binance-dashboard/trading-core";
+import { z } from "zod";
 
 // Группы активов — AG (Asset Group), решение пользователя 2026-10-15 (spec 0016): кошельки Binance
 // со своими инструментами. Ключ в БД и URL — market (spot / usdm / coinm), код для людей — code (spec 0023).
@@ -71,3 +73,9 @@ export const DEMO_MIRROR_MARKETS = [
   "usdm",
 ] as const satisfies readonly Market[];
 export type DemoMirrorMarket = (typeof DEMO_MIRROR_MARKETS)[number];
+
+/** market строки зеркала из БД; старое futures — usdm. */
+export const demoMirrorMarketSchema = z.preprocess(
+  normalizeMarket,
+  z.enum(DEMO_MIRROR_MARKETS),
+);

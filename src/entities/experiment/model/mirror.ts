@@ -1,4 +1,4 @@
-import { normalizeMarket } from "@binance-dashboard/trading-core";
+import { withLegacyMarketField } from "@binance-dashboard/trading-core";
 import { z } from "zod";
 
 // Demo-зеркало (spec 008): статусы зеркальной сделки на Binance Demo.
@@ -68,16 +68,8 @@ const spotOrderRefSchema = z.object({
   clientOrderId: z.string(),
 });
 /** Старый market "futures" (строки до spec 0023, если миграция их не застала) читается как usdm. */
-const legacyRefs = (value: unknown): unknown =>
-  value !== null &&
-  typeof value === "object" &&
-  "market" in value &&
-  value.market !== normalizeMarket(value.market)
-    ? { ...value, market: normalizeMarket(value.market) }
-    : value;
-
 export const mirrorProtectRefsSchema = z.preprocess(
-  legacyRefs,
+  withLegacyMarketField,
   z.discriminatedUnion("market", [
     z.object({
       market: z.literal("usdm"),

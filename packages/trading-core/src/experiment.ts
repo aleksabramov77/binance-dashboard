@@ -28,6 +28,18 @@ export const normalizeMarket = (value: unknown): unknown =>
 /** marketSchema, принимающая и старое имя группы: для журнала, URL и запросов от старых клиентов. */
 export const legacyMarketSchema = z.preprocess(normalizeMarket, marketSchema);
 
+/**
+ * Объект с полем market: старое имя группы → новое (preprocess для discriminatedUnion по market —
+ * ссылки на ордера зеркала и сделок). Единственная реализация чтения старого имени (spec 0023).
+ */
+export const withLegacyMarketField = (value: unknown): unknown =>
+  value !== null &&
+  typeof value === "object" &&
+  "market" in value &&
+  value.market !== normalizeMarket(value.market)
+    ? { ...value, market: normalizeMarket(value.market) }
+    : value;
+
 export const directionSchema = z.enum(["long", "short"]);
 export type TradeDirection = z.infer<typeof directionSchema>;
 

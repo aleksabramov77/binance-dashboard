@@ -8,6 +8,9 @@ export const SIZING = {
   minNotionalUsd: 5,
 } as const;
 
+/** Запас на погрешность плавающей точки при округлении до целых контрактов. */
+const EPS = 1e-9;
+
 export interface SizeInput {
   entry: number;
   /** null — без стопа (buy & hold): объём по лимиту. */
@@ -66,9 +69,12 @@ export function sizePosition(
   const contract = input.contractSizeUsd;
   if (contract !== undefined) {
     if (!(contract > 0)) return null;
+    // Контракты — от объёма в $, а не от quantity × entry: деление и обратное умножение на цену
+    // теряют точность ($50 / 5434 × 5434 = 49,999…) и давали 4 контракта вместо 5.
+    const wantedUsd = Math.min(cap, byRisk * entry);
     const contracts = Math.min(
-      Math.max(1, Math.floor((quantity * entry) / contract)),
-      Math.floor(free / contract),
+      Math.max(1, Math.floor(wantedUsd / contract + EPS)),
+      Math.floor(free / contract + EPS),
     );
     if (contracts < 1) return null;
     quantity = (contracts * contract) / entry;

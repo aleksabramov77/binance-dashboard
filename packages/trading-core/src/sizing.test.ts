@@ -83,6 +83,14 @@ describe("sizePosition", () => {
       expect(s?.margin).toBeCloseTo(100);
     });
 
+    it("цена не теряет контракт на округлении: $50 / $10 = 5 при входе 5434 и 95303", () => {
+      for (const entry of [5434, 95_303]) {
+        const s = coinm({ contractSizeUsd: 10, entry });
+        expect(s?.notional).toBeCloseTo(50);
+        expect(Math.round(((s?.quantity ?? 0) * entry) / 10)).toBe(5);
+      }
+    });
+
     it("дробный остаток отбрасывается: $50 / $15 → 3 контракта", () => {
       expect(coinm({ contractSizeUsd: 15 })?.notional).toBeCloseTo(45);
     });

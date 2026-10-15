@@ -5,8 +5,10 @@ import {
   type Experiment,
   type ExperimentMarket,
   experimentSchema,
+  legacyMarketSchema,
 } from "@binance-dashboard/trading-core";
 import { z } from "zod";
+import { ASSET_GROUPS } from "@/entities/experiment";
 
 /** Как у каталога (features/paper-engine): стартовый бюджет, включён, без demo-зеркала. */
 export const PRIVATE_DEFAULTS = {
@@ -26,17 +28,14 @@ const PREFIX_MARKET: Record<string, ExperimentMarket> = {
   C: "coinm",
 };
 
-/** Демо-зеркало COIN-M — позже (spec 0023): включить его файлом нельзя, как и тумблером. */
-const MIRROR_BLOCKED: Partial<Record<ExperimentMarket, string>> = {
-  coinm: "Демо-зеркало COIN-M — позже",
-};
-
 /**
  * Эксперимент в private/experiments.json: формат каталога, необязательные поля — с дефолтами каталога.
  * Лишние поля верхнего уровня — ошибка: опечатка в имени поля не должна молча теряться.
  */
 export const privateExperimentSchema = z.strictObject({
   ...experimentSchema.shape,
+  // Файл, написанный до spec 0023, называет USDⓈ-M старым именем futures — читаем его как usdm.
+  market: legacyMarketSchema,
   name: z.string().trim().min(1),
   hypothesis: z.string().trim().min(1),
   initialBudget: experimentSchema.shape.initialBudget.default(
@@ -110,7 +109,8 @@ export function parsePrivateExperiments(
       );
       return;
     }
-    const blocked = MIRROR_BLOCKED[e.market];
+    // Демо-зеркало COIN-M — позже (spec 0023): включить его файлом нельзя, как и тумблером.
+    const blocked = ASSET_GROUPS[e.market].demoMirrorBlocked;
     if (e.demoMirror && blocked) {
       errors.push(`${who}: поле demoMirror — ${blocked}`);
       return;

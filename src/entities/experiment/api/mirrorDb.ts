@@ -4,6 +4,7 @@ import { computeDemoStats } from "../lib/stats";
 import {
   DEMO_MIRROR_MARKETS,
   type DemoMirrorMarket,
+  demoMirrorMarketSchema,
 } from "../model/assetGroup";
 import {
   demoMirrorOrdersTable,
@@ -62,7 +63,7 @@ const toClose = (
   exitReason: string | null,
 ): MirrorToClose => ({
   tradeId: r.tradeId,
-  market: r.market as MirrorToClose["market"],
+  market: demoMirrorMarketSchema.parse(r.market),
   symbol: r.symbol,
   direction: r.direction as MirrorToClose["direction"],
   quantity: r.quantity ?? 0,
@@ -137,7 +138,7 @@ export async function listMirrorCandidates(
     .orderBy(paperTradesTable.openedAt);
   return rows.map((r) => ({
     ...r,
-    market: r.market as MirrorCandidate["market"],
+    market: demoMirrorMarketSchema.parse(r.market),
     direction: r.direction as MirrorCandidate["direction"],
     openedAt: r.openedAt.toISOString(),
   }));

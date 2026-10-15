@@ -1,7 +1,13 @@
+import {
+  normalizeMarket,
+  withLegacyMarketField,
+} from "@binance-dashboard/trading-core";
 import { z } from "zod";
 
 // Рынки Binance (spec 0023). Имена — как у групп активов в глоссарии: spot — Spot (api), usdm —
 // USDⓈ-M Futures (fapi), coinm — COIN-M Futures (dapi). Среда-независимый модуль: его грузит и Deno.
+// Чтение старого имени futures — одна реализация в trading-core (normalizeMarket): имена рынков
+// доменно-нейтральны, как индикаторы, которые shared/lib тоже берёт из ядра.
 
 export const BINANCE_MARKETS = ["spot", "usdm", "coinm"] as const;
 export type BinanceMarket = (typeof BINANCE_MARKETS)[number];
@@ -13,16 +19,10 @@ export type FuturesMarket = Exclude<BinanceMarket, "spot">;
 export const TRADE_MARKETS = ["spot", "usdm"] as const;
 export type Market = (typeof TRADE_MARKETS)[number];
 
-/** Имя USDⓈ-M до spec 0023: сетапы и сделки от старого клиента читаются как usdm. */
-const legacy = (value: unknown) => (value === "futures" ? "usdm" : value);
+/** Рынок сделки; старое имя USDⓈ-M (futures) — сетапы и сделки от старого клиента — читается как usdm. */
+export const tradeMarketSchema = z.preprocess(
+  normalizeMarket,
+  z.enum(TRADE_MARKETS),
+);
 
-export const tradeMarketSchema = z.preprocess(legacy, z.enum(TRADE_MARKETS));
-
-/** Объект с полем market: старое имя рынка → новое (для discriminatedUnion по market). */
-export const withLegacyMarketField = (value: unknown): unknown =>
-  value !== null &&
-  typeof value === "object" &&
-  "market" in value &&
-  value.market === "futures"
-    ? { ...value, market: "usdm" }
-    : value;
+export { withLegacyMarketField };
