@@ -82,6 +82,8 @@ export const COOLDOWN_LOG_STEP_MS = 5_000;
 
 const COOLDOWN_STATUSES = new Set([418, 429]);
 
+type Cooldown = { until: number; status: number };
+
 const cooldowns = new Map<string, Cooldown>();
 
 /** Сбросить все паузы (тесты). */
@@ -106,8 +108,6 @@ export function cooldownEnd(
   if (banned) until = Math.max(until, Number(banned[1]));
   return until;
 }
-
-type Cooldown = { until: number; status: number };
 
 /**
  * Совместить действующую паузу с новым ответом 429/418. Параллельные запросы получают их с разницей в миллисекунды,
