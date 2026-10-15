@@ -29,17 +29,14 @@ const BASE: Record<Market, string> = {
 };
 
 /**
- * Базовый актив фьючерса — криптовалюта: underlyingType COIN и не токен реального актива (подтип RWA:
- * золото PAXG, XAUT). Акции и сырьё Binance торгует отдельным contractType TRADIFI_PERPETUAL.
+ * Базовый актив фьючерса — криптовалюта: underlyingType COIN (не индекс INDEX и не пре-маркет PREMARKET).
+ * Подтип RWA не учитываем: его носят и монеты RWA-сектора (MANTRA, CFG); токены золота PAXG и XAUT — тоже
+ * COIN, их отсекает список не-крипто потребителя. Акции и сырьё — отдельный contractType TRADIFI_PERPETUAL.
  */
 export function isCryptoUnderlying(contract: {
   underlyingType?: string | null;
-  underlyingSubType?: readonly string[] | null;
 }): boolean {
-  return (
-    contract.underlyingType === "COIN" &&
-    !(contract.underlyingSubType ?? []).includes("RWA")
-  );
+  return contract.underlyingType === "COIN";
 }
 
 export function createMarketApi(getJson: GetJson) {
@@ -82,7 +79,7 @@ export function createMarketApi(getJson: GetJson) {
 
     /**
      * Символы бессрочных USDT-фьючерсов, по которым идёт торговля. cryptoOnly — только контракты на
-     * монеты: без индексов (BTCDOMUSDT) и токенов реальных активов (PAXGUSDT, XAUTUSDT) — isCryptoUnderlying.
+     * монеты: без индексов (BTCDOMUSDT) и пре-маркета — isCryptoUnderlying.
      */
     async fetchPerpetualSymbols(
       options: { cryptoOnly?: boolean } = {},

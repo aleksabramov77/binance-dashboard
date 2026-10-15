@@ -62,11 +62,11 @@ spec 007b). Поэтому модули слайса импортируют то
   базы из явного списка `NON_CRYPTO` (`config/engine.ts`: PAXG, XAUT, XAU, XAG, BTCDOM и токенизированные акции/ETF
   Binance с суффиксом B — `SNDKB`, `TSLAB`, `SPYB`…). Новые листинги дописываются в список вручную.
 - Futures: поставщик тикеров (`src/app/server/experimentEngine.ts`, Edge Function) берёт бессрочные контракты
-  `fetchPerpetualSymbols({ cryptoOnly: true })` — `underlyingType = COIN` и подтип не `RWA` (без BTCDOMUSDT, PAXGUSDT,
-  XAUTUSDT; подтип `RWA` у Binance носят и монеты RWA-сектора — MANTRAUSDT, CFGUSDT, — они тоже исключаются, как
-  решено в spec); акции и сырьё (`TRADIFI_PERPETUAL`) и так отсекает `contractType = PERPETUAL`. Вместе с индексами
-  (`INDEX`: BTCDOMUSDT, ALLUSDT) уходят и пре-маркет контракты (`underlyingType = PREMARKET`) — монеты до листинга на
-  spot, без истории и с тонкой ликвидностью. Список `NON_CRYPTO` действует и на futures.
+  `fetchPerpetualSymbols({ cryptoOnly: true })` — только `underlyingType = COIN`: без индексов (`INDEX`: BTCDOMUSDT,
+  ALLUSDT) и пре-маркета (`PREMARKET` — монеты до листинга на spot: особые правила контракта, нет истории, тонкая
+  ликвидность). Акции и сырьё (`TRADIFI_PERPETUAL`) и так отсекает `contractType = PERPETUAL`. Подтип `RWA` не
+  учитывается: его носят и настоящие монеты RWA-сектора (MANTRAUSDT, CFGUSDT) — они остаются в юниверсе, а токены
+  золота PAXGUSDT и XAUTUSDT (тоже `COIN` + `RWA`) отсекает `NON_CRYPTO`: `isEligibleSymbol` действует на оба рынка.
 - Уже открытые сделки по исключённым символам закрываются своими выходами: символы открытых сделок движок
   обрабатывает и вне юниверса.
 

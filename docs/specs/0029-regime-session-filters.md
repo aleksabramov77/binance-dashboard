@@ -44,9 +44,11 @@
 - [x] AC5. `describeConfig` — строки «Режим рынка» и «Часы/дни» на русском; глоссарий/справка — если там описаны поля
   конфига.
 - [x] AC6. Юниверс: `isEligibleSymbol` / `pickUniverse` (`src/features/paper-engine/lib/universe.ts`) исключают
-  не-крипто: futures — по `exchangeInfo` (`underlyingType !== "COIN"` или подтип `RWA`); spot — по списку
-  `NON_CRYPTO` в `config/engine.ts` (как `STABLECOINS`), в него — известные токенизированные акции и металлы.
-  Тест: тикеры с такими символами не попадают ни в `top`, ни в `movers`.
+  не-крипто: futures — по `exchangeInfo` (`underlyingType !== "COIN"`: индексы и пре-маркет; подтип `RWA` не
+  исключает — его носят и монеты RWA-сектора MANTRA, CFG); оба рынка — по списку `NON_CRYPTO` в `config/engine.ts`
+  (как `STABLECOINS`), в него — известные токенизированные акции и металлы (PAXG, XAUT на futures — тоже им).
+  Тест: тикеры с такими символами не попадают ни в `top`, ни в `movers`; PAXGUSDT/XAUTUSDT (`COIN` + `RWA`) не попадают
+  в futures-юниверс, MANTRAUSDT (`COIN` + `RWA`) — попадает.
 - [x] AC7. README движка и `trading-core` — абзац о фильтрах и исключении не-крипто.
 
 ## Вне scope
@@ -58,7 +60,10 @@
 - Сейчас схема — zod `object` без `strict`: неизвестное поле молча отбрасывается, и эксперимент с ещё не
   поддерживаемым полем запустился бы без него (найдено при подготовке эпохи 2).
 - Futures `exchangeInfo`: `underlyingType` ∈ {COIN, …}; акции/металлы/индексы — не `COIN` (TSLAUSDT, XAUUSDT,
-  BTCDOMUSDT…), PAXG/XAUT — `COIN` с подтипом `RWA`. Spot `exchangeInfo` такого признака не имеет.
+  BTCDOMUSDT…), PAXG/XAUT — `COIN` с подтипом `RWA`. Подтип `RWA` у Binance носят и настоящие крипто-монеты
+  RWA-сектора (MANTRA, CFG), поэтому по нему не фильтруем: PAXG/XAUT исключает `NON_CRYPTO`. Пре-маркет
+  (`underlyingType = PREMARKET`) исключён: особые правила контракта и тонкая ликвидность. Spot `exchangeInfo` такого
+  признака не имеет.
 - Возможный конфликт с PR #61 (0023: `futures` → `usdm`, COIN-M) — минимальные правки в общих файлах.
 
 ## Журнал
@@ -66,3 +71,4 @@
 |---|---|
 | 2026-10-15 | ТЗ утверждено сессией лаборатории по решению пользователя (очередь до эпохи 2 ведётся без промежуточных гейтов) |
 | 2026-10-15 | Реализовано в ветке `feature/0029-regime-session-filters`: строгая схема конфига и фильтры `marketFilter`/`sessionFilter` в `trading-core` (`filters.ts`), фильтры во входе движка (свечи режима — общий кэш тика), `describeConfig` и глоссарий, юниверс без не-крипто (spot — `NON_CRYPTO`, futures — `underlyingType`/`RWA`), `lab:private` называет путь лишнего поля; на прод-БД все строки `experiments` проходят строгую схему, `lab:private --dry-run` — «без изменений». Статус → testing |
+| 2026-10-15 | Решение оркестратора: подтип `RWA` больше не исключает futures-контракт (MANTRA, CFG — крипта), PAXG/XAUT на futures отсекает `NON_CRYPTO`; пре-маркет остаётся исключённым. AC6 и техзаметка обновлены, тесты на PAXG/XAUT/MANTRA |

@@ -58,6 +58,7 @@ describe("fetchPerpetualSymbols", () => {
       contract("ETHUSDT", "COIN", ["Layer-1", "Crypto"]),
       contract("BTCDOMUSDT", "INDEX", ["Index", "Crypto"]),
       contract("PAXGUSDT", "COIN", ["RWA", "Crypto"]),
+      contract("MANTRAUSDT", "COIN", ["RWA", "Crypto"]),
       contract("NEWUSDT", "PREMARKET", []),
       contract("TSLAUSDT", "EQUITY", ["TradFi"], "TRADIFI_PERPETUAL"),
     ],
@@ -69,13 +70,14 @@ describe("fetchPerpetualSymbols", () => {
       "ETHUSDT",
       "BTCDOMUSDT",
       "PAXGUSDT",
+      "MANTRAUSDT",
       "NEWUSDT",
     ]);
   });
 
-  it("cryptoOnly — без индексов, металлов (RWA), пре-маркета и акций", async () => {
+  it("cryptoOnly — без индексов, пре-маркета и акций; подтип RWA не исключает (PAXG — забота NON_CRYPTO)", async () => {
     expect([
       ...(await market.fetchPerpetualSymbols({ cryptoOnly: true })),
-    ]).toEqual(["BTCUSDT", "ETHUSDT"]);
+    ]).toEqual(["BTCUSDT", "ETHUSDT", "PAXGUSDT", "MANTRAUSDT"]);
   });
 });

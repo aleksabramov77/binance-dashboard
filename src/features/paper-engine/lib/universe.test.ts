@@ -94,4 +94,22 @@ describe("юниверс", () => {
       pickUniverse({ type: "symbols", symbols: ["PAXG", "BTC"] }, market),
     ).toEqual(["BTCUSDT"]);
   });
+
+  it("futures: PAXG и XAUT (COIN с подтипом RWA проходят справочник) отсекает NON_CRYPTO, монета RWA-сектора остаётся", () => {
+    // Тикеры futures после fetchPerpetualSymbols({ cryptoOnly: true }): подтип RWA там не фильтруется.
+    const futures = [
+      t("BTCUSDT", 5e9, 1),
+      t("PAXGUSDT", 4e9, 3),
+      t("XAUTUSDT", 3e9, -3),
+      t("MANTRAUSDT", 2e9, 2),
+    ];
+    expect(pickUniverse({ type: "top", n: 4 }, futures)).toEqual([
+      "BTCUSDT",
+      "MANTRAUSDT",
+    ]);
+    expect(pickUniverse({ type: "movers", n: 1 }, futures)).toEqual([
+      "MANTRAUSDT",
+      "BTCUSDT",
+    ]);
+  });
 });
