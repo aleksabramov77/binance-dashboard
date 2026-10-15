@@ -257,7 +257,8 @@ async function readOwnLegs(
 
 /**
  * Сколько закрыла своя сработавшая algo-нога: actualQty, иначе executedQty рыночного ордера
- * actualOrderId. null — узнать не удалось (тогда закрытие не докрывает остаток).
+ * actualOrderId. null — данных нет (тогда закрытие не докрывает остаток). Сбой сети не глотаем:
+ * закрытие уйдёт в close_failed, и следующий прогон перечитает объём (ревью #66).
  */
 async function triggeredQty(
   creds: BinanceCredentials,
@@ -266,14 +267,10 @@ async function triggeredQty(
 ): Promise<number | null> {
   if (q.actualQty > 0) return q.actualQty;
   if (q.actualOrderId === null) return null;
-  try {
-    const order = await fetchDemoFuturesOrder(creds, symbol, {
-      orderId: q.actualOrderId,
-    });
-    return order && order.executedQty > 0 ? order.executedQty : null;
-  } catch {
-    return null;
-  }
+  const order = await fetchDemoFuturesOrder(creds, symbol, {
+    orderId: q.actualOrderId,
+  });
+  return order && order.executedQty > 0 ? order.executedQty : null;
 }
 
 /** Снять свой ордер. Спот: снятие ордера из списка (OCO/OTOCO) снимает весь список. */
@@ -358,11 +355,18 @@ async function closeOwn(
     // Объём своей сработавшей ноги неизвестен — остаток не докрываем (на стороне могут быть соседи).
     // Статус closed: нога reduceOnly закрывает свой объём, а повтор close_failed каждую минуту риск
     // не снимет; хвост, если он есть, виден в «Демо-сделках».
-    if (verdict === "closedByExchange" && plan.soldUnknown)
+    if (verdict === "closedByExchange" && plan.soldUnknown) {
+      // Отдельное событие: свой хвост мог остаться без защиты — видно в журнале и мониторе.
+      log.warn(
+        "trade.close_unverified",
+        `${req.symbol}: своя нога сработала, её объём неизвестен — остаток не докрывали`,
+        { ...req, steps },
+      );
       return finish(
         "closed",
         "Позиция закрыта биржей (сработал стоп/тейк); исполненный объём своей ноги неизвестен — остаток не докрывали, чтобы не закрыть объём других зеркал.",
       );
+    }
     return finish(
       "closed",
       verdict === "closedByExchange"

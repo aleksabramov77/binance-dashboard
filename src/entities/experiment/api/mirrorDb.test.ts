@@ -370,6 +370,32 @@ describe("protect_refs", () => {
     expect((await activeMirrors(db))[0]?.hasRefs).toBe(true);
   });
 
+  it("спот со своими ссылками — не legacy (метка legs только у фьючерсов)", async () => {
+    await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    await db.execute(
+      sql.raw("update demo_mirror_orders set market = 'spot' where trade_id = 'a'"),
+    );
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      quantity: 40,
+      protectRefs: {
+        market: "spot",
+        orderListId: 7,
+        netQuantity: 39.96,
+        stop: { orderId: 71, clientOrderId: "bd1-S" },
+        takeProfit: { orderId: 72, clientOrderId: "bd1-T" },
+      },
+    });
+    expect(await activeMirrors(db)).toMatchObject([
+      { market: "spot", hasRefs: true },
+    ]);
+  });
+
   it("своя нога сработала: строка закрыта биржей сразу, с ценой выхода; paper-сделка ещё открыта", async () => {
     await setup();
     await setExperimentDemoMirror(db, "F01", true);

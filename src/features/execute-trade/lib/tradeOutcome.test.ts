@@ -65,7 +65,7 @@ describe("фьючерсы", () => {
       ),
     ).toEqual({ protect: { amount: 40, entryPrice: null } });
   });
-  it("соседи на стороне, свой ордер точно не найден — вход не прошёл, их объём не трогаем", () => {
+  it("соседи на стороне, свой ордер не найден и сторона не выросла — вход не прошёл, их объём не трогаем", () => {
     expect(
       afterFuturesPositionCheck(
         { amount: 30, entryPrice: 0.22 },
@@ -75,16 +75,46 @@ describe("фьючерсы", () => {
       ),
     ).toMatchObject({ status: "rejected", withEntry: false });
   });
+  it("соседи на стороне, свой ордер не найден, но сторона выросла на заявку — вход исполнился, не rejected (ревью #66)", () => {
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 70, entryPrice: 0.22 },
+        30,
+        "missing",
+        40,
+      ),
+    ).toEqual({ protect: { amount: 40, entryPrice: null } });
+  });
+  it("соседи на стороне, свой ордер не найден, прирост неясен — unprotected, не rejected", () => {
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 55, entryPrice: 0.22 },
+        30,
+        "missing",
+        40,
+      ),
+    ).toMatchObject({ status: "unprotected", withEntry: false });
+  });
   it("соседи на стороне, ордер не прочитан, прирост неясен — unprotected без защиты и отката", () => {
-    for (const amount of [30, 55])
-      expect(
-        afterFuturesPositionCheck(
-          { amount, entryPrice: 0.22 },
-          30,
-          "unknown",
-          40,
-        ),
-      ).toMatchObject({ status: "unprotected", withEntry: false });
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 55, entryPrice: 0.22 },
+        30,
+        "unknown",
+        40,
+      ),
+    ).toMatchObject({ status: "unprotected", withEntry: false });
+  });
+  it("соседи на стороне, ордер не прочитан, сторона не выросла — вход не прошёл", () => {
+    // Позиция перечитана после окна исполнения ордера: прироста нет — как при пустой стороне.
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 30, entryPrice: 0.22 },
+        30,
+        "unknown",
+        40,
+      ),
+    ).toMatchObject({ status: "rejected", withEntry: false });
   });
   it("стоп не встал — откат; встал — тейк или готово (stopOnly)", () => {
     expect(afterFuturesStop(false, false)).toBe("rollback");
