@@ -157,7 +157,22 @@ Dual 20 %, DeFi 10 %, Smart Arbitrage 5 % (описательно, без про
 - Достаточно ли монет Dual: BTC, ETH, BNB, SOL × USDT, USDC?
 - «Мои позиции» в сложных продуктах — отдельной задачей (предлагаю да).
 
+### Итог пробы полей (шаг 0, 2026-10-15)
+- Dual `dci/product/list`: `settleDate`/`purchaseEndTime` — мс; `duration` — дни; `apr` — **доля** (`2.5608` = 256 %,
+  у 1-дневных у страйка); `pageSize` ≤ 100, у BTC CALL ~670 предложений (7 страниц), список — от ближнего страйка.
+  CALL: `investCoin` = монета, страйк выше цены → Sell High; PUT: `investCoin` = стейбл, страйк ниже → Buy Low
+  (зафиксировано тестом `entities/earn-product/model/normalize.test.ts`).
+- On-chain `locked/list`: `rows[] {projectId, detail {asset, rewardAsset, duration, isSoldOut, apr, status}, quota
+  {totalPersonalQuota, minimum}}`, APR — доля; сейчас 9 продуктов (BTC, USDT, BNB).
+- ETH/SOL `quota`: ставки нет — APR берём из `…/history/rateHistory?size=1` (`annualPercentageRate`, доля);
+  `redeemPeriod` — дни (ETH 27, SOL 4). То же для RWUSD/BFUSD (`rateHistory`), `quota` — `subscriptionQuota`,
+  `standardRedemptionQuota {redeemPeriod, fee}`; у BFUSD нет `subscribeEnable`.
+- Soft Staking `list`: `rows[] {asset, apr, minAmount, maxCap}` — ~30 альткоинов.
+- Все ручки ответили на read-only ключ; ошибок аккаунта RWUSD/BFUSD не было. Полный каталог — ~4,7 тыс. предложений
+  Dual (~1,3 МБ JSON), холодная загрузка ~4–5 с.
+
 ## Журнал
 | Дата | Событие |
 |---|---|
 | 2026-10-15 | План утверждён пользователем (plan mode), ТЗ записано; ветка `feature/0019-earn-advanced-products` |
+| 2026-10-15 | Developer, ветка `feature/0019-earn-advanced-products`: проба полей, клиент Binance, сущность `earn-product`, загрузчик `load-earn-catalog` и роуты, вкладки `/earn`, Dual (фильтры, таблица, исходы), «Стейкинг и DeFi», гид и калькулятор `allocation-advice` |
