@@ -141,7 +141,7 @@ export function planMirror(
       decisions.push({
         tradeId: t.tradeId,
         kind: "skip",
-        reason: `По ${t.symbol} (${t.market}) открыто зеркало без учёта своих ордеров (до PR 2b) — второе зеркало после его закрытия.`,
+        reason: `По ${t.symbol} (${t.market}) открыто старое зеркало, чьи стоп и тейк закрывают всю позицию, — второе зеркало после его закрытия.`,
       });
       continue;
     }

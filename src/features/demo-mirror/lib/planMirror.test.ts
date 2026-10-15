@@ -222,7 +222,7 @@ describe("planMirror: открытые зеркала до PR 2b (без protect
         tradeId: "x",
         kind: "skip",
         reason:
-          "По ETHUSDT (futures) открыто зеркало без учёта своих ордеров (до PR 2b) — второе зеркало после его закрытия.",
+          "По ETHUSDT (futures) открыто старое зеркало, чьи стоп и тейк закрывают всю позицию, — второе зеркало после его закрытия.",
       },
       // Другой рынок той же монеты — не мешает.
       expect.objectContaining({ tradeId: "sp", kind: "open" }),
