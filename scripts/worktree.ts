@@ -1,6 +1,7 @@
 // Worktree на задачу (решение пользователя 2026-10-15). Каждая задача — своя ветка в своём worktree, плоско рядом
 // с репозиторием: ~/Projects/my/binance-dashboard_<метка>. Неотслеживаемые файлы из .claude/worktree-links.json
-// (.env.local) — ссылками на основной checkout; у каждого worktree свой локальный сервер, своя PGlite и свой порт.
+// (.env.local; папка private — клон приватного репозитория, spec 0015) — ссылками на основной checkout;
+// у каждого worktree свой локальный сервер, своя PGlite и свой порт.
 //
 //   pnpm wt next                                               номер новой задачи: журнал main + невлитые ветки задач
 //   pnpm wt new <ветка> [--name <метка>] [--from <commit-ish>]  создать (ветка от свежего origin/main) и подготовить
@@ -18,6 +19,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import {
   BRANCH_PATTERN,
+  DEFAULT_LINKS,
   latestPrByBranch,
   nextTaskNumber,
   normalizeLinks,
@@ -30,7 +32,6 @@ import {
   worktreeFolderName,
 } from "./lib/worktreePlan";
 
-const DEFAULT_LINKS = [".env.local"];
 const STALE_MS = 14 * 86_400_000;
 const SERVER_WAIT_MS = 120_000;
 

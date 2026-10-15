@@ -40,7 +40,7 @@ Zustand (клиентское состояние, если понадобитс�
 | Earn | `pages/earn`, `widgets/{best-offers,changes-feed,offers-table}`, `features/{collect-snapshot,refresh-snapshot,offer-filters}`, `entities/earn-offer` | `/api/earn/*`, `/api/cron/earn-snapshot` | таблица `earn_snapshots` (`entities/earn-offer/model/db.ts`) |
 | Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
-| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`), `/api/cron/tick`, `/api/cron/demo-mirror` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state`, `demo_mirror_orders` |
+| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`), `/api/cron/tick`, `/api/cron/demo-mirror` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state`, `demo_mirror_orders` |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
 | Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → Telegram), `src/app/server/{logs,logMonitor}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs`, `/api/cron/log-monitor`, `/api/auth/*`, страница `/login` | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
 
@@ -137,6 +137,38 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 
 ## Данные на диске
 `data/` в `.gitignore`: `snapshots/` (снимки Earn), `logs/`, `pglite/` (локальная БД).
+`private/` в `.gitignore` — клон приватного репозитория (см. «Приватные эксперименты»).
+
+## Приватные эксперименты (spec 0015)
+Репозиторий публичный. Принцип: **движок и строительные блоки стратегий — публичные (`trading-core`, движок,
+экраны), «рецепты» и результаты — приватные.**
+- Приватные данные — в отдельном приватном репозитории `aleksabramov77/binance-dashboard-private`, клон — в
+  игнорируемой папке `private/` основного checkout
+  (`git clone git@github-personal:aleksabramov77/binance-dashboard-private.git private`). Worktree получает на неё
+  ссылку (`pnpm wt new` / `pnpm wt link`, список `.claude/worktree-links.json`). Содержимое: `experiments.json`
+  (эксперименты), `lab/` (анализы `/flow lab`), `README.md`.
+- `private/experiments.json` — массив в формате каталога (`experimentSchema` из `trading-core`): `id`, `market`,
+  `name`, `hypothesis`, `config`; необязательные `initialBudget` (10 000), `enabled` (`true`), `demoMirror` (`false`).
+  id — `P` + буква рынка + номер: `PS01` (spot), `PF01` (futures); с id каталога (`S..`, `F..`) не пересекается.
+- `pnpm lab:private [--dry-run] [--prod] [--file <path>]` (`scripts/lab-private.ts`, чистая логика и тесты —
+  `scripts/lib/labPrivate.ts`): проверяет файл целиком (схема, лишние поля, префикс ↔ рынок, повторы, пересечение
+  с каталогом) до подключения к БД, печатает цель (хост Postgres без пароля или «локальная PGlite») и план
+  («новый» / «обновится» / «без изменений»), затем пишет новые и изменённые эксперименты через `seedExperiments`
+  в одной транзакции. БД — как у `pnpm db:migrate`: `DATABASE_URL` из `.env.local`, без неё — PGlite (её скрипт
+  мигрирует сам; прод мигрирует деплой). `enabled`, `demoMirror`, `initialBudget` пишутся только при вставке —
+  тумблеры `/settings`, бюджеты и сделки повторный запуск не трогает.
+- **Защита прода:** цель Postgres (задан `DATABASE_URL`) — это прод; запись туда только с явным `--prod`
+  (`pnpm lab:private --prod`). Без него скрипт печатает цель и план, объясняет, как писать, и выходит с ошибкой —
+  в БД ничего не пишется (`decideLabPrivateWrite`). `--dry-run` работает без `--prod`, для PGlite `--prod` не нужен.
+  В worktree `.env.local` — ссылка на основной checkout с прод-`DATABASE_URL`, а локальный сервер worktree работает
+  на `data/pglite`: чтобы эксперимент появился на нём — `pnpm wt stop` → `DATABASE_URL= pnpm lab:private` →
+  `pnpm wt serve`.
+- Дальше приватный эксперимент живёт только в таблице `experiments`: движок (VM и Edge Function), `/experiments`
+  и `/experiments/[id]` (id вне каталога рендерятся по запросу) работают с ним как с экспериментом каталога. Сид
+  каталога на тике делает upsert только своих id и приватные строки не трогает (тест в `engineTick.test.ts`).
+  Vercel, CI и Edge Function файлы `private/` не нужны. Удаление из БД — вне scope: выключение тумблером.
+- Параметры, гипотезы и результаты приватных экспериментов не пишутся в публичные файлы, spec, коммиты, описания
+  PR и issue (правило — `conventions.md` → «Приватные эксперименты»).
 
 ## База данных (spec 003, задача 2a)
 - Postgres через Drizzle ORM. `src/shared/db/client.server.ts` — доменно-нейтральное подключение:
