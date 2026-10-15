@@ -20,7 +20,8 @@
  │     есть замечания → DEVELOPER правит → TESTER снова все AC на локальном сервере → REVIEWER
  │     (до 3 кругов, дальше — к пользователю); замечаний нет → label `ai-approved`
  ├─6. статусы в PRD, spec и docs/HISTORY.md, зелёный CI → ⏸ пользователь: «мерж» → squash-merge
- └─7. выкатка (`/flow release`) → `pnpm wt remove <ветка>` (сервер остановлен, worktree удалён)
+ ├─7. выкатка (`/flow release`) → `pnpm wt remove <ветка>` (сервер остановлен, worktree удалён)
+ └─8. закрытие: хвосты проверены, другие сессии оповещены → 🎉 «сессию можно закрывать» (иначе ⛔ «пока не закрывать»)
 CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger · typecheck · Vitest · build.
 ```
 
