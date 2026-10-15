@@ -79,3 +79,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-15 | ТЗ утверждено |
+| 2026-10-15 | Разработка в ветке `feature/0021-db-space-bot`: слайс `features/db-space` (пороги, `planSpaceAlerts`, тексты), `src/app/server/{alertState,dbSpace,telegramBot}.ts`, `POST /api/telegram/webhook`, проверка места в `POST /api/cron/log-monitor`, `pnpm telegram:setup [--delete]`, env `TELEGRAM_WEBHOOK_SECRET` и `DB_SIZE_LIMIT_MB`, тесты; `pnpm check` и `pnpm build` зелёные |
