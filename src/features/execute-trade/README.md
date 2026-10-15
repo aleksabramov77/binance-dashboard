@@ -14,6 +14,13 @@
   Остаток дешевле `minNotional` или меньше `minQty` (`lib/validateTrade.ts → isDust`: хвост монет после комиссии,
   когда спот закрыл OCO на бирже) — пыль, биржа его не продаст (-1013 NOTIONAL): тоже `closed`, без ордера.
   Вызывает demo-зеркало (spec 008, `src/app/server/demoMirror.ts`).
+  С `protectRefs` (spec 0012, PR 2b — зеркала, открытые после PR 2b) — только свои ордера: статусы своего стопа/тейка
+  (`fetchDemoAlgoOrder` / `fetchDemoSpotOrderByClientId`) → `lib/closePlan.ts` (`planOwnClose`): стоящие снимаются
+  (`demoCancelAlgoOrder` / `demoSpotCancelByClientId`, снятие ноги списка снимает весь список); сработал свой
+  (algo: `actualOrderId` или TRIGGERED/FINISHED — демо 2026-10-15: тейк FINISHED, стоп EXPIRED; спот: FILLED) —
+  `closed` без ордера; иначе докрывается свой объём: фьючерсы — reduceOnly на min(свой, позиция в свою сторону),
+  спот — min(купленное − проданное своими ордерами, баланс). Ордера других зеркал и ручные по символу не трогаются.
+  Без `protectRefs` (старые строки, демо-сброс по ним) — по-старому.
 - `getTradeHistory()` — история демо-сделок с биржи (`GET /api/trade/history`), локально не хранится.
 
 ## История и статусы сделок (`model/getTradeHistory.ts`)
@@ -76,9 +83,15 @@
    только `STOP_MARKET`. Algo-ордер с `-4509` и закрытие `reduceOnly` с `-2022` (позиция ещё не видна сразу
    после входа) повторяются через 1 и 2 с. `fitMinNotional` смотрит на объём уже после округления вниз к шагу
    (BTCUSDT $50 → 0,0006 BTC ≈ $48,99 → поднимается до 0,0007).
-6. Выбор исхода по результатам шагов — чистые функции `lib/tradeOutcome.ts` (`afterEntryError`, `afterPending`,
+6. `TradeResult.protectRefs` (`shared/api/binance/protectRefs.ts`) — свои защитные ордера: фьючерсы — `entryOrderId`,
+   algoId/clientAlgoId стопа и тейка (`bd<id>-S/-T`); спот — orderListId и orderId/clientOrderId стопа и тейка
+   (OTO/OTOCO — `-S/-T`, отдельная защита после покупки — `-S2/-T2`). У `rejected` — null. Зеркало хранит их в
+   `demo_mirror_orders.protect_refs`. Фьючерсный вход — со своим `newClientOrderId` (`-M`): при неизвестном исходе
+   сначала сверка по нему (`fetchDemoFuturesOrder`), потом по позиции. Цена входа/выхода фьючерсов без `avgPrice`
+   в ответе — из ордера или его исполнений (`model/futuresFillPrice.ts`), а не текущая.
+7. Выбор исхода по результатам шагов — чистые функции `lib/tradeOutcome.ts` (`afterEntryError`, `afterPending`,
    `afterProtect`, `afterFuturesRollback`…); в `model` — только запросы и шаги отчёта.
-7. Статус: `protected` (вход + стоп; тейк, если он есть в заявке и встал), `unprotected` (вход есть, защиты нет и откат не удался — пользователь
+8. Статус: `protected` (вход + стоп; тейк, если он есть в заявке и встал), `unprotected` (вход есть, защиты нет и откат не удался — пользователь
    должен закрыть вручную), `rejected` (позиции точно нет, в т.ч. после отката).
 
 ## Инварианты (не ломать)
@@ -97,6 +110,6 @@
 ## Тесты
 `lib/validateTrade.test.ts` — валидация, округление, минимум после округления, фильтр цены, деньги спота с +0,5%,
 минимум стопа после комиссии; `lib/spotEntry.test.ts` — выбор OTOCO/OTO, цена и объём заявки, статусы отложенных
-ордеров, clientOrderId и перечитанная заявка; `lib/tradeOutcome.test.ts` — исходы по шагам (откат фьючерсов,
+ордеров, clientOrderId и перечитанная заявка; `lib/closePlan.test.ts` — закрытие по своим ордерам; `lib/tradeOutcome.test.ts` — исходы по шагам (откат фьючерсов,
 защита/продажа спота, неизвестный исход входа); `lib/groupFills.test.ts`, `lib/markTrades.test.ts` —
 сборка ордеров и статусы сделок. Сценарии с сетью проверяются вручную на демо-счёте.
