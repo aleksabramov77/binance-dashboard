@@ -29,6 +29,11 @@ export const demoProtectRefsSchema = z.discriminatedUnion("market", [
     market: z.literal("spot"),
     /** Список OTO/OTOCO или OCO, в котором стоят стоп и тейк. */
     orderListId: z.number().nullable(),
+    /**
+     * Сколько монет пришло на баланс: куплено минус комиссия в покупаемой монете. Закрытие продаёт
+     * не больше — иначе заберёт чужие монеты. Нет — по ставке комиссии от купленного.
+     */
+    netQuantity: z.number().nullable().optional(),
     stop: spotOrderRefSchema.nullable(),
     takeProfit: spotOrderRefSchema.nullable(),
   }),

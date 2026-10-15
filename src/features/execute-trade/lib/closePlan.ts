@@ -1,3 +1,5 @@
+import { SPOT_TAKER_FEE } from "../config/spot";
+
 // Закрытие зеркала по своим защитным ордерам (spec 0012, PR 2b): чистый выбор действий,
 // сеть — model/closeDemoPosition.ts. Без ссылок (старые строки, ручные сделки) — по-старому.
 
@@ -90,3 +92,23 @@ export function ownCloseQuantity(
 /** Фьючерсы: сколько позиции в сторону сделки (позиция в другую сторону — не наша). */
 export const positionOnSide = (amount: number, direction: "long" | "short") =>
   direction === "long" ? Math.max(amount, 0) : Math.max(-amount, 0);
+
+/**
+ * Спот: сколько своих монет на балансе — купленное минус комиссия в покупаемой монете. Есть из
+ * fills входа (protectRefs.netQuantity) — оно; нет — по ставке комиссии. Продавать больше нельзя:
+ * разница — чужие монеты (демо 2026-10-15: куплено 150 S, пришло 149,85; закрытие продало 150).
+ */
+export function spotNetQuantity(
+  netQuantity: number | null | undefined,
+  bought: number,
+  feeRate = SPOT_TAKER_FEE,
+): number {
+  return netQuantity ?? bought * (1 - feeRate);
+}
+
+/**
+ * Средняя цена исполнения без хвоста плавающей точки (0.22210000000000002 → 0.2221): 10 значащих
+ * знаков — точнее шага цены любой пары, расчёты PnL не меняются.
+ */
+export const averagePrice = (quote: number, quantity: number) =>
+  Number((quote / quantity).toPrecision(10));

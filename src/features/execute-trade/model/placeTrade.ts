@@ -38,6 +38,7 @@ import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { SPOT_TAKER_FEE } from "../config/spot";
+import { averagePrice } from "../lib/closePlan";
 import {
   chooseSpotEntry,
   pendingOutcome,
@@ -652,9 +653,10 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
     list = rechecked.found;
   }
   c.refs.current = spotListRefs(list, ids, mode === "otoco");
+  const net = list.filled - list.baseCommission;
 
   const filled = list.filled;
-  const entryPrice = filled > 0 ? list.quoteQty / filled : price;
+  const entryPrice = filled > 0 ? averagePrice(list.quoteQty, filled) : price;
   const bought = afterSpotBuy(list.workingStatus, filled, "spotList");
   if (bought !== "filled") {
     steps.push({
@@ -665,7 +667,8 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
     // FOK не исполняется частично; если всё же куплено — защищаем купленное отдельно.
     if (bought !== "partial") return done(bought);
     return protectOrSell(c, {
-      sellQty: floorToStep(filled - list.baseCommission, rules.stepSize),
+      sellQty: floorToStep(net, rules.stepSize),
+      net,
       entryPrice,
       filled,
     });
@@ -758,10 +761,8 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
     }
   }
   return protectOrSell(c, {
-    sellQty: floorToStep(
-      filled - list.baseCommission - soldByTakeProfit,
-      rules.stepSize,
-    ),
+    sellQty: floorToStep(net - soldByTakeProfit, rules.stepSize),
+    net: net - soldByTakeProfit,
     entryPrice,
     filled,
   });
@@ -778,6 +779,7 @@ function spotListRefs(
   return {
     market: "spot",
     orderListId: list.orderListId,
+    netQuantity: list.filled - list.baseCommission,
     stop: { orderId: stop?.orderId ?? null, clientOrderId: ids.stop },
     takeProfit: withTakeProfit
       ? { orderId: tp?.orderId ?? null, clientOrderId: ids.takeProfit }
@@ -860,9 +862,10 @@ async function placeSpotMarket(c: SpotContext): Promise<TradeResult> {
   }
   const bought = afterSpotBuy(status, filled, "spotMarket");
   if (bought !== "filled" && bought !== "partial") return done(bought);
-  const entryPrice = filled > 0 ? quoteQty / filled : price;
+  const entryPrice = filled > 0 ? averagePrice(quoteQty, filled) : price;
   return protectOrSell(c, {
     sellQty: floorToStep(filled - fee, rules.stepSize),
+    net: filled - fee,
     entryPrice,
     filled,
   });
@@ -875,7 +878,13 @@ async function placeSpotMarket(c: SpotContext): Promise<TradeResult> {
  */
 async function protectOrSell(
   c: SpotContext,
-  bought: { sellQty: string; entryPrice: number; filled: number },
+  bought: {
+    sellQty: string;
+    /** Своих монет на балансе (купленное − комиссия − проданное тейком) — объём закрытия. */
+    net: number;
+    entryPrice: number;
+    filled: number;
+  },
 ): Promise<TradeResult> {
   const { creds, req, v, ids, steps, done } = c;
   const { sellQty, entryPrice, filled } = bought;
@@ -884,6 +893,7 @@ async function protectOrSell(
   const own: Extract<DemoProtectRefs, { market: "spot" }> = {
     market: "spot",
     orderListId: null,
+    netQuantity: bought.net,
     stop: { orderId: null, clientOrderId: ids.protectStop },
     takeProfit: req.stopOnly
       ? null
@@ -920,6 +930,18 @@ async function protectOrSell(
         },
       );
       own.orderListId = oco.orderListId;
+      const idOf = (clientOrderId: string) =>
+        oco.orders.find((o) => o.clientOrderId === clientOrderId)?.orderId ??
+        null;
+      own.stop = {
+        orderId: idOf(ids.protectStop),
+        clientOrderId: ids.protectStop,
+      };
+      if (own.takeProfit)
+        own.takeProfit = {
+          orderId: idOf(ids.protectTakeProfit),
+          clientOrderId: ids.protectTakeProfit,
+        };
       steps.push({
         label: protectLabel,
         ok: true,

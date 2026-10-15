@@ -18,11 +18,13 @@ import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import {
   algoLeg,
+  averagePrice,
   type ClosePlan,
   ownCloseQuantity,
   planOwnClose,
   positionOnSide,
   spotLeg,
+  spotNetQuantity,
 } from "../lib/closePlan";
 import { floorToStep, isDust } from "../lib/validateTrade";
 import { futuresFillPrice } from "./futuresFillPrice";
@@ -153,7 +155,7 @@ export async function closeDemoPosition(
       "closed",
       "Монеты проданы по рынку.",
       order.executedQty > 0
-        ? order.cummulativeQuoteQty / order.executedQty
+        ? averagePrice(order.cummulativeQuoteQty, order.executedQty)
         : null,
     );
   } catch (error) {
@@ -302,8 +304,13 @@ async function closeOwn(
 
     const baseAsset = req.symbol.replace(/USDT$/, "");
     const held = (await fetchDemoSpotHoldings(creds)).get(baseAsset) ?? 0;
+    // Свой объём — полученное нетто (купленное − комиссия), а не купленное: иначе продадим чужое.
+    const own =
+      refs.market === "spot"
+        ? spotNetQuantity(refs.netQuantity, req.quantity)
+        : req.quantity;
     const qty = floorToStep(
-      ownCloseQuantity(req.quantity, plan.soldByLegs, held),
+      ownCloseQuantity(own, plan.soldByLegs, held),
       rules.stepSize,
     );
     const price = await fetchDemoPrice("spot", req.symbol);
@@ -325,7 +332,7 @@ async function closeOwn(
       "closed",
       "Монеты проданы по рынку.",
       order.executedQty > 0
-        ? order.cummulativeQuoteQty / order.executedQty
+        ? averagePrice(order.cummulativeQuoteQty, order.executedQty)
         : null,
     );
   } catch (error) {

@@ -51,7 +51,14 @@ export const spotOrderSchema = z
   .loose();
 
 export const orderListSchema = z
-  .object({ orderListId: z.number(), listStatusType: z.string() })
+  .object({
+    orderListId: z.number(),
+    listStatusType: z.string(),
+    // Ордера списка: по clientOrderId находим orderId своего стопа/тейка.
+    orders: z
+      .array(z.object({ orderId: z.number(), clientOrderId: z.string() }))
+      .catch([]),
+  })
   .loose();
 
 /**

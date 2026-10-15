@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   algoLeg,
+  averagePrice,
   ownCloseQuantity,
   planOwnClose,
   positionOnSide,
   spotLeg,
+  spotNetQuantity,
 } from "./closePlan";
 
 describe("свои ордера фьючерсов (algo)", () => {
@@ -99,5 +101,32 @@ describe("сколько докрывать своим ордером", () => {
     expect(positionOnSide(0.5, "long")).toBe(0.5);
     expect(positionOnSide(-0.5, "long")).toBe(0);
     expect(positionOnSide(-0.5, "short")).toBe(0.5);
+  });
+});
+
+describe("свой объём спота — полученное нетто, а не купленное", () => {
+  it("комиссия в монете из fills входа; нет — по ставке 0,1%", () => {
+    // Демо 2026-10-15: куплено 150 S, комиссия 0,15 S → своих 149,85.
+    expect(spotNetQuantity(149.85, 150)).toBe(149.85);
+    expect(spotNetQuantity(undefined, 150)).toBeCloseTo(149.85, 9);
+    expect(spotNetQuantity(null, 40)).toBeCloseTo(39.96, 9);
+  });
+  it("закрытие не продаёт чужие монеты: баланс больше своего — продаём своё", () => {
+    // На балансе 0,1436 S было до сделки: 149,9936 — продаём только свои 149,85.
+    expect(ownCloseQuantity(spotNetQuantity(149.85, 150), 0, 149.9936)).toBe(
+      149.85,
+    );
+    // Тейк уже продал часть своих.
+    expect(ownCloseQuantity(spotNetQuantity(39.96, 40), 10, 40.5)).toBeCloseTo(
+      29.96,
+      9,
+    );
+  });
+});
+
+describe("averagePrice", () => {
+  it("без хвоста плавающей точки", () => {
+    expect(averagePrice(8.884, 40)).toBe(0.2221);
+    expect(averagePrice(10.182, 60)).toBe(0.1697);
   });
 });
