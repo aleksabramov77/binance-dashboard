@@ -49,6 +49,43 @@ export const lockedPositionsSchema = z.object({
   ),
 });
 
+/**
+ * История начислений Flexible (`/sapi/v1/simple-earn/flexible/history/rewardsRecord`). Проба 2026-10-15: id продукта
+ * приходит в `productId` (в документации — `projectId`), `rewards` — сумма в монете `asset`.
+ */
+export const flexibleRewardsSchema = z.object({
+  total: z.number(),
+  rows: z.array(
+    z
+      .object({
+        asset: z.string(),
+        rewards: decimal,
+        productId: z.string().optional(),
+        projectId: z.string().optional(),
+        type: z.string(),
+        time: z.number(),
+      })
+      .transform(({ projectId, ...row }) => ({
+        ...row,
+        productId: row.productId ?? projectId ?? null,
+      })),
+  ),
+});
+
+/** История начислений Locked (`/sapi/v1/simple-earn/locked/history/rewardsRecord`), поля — по документации. */
+export const lockedRewardsSchema = z.object({
+  total: z.number(),
+  rows: z.array(
+    z.object({
+      positionId: z.coerce.string(),
+      asset: z.string(),
+      amount: decimal,
+      time: z.number(),
+      type: z.string().optional(),
+    }),
+  ),
+});
+
 export const walletBalancesSchema = z.array(
   z.object({ walletName: z.string(), balance: decimal, activate: z.boolean() }),
 );
@@ -66,4 +103,8 @@ export type FlexiblePosition = z.infer<
 export type LockedPosition = z.infer<
   typeof lockedPositionsSchema
 >["rows"][number];
+export type FlexibleReward = z.infer<
+  typeof flexibleRewardsSchema
+>["rows"][number];
+export type LockedReward = z.infer<typeof lockedRewardsSchema>["rows"][number];
 export type WalletBalance = z.infer<typeof walletBalancesSchema>[number];

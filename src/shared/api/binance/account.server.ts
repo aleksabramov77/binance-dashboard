@@ -1,15 +1,21 @@
 // Подписанные запросы к аккаунту: только для сервера (node:crypto, секрет API).
 export {
+  type FlexibleRewardsType,
   fetchFlexiblePositions,
+  fetchFlexibleRewards,
   fetchFundingAssets,
   fetchLockedPositions,
+  fetchLockedRewards,
   fetchSpotAccount,
   fetchWalletBalances,
+  type RewardsWindow,
 } from "./accountClient";
 export type {
   FlexiblePosition,
+  FlexibleReward,
   FundingAsset,
   LockedPosition,
+  LockedReward,
   SpotAccount,
   WalletBalance,
 } from "./accountSchemas";

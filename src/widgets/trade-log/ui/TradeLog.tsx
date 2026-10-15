@@ -106,7 +106,7 @@ const pnlTone = (v: number) =>
 function SummaryLine({ s }: { s: TradeSummary }) {
   const winRate = s.closed > 0 ? Math.round((s.wins / s.closed) * 100) : null;
   return (
-    <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+    <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm contain-inline-size">
       <span>
         Закрыто: <b>{s.closed}</b> (в плюс {s.wins}, в минус {s.losses}
         {winRate !== null && `, ${winRate}% прибыльных`})
@@ -129,7 +129,7 @@ export function TradeLog({ overview }: { overview: TradeOverview }) {
   const error = history.error?.message ?? history.data?.error;
 
   return (
-    <Card>
+    <Card className="w-fit max-w-full min-w-0">
       <CardHeader>
         <CardTitle className="flex flex-wrap items-baseline justify-between gap-2 text-base">
           <span>Демо-сделки</span>
@@ -153,7 +153,11 @@ export function TradeLog({ overview }: { overview: TradeOverview }) {
           </p>
         ) : (
           <>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && (
+              <p className="text-sm text-destructive contain-inline-size">
+                {error}
+              </p>
+            )}
             {orders.length > 0 && <SummaryLine s={summarizeTrades(orders)} />}
             {orders.length === 0 ? (
               !error && (
@@ -170,7 +174,7 @@ export function TradeLog({ overview }: { overview: TradeOverview }) {
                 </TableBody>
               </Table>
             )}
-            <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+            <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground contain-inline-size">
               {TRADE_STATUSES.map((s) => (
                 <li key={s} className="flex items-center gap-1.5">
                   <TradeStatusDot status={s} />
@@ -178,7 +182,7 @@ export function TradeLog({ overview }: { overview: TradeOverview }) {
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground contain-inline-size">
               Исполненные ордера с демо-счёта Binance (вход, срабатывание TP/SL,
               ручные закрытия); у входа и выхода одной сделки — один индикатор.
               Пара — ссылка на график Binance Demo. Отклонённые попытки — в
