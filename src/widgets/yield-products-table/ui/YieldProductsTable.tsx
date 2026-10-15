@@ -63,11 +63,23 @@ const SORT_VALUE: Record<SortKey, (p: YieldProduct) => SortValue> = {
   quota: (p) => (p.quotaLeft === null ? null : p.quotaLeft * (p.priceUsd ?? 1)),
 };
 
-/** По умолчанию: сначала менее рискованные, внутри — по ставке. */
+/**
+ * По умолчанию: основные продукты вкладки (RWUSD/BFUSD → стейкинг → DeFi), Soft Staking — в конце
+ * (это десятки мелких альткоинов); внутри вида — по ставке.
+ */
+const DEFAULT_KIND_ORDER: YieldProduct["kind"][] = [
+  "rwusd",
+  "bfusd",
+  "eth-staking",
+  "sol-staking",
+  "onchain",
+  "soft-staking",
+];
+
 function defaultOrder(products: YieldProduct[]): YieldProduct[] {
   return [...products].sort(
     (a, b) =>
-      EARN_KIND_INFO[a.kind].riskLevel - EARN_KIND_INFO[b.kind].riskLevel ||
+      DEFAULT_KIND_ORDER.indexOf(a.kind) - DEFAULT_KIND_ORDER.indexOf(b.kind) ||
       (b.apr ?? 0) - (a.apr ?? 0),
   );
 }
