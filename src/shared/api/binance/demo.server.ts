@@ -1,10 +1,15 @@
 // Торговля в Binance Demo Trading: только для сервера (секрет API).
 
 export type {
+  SpotEntryListParams,
+  SpotEntryListResult,
+} from "./demoOrderLists";
+export type {
   DemoCloseKind,
   DemoProtectiveStop,
   DemoSymbolOrders,
 } from "./demoOrders";
+export type { PriceBand, SymbolRules } from "./demoRules";
 export {
   type DemoFill,
   type DemoPosition,
@@ -15,6 +20,7 @@ export {
   demoFuturesPosition,
   demoFuturesPrepare,
   demoFuturesReduceMarket,
+  demoSpotBuyProtected,
   demoSpotMarketOrder,
   demoSpotOcoSell,
   demoSpotStopLossSell,
@@ -23,10 +29,10 @@ export {
   fetchDemoOpenSymbols,
   fetchDemoPrice,
   fetchDemoSpotHoldings,
+  fetchDemoSpotOrderStatus,
   fetchDemoSymbolOrders,
   fetchDemoSymbolRules,
   fetchDemoTradedSymbols,
   fetchDemoUsdtBalances,
-  type SymbolRules,
 } from "./demoTrading";
 export { BinanceApiError, ResponseFormatError } from "./signed";

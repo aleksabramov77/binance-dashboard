@@ -1,5 +1,5 @@
 import type { TradeRequest } from "@/entities/trade";
-import type { SymbolRules } from "@/shared/api/binance/demo.server";
+import type { PriceBand, SymbolRules } from "@/shared/api/binance/demo.server";
 
 /** Число знаков после запятой у шага биржи: "0.00010000" → 4, "1" → 0. */
 export function stepDecimals(step: string): number {
@@ -25,18 +25,46 @@ export const MAX_MIN_NOTIONAL_BUMP = 3;
 
 /**
  * Количество, поднятое до minNotional символа с запасом 1% и округлением вверх к шагу,
- * если объём ниже минимума не больше чем в MAX_MIN_NOTIONAL_BUMP раз; иначе — как было.
+ * если объём после округления вниз к шагу ниже минимума не больше чем в MAX_MIN_NOTIONAL_BUMP раз
+ * и поднятый объём не выше maxNotionalUsd; иначе — как было.
+ * Объём сравнивается уже округлённым: $50 у BTCUSDT-фьючерсов (шаг 0,0001) ровно на минимуме,
+ * но после округления вниз — 0,0006 BTC ≈ $48,99 (spec 0012, AC1).
  */
 export function fitToMinNotional(
   quantity: number,
   price: number,
   rules: Pick<SymbolRules, "stepSize" | "minNotional">,
+  maxNotionalUsd = Number.POSITIVE_INFINITY,
 ): number {
-  const notional = quantity * price;
+  const notional = Number(floorToStep(quantity, rules.stepSize)) * price;
   if (notional >= rules.minNotional || price <= 0) return quantity;
-  if (rules.minNotional > notional * MAX_MIN_NOTIONAL_BUMP) return quantity;
+  if (rules.minNotional > quantity * price * MAX_MIN_NOTIONAL_BUMP)
+    return quantity;
   const step = Number(rules.stepSize);
-  return Math.ceil((rules.minNotional * 1.01) / price / step - 1e-9) * step;
+  const fitted =
+    Math.ceil((rules.minNotional * 1.01) / price / step - 1e-9) * step;
+  return fitted * price > maxNotionalUsd ? quantity : fitted;
+}
+
+/** Запас от границы фильтра цены биржи — доля текущей цены (средняя цена биржи от неё отстаёт). */
+export const PRICE_BAND_MARGIN = 0.01;
+
+/**
+ * Уровень выхода, подтянутый внутрь фильтра PERCENT_PRICE_BY_SIDE / PERCENT_PRICE с запасом
+ * PRICE_BAND_MARGIN. Выход лонга — SELL (ask), шорта — BUY (bid). Цена фильтра — средняя за
+ * 5 минут; берём текущую как приближение. null — уровень и так в пределах фильтра.
+ */
+export function fitToPriceBand(
+  level: number,
+  price: number,
+  band: PriceBand,
+  exitSide: "BUY" | "SELL",
+): number | null {
+  const up = exitSide === "SELL" ? band.askUp : band.bidUp;
+  const down = exitSide === "SELL" ? band.askDown : band.bidDown;
+  if (level < price * down) return price * (down + PRICE_BAND_MARGIN);
+  if (level > price * up) return price * (up - PRICE_BAND_MARGIN);
+  return null;
 }
 
 export interface ValidatedTrade {
@@ -44,6 +72,8 @@ export interface ValidatedTrade {
   stopLoss: string;
   takeProfit: string;
   notionalUsd: number;
+  /** Что поправлено под правила биржи (стоп/тейк подтянуты к фильтру цены) — шаги заявки. */
+  adjustments: string[];
 }
 
 export interface TradeContext {
@@ -81,9 +111,35 @@ export function validateTrade(
       `Для шорта нужно TP < цена (${price}) < SL — уровни устарели, пересканируйте.`,
     );
 
+  // Стоп/тейк за фильтром цены биржа отклонит (-1013 PERCENT_PRICE_BY_SIDE): страховочный стоп
+  // −50% у сделок без стопа, «дальний» тейк. Подтягиваем к границе — до проверки риска.
+  const adjustments: string[] = [];
+  let stopLoss = req.stopLoss;
+  let takeProfit = req.takeProfit;
+  if (rules.priceBand && errors.length === 0) {
+    const exitSide = isLong ? "SELL" : "BUY";
+    const stop = fitToPriceBand(stopLoss, price, rules.priceBand, exitSide);
+    if (stop !== null && (isLong ? stop < price : stop > price)) {
+      adjustments.push(
+        `Стоп подтянут к границе фильтра биржи: ${roundToTick(stopLoss, rules.tickSize)} → ${roundToTick(stop, rules.tickSize)}`,
+      );
+      stopLoss = stop;
+    }
+    // Без тейка на бирже (stopOnly) его уровень никуда не уходит — не трогаем.
+    const tp = req.stopOnly
+      ? null
+      : fitToPriceBand(takeProfit, price, rules.priceBand, exitSide);
+    if (tp !== null && (isLong ? tp > price : tp < price)) {
+      adjustments.push(
+        `Тейк подтянут к границе фильтра биржи: ${roundToTick(takeProfit, rules.tickSize)} → ${roundToTick(tp, rules.tickSize)}`,
+      );
+      takeProfit = tp;
+    }
+  }
+
   const quantity = floorToStep(
     req.fitMinNotional
-      ? fitToMinNotional(req.quantity, price, rules)
+      ? fitToMinNotional(req.quantity, price, rules, maxNotionalUsd)
       : req.quantity,
     rules.stepSize,
   );
@@ -112,7 +168,7 @@ export function validateTrade(
       errors.push(
         `Нужно ${usd(requiredUsd)} ${req.market === "spot" ? "USDT" : "маржи"}, а на ${wallet} свободно ${usd(availableUsd)}.`,
       );
-    const lossAtStop = qty * Math.abs(price - req.stopLoss);
+    const lossAtStop = qty * Math.abs(price - stopLoss);
     const maxLoss = availableUsd * maxRiskPct;
     if (lossAtStop > maxLoss)
       errors.push(
@@ -125,9 +181,10 @@ export function validateTrade(
     ok: true,
     value: {
       quantity,
-      stopLoss: roundToTick(req.stopLoss, rules.tickSize),
-      takeProfit: roundToTick(req.takeProfit, rules.tickSize),
+      stopLoss: roundToTick(stopLoss, rules.tickSize),
+      takeProfit: roundToTick(takeProfit, rules.tickSize),
       notionalUsd,
+      adjustments,
     },
   };
 }

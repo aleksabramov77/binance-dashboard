@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TradeRequest } from "@/entities/trade";
 import {
   fitToMinNotional,
+  fitToPriceBand,
   floorToStep,
   isDust,
   roundToTick,
@@ -15,6 +16,9 @@ const rules = {
   stepSize: "0.00100000",
   minQty: 0.001,
   minNotional: 5,
+  priceBand: null,
+  otoAllowed: true,
+  ocoAllowed: true,
 };
 
 const long: TradeRequest = {
@@ -60,6 +64,7 @@ describe("validateTrade", () => {
         stopLoss: "1900.12",
         takeProfit: "2100.46",
         notionalUsd: 50,
+        adjustments: [],
       },
     });
   });
@@ -151,5 +156,137 @@ describe("fitToMinNotional", () => {
   });
   it("минимум больше втрое — не поднимаем (сделка была бы не той)", () => {
     expect(fitToMinNotional(0.0001, 71_100, r)).toBe(0.0001);
+  });
+});
+
+describe("fitToMinNotional после округления (spec 0012, AC1)", () => {
+  // BTCUSDT на демо-фьючерсах: шаг 0,0001, минимум $50.
+  const btc = { stepSize: "0.0001", minNotional: 50 };
+  it("$50 ровно на минимуме, но после округления вниз $48,99 — поднимаем на шаг", () => {
+    const qty = fitToMinNotional(50 / 81_650, 81_650, btc);
+    expect(floorToStep(qty, btc.stepSize)).toBe("0.0007");
+  });
+  it("не поднимает выше лимита на сделку", () => {
+    expect(fitToMinNotional(50 / 81_650, 81_650, btc, 55)).toBe(50 / 81_650);
+  });
+  it("validateTrade: вход BTCUSDT на $50 проходит, объём на бирже ≥ minNotional", () => {
+    const result = validateTrade(
+      {
+        symbol: "BTCUSDT",
+        market: "futures",
+        direction: "long",
+        quantity: 50 / 81_650,
+        stopLoss: 80_000,
+        takeProfit: 85_000,
+        leverage: 1,
+        fitMinNotional: true,
+      },
+      {
+        price: 81_650,
+        rules: {
+          ...rules,
+          tickSize: "0.10",
+          stepSize: "0.0001",
+          minQty: 0.0001,
+          minNotional: 50,
+        },
+        maxNotionalUsd: 100,
+        availableUsd: 5000,
+        maxRiskPct: 0.02,
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.quantity).toBe("0.0007");
+      expect(result.value.notionalUsd).toBeGreaterThanOrEqual(50);
+    }
+  });
+});
+
+describe("стоп и тейк в пределах фильтра цены биржи (spec 0012, AC3)", () => {
+  // Реальные фильтры demo-api.binance.com 2026-10-15 (SUSDT и BATUSDT одинаковые):
+  // PERCENT_PRICE_BY_SIDE bidUp 1.2, bidDown 0.5, askUp 2, askDown 0.8.
+  const band = { bidUp: 1.2, bidDown: 0.5, askUp: 2, askDown: 0.8 };
+  const spotRules = (tickSize: string, stepSize: string) => ({
+    tickSize,
+    stepSize,
+    minQty: Number(stepSize),
+    minNotional: 5,
+    priceBand: band,
+    otoAllowed: true,
+    ocoAllowed: true,
+  });
+
+  it("fitToPriceBand: SELL-стоп ниже askDown — к границе +1%, в пределах — null", () => {
+    expect(fitToPriceBand(50, 100, band, "SELL")).toBeCloseTo(81, 9);
+    expect(fitToPriceBand(250, 100, band, "SELL")).toBeCloseTo(199, 9);
+    expect(fitToPriceBand(90, 100, band, "SELL")).toBeNull();
+    // BUY-стоп шорта выше bidUp.
+    expect(fitToPriceBand(150, 100, band, "BUY")).toBeCloseTo(119, 9);
+  });
+
+  it("SUSDT 14 окт.: страховочный стоп −50% подтянут, шаг виден", () => {
+    const result = validateTrade(
+      {
+        symbol: "SUSDT",
+        market: "spot",
+        direction: "long",
+        quantity: 930,
+        stopLoss: 0.02688,
+        takeProfit: 0.3,
+        leverage: 1,
+        stopOnly: true,
+      },
+      ctx({ price: 0.05376, rules: spotRules("0.00001000", "0.10000000") }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stopLoss).toBe("0.04355");
+      expect(result.value.adjustments).toEqual([
+        "Стоп подтянут к границе фильтра биржи: 0.02688 → 0.04355",
+      ]);
+    }
+  });
+
+  it("BATUSDT: стоп и «дальний» тейк за фильтром подтянуты оба", () => {
+    const result = validateTrade(
+      {
+        symbol: "BATUSDT",
+        market: "spot",
+        direction: "long",
+        quantity: 293,
+        stopLoss: 0.0853,
+        takeProfit: 1.0225,
+        leverage: 1,
+      },
+      ctx({ price: 0.1705, rules: spotRules("0.00010000", "1.00000000") }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stopLoss).toBe("0.1381");
+      expect(result.value.takeProfit).toBe("0.3393");
+      expect(result.value.adjustments).toHaveLength(2);
+      expect(result.value.adjustments[1]).toBe(
+        "Тейк подтянут к границе фильтра биржи: 1.0225 → 0.3393",
+      );
+    }
+  });
+
+  it("фьючерсы (фильтра в правилах нет) — стоп не трогаем", () => {
+    const result = validateTrade(
+      {
+        ...long,
+        market: "futures",
+        quantity: 0.0257,
+        stopLoss: 1000,
+        takeProfit: 2100,
+      },
+      ctx({ availableUsd: 100_000 }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stopLoss).toBe("1000.00");
+      expect(result.value.adjustments).toEqual([]);
+    }
   });
 });
