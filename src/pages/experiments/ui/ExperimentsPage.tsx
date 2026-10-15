@@ -210,8 +210,9 @@ function ExperimentRow({
           href={`/experiments/${encodeURIComponent(e.id)}`}
           className="group flex flex-col gap-0.5"
         >
-          {/* Код, название и бейджи — в одну строку, пока таблица так помещается; иначе название переносится (spec 0018). */}
-          <span className="flex items-center gap-2 group-data-[fit=wide]/table:whitespace-nowrap">
+          {/* Код, название и бейджи — в одну строку; переносятся, только если так таблица помещается без прокрутки
+              (режим wrap, spec 0018, решения 5 и 7). */}
+          <span className="flex items-center gap-2 whitespace-nowrap group-data-[fit=wrap]/table:whitespace-normal">
             <span className="font-mono text-xs text-muted-foreground">
               {e.id}
             </span>
