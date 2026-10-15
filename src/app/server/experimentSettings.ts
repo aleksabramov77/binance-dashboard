@@ -21,7 +21,7 @@ import {
 } from "@/entities/experiment";
 import { ENGINE_KEYS, planReset, priceKey } from "@/features/paper-engine";
 import { fetchDemoUsdtBalances } from "@/shared/api/binance/demo.server";
-import { fetch24hTickers } from "@/shared/api/binance/public.server";
+import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
@@ -145,8 +145,8 @@ async function lastPrices(
   await Promise.all(
     [...markets].map(async (market) => {
       try {
-        for (const t of await fetch24hTickers(market))
-          prices[priceKey(market, t.symbol)] = t.lastPrice;
+        for (const [symbol, price] of await fetchTickerPrices(market))
+          prices[priceKey(market, symbol)] = price;
       } catch (error) {
         log.warn(
           "experiments.reset",
