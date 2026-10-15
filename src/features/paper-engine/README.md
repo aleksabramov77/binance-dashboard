@@ -13,9 +13,9 @@ spec 007b). Поэтому модули слайса импортируют то
 ## Устройство
 | Модуль | Что делает |
 |---|---|
-| `config/catalog.ts` | 40 экспериментов S01–S20 (spot, только long) и F01–F20 (futures) по плану spec 003, бюджет 10 000 |
+| `config/catalog.ts` | 40 экспериментов S01–S20 (spot, только long) и F01–F20 (USDⓈ-M, `usdm`) по плану spec 003, бюджет 10 000; эксперименты COIN-M (`coinm`) — только приватные `PC..` |
 | `config/engine.ts` | лимиты свечей, параллельность запросов, порог ликвидности movers, стейблкоины |
-| `lib/universe.ts` | `pickUniverse`: majors / top-N по обороту / movers / symbols, blacklist; только `…USDT`, без стейблов и UP/DOWN/BULL/BEAR |
+| `lib/universe.ts` | `pickUniverse(universe, tickers, market)`: majors / top-N по обороту / movers / symbols, blacklist; символы группы — `…USDT` (Spot, USDⓈ-M) или `…USD_PERP` (COIN-M), без стейблов и UP/DOWN/BULL/BEAR; `coinmTicker` — оборот COIN-M в $ (контракты × размер контракта) |
 | `lib/candles.ts` | отбрасывание незакрытой свечи, склейка кэша, детерминированное «случайное» число |
 | `lib/levels.ts` | стоп и тейк от цены входа: ATR / % / уровень сигнала, TP по R:R / % / сигналу |
 | `model/store.ts` | интерфейс `ExperimentStore`, ключи `engine_state`, роли раннера |

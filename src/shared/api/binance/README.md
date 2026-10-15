@@ -4,7 +4,7 @@
 
 | Мир | Хосты | Ключ | Точка входа |
 |---|---|---|---|
-| Публичное API (рынок, Earn) | `api.binance.com`, `fapi.binance.com`, `www.binance.com/bapi` | не нужен | `public.server.ts` |
+| Публичное API (рынок, Earn) | `api.binance.com`, `fapi.binance.com`, `dapi.binance.com` (COIN-M), `www.binance.com/bapi` | не нужен | `public.server.ts` |
 | Аккаунт (read-only) | `api.binance.com` (`/sapi`, `/api/v3/account`) | `BINANCE_API_KEY/SECRET` | `account.server.ts` |
 | Demo Trading (сделки) | `demo-api.binance.com`, `demo-fapi.binance.com` | `BINANCE_DEMO_API_KEY/SECRET` | `demo.server.ts` |
 
@@ -19,8 +19,13 @@
   `timestamp` и подпись на каждую попытку, повторы при сетевых сбоях, валидация ответа Zod.
   Ошибка биржи → `BinanceApiError` (с `code`, повторять бессмысленно); 2xx с неожиданным телом →
   `ResponseFormatError` (для ордеров значит «скорее всего исполнен»).
-- `marketApi.ts` — **среда-независимые** публичные рыночные запросы (`createMarketApi(getJson)`): тикеры,
-  свечи, бессрочные фьючерсы, funding. Без `@/…` и `node:*` — его импортирует и Edge Function Supabase
+- `markets.ts` — имена рынков (spec 0023): `BinanceMarket` = `spot` / `usdm` (USDⓈ-M, fapi) / `coinm` (COIN-M, dapi),
+  `FuturesMarket`, `Market` = `spot` / `usdm` — рынки ручных сделок и Binance Demo; `tradeMarketSchema` читает старое
+  `futures` как `usdm` (сетапы и сделки от старого клиента), `withLegacyMarketField` — то же для объектов с полем market.
+- `marketApi.ts` — **среда-независимые** публичные рыночные запросы (`createMarketApi(getJson)`): тикеры
+  (`fetch24hTickers` — Spot/USDⓈ-M, `fetchCoinmTickers` — COIN-M: оборот в контрактах), свечи по любому рынку,
+  бессрочные контракты `fetchPerpetuals(market)` (символ → размер контракта COIN-M; у dapi статус — `contractStatus`),
+  funding `fetchFundingRates(market)`. Без `@/…` и `node:*` — его импортирует и Edge Function Supabase
   `engine-tick` (Deno, spec 007b). Транспорт (повторы, журнал) передаётся аргументом.
 - `market.ts` — `createMarketApi` поверх `getJsonWithRetry` (`shared/lib/fetchRetry.ts`) для Node;
   `client.ts` — Earn и цены через тот же `getJsonWithRetry`.
@@ -68,5 +73,5 @@
 - `-4067` на `/fapi/v1/marginType` — по символу есть открытые ордера (даже если маржа уже изолированная);
   `placeTrade` не доходит до этого вызова, если символ уже в сделке.
 - Тесты схем — `demoSchemas.test.ts`; сетевые функции не тестируются (нет моков сети).
-- `fetchFundingRates` — `/fapi/v1/premiumIndex` одним запросом по всем фьючерсам (без ключа): ставки
-  funding для движка лаборатории (F14). У поставочных контрактов ставки нет — они пропускаются.
+- `fetchFundingRates(market)` — `/fapi/v1/premiumIndex` или `/dapi/v1/premiumIndex` одним запросом по всем фьючерсам
+  рынка (без ключа): ставки funding для движка лаборатории (F14 и его копии в COIN-M). У поставочных контрактов ставки нет — они пропускаются.

@@ -104,3 +104,4 @@
 | 2026-10-15 | ТЗ написано, решения пользователя зафиксированы |
 | 2026-10-15 | ТЗ утверждено |
 | 2026-10-15 | Разработка начата: ветка `feature/0023-coinm-asset-group` |
+| 2026-10-15 | Реализовано (Developer): ядро — `MARKETS` spot/usdm/coinm, `MARKET_KIND`, `legacyMarketSchema`, комиссия и размер сделки COIN-M целыми контрактами; `marketApi` — dapi (тикеры, свечи, funding, бессрочные с размером контракта); движок — юниверс `…USD_PERP`, ветвления по виду группы, недоступный рынок пропускается одной записью `warn`; миграция `0007_futures_to_usdm`; шапка, фильтры `/experiments` и `/stats` с COIN-M и чтением `?market=futures`; демо-зеркало COIN-M недоступно (галочка, API 400, `lab:private`); `lab:private` — `PC..`, `lab:report` — COIN-M отдельной группой; глоссарий, архитектура, README. `pnpm check`, `pnpm build`, `pnpm check:edge` зелёные |
