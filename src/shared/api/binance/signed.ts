@@ -5,6 +5,7 @@ import {
   describeNetworkError,
   HttpError,
   NetworkError,
+  REQUEST_TIMEOUT_MS,
   withRetry,
 } from "@/shared/lib/fetchRetry";
 import { log } from "@/shared/lib/logger.server";
@@ -60,6 +61,7 @@ export async function signedRequest<T extends z.ZodType>(
       method,
       headers: { "X-MBX-APIKEY": creds.apiKey },
       cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     const body: unknown = await res.json();
     // Параметры запроса — без подписи и ключа (они не в params).

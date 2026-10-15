@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   afterEntryError,
+  afterFuturesOrderCheck,
   afterFuturesPositionCheck,
   afterFuturesRollback,
   afterFuturesStop,
@@ -10,6 +11,8 @@ import {
   afterSell,
   afterSpotBuy,
   afterSpotRecheck,
+  afterStopLost,
+  afterTakeProfitCancel,
 } from "./tradeOutcome";
 
 describe("ошибка отправки входа", () => {
@@ -139,6 +142,51 @@ describe("спот", () => {
       withEntry: false,
     });
     expect(afterSell(false)).toMatchObject({
+      status: "unprotected",
+      withEntry: true,
+    });
+  });
+});
+
+describe("фьючерсы: свой ордер входа после неизвестного исхода", () => {
+  it("исполнен — берём объём из ордера; завершён без исполнения — отказ; иначе — по позиции", () => {
+    const order = { status: "FILLED", executedQty: 40, avgPrice: 0.2292 };
+    expect(afterFuturesOrderCheck(order)).toEqual({ filled: order });
+    expect(
+      afterFuturesOrderCheck({ status: "EXPIRED", executedQty: 0 }),
+    ).toMatchObject({ status: "rejected", withEntry: false });
+    expect(afterFuturesOrderCheck({ status: "NEW", executedQty: 0 })).toBe(
+      "checkPosition",
+    );
+    expect(afterFuturesOrderCheck(null)).toBe("checkPosition");
+    expect(afterFuturesOrderCheck("error")).toBe("checkPosition");
+  });
+});
+
+describe("спот: стоп OTOCO снят биржей, тейк ещё стоит (PR 2b)", () => {
+  it("тейк стоит — снять свой тейк, потом защищать заново", () => {
+    expect(afterStopLost({ status: "NEW", executedQty: 0 })).toBe(
+      "cancelTakeProfit",
+    );
+    expect(afterStopLost({ status: "PARTIALLY_FILLED", executedQty: 10 })).toBe(
+      "cancelTakeProfit",
+    );
+  });
+  it("тейк исполнен — монеты проданы, защита не нужна", () => {
+    expect(afterStopLost({ status: "FILLED", executedQty: 59 })).toMatchObject({
+      status: "protected",
+      withEntry: true,
+    });
+  });
+  it("тейк снят или не найден — защищать сразу", () => {
+    expect(afterStopLost({ status: "EXPIRED", executedQty: 0 })).toBe(
+      "protect",
+    );
+    expect(afterStopLost(null)).toBe("protect");
+  });
+  it("снять тейк не удалось — без продажи и перезащиты, unprotected", () => {
+    expect(afterTakeProfitCancel(true)).toBe("protect");
+    expect(afterTakeProfitCancel(false)).toMatchObject({
       status: "unprotected",
       withEntry: true,
     });

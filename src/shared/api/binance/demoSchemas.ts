@@ -51,7 +51,14 @@ export const spotOrderSchema = z
   .loose();
 
 export const orderListSchema = z
-  .object({ orderListId: z.number(), listStatusType: z.string() })
+  .object({
+    orderListId: z.number(),
+    listStatusType: z.string(),
+    // Ордера списка: по clientOrderId находим orderId своего стопа/тейка.
+    orders: z
+      .array(z.object({ orderId: z.number(), clientOrderId: z.string() }))
+      .catch([]),
+  })
   .loose();
 
 /**
@@ -130,6 +137,19 @@ export const positionRiskSchema = z.array(
 );
 
 /** История и активные algo-ордера (TP/SL) символа на демо-фьючерсах. */
+/**
+ * id рыночного ордера, которым сработал algo TP/SL. "" / нет поля / 0 / не положительное число —
+ * ещё не срабатывал (null): 0 не должен считаться «сработал» при закрытии.
+ */
+export const actualOrderIdSchema = z
+  .union([z.string(), z.number()])
+  .optional()
+  .transform((v) => {
+    const id = v === undefined || v === "" ? Number.NaN : Number(v);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  })
+  .catch(null);
+
 export const algoHistorySchema = z.array(
   z
     .object({
@@ -138,12 +158,8 @@ export const algoHistorySchema = z.array(
       side: z.enum(["BUY", "SELL"]),
       algoStatus: z.string(),
       triggerPrice: decimal.catch(0),
-      // id рыночного ордера, которым исполнился TP/SL; "" или нет поля — ещё не срабатывал.
-      actualOrderId: z
-        .union([z.string(), z.number()])
-        .optional()
-        .transform((v) => (v === undefined || v === "" ? null : Number(v)))
-        .catch(null),
+      // id рыночного ордера, которым исполнился TP/SL; не срабатывал — null.
+      actualOrderId: actualOrderIdSchema,
     })
     .loose(),
 );
@@ -174,8 +190,25 @@ export const spotAllOrdersSchema = z.array(
 );
 
 export const algoOrderSchema = z
-  .object({ algoId: z.number(), algoStatus: z.string().optional() })
+  .object({
+    algoId: z.number(),
+    clientAlgoId: z.string().nullable().catch(null),
+    algoStatus: z.string().optional(),
+  })
   .loose();
+
+/**
+ * GET /fapi/v1/algoOrder: статус своего стопа/тейка. Статусы на демо: NEW, CANCELED, EXPIRED,
+ * TRIGGERED, FINISHED (demoOrders.test.ts); actualOrderId — рыночный ордер, которым он сработал.
+ */
+export const algoOrderQuerySchema = z
+  .object({
+    algoId: z.number(),
+    algoStatus: z.string(),
+    actualOrderId: actualOrderIdSchema,
+  })
+  .loose();
+export type AlgoOrderQuery = z.infer<typeof algoOrderQuerySchema>;
 
 export const anySchema = z.unknown();
 

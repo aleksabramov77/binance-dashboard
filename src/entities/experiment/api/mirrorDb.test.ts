@@ -8,9 +8,10 @@ import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
 import {
   activeMirrorSymbols,
   claimMirror,
-  claimMirrorsToClose,
+  claimMirrorToClose,
   claimOpenMirrors,
   listMirrorCandidates,
+  listMirrorsToClose,
   type MirrorCandidate,
   markDemoReset,
   mirrorStatuses,
@@ -111,6 +112,13 @@ describe("demo-зеркало в БД", () => {
   });
 
   it("закрытая paper-сделка с открытым зеркалом захватывается на закрытие один раз", async () => {
+    // Свои стоп/тейк (PR 2b): сохраняются при входе и приходят в захвате на закрытие.
+    const protectRefs = {
+      market: "futures" as const,
+      entryOrderId: 11,
+      stop: { algoId: 21, clientAlgoId: "bd1-S" },
+      takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
+    };
     const store = await setup();
     await setExperimentDemoMirror(db, "F01", true);
     const [c] = await listMirrorCandidates(db, SINCE);
@@ -122,8 +130,10 @@ describe("demo-зеркало в БД", () => {
       demoRef: "r1",
       entryPrice: 100,
       quantity: 0.5,
+      protectRefs,
     });
-    expect(await claimMirrorsToClose(db)).toEqual([]);
+    expect(await listMirrorsToClose(db)).toEqual([]);
+    expect(await claimMirrorToClose(db, "a")).toBeNull();
 
     await store.closeTrade("a", {
       closedAt: "2026-10-11T12:30:00.000Z",
@@ -133,18 +143,19 @@ describe("demo-зеркало в БД", () => {
       pnl: 1.9,
       rMultiple: 0.4,
     });
-    const toClose = await claimMirrorsToClose(db);
-    expect(toClose).toEqual([
-      {
-        tradeId: "a",
-        market: "futures",
-        symbol: "ETHUSDT",
-        direction: "long",
-        quantity: 0.5,
-        exitReason: "trail",
-      },
-    ]);
-    expect(await claimMirrorsToClose(db)).toEqual([]);
+    expect(await listMirrorsToClose(db)).toEqual(["a"]);
+    expect(await claimMirrorToClose(db, "a")).toEqual({
+      tradeId: "a",
+      market: "futures",
+      symbol: "ETHUSDT",
+      direction: "long",
+      quantity: 0.5,
+      exitReason: "trail",
+      protectRefs,
+    });
+    // Захвачена (closing) — второй прогон её не получит и в списке её нет.
+    expect(await claimMirrorToClose(db, "a")).toBeNull();
+    expect(await listMirrorsToClose(db)).toEqual([]);
 
     await updateMirror(db, "a", {
       status: "closed",
@@ -307,5 +318,35 @@ describe("data-fix drizzle/0005 (spec 0012, AC2)", () => {
       message: "ETHUSDT: нет на демо-фьючерсах.",
     });
     expect(statuses.get("b")?.status).toBe("rejected");
+  });
+});
+
+describe("protect_refs", () => {
+  it("старые строки без ссылок и битый jsonb — null (закрытие по-старому)", async () => {
+    const store = await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      quantity: 0.5,
+    });
+    await db.execute(
+      sql`update demo_mirror_orders set protect_refs = '{"market":"spot"}'::jsonb where trade_id = 'a'`,
+    );
+    await store.closeTrade("a", {
+      closedAt: "2026-10-11T12:30:00.000Z",
+      exitPrice: 104,
+      exitReason: "sl",
+      fees: 0.1,
+      pnl: 1.9,
+      rMultiple: 0.4,
+    });
+    expect(await claimMirrorToClose(db, "a")).toMatchObject({
+      tradeId: "a",
+      protectRefs: null,
+    });
   });
 });

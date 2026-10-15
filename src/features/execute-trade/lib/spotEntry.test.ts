@@ -3,9 +3,9 @@ import {
   ceilToTick,
   chooseSpotEntry,
   pendingOutcome,
-  spotClientIds,
   spotEntryFromQuery,
   spotEntryLimitPrice,
+  tradeClientIds,
 } from "./spotEntry";
 import { spotSellQuantity } from "./validateTrade";
 
@@ -80,13 +80,16 @@ describe("pendingOutcome", () => {
 
 describe("заявка с неизвестным исходом", () => {
   it("свои clientOrderId: короткие, из id сделки, разные у ордеров", () => {
-    const ids = spotClientIds("3f2a9c1e-7b4d-4e8f-9a01-23456789abcd");
+    const ids = tradeClientIds("3f2a9c1e-7b4d-4e8f-9a01-23456789abcd");
     expect(ids).toEqual({
       list: "bd3f2a9c1e7b4d4e8f9a012345-L",
       working: "bd3f2a9c1e7b4d4e8f9a012345-W",
       stop: "bd3f2a9c1e7b4d4e8f9a012345-S",
       takeProfit: "bd3f2a9c1e7b4d4e8f9a012345-T",
       market: "bd3f2a9c1e7b4d4e8f9a012345-M",
+      protectList: "bd3f2a9c1e7b4d4e8f9a012345-L2",
+      protectStop: "bd3f2a9c1e7b4d4e8f9a012345-S2",
+      protectTakeProfit: "bd3f2a9c1e7b4d4e8f9a012345-T2",
     });
     for (const id of Object.values(ids))
       expect(id).toMatch(/^[A-Za-z0-9_-]{1,36}$/);
