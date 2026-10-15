@@ -135,10 +135,10 @@ const COLUMNS: {
 
 function ColumnHead({
   column,
-  sort,
+  head,
 }: {
   column: (typeof COLUMNS)[number];
-  sort: SortHeadProps;
+  head: SortHeadProps;
 }) {
   return (
     <SortableHead
@@ -146,7 +146,7 @@ function ColumnHead({
         column.numeric && "text-right",
         column.key === "demo" && "text-center",
       )}
-      {...sort}
+      {...head}
       description={column.description}
     >
       {column.label}
@@ -323,7 +323,7 @@ function ExperimentsDashboard() {
             <TableHeader>
               <TableRow>
                 {COLUMNS.map((c) => (
-                  <ColumnHead key={c.key} column={c} sort={head(c.key)} />
+                  <ColumnHead key={c.key} column={c} head={head(c.key)} />
                 ))}
               </TableRow>
             </TableHeader>
