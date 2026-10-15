@@ -112,3 +112,54 @@ export function spotNetQuantity(
  */
 export const averagePrice = (quote: number, quantity: number) =>
   Number((quote / quantity).toPrecision(10));
+
+/** Ссылка на свой algo-ордер в protectRefs. */
+export interface StoredAlgoRef {
+  algoId: number | null;
+  clientAlgoId: string | null;
+}
+
+/**
+ * Чем искать/снимать свой algo-ордер: algoId, а если он неизвестен (исход постановки был
+ * неизвестен и ордер не нашёлся) — clientAlgoId. Нет ни того ни другого — нечем (null).
+ */
+export function algoLookup(
+  ref: StoredAlgoRef,
+): { algoId: number } | { clientAlgoId: string } | null {
+  if (ref.algoId !== null) return { algoId: ref.algoId };
+  return ref.clientAlgoId ? { clientAlgoId: ref.clientAlgoId } : null;
+}
+
+/**
+ * Стоп/тейк фьючерсов с неизвестным исходом постановки, перечитанный по своему clientAlgoId:
+ * нашёлся стоящим или сработавшим — выставлен (algoId известен); не нашёлся или не прочитали — не
+ * подтверждён, но ссылка по clientAlgoId сохраняется: закрытие найдёт и снимет его, если он всё же встал.
+ */
+export function afterAlgoUnknown(
+  found:
+    | { algoId: number; algoStatus: string; actualOrderId: number | null }
+    | null
+    | "error",
+  clientAlgoId: string,
+): { placed: boolean; ref: StoredAlgoRef } {
+  if (found === null || found === "error")
+    return { placed: false, ref: { algoId: null, clientAlgoId } };
+  const leg = algoLeg(found);
+  return {
+    placed: leg.active || leg.triggered,
+    ref: { algoId: found.algoId, clientAlgoId },
+  };
+}
+
+/**
+ * Итог закрытия после снятия своих ордеров: qty — сколько докрыть своим ордером (уже к шагу,
+ * пыль — 0). Своя нога сработала, но своя позиция осталась (сработала частично, или closePosition
+ * не всё закрыл) — докрываем, а не объявляем «закрыта биржей».
+ */
+export function closeVerdict(
+  plan: Pick<ClosePlan, "closedByExchange">,
+  qty: number,
+): "close" | "closedByExchange" | "nothingLeft" {
+  if (qty > 0) return "close";
+  return plan.closedByExchange ? "closedByExchange" : "nothingLeft";
+}

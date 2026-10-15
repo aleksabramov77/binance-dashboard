@@ -41,7 +41,7 @@ import {
 } from "./demoSchemas";
 import type { Market } from "./market";
 import { ORDER_RECV_WINDOW_MS } from "./orderOutcome";
-import { BinanceApiError, signedRequest } from "./signed";
+import { BinanceApiError, type SignedParams, signedRequest } from "./signed";
 
 /** Binance Demo Trading — виртуальные деньги, реальные котировки. */
 const DEMO_URL: Record<Market, string> = {
@@ -427,15 +427,23 @@ export async function demoFuturesCloseAt(
       closePosition: true,
       workingType: "MARK_PRICE",
       priceProtect: true,
+      // Короткое окно — дедлайн перечитывания при неизвестном исходе (как у входа).
+      recvWindow: ORDER_RECV_WINDOW_MS,
       ...(clientAlgoId ? { clientAlgoId } : {}),
     },
   );
 }
 
-/** Свой algo-ордер (стоп/тейк) по algoId; null — не найден (снятые без исполнения хранятся 3 дня). */
+/** Свой algo-ордер: по algoId, а если его нет (исход постановки был неизвестен) — по clientAlgoId. */
+export type AlgoRef = { algoId: number } | { clientAlgoId: string };
+
+const algoParams = (ref: AlgoRef): SignedParams =>
+  "algoId" in ref ? { algoId: ref.algoId } : { clientAlgoId: ref.clientAlgoId };
+
+/** Свой algo-ордер (стоп/тейк); null — не найден (снятые без исполнения хранятся 3 дня). */
 export async function fetchDemoAlgoOrder(
   creds: BinanceCredentials,
-  algoId: number,
+  ref: AlgoRef,
 ): Promise<AlgoOrderQuery | null> {
   try {
     return await signedRequest(
@@ -444,7 +452,7 @@ export async function fetchDemoAlgoOrder(
       "GET",
       "/fapi/v1/algoOrder",
       algoOrderQuerySchema,
-      { algoId },
+      algoParams(ref),
     );
   } catch (error) {
     if (isNoSuchOrder(error)) return null;
@@ -455,7 +463,7 @@ export async function fetchDemoAlgoOrder(
 /** Отменить свой algo-ордер. false — отменять нечего (уже сработал, снят или не найден). */
 export async function demoCancelAlgoOrder(
   creds: BinanceCredentials,
-  algoId: number,
+  ref: AlgoRef,
 ): Promise<boolean> {
   try {
     await signedRequest(
@@ -464,7 +472,7 @@ export async function demoCancelAlgoOrder(
       "DELETE",
       "/fapi/v1/algoOrder",
       anySchema,
-      { algoId },
+      algoParams(ref),
     );
     return true;
   } catch (error) {

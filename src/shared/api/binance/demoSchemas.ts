@@ -137,6 +137,19 @@ export const positionRiskSchema = z.array(
 );
 
 /** История и активные algo-ордера (TP/SL) символа на демо-фьючерсах. */
+/**
+ * id рыночного ордера, которым сработал algo TP/SL. "" / нет поля / 0 / не положительное число —
+ * ещё не срабатывал (null): 0 не должен считаться «сработал» при закрытии.
+ */
+export const actualOrderIdSchema = z
+  .union([z.string(), z.number()])
+  .optional()
+  .transform((v) => {
+    const id = v === undefined || v === "" ? Number.NaN : Number(v);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  })
+  .catch(null);
+
 export const algoHistorySchema = z.array(
   z
     .object({
@@ -145,12 +158,8 @@ export const algoHistorySchema = z.array(
       side: z.enum(["BUY", "SELL"]),
       algoStatus: z.string(),
       triggerPrice: decimal.catch(0),
-      // id рыночного ордера, которым исполнился TP/SL; "" или нет поля — ещё не срабатывал.
-      actualOrderId: z
-        .union([z.string(), z.number()])
-        .optional()
-        .transform((v) => (v === undefined || v === "" ? null : Number(v)))
-        .catch(null),
+      // id рыночного ордера, которым исполнился TP/SL; не срабатывал — null.
+      actualOrderId: actualOrderIdSchema,
     })
     .loose(),
 );
@@ -196,11 +205,7 @@ export const algoOrderQuerySchema = z
   .object({
     algoId: z.number(),
     algoStatus: z.string(),
-    actualOrderId: z
-      .union([z.string(), z.number()])
-      .optional()
-      .transform((v) => (v === undefined || v === "" ? null : Number(v)))
-      .catch(null),
+    actualOrderId: actualOrderIdSchema,
   })
   .loose();
 export type AlgoOrderQuery = z.infer<typeof algoOrderQuerySchema>;

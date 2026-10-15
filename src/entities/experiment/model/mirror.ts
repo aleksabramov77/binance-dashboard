@@ -58,7 +58,8 @@ export type ExperimentDemoMirror = z.infer<typeof experimentDemoMirrorSchema>;
  * в src/app/server/demoMirror.ts. null — старые строки и входы без защиты: закрытие по-старому.
  */
 const algoRefSchema = z.object({
-  algoId: z.number(),
+  /** null — исход постановки неизвестен и ордер не нашёлся: ищем и снимаем по clientAlgoId. */
+  algoId: z.number().nullable(),
   clientAlgoId: z.string().nullable(),
 });
 const spotOrderRefSchema = z.object({

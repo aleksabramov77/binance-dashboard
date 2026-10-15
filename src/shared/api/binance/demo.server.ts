@@ -16,6 +16,7 @@ export type {
   FuturesOrder,
   SpotOrderQuery,
 } from "./demoSchemas";
+export type { AlgoRef } from "./demoTrading";
 export {
   type DemoFill,
   type DemoPosition,

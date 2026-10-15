@@ -16,9 +16,11 @@
   Вызывает demo-зеркало (spec 008, `src/app/server/demoMirror.ts`).
   С `protectRefs` (spec 0012, PR 2b — зеркала, открытые после PR 2b) — только свои ордера: статусы своего стопа/тейка
   (`fetchDemoAlgoOrder` / `fetchDemoSpotOrderByClientId`) → `lib/closePlan.ts` (`planOwnClose`): стоящие снимаются
-  (`demoCancelAlgoOrder` / `demoSpotCancelByClientId`, снятие ноги списка снимает весь список); сработал свой
+  (`demoCancelAlgoOrder` / `demoSpotCancelByClientId`, снятие ноги списка снимает весь список; algo — по algoId, а без
+  него — по clientAlgoId, `algoLookup`); сработал свой
   (algo: `actualOrderId` или TRIGGERED/FINISHED — демо 2026-10-15: тейк FINISHED, стоп EXPIRED; спот: FILLED) —
-  `closed` без ордера; иначе докрывается свой объём: фьючерсы — reduceOnly на min(свой, позиция в свою сторону),
+  `closed` без ордера, если своего объёма на бирже не осталось (`closeVerdict`; остался — докрывается); иначе
+  докрывается свой объём: фьючерсы — reduceOnly на min(свой, позиция в свою сторону),
   спот — min(полученное нетто − проданное своими ордерами, баланс): нетто = купленное − комиссия в монете
   (`protectRefs.netQuantity` из fills входа, иначе по ставке 0,1%, `spotNetQuantity`) — чужие монеты не продаются. Ордера других зеркал и ручные по символу не трогаются.
   Без `protectRefs` (старые строки, демо-сброс по ним) — по-старому.
@@ -89,7 +91,9 @@
    algoId/clientAlgoId стопа и тейка (`bd<id>-S/-T`); спот — orderListId и orderId/clientOrderId стопа и тейка
    (OTO/OTOCO — `-S/-T`, отдельная защита после покупки — `-S2/-T2`). У `rejected` — null. Зеркало хранит их в
    `demo_mirror_orders.protect_refs`. Фьючерсный вход — со своим `newClientOrderId` (`-M`): при неизвестном исходе
-   сначала сверка по нему (`fetchDemoFuturesOrder`), потом по позиции. Цена входа/выхода фьючерсов без `avgPrice`
+   сначала сверка по нему (`fetchDemoFuturesOrder`), потом по позиции. Стоп/тейк с неизвестным исходом постановки перечитываются по своему
+   `clientAlgoId` до дедлайна (`afterAlgoUnknown`): не нашёлся — не подтверждён (стоп → откат), но ссылка
+   `{algoId: null, clientAlgoId}` сохраняется, и закрытие снимет висящий ордер. Цена входа/выхода фьючерсов без `avgPrice`
    в ответе — из ордера или его исполнений (`model/futuresFillPrice.ts`), а не текущая.
 7. Выбор исхода по результатам шагов — чистые функции `lib/tradeOutcome.ts` (`afterEntryError`, `afterPending`,
    `afterProtect`, `afterFuturesRollback`…); в `model` — только запросы и шаги отчёта.

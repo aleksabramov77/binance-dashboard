@@ -6,6 +6,7 @@ import {
   type TradeStep,
 } from "@/entities/trade";
 import {
+  type AlgoOrderQuery,
   BinanceApiError,
   type DemoProtectRefs,
   demoCancelAllOrders,
@@ -20,6 +21,7 @@ import {
   demoSpotOcoSell,
   demoSpotStopLossSell,
   type FuturesOrder,
+  fetchDemoAlgoOrder,
   fetchDemoFuturesOrder,
   fetchDemoOpenSymbols,
   fetchDemoPrice,
@@ -38,7 +40,11 @@ import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { SPOT_TAKER_FEE } from "../config/spot";
-import { averagePrice } from "../lib/closePlan";
+import {
+  afterAlgoUnknown,
+  averagePrice,
+  type StoredAlgoRef,
+} from "../lib/closePlan";
 import {
   chooseSpotEntry,
   pendingOutcome,
@@ -222,7 +228,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   if (!checked.ok) return finish("rejected", checked.errors.join(" "));
   const v = checked.value;
   const entrySide = req.direction === "long" ? "BUY" : "SELL";
-  const exitSide = req.direction === "long" ? "SELL" : "BUY";
+  const exitSide: "BUY" | "SELL" = req.direction === "long" ? "SELL" : "BUY";
 
   for (const detail of v.adjustments)
     steps.push({ label: "Фильтр цены биржи", ok: true, detail });
@@ -386,38 +392,21 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   const futuresRefs = {
     market: "futures" as const,
     entryOrderId,
-    stop: null as { algoId: number; clientAlgoId: string | null } | null,
-    takeProfit: null as { algoId: number; clientAlgoId: string | null } | null,
+    stop: null as StoredAlgoRef | null,
+    takeProfit: null as StoredAlgoRef | null,
   };
   refs.current = futuresRefs;
 
   // Сначала стоп: не встал — позиция без защиты не остаётся, сразу закрываем её по рынку (AC5).
-  let stopPlaced = false;
-  try {
-    const algo = await withPositionRetry(() =>
-      demoFuturesCloseAt(
-        creds,
-        req.symbol,
-        exitSide,
-        "STOP_MARKET",
-        v.stopLoss,
-        ids.stop,
-      ),
-    );
-    stopPlaced = true;
-    futuresRefs.stop = {
-      algoId: algo.algoId,
-      clientAlgoId: algo.clientAlgoId ?? ids.stop,
-    };
-    steps.push({
-      label: "Stop Loss",
-      ok: true,
-      detail: `${v.stopLoss}, закроет всю позицию, #${algo.algoId}`,
-    });
-  } catch (error) {
-    steps.push({ label: "Stop Loss", ok: false, detail: errorText(error) });
-  }
-  const afterStop = afterFuturesStop(stopPlaced, req.stopOnly === true);
+  const algoCtx = { creds, symbol: req.symbol, exitSide, steps };
+  const stop = await placeProtectiveAlgo(
+    algoCtx,
+    "STOP_MARKET",
+    v.stopLoss,
+    ids.stop,
+  );
+  futuresRefs.stop = stop.ref;
+  const afterStop = afterFuturesStop(stop.placed, req.stopOnly === true);
   if (afterStop === "rollback")
     return rollbackFutures({
       creds,
@@ -431,32 +420,89 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     });
   if (afterStop !== "takeProfit") return done(afterStop, entryPrice, filled);
 
-  let tpPlaced = false;
+  // Тейк с неизвестным исходом: protected (стоп стоит), но ссылка по clientAlgoId остаётся —
+  // закрытие снимет висящий тейк.
+  const tp = await placeProtectiveAlgo(
+    algoCtx,
+    "TAKE_PROFIT_MARKET",
+    v.takeProfit,
+    ids.takeProfit,
+  );
+  futuresRefs.takeProfit = tp.ref;
+  return done(afterFuturesTakeProfit(tp.placed), entryPrice, filled);
+}
+
+/**
+ * Стоп или тейк фьючерсов со своим clientAlgoId. Биржа отказала — не выставлен, ссылки нет.
+ * Исход неизвестен (-1006/-1007, 5xx, сеть, таймаут) — перечитать по clientAlgoId до дедлайна
+ * (lib/closePlan → afterAlgoUnknown): ссылка сохраняется в любом случае.
+ */
+async function placeProtectiveAlgo(
+  c: {
+    creds: BinanceCredentials;
+    symbol: string;
+    exitSide: "BUY" | "SELL";
+    steps: TradeStep[];
+  },
+  type: "STOP_MARKET" | "TAKE_PROFIT_MARKET",
+  trigger: string,
+  clientAlgoId: string,
+): Promise<{ placed: boolean; ref: StoredAlgoRef | null }> {
+  const label = type === "STOP_MARKET" ? "Stop Loss" : "Take Profit";
+  const sentAt = Date.now();
   try {
     const algo = await withPositionRetry(() =>
       demoFuturesCloseAt(
-        creds,
-        req.symbol,
-        exitSide,
-        "TAKE_PROFIT_MARKET",
-        v.takeProfit,
-        ids.takeProfit,
+        c.creds,
+        c.symbol,
+        c.exitSide,
+        type,
+        trigger,
+        clientAlgoId,
       ),
     );
-    tpPlaced = true;
-    futuresRefs.takeProfit = {
-      algoId: algo.algoId,
-      clientAlgoId: algo.clientAlgoId ?? ids.takeProfit,
-    };
-    steps.push({
-      label: "Take Profit",
+    c.steps.push({
+      label,
       ok: true,
-      detail: `${v.takeProfit}, закроет всю позицию, #${algo.algoId}`,
+      detail: `${trigger}, закроет всю позицию, #${algo.algoId}`,
     });
+    return {
+      placed: true,
+      ref: {
+        algoId: algo.algoId,
+        clientAlgoId: algo.clientAlgoId ?? clientAlgoId,
+      },
+    };
   } catch (error) {
-    steps.push({ label: "Take Profit", ok: false, detail: errorText(error) });
+    c.steps.push({ label, ok: false, detail: errorText(error) });
+    if (orderErrorOutcome(error) === "rejected")
+      return { placed: false, ref: null };
   }
-  return done(afterFuturesTakeProfit(tpPlaced), entryPrice, filled);
+  let found: AlgoOrderQuery | null | "error";
+  try {
+    found = await recheckUntil(
+      unknownOutcomeDeadline(sentAt, Date.now()),
+      () => fetchDemoAlgoOrder(c.creds, { clientAlgoId }),
+      (a) => a !== null,
+    );
+  } catch (error) {
+    c.steps.push({
+      label: `Проверка: ${label}`,
+      ok: false,
+      detail: errorText(error),
+    });
+    found = "error";
+  }
+  const checked = afterAlgoUnknown(found, clientAlgoId);
+  if (found !== "error")
+    c.steps.push({
+      label: `Проверка: ${label}`,
+      ok: checked.placed,
+      detail: found
+        ? `${found.algoStatus}, #${found.algoId}`
+        : `Ордера ${clientAlgoId} на бирже нет`,
+    });
+  return checked;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

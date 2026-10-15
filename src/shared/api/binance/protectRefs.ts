@@ -7,7 +7,8 @@ import { z } from "zod";
 
 /** Algo-ордер фьючерсов (STOP_MARKET / TAKE_PROFIT_MARKET). */
 const algoRefSchema = z.object({
-  algoId: z.number(),
+  /** null — исход постановки неизвестен и ордер не нашёлся: ищем и снимаем по clientAlgoId. */
+  algoId: z.number().nullable(),
   clientAlgoId: z.string().nullable(),
 });
 

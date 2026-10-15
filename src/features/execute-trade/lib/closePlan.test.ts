@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  afterAlgoUnknown,
   algoLeg,
+  algoLookup,
   averagePrice,
+  closeVerdict,
   ownCloseQuantity,
   planOwnClose,
   positionOnSide,
@@ -128,5 +131,49 @@ describe("averagePrice", () => {
   it("без хвоста плавающей точки", () => {
     expect(averagePrice(8.884, 40)).toBe(0.2221);
     expect(averagePrice(10.182, 60)).toBe(0.1697);
+  });
+});
+
+describe("свой algo-ордер с неизвестным исходом постановки (ревью #53)", () => {
+  it("нашёлся по clientAlgoId — выставлен, algoId в ссылке", () => {
+    expect(
+      afterAlgoUnknown(
+        { algoId: 42, algoStatus: "NEW", actualOrderId: null },
+        "bd1-T",
+      ),
+    ).toEqual({ placed: true, ref: { algoId: 42, clientAlgoId: "bd1-T" } });
+    expect(
+      afterAlgoUnknown(
+        { algoId: 42, algoStatus: "CANCELED", actualOrderId: null },
+        "bd1-S",
+      ).placed,
+    ).toBe(false);
+  });
+  it("не нашёлся или не прочитали — не подтверждён, но ссылка с algoId null сохраняется", () => {
+    for (const found of [null, "error"] as const)
+      expect(afterAlgoUnknown(found, "bd1-T")).toEqual({
+        placed: false,
+        ref: { algoId: null, clientAlgoId: "bd1-T" },
+      });
+  });
+  it("ссылка с algoId null — ищем и снимаем по clientAlgoId", () => {
+    expect(algoLookup({ algoId: null, clientAlgoId: "bd1-T" })).toEqual({
+      clientAlgoId: "bd1-T",
+    });
+    expect(algoLookup({ algoId: 42, clientAlgoId: "bd1-T" })).toEqual({
+      algoId: 42,
+    });
+    expect(algoLookup({ algoId: null, clientAlgoId: null })).toBeNull();
+  });
+});
+
+describe("closeVerdict", () => {
+  it("своя нога сработала, но своя позиция осталась — докрыть, а не «закрыта биржей»", () => {
+    expect(closeVerdict({ closedByExchange: true }, 0.2)).toBe("close");
+    expect(closeVerdict({ closedByExchange: true }, 0)).toBe(
+      "closedByExchange",
+    );
+    expect(closeVerdict({ closedByExchange: false }, 0)).toBe("nothingLeft");
+    expect(closeVerdict({ closedByExchange: false }, 1)).toBe("close");
   });
 });

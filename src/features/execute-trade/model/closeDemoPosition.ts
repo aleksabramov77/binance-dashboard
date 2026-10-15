@@ -18,8 +18,10 @@ import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import {
   algoLeg,
+  algoLookup,
   averagePrice,
   type ClosePlan,
+  closeVerdict,
   ownCloseQuantity,
   planOwnClose,
   positionOnSide,
@@ -181,9 +183,10 @@ async function readOwnLegs(
 ): Promise<ClosePlan> {
   if (refs.market === "futures") {
     const [stop, takeProfit] = await Promise.all(
-      [refs.stop, refs.takeProfit].map(async (r) =>
-        r ? algoLeg(await fetchDemoAlgoOrder(creds, r.algoId)) : null,
-      ),
+      [refs.stop, refs.takeProfit].map(async (r) => {
+        const lookup = r && algoLookup(r);
+        return lookup ? algoLeg(await fetchDemoAlgoOrder(creds, lookup)) : null;
+      }),
     );
     return planOwnClose({ stop: stop ?? null, takeProfit: takeProfit ?? null });
   }
@@ -208,7 +211,8 @@ async function cancelOwn(
 ): Promise<boolean> {
   if (refs.market === "futures") {
     const ref = refs[leg];
-    return ref ? demoCancelAlgoOrder(creds, ref.algoId) : false;
+    const lookup = ref && algoLookup(ref);
+    return lookup ? demoCancelAlgoOrder(creds, lookup) : false;
   }
   const ref = refs[leg];
   return ref
@@ -254,14 +258,24 @@ async function closeOwn(
       "Не удалось снять свои защитные ордера — позиция не закрыта, проверьте на demo.binance.com.",
     );
   }
-  if (plan.closedByExchange) {
+  // Своя нога сработала — позицию всё равно перечитываем: остался свой объём — докрываем.
+  const nothingToClose = (detail: string) => {
+    const verdict = closeVerdict(plan, 0);
     steps.push({
       label: "Позиция",
       ok: true,
-      detail: "Сработал свой стоп/тейк на бирже",
+      detail:
+        verdict === "closedByExchange"
+          ? `Сработал свой стоп/тейк на бирже; ${detail}`
+          : detail,
     });
-    return finish("closed", "Позиция уже закрыта биржей (сработал стоп/тейк).");
-  }
+    return finish(
+      "closed",
+      verdict === "closedByExchange"
+        ? "Позиция уже закрыта биржей (сработал стоп/тейк)."
+        : "Позиция уже была закрыта на бирже.",
+    );
+  };
 
   try {
     const rules = await fetchDemoSymbolRules(req.market, req.symbol);
@@ -277,14 +291,10 @@ async function closeOwn(
         ),
         rules.stepSize,
       );
-      if (Number(qty) <= 0) {
-        steps.push({
-          label: "Позиция",
-          ok: true,
-          detail: `Своей позиции нет (на бирже ${position.amount})`,
-        });
-        return finish("closed", "Позиция уже была закрыта на бирже.");
-      }
+      if (closeVerdict(plan, Number(qty)) !== "close")
+        return nothingToClose(
+          `своей позиции нет (на бирже ${position.amount})`,
+        );
       const order = await demoFuturesReduceMarket(
         creds,
         req.symbol,
@@ -314,14 +324,12 @@ async function closeOwn(
       rules.stepSize,
     );
     const price = await fetchDemoPrice("spot", req.symbol);
-    if (isDust(Number(qty), price, rules)) {
-      steps.push({
-        label: "Остаток",
-        ok: true,
-        detail: `${baseAsset}: к продаже ${qty} (~$${(Number(qty) * price).toFixed(2)}) — меньше минимального ордера`,
-      });
-      return finish("closed", "Монеты уже проданы (сработал TP/SL на бирже).");
-    }
+    // Пыль биржа не продаст (-1013 NOTIONAL) — продавать нечего.
+    const sellable = isDust(Number(qty), price, rules) ? 0 : Number(qty);
+    if (closeVerdict(plan, sellable) !== "close")
+      return nothingToClose(
+        `${baseAsset}: к продаже ${qty} (~$${(Number(qty) * price).toFixed(2)}) — меньше минимального ордера`,
+      );
     const order = await demoSpotMarketOrder(creds, req.symbol, "SELL", qty);
     steps.push({
       label: "Продать свой объём по рынку",
