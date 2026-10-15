@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RISK_PROFILES } from "../config/profiles";
-import { MIN_LIQUID_RESERVE } from "../config/rules";
+import { MAX_UNPROTECTED_SHARE, MIN_LIQUID_RESERVE } from "../config/rules";
 import { buildAllocation } from "./buildAllocation";
 
 describe("распределение по профилю риска", () => {
@@ -19,11 +19,21 @@ describe("распределение по профилю риска", () => {
     expect(ids).toEqual(["simple-flexible", "simple-locked", "stable-yield"]);
   });
 
-  it("незащищённый капитал в агрессивном — не больше трети суммы", () => {
-    const risky = buildAllocation(1_000, "aggressive")
+  it.each(
+    RISK_PROFILES,
+  )("%s: корзины без защиты капитала укладываются в MAX_UNPROTECTED_SHARE", (profile) => {
+    const risky = buildAllocation(1_000, profile)
       .filter((b) => ["dual", "onchain", "smart-arbitrage"].includes(b.id))
       .reduce((s, b) => s + b.share, 0);
-    expect(risky).toBeLessThanOrEqual(0.35 + 1e-9);
+    expect(risky).toBeLessThanOrEqual(MAX_UNPROTECTED_SHARE[profile] + 1e-9);
+  });
+
+  it("лимит незащищённого капитала: 0 % / 15 % / 35 % по профилям", () => {
+    expect(MAX_UNPROTECTED_SHARE).toEqual({
+      conservative: 0,
+      moderate: 0.15,
+      aggressive: 0.35,
+    });
   });
 
   it("отрицательная сумма считается нулём", () => {

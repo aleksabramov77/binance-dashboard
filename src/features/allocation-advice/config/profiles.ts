@@ -1,4 +1,12 @@
 import type { EarnKind } from "@/entities/earn-product";
+import {
+  DUAL_MAX_DAYS,
+  DUAL_MIN_DISTANCE,
+  LOCK_LADDER,
+  MAX_SHARE_PER_PROTOCOL,
+  MAX_UNPROTECTED_SHARE,
+  sharePercent,
+} from "./rules";
 
 export const RISK_PROFILES = [
   "conservative",
@@ -15,11 +23,9 @@ export const PROFILE_LABELS: Record<RiskProfile, string> = {
 
 export const PROFILE_DESCRIPTIONS: Record<RiskProfile, string> = {
   conservative:
-    "Главное — не потерять. Только продукты, где возвращается то же количество монет, и только стейблкоины. Доход скромный.",
-  moderate:
-    "Основа — надёжные продукты, небольшая часть — в стейкинг и Dual ради дохода повыше.",
-  aggressive:
-    "Готовы рискнуть третью суммы ради заметно большего дохода. Даже здесь большая часть — в надёжных продуктах.",
+    "Главное — не потерять. Только продукты, где возвращается то же количество монет, и только стейблкоины (BFUSD не берём). Доход скромный.",
+  moderate: `Основа — надёжные продукты, небольшая часть — в стейкинг и Dual ради дохода повыше. Без защиты капитала — не больше ${sharePercent(MAX_UNPROTECTED_SHARE.moderate)} суммы.`,
+  aggressive: `Готовы рискнуть до ${sharePercent(MAX_UNPROTECTED_SHARE.aggressive)} суммы ради заметно большего дохода. Даже здесь большая часть — в надёжных продуктах.`,
 };
 
 /** Корзины калькулятора: несколько видов Earn с одинаковой ролью в портфеле. */
@@ -51,11 +57,11 @@ export const BUCKET_INFO: Record<BucketId, { title: string; why: string }> = {
   },
   "simple-locked": {
     title: "Simple Earn Locked (стейблкоины, лестница сроков)",
-    why: "Ставка выше Flexible за заморозку. Разложено на сроки 30/60/90 дней, чтобы часть денег освобождалась каждый месяц.",
+    why: `Ставка выше Flexible за заморозку. Разложено на сроки ${LOCK_LADDER.join("/")} дней, чтобы часть денег освобождалась регулярно.`,
   },
   "stable-yield": {
     title: "RWUSD / BFUSD",
-    why: "Долларовый доход от облигаций (RWUSD) и стратегии Binance (BFUSD). Вывод занимает 1–3 дня.",
+    why: "Долларовый доход от облигаций (RWUSD) и стратегии Binance (BFUSD). Вывод занимает 1–3 дня. У BFUSD капитал не защищён — он идёт в лимит незащищённой части профиля (в консервативном — только RWUSD).",
   },
   staking: {
     title: "ETH / SOL Staking",
@@ -63,11 +69,11 @@ export const BUCKET_INFO: Record<BucketId, { title: string; why: string }> = {
   },
   dual: {
     title: "Dual Investment (Buy Low)",
-    why: "Высокая ставка за готовность купить монету дешевле текущей цены. Целевая цена — не ближе 5 % от рынка, срок — до двух недель.",
+    why: `Высокая ставка за готовность купить монету дешевле текущей цены. Целевая цена — не ближе ${sharePercent(DUAL_MIN_DISTANCE)} от рынка, срок — до ${DUAL_MAX_DAYS} дней.`,
   },
   onchain: {
     title: "On-chain Yields (DeFi)",
-    why: "Самый рискованный вид: деньги уходят во внешние протоколы. Не больше 10 % в один протокол.",
+    why: `Самый рискованный вид: деньги уходят во внешние протоколы. Не больше ${sharePercent(MAX_SHARE_PER_PROTOCOL)} в один протокол.`,
   },
   "smart-arbitrage": {
     title: "Smart Arbitrage",

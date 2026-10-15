@@ -6,6 +6,7 @@ import type {
   KindSummary,
   YieldProduct,
 } from "@/entities/earn-product";
+import type { RiskProfile } from "../config/profiles";
 import { buildAllocation } from "./buildAllocation";
 import { fillAllocation } from "./fillAllocation";
 
@@ -187,11 +188,15 @@ const bucket = (plan: ReturnType<typeof fillAllocation>, id: string) =>
 
 describe("калькулятор: продукты в корзинах", () => {
   it("Flexible — только стейблы, не больше 25 % суммы в один продукт", () => {
-    const plan = fillAllocation(buildAllocation(10_000, "conservative"), {
-      simpleOffers,
-      catalog,
-      summary,
-    });
+    const plan = fillAllocation(
+      buildAllocation(10_000, "conservative"),
+      {
+        simpleOffers,
+        catalog,
+        summary,
+      },
+      "conservative",
+    );
     const flex = bucket(plan, "simple-flexible");
     expect(flex?.picks.map((p) => [p.id, p.amountUsd])).toEqual([
       ["usdt-flex", 2_500],
@@ -202,11 +207,15 @@ describe("калькулятор: продукты в корзинах", () => {
   });
 
   it("Locked — лестницей сроков 30/60/90, распроданные пропускаются", () => {
-    const plan = fillAllocation(buildAllocation(9_000, "moderate"), {
-      simpleOffers,
-      catalog,
-      summary,
-    });
+    const plan = fillAllocation(
+      buildAllocation(9_000, "moderate"),
+      {
+        simpleOffers,
+        catalog,
+        summary,
+      },
+      "moderate",
+    );
     const locked = bucket(plan, "simple-locked");
     expect(locked?.picks.map((p) => p.id)).toEqual([
       "usdt-30",
@@ -219,11 +228,15 @@ describe("калькулятор: продукты в корзинах", () => {
   });
 
   it("Dual — только Buy Low дальше 5 % от цены и до 14 дней, лучшее по монете, по 10 % суммы", () => {
-    const plan = fillAllocation(buildAllocation(10_000, "aggressive"), {
-      simpleOffers,
-      catalog,
-      summary,
-    });
+    const plan = fillAllocation(
+      buildAllocation(10_000, "aggressive"),
+      {
+        simpleOffers,
+        catalog,
+        summary,
+      },
+      "aggressive",
+    );
     const dual = bucket(plan, "dual");
     expect(dual?.picks.map((p) => [p.id, p.amountUsd])).toEqual([
       ["dual:btc-far", 1_000],
@@ -232,22 +245,30 @@ describe("калькулятор: продукты в корзинах", () => {
   });
 
   it("DeFi — стейблы первыми, один продукт на протокол, не больше 10 % в протокол", () => {
-    const plan = fillAllocation(buildAllocation(10_000, "aggressive"), {
-      simpleOffers,
-      catalog,
-      summary,
-    });
+    const plan = fillAllocation(
+      buildAllocation(10_000, "aggressive"),
+      {
+        simpleOffers,
+        catalog,
+        summary,
+      },
+      "aggressive",
+    );
     expect(
       bucket(plan, "onchain")?.picks.map((p) => [p.id, p.amountUsd]),
     ).toEqual([["onchain:Plasma-USDT-90D", 1_000]]);
   });
 
   it("без ключа — корзины каталога «нужен ключ», сумма в «не размещено», доход — по сводке", () => {
-    const plan = fillAllocation(buildAllocation(10_000, "conservative"), {
-      simpleOffers,
-      catalog: { status: "not-configured", hosting: "local" },
-      summary,
-    });
+    const plan = fillAllocation(
+      buildAllocation(10_000, "conservative"),
+      {
+        simpleOffers,
+        catalog: { status: "not-configured", hosting: "local" },
+        summary,
+      },
+      "conservative",
+    );
     const stable = bucket(plan, "stable-yield");
     expect(stable).toMatchObject({
       gap: "needs-key",
@@ -259,11 +280,15 @@ describe("калькулятор: продукты в корзинах", () => {
   });
 
   it("без снимка Simple Earn и без сводки — корзины Simple пустые, доход 0", () => {
-    const plan = fillAllocation(buildAllocation(1_000, "conservative"), {
-      simpleOffers: null,
-      catalog: null,
-      summary: null,
-    });
+    const plan = fillAllocation(
+      buildAllocation(1_000, "conservative"),
+      {
+        simpleOffers: null,
+        catalog: null,
+        summary: null,
+      },
+      "conservative",
+    );
     expect(bucket(plan, "simple-flexible")).toMatchObject({
       gap: "no-snapshot",
       unplacedUsd: 600,
@@ -274,11 +299,15 @@ describe("калькулятор: продукты в корзинах", () => {
   });
 
   it("Smart Arbitrage — только вручную; ожидаемый доход складывается из продуктов", () => {
-    const plan = fillAllocation(buildAllocation(10_000, "aggressive"), {
-      simpleOffers,
-      catalog,
-      summary,
-    });
+    const plan = fillAllocation(
+      buildAllocation(10_000, "aggressive"),
+      {
+        simpleOffers,
+        catalog,
+        summary,
+      },
+      "aggressive",
+    );
     const arb = bucket(plan, "smart-arbitrage");
     expect(arb).toMatchObject({
       gap: "manual",
@@ -290,5 +319,125 @@ describe("калькулятор: продукты в корзинах", () => {
       6,
     );
     expect(plan.amountUsd).toBeCloseTo(10_000, 6);
+  });
+
+  const unprotectedUsd = (p: ReturnType<typeof fillAllocation>) =>
+    p.buckets
+      .flatMap((b) => b.picks)
+      .filter((pick) => /^(dual:|onchain:|bfusd)/.test(pick.id))
+      .reduce((s, pick) => s + pick.amountUsd, 0) +
+    (bucket(p, "smart-arbitrage")?.amountUsd ?? 0);
+  const planFor = (amount: number, profile: RiskProfile) =>
+    fillAllocation(
+      buildAllocation(amount, profile),
+      { simpleOffers, catalog, summary },
+      profile,
+    );
+
+  it("консервативный — 0 $ в незащищённых: RWUSD/BFUSD-корзина целиком в RWUSD", () => {
+    const plan = planFor(10_000, "conservative");
+    expect(unprotectedUsd(plan)).toBe(0);
+    expect(
+      bucket(plan, "stable-yield")?.picks.map((p) => [p.id, p.amountUsd]),
+    ).toEqual([["rwusd", 1_500]]);
+  });
+
+  it("агрессивный — незащищённые вместе с BFUSD не больше 35 % суммы", () => {
+    const plan = planFor(10_000, "aggressive");
+    expect(unprotectedUsd(plan)).toBeLessThanOrEqual(3_500 + 1e-6);
+    // Dual, DeFi и Smart Arbitrage уже занимают весь лимит — BFUSD не достаётся, его доля уходит в RWUSD.
+    expect(
+      bucket(plan, "stable-yield")?.picks.map((p) => [p.id, p.amountUsd]),
+    ).toEqual([["rwusd", 1_000]]);
+  });
+
+  it("умеренный — BFUSD получает только остаток лимита 15 %, излишек — в RWUSD", () => {
+    const plan = planFor(10_000, "moderate");
+    const stable = bucket(plan, "stable-yield");
+    expect(stable?.picks.map((p) => [p.id, p.amountUsd])).toEqual([
+      ["bfusd", 500],
+      ["rwusd", 1_000],
+    ]);
+    expect(unprotectedUsd(plan)).toBeCloseTo(1_500, 6);
+  });
+
+  it("сумма меньше минимума продукта — в «не размещено» с причиной", () => {
+    const small: AdvancedCatalog = {
+      ...catalog,
+      yields: [
+        yieldProduct({
+          id: "onchain:Plasma-USDT-90D",
+          kind: "onchain",
+          name: "Plasma-USDT-90D",
+          apr: 0.026,
+          minPurchase: 100,
+        }),
+      ],
+      dual: [
+        dualOffer({ minAmount: 60 }),
+        dualOffer({
+          id: "dual:eth",
+          coin: "ETH",
+          price: 3_000,
+          strikePrice: 2_700,
+          apr: 0.15,
+          minAmount: 60,
+        }),
+      ],
+    };
+    const plan = fillAllocation(
+      buildAllocation(500, "aggressive"),
+      { simpleOffers, catalog: small, summary },
+      "aggressive",
+    );
+    expect(bucket(plan, "onchain")).toMatchObject({
+      picks: [],
+      unplacedUsd: 50,
+      gap: "below-minimum",
+    });
+    // Dual 100 $ на две монеты — по 50 $ при минимуме 60: обе выбывают.
+    expect(bucket(plan, "dual")).toMatchObject({
+      picks: [],
+      gap: "below-minimum",
+    });
+  });
+
+  it("Locked: занятый ближайший срок не обнуляет ступень — берётся следующий по близости", () => {
+    const offers = [
+      offer({
+        id: "usdt-30",
+        type: "locked",
+        durationDays: 30,
+        maxApr: 0.07,
+        baseApr: 0.07,
+      }),
+      offer({
+        id: "usdt-120",
+        type: "locked",
+        durationDays: 120,
+        maxApr: 0.09,
+        baseApr: 0.09,
+      }),
+      offer({
+        id: "usdc-60",
+        asset: "USDC",
+        type: "locked",
+        durationDays: 60,
+        maxApr: 0.2,
+        baseApr: 0.2,
+        minPurchase: 10_000,
+      }),
+    ];
+    const plan = fillAllocation(
+      buildAllocation(9_000, "moderate"),
+      { simpleOffers: offers, catalog, summary },
+      "moderate",
+    );
+    // 60 дн. (USDC) ниже минимума и отсеян до поиска срока; ступень 60 получает 120 дн., на 90 продуктов не осталось.
+    expect(bucket(plan, "simple-locked")?.picks.map((p) => p.label)).toEqual([
+      "USDT Locked 30 дн.",
+      "USDT Locked 120 дн.",
+    ]);
+    expect(bucket(plan, "simple-locked")?.gap).toBe("below-minimum");
   });
 });

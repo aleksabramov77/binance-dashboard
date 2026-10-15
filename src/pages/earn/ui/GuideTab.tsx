@@ -23,11 +23,15 @@ export function GuideTab({ onOpenTab }: { onOpenTab: (tab: KindTab) => void }) {
   const summary = useEarnSummary();
   const plan = useMemo(
     () =>
-      fillAllocation(buildAllocation(amount, profile), {
-        simpleOffers: simple.data?.latest?.offers ?? null,
-        catalog: catalog.data ?? null,
-        summary: summary.data?.items ?? null,
-      }),
+      fillAllocation(
+        buildAllocation(amount, profile),
+        {
+          simpleOffers: simple.data?.latest?.offers ?? null,
+          catalog: catalog.data ?? null,
+          summary: summary.data?.items ?? null,
+        },
+        profile,
+      ),
     [amount, profile, simple.data, catalog.data, summary.data],
   );
   return (
