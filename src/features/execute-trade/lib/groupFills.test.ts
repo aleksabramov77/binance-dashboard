@@ -61,3 +61,12 @@ describe("groupFills", () => {
     ]);
   });
 });
+
+describe("groupFills: средняя цена", () => {
+  it("без хвоста плавающей точки", () => {
+    const [o] = groupFills([
+      fill({ qty: 39, price: 0.1738, quoteQty: 6.7782 }),
+    ]);
+    expect(o.avgPrice).toBe(0.1738);
+  });
+});

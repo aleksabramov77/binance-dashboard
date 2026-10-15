@@ -28,6 +28,12 @@ export interface DemoSymbolOrders {
    * actualOrderId), своё закрытие. Несколько сделок по одной монете не склеиваются (spec 0012, PR 2d).
    */
   groups: Map<number, string>;
+  /**
+   * Исполненные ордера, которыми своя сделка закрыта целиком: своё закрытие (`-C`) или свой
+   * сработавший TP/SL (`-S`/`-T`/`-S2`/`-T2`, у algo — его actualOrderId). Продаётся нетто вниз к шагу,
+   * поэтому на балансе остаётся хвост — по остатку сделку закрытой не признать.
+   */
+  fullExits: Set<number>;
 }
 
 /**
@@ -40,6 +46,10 @@ export function clientIdGroup(
   const m = /^(bd[A-Za-z0-9]{1,24})-[A-Z][0-9]?$/.exec(clientId ?? "");
   return m ? m[1] : null;
 }
+
+/** Свой ордер, закрывающий сделку целиком: закрытие `-C` или TP/SL `-S`/`-T`/`-S2`/`-T2`. */
+export const isOwnFullExitId = (clientId: string | null | undefined) =>
+  /^bd[A-Za-z0-9]{1,24}-(C|S|T|S2|T2)$/.test(clientId ?? "");
 
 const FUTURES_KIND: Record<string, DemoCloseKind> = {
   TAKE_PROFIT_MARKET: "tp",
@@ -87,6 +97,7 @@ export function toSpotSymbolOrders(
   const closeKinds = new Map<number, DemoCloseKind>();
   const openStops: DemoProtectiveStop[] = [];
   const groups = new Map<number, string>();
+  const fullExits = new Set<number>();
   for (const o of orders) {
     const kind = SPOT_KIND[o.type];
     if (o.status === "FILLED" && kind) closeKinds.set(o.orderId, kind);
@@ -94,8 +105,10 @@ export function toSpotSymbolOrders(
       openStops.push(toStop(o.type, o.side, o.stopPrice, o.clientOrderId));
     const group = clientIdGroup(o.clientOrderId);
     if (group) groups.set(o.orderId, group);
+    if (o.status === "FILLED" && isOwnFullExitId(o.clientOrderId))
+      fullExits.add(o.orderId);
   }
-  return { closeKinds, openStops, groups };
+  return { closeKinds, openStops, groups, fullExits };
 }
 
 /**
@@ -109,6 +122,7 @@ export function toFuturesSymbolOrders(
   const closeKinds = new Map<number, DemoCloseKind>();
   const openStops: DemoProtectiveStop[] = [];
   const groups = new Map<number, string>();
+  const fullExits = new Set<number>();
   for (const a of algos) {
     const kind = FUTURES_KIND[a.orderType];
     if (kind && a.actualOrderId !== null) closeKinds.set(a.actualOrderId, kind);
@@ -119,6 +133,8 @@ export function toFuturesSymbolOrders(
     // Рыночный ордер, которым сработал свой TP/SL, — той же сделки, что и algo.
     const group = clientIdGroup(a.clientAlgoId);
     if (group && a.actualOrderId !== null) groups.set(a.actualOrderId, group);
+    if (a.actualOrderId !== null && isOwnFullExitId(a.clientAlgoId))
+      fullExits.add(a.actualOrderId);
   }
   for (const o of orders) {
     if (o.status === "NEW" && isStopType(o.type))
@@ -126,10 +142,11 @@ export function toFuturesSymbolOrders(
     const group = clientIdGroup(o.clientOrderId);
     if (group && !groups.has(o.orderId)) groups.set(o.orderId, group);
     if (o.status !== "FILLED") continue;
+    if (isOwnFullExitId(o.clientOrderId)) fullExits.add(o.orderId);
     if (isLiquidationId(o.clientOrderId))
       closeKinds.set(o.orderId, "liquidation");
     else if (FUTURES_KIND[o.type] && !closeKinds.has(o.orderId))
       closeKinds.set(o.orderId, FUTURES_KIND[o.type]);
   }
-  return { closeKinds, openStops, groups };
+  return { closeKinds, openStops, groups, fullExits };
 }

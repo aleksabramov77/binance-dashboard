@@ -22,6 +22,7 @@ const state = (over: Partial<SymbolState> = {}): SymbolState => ({
   closeKinds: new Map(),
   openStops: [],
   groups: new Map(),
+  fullExits: new Set(),
   position: null,
   ...over,
 });
@@ -434,5 +435,62 @@ describe("markTrades — несколько сделок дашборда по �
     expect(statusOf(marks, l)).toBe("open");
     expect(statusOf(marks, sh)).toBe("open");
     expect(marks.get(sh.orderId)?.role).toBe("entry");
+  });
+});
+
+describe("markTrades — спот-зеркала закрыты своим ордером, хвост нетто остаётся (PR 2d)", () => {
+  const spot = (over: Partial<OrderAggregate>) =>
+    order({ market: "spot", symbol: "BATUSDT", realizedPnl: null, ...over });
+
+  it("два зеркала: продано нетто вниз к шагу (39 из 40, 44 из 45), общий баланс больше — обе закрыты", () => {
+    const a = spot({ side: "BUY", time: 1, quantity: 40, quoteQty: 7 });
+    const b = spot({ side: "BUY", time: 2, quantity: 45, quoteQty: 7.9 });
+    const aC = spot({
+      side: "SELL",
+      time: 3,
+      quantity: 39,
+      quoteQty: 6.9,
+      avgPrice: 0.177,
+    });
+    const bC = spot({
+      side: "SELL",
+      time: 4,
+      quantity: 44,
+      quoteQty: 7.8,
+      avgPrice: 0.177,
+    });
+    const marks = markTrades(
+      [a, b, aC, bC],
+      state({
+        groups: new Map([
+          [a.orderId, "bda"],
+          [b.orderId, "bdb"],
+          [aC.orderId, "bda"],
+          [bC.orderId, "bdb"],
+        ]),
+        fullExits: new Set([aC.orderId, bC.orderId]),
+        // Хвосты двух сделок и чужие монеты: 1,9 BAT + 3,7 — «держится» по старому правилу.
+        position: { amount: 5.6, entryPrice: null, unrealizedPnl: null },
+      }),
+    );
+    for (const o of [a, b, aC, bC])
+      expect(statusOf(marks, o)).not.toMatch(/^open/);
+    expect(marks.get(aC.orderId)?.role).toBe("exit");
+  });
+
+  it("свой выход не целиком (частичный тейк) и без стопа — сделка остаётся open-unprotected", () => {
+    const a = spot({ side: "BUY", time: 1, quantity: 40, quoteQty: 7 });
+    const part = spot({ side: "SELL", time: 2, quantity: 10, quoteQty: 1.9 });
+    const marks = markTrades(
+      [a, part],
+      state({
+        groups: new Map([
+          [a.orderId, "bda"],
+          [part.orderId, "bda"],
+        ]),
+        position: { amount: 30, entryPrice: null, unrealizedPnl: null },
+      }),
+    );
+    expect(statusOf(marks, a)).toBe("open-unprotected");
   });
 });

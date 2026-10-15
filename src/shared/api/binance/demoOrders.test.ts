@@ -215,3 +215,25 @@ describe("свои сделки по clientOrderId (spec 0012, PR 2d)", () => {
     ]);
   });
 });
+
+describe("свои закрывающие ордера (fullExits)", () => {
+  it("спот: исполненные -C, -S, -T2 своей сделки; вход -M и чужие — нет", () => {
+    const o = (orderId: number, clientOrderId: string, status = "FILLED") => ({
+      orderId,
+      type: "MARKET",
+      side: "SELL" as const,
+      status,
+      stopPrice: 0,
+      clientOrderId,
+    });
+    const r = toSpotSymbolOrders([
+      o(1, "bda-C"),
+      o(2, "bda-S"),
+      o(3, "bda-T2"),
+      o(4, "bda-M"),
+      o(5, "web_1"),
+      o(6, "bdb-T", "CANCELED"),
+    ]);
+    expect([...r.fullExits]).toEqual([1, 2, 3]);
+  });
+});

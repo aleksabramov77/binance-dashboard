@@ -1017,7 +1017,12 @@ export async function fetchDemoSymbolOrders(
     return toFuturesSymbolOrders(algos, orders);
   } catch (error) {
     if (error instanceof BinanceApiError && error.code === -1121)
-      return { closeKinds: new Map(), openStops: [], groups: new Map() };
+      return {
+        closeKinds: new Map(),
+        openStops: [],
+        groups: new Map(),
+        fullExits: new Set(),
+      };
     throw error;
   }
 }

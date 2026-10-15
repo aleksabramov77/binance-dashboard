@@ -9,6 +9,8 @@ import type { OrderAggregate } from "./groupFills";
 export interface SymbolState {
   /** orderId → своя сделка дашборда (clientIdGroup): ордера одной сделки не смешиваются с соседними. */
   groups: Map<number, string>;
+  /** Исполненные свои ордера, закрывшие сделку целиком (`-C`, свой TP/SL). */
+  fullExits: Set<number>;
   /** orderId исполненного ордера → тип выхода (TP/SL/…); ручных ордеров в карте нет. */
   closeKinds: Map<number, DemoCloseKind>;
   /** Активные защитные стопы. */
@@ -32,6 +34,8 @@ export interface OrderMark extends TradeMark {
 }
 
 interface Trade {
+  /** Закрыта своим ордером целиком (`-C` или свой TP/SL) — хвост нетто на балансе не держит её открытой. */
+  fullyClosed: boolean;
   /** Сделка дашборда (clientIdGroup) или `side:<positionSide>` для ордеров без своего id. */
   key: string;
   /** 1 — лонг, −1 — шорт. */
@@ -73,9 +77,10 @@ function applyOrder(
   o: OrderAggregate,
   key: string,
   trades: Trade[],
+  fullExits: Set<number>,
 ): Trade | null {
   const dir = signOf(o);
-  const isClosed = !cur || cur.remaining <= cur.entryQty * DUST[o.market];
+  const isClosed = cur === null || !isOpenTrade(cur);
   if (cur && !isClosed && dir !== cur.dir) {
     const closeQty = Math.min(o.quantity, cur.remaining);
     const pnl =
@@ -87,6 +92,7 @@ function applyOrder(
     cur.remaining = Math.max(0, cur.remaining - o.quantity);
     cur.lastExit = o;
     cur.orders.push({ order: o, role: "exit", pnl });
+    if (fullExits.has(o.orderId)) cur.fullyClosed = true;
     // Разворот одним ордером (шорт 10 закрыт покупкой 15): остаток — вход новой сделки.
     // Строка ордера получит статус новой сделки, роль «выход» и PnL закрытой.
     // Только futures: на споте шорта нет, а «лишняя» продажа — это вход за пределами
@@ -94,6 +100,7 @@ function applyOrder(
     if (o.market === "futures" && reversal > cur.entryQty * DUST[o.market]) {
       const next: Trade = {
         key,
+        fullyClosed: false,
         dir,
         remaining: reversal,
         entryQty: reversal,
@@ -122,6 +129,7 @@ function applyOrder(
     const pnl = o.market === "futures" ? o.realizedPnl : null;
     trades.push({
       key,
+      fullyClosed: true,
       dir: dir === 1 ? -1 : 1,
       remaining: 0,
       entryQty: o.quantity,
@@ -134,6 +142,7 @@ function applyOrder(
   }
   const next: Trade = {
     key,
+    fullyClosed: false,
     dir,
     remaining: o.quantity,
     entryQty: o.quantity,
@@ -146,8 +155,18 @@ function applyOrder(
   return next;
 }
 
-const isOpenTrade = (t: Trade | null): t is Trade =>
-  t !== null && t.remaining > t.entryQty * DUST[t.orders[0].order.market];
+/**
+ * Открыта: не закрыта своим ордером целиком и остаток больше пыли. Для сделок дашборда главный
+ * признак — свой закрывающий ордер (продаём нетто вниз к шагу — хвост до шага остаётся); для
+ * остальных — остаток меньше доли входа DUST.
+ */
+function isOpenTrade(t: Trade | null): boolean {
+  return (
+    t !== null &&
+    !t.fullyClosed &&
+    t.remaining > t.entryQty * DUST[t.orders[0].order.market]
+  );
+}
 
 /**
  * Разбивает ордера символа на сделки. Ордер своей сделки дашборда (groups: clientOrderId
@@ -159,6 +178,7 @@ const isOpenTrade = (t: Trade | null): t is Trade =>
 function splitTrades(
   orders: OrderAggregate[],
   groups: Map<number, string>,
+  fullExits: Set<number>,
 ): Trade[] {
   const trades: Trade[] = [];
   const current = new Map<string, Trade | null>();
@@ -177,7 +197,10 @@ function splitTrades(
       );
       key = exitFor ? exitFor.key : `side:${o.positionSide}`;
     }
-    current.set(key, applyOrder(current.get(key) ?? null, o, key, trades));
+    current.set(
+      key,
+      applyOrder(current.get(key) ?? null, o, key, trades, fullExits),
+    );
   }
   return trades;
 }
@@ -205,9 +228,13 @@ export function markTrades(
   state: SymbolState | null,
 ): Map<number, OrderMark> {
   const marks = new Map<number, OrderMark>();
-  for (const trade of splitTrades(orders, state?.groups ?? new Map())) {
+  for (const trade of splitTrades(
+    orders,
+    state?.groups ?? new Map(),
+    state?.fullExits ?? new Set(),
+  )) {
     const market = trade.orders[0].order.market;
-    const isOpen = trade.remaining > trade.entryQty * DUST[market];
+    const isOpen = isOpenTrade(trade);
     let status: TradeStatus = "unknown";
     let stopPrice: number | null = null;
     let unrealizedPnl: number | null = null;
