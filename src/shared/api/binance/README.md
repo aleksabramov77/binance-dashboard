@@ -24,7 +24,8 @@
   `engine-tick` (Deno, spec 007b). Транспорт (повторы, журнал) передаётся аргументом.
 - `market.ts` — `createMarketApi` поверх `getJsonWithRetry` (`shared/lib/fetchRetry.ts`) для Node;
   `client.ts` — Earn и цены через тот же `getJsonWithRetry`.
-- `accountClient.ts` — Spot, Funding, Simple Earn (read-only).
+- `accountClient.ts` — Spot, Funding, Simple Earn (read-only): позиции и история начислений (см. «Earn: история
+  начислений» ниже).
 - `earnAccountClient.ts` + `earnAccountSchemas.ts` — каталоги сложных продуктов Earn (spec 0019), только подписанные
   GET (USER_DATA, read-only ключ). Экспорт — через `account.server.ts`, типы — через `index.ts`. См. «Earn: сложные
   продукты» ниже.
@@ -97,3 +98,20 @@
   `rateHistory` у Binance тяжелее обычных ручек — дёргается только на холодный кэш (4 запроса).
 - Ручки `…/account` (балансы позиций) не используются: «Мои позиции» — вне scope 0019.
 - Нет аккаунта RWUSD/BFUSD или другая ошибка группы → группа уходит в `warnings` загрузчика, остальные видны.
+
+## Earn: история начислений (spec 0022, проба 2026-10-15)
+Колонка «Вчера» в таблице портфеля. Обе ручки — подписанные GET (USER_DATA, read-only ключ), вес 150 (IP), окно
+`startTime`/`endTime` не больше 30 дней (`endTime` включительно), страницы по 100 (`fetchAllPages`).
+
+| Функция | Ручка | Параметры | Поля, которые используем |
+|---|---|---|---|
+| `fetchFlexibleRewards` | `GET /sapi/v1/simple-earn/flexible/history/rewardsRecord` | `type` **обязателен** (без него `-1102`): `BONUS`, `REALTIME`, `REWARDS`, `ALL`; `startTime`, `endTime` | `rows[] {asset, rewards, productId, type, time}` — в документации `projectId`, в ответе `productId` (схема берёт любое) |
+| `fetchLockedRewards` | `GET /sapi/v1/simple-earn/locked/history/rewardsRecord` | `startTime`, `endTime` | `rows[] {positionId, asset, amount, time, type}` — по документации (на аккаунте пробы Locked-позиций нет) |
+
+- `REALTIME` — начисление по базовой ставке, одна строка на продукт за сутки (`time` — 23:59:59 UTC); `BONUS` —
+  бонусная ступень (`tierAnnualPercentageRate`), приходит в течение суток. Они не пересекаются: `REALTIME` совпадает
+  с `yesterdayRealTimeRewards` позиции, `BONUS` — ровно ступень (500 USDT × 4 % / 365).
+- `ALL` отдаёт ровно объединение `BONUS` + `REALTIME` без повторов — загрузчик портфеля делает один запрос вместо
+  трёх. `REWARDS` («старая история») за 30 дней пуст; суммируются только `BONUS` и `REALTIME`
+  (`features/load-portfolio/model/yesterdayRewards.ts`).
+- `rewards`/`amount` — в монете `asset` (монета награды); в USD — по цене этой монеты.
