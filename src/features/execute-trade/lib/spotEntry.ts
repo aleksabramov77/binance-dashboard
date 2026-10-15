@@ -62,15 +62,16 @@ export function pendingOutcome(
   orders: { type: string; status: string }[],
 ): "placed" | "stopOnly" | "waiting" | "failed" {
   if (orders.length === 0) return "waiting";
-  if (
-    orders.some((o) => o.status === "FILLED" || o.status === "PARTIALLY_FILLED")
-  )
-    return "placed";
+  // Нога исполнилась целиком — позиция уже продана (вторую ногу OCO биржа снимает сама).
+  if (orders.some((o) => o.status === "FILLED")) return "placed";
   const stop = orders.find((o) => STOP_TYPES.includes(o.type));
   const anyDead = orders.some((o) => DEAD.includes(o.status));
-  // Стоп снят — защиты нет. Стопа в списке не нашли (не ждём такого) — как раньше: любой снятый
-  // ордер считаем потерей защиты.
-  if (anyDead && (!stop || DEAD.includes(stop.status))) return "failed";
+  // Стопа в списке нет (в ответе биржи он есть всегда; при перечитывании по clientOrderId его могли
+  // не найти) — защита не подтверждена: никогда не placed.
+  if (!stop) return anyDead ? "failed" : "waiting";
+  // Стоп снят — защиты нет; стоп частично сработал — он жив и продаёт остаток.
+  if (DEAD.includes(stop.status)) return "failed";
+  if (stop.status === "PARTIALLY_FILLED") return "placed";
   if (orders.some((o) => o.status === "PENDING_NEW")) return "waiting";
   return anyDead ? "stopOnly" : "placed";
 }

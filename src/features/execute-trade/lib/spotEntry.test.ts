@@ -65,8 +65,16 @@ describe("pendingOutcome", () => {
     expect(pendingOutcome([stop("REJECTED")])).toBe("failed");
     expect(pendingOutcome([])).toBe("waiting");
   });
-  it("стопа в списке нет — любой снятый ордер считается потерей защиты", () => {
+  it("стопа в списке нет — защита не подтверждена, никогда не placed (ревью #49)", () => {
     expect(pendingOutcome([tp("EXPIRED")])).toBe("failed");
+    // OTOCO перечитана: стоп -S не найден (-2013), тейк -T стоит.
+    expect(pendingOutcome([tp("NEW")])).toBe("waiting");
+    expect(pendingOutcome([tp("FILLED")])).toBe("placed");
+    // Тейк исполнен частично, стоп не найден — остаток без подтверждённого стопа.
+    expect(pendingOutcome([tp("PARTIALLY_FILLED")])).toBe("waiting");
+    expect(pendingOutcome([tp("PARTIALLY_FILLED"), stop("NEW")])).toBe(
+      "placed",
+    );
   });
 });
 
