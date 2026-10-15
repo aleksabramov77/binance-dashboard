@@ -80,9 +80,11 @@
    `unprotected` без продажи; затем стоп/OCO отдельно (`-S2/-T2`), при отказе — продажа по рынку. Если OTO/OCO по символу запрещены (`otoAllowed`/`ocoAllowed` в exchangeInfo) — покупка по рынку →
    OCO/стоп → при отказе биржи продажа по рынку (`rejected` «стоп не принят»).
 4. **Futures** (`model/placeFutures.ts`, spec 0012 PR 2c) — работает в обоих режимах позиций:
-   - режим — `fetchDemoPositionMode` (кэш 30 с). One-way и счёт пуст (нет позиций и ордеров, обычных и algo) —
-     перед входом включается Hedge (`demoEnableHedgeMode`, «уже включён» `-4059` — не ошибка); счёт не пуст или
-     переключить не вышло (`-4067/-4068`) — вход в One-way. Выбор — `lib/futuresMode.ts → choosePositionMode`,
+   - режим — `fetchDemoPositionMode` (кэш 30 с). Счёт уже в Hedge — работаем в Hedge. One-way: автопереключение
+     за флагом `config/trade.ts → FUTURES_AUTO_HEDGE` (**выключено** до «окна обслуживания»: Hedge на демо не
+     проверен) — без флага POST `/fapi/v1/positionSide/dual` не вызывается никогда; с флагом и пустым счётом (нет
+     позиций и ордеров, обычных и algo) перед входом включается Hedge (`demoEnableHedgeMode`, `-4059` — не
+     ошибка); счёт не пуст или переключить не вышло (`-4067/-4068`) — вход в One-way. Выбор — `lib/futuresMode.ts → choosePositionMode`,
      шаг «Режим позиций» в отчёте;
    - своя сторона занята (`ownSideBusy`: Hedge — позиция/ордера своего positionSide, One-way — любые по символу) —
      `rejected` без запросов на изменение (в т.ч. ручные сделки с /signals);

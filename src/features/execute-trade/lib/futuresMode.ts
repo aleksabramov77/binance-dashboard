@@ -10,16 +10,30 @@ import {
 // Сеть — model/placeTrade.ts и model/closeDemoPosition.ts.
 
 /**
- * Режим для входа. Hedge — как есть. One-way и счёт пуст (нет позиций и ордеров) — включить Hedge:
- * иначе биржа не даст (-4067/-4068). Не пуст или проверить не удалось (null) — вход в One-way.
+ * Режим для входа. Hedge — как есть. One-way: автопереключение выключено (config/trade →
+ * FUTURES_AUTO_HEDGE) — One-way; включено и счёт пуст (нет позиций и ордеров) — включить Hedge (иначе
+ * биржа не даст: -4067/-4068); не пуст или проверить не удалось (null) — One-way. reason — для шага отчёта.
  */
 export function choosePositionMode(
   current: PositionMode,
   accountBusy: boolean | null,
-): { mode: PositionMode; enableHedge: boolean } {
-  if (current === "hedge") return { mode: "hedge", enableHedge: false };
-  if (accountBusy === false) return { mode: "hedge", enableHedge: true };
-  return { mode: "oneway", enableHedge: false };
+  autoHedge: boolean,
+): {
+  mode: PositionMode;
+  enableHedge: boolean;
+  reason: "hedge" | "autoHedgeOff" | "accountBusy" | "busyUnknown" | "switch";
+} {
+  if (current === "hedge")
+    return { mode: "hedge", enableHedge: false, reason: "hedge" };
+  if (!autoHedge)
+    return { mode: "oneway", enableHedge: false, reason: "autoHedgeOff" };
+  if (accountBusy === false)
+    return { mode: "hedge", enableHedge: true, reason: "switch" };
+  return {
+    mode: "oneway",
+    enableHedge: false,
+    reason: accountBusy === null ? "busyUnknown" : "accountBusy",
+  };
 }
 
 /**

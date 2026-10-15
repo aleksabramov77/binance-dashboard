@@ -15,22 +15,35 @@ const onewayLong = { mode: "oneway", direction: "long" } as const;
 const onewayShort = { mode: "oneway", direction: "short" } as const;
 
 describe("choosePositionMode", () => {
-  it("Hedge — как есть; One-way на пустом счёте — включить Hedge", () => {
-    expect(choosePositionMode("hedge", true)).toEqual({
-      mode: "hedge",
-      enableHedge: false,
-    });
-    expect(choosePositionMode("oneway", false)).toEqual({
-      mode: "hedge",
-      enableHedge: true,
-    });
+  it("Hedge (включён вручную) — работаем в Hedge при любом флаге", () => {
+    for (const auto of [false, true])
+      expect(choosePositionMode("hedge", true, auto)).toEqual({
+        mode: "hedge",
+        enableHedge: false,
+        reason: "hedge",
+      });
   });
-  it("на счёте позиции/ордера или проверить не удалось — вход в One-way", () => {
-    expect(choosePositionMode("oneway", true)).toEqual({
+  it("автопереключение выключено — One-way даже на пустом счёте, без POST", () => {
+    expect(choosePositionMode("oneway", false, false)).toEqual({
       mode: "oneway",
       enableHedge: false,
+      reason: "autoHedgeOff",
     });
-    expect(choosePositionMode("oneway", null).mode).toBe("oneway");
+  });
+  it("включено: пустой счёт — включить Hedge; занят или неизвестно — One-way", () => {
+    expect(choosePositionMode("oneway", false, true)).toEqual({
+      mode: "hedge",
+      enableHedge: true,
+      reason: "switch",
+    });
+    expect(choosePositionMode("oneway", true, true)).toMatchObject({
+      mode: "oneway",
+      reason: "accountBusy",
+    });
+    expect(choosePositionMode("oneway", null, true)).toMatchObject({
+      mode: "oneway",
+      reason: "busyUnknown",
+    });
   });
 });
 

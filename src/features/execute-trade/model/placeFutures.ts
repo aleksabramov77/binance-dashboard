@@ -21,7 +21,7 @@ import {
   unknownOutcomeDeadline,
 } from "@/shared/api/binance/demo.server";
 import type { BinanceCredentials } from "@/shared/config/env.server";
-import { FUTURES_STOP_BEFORE_ENTRY } from "../config/trade";
+import { FUTURES_AUTO_HEDGE, FUTURES_STOP_BEFORE_ENTRY } from "../config/trade";
 import {
   afterAlgoUnknown,
   algoLookup,
@@ -75,9 +75,17 @@ const MODE_LABEL: Record<PositionMode, string> = {
   oneway: "One-way (одна позиция на символ)",
 };
 
+const MODE_REASON = {
+  hedge: MODE_LABEL.hedge,
+  autoHedgeOff: `${MODE_LABEL.oneway}: автопереключение в Hedge выключено (config/trade → FUTURES_AUTO_HEDGE)`,
+  accountBusy: `${MODE_LABEL.oneway}: на счёте есть позиции или ордера — Hedge не включить`,
+  busyUnknown: `${MODE_LABEL.oneway}: не удалось проверить, пуст ли счёт, — Hedge не включаем`,
+  switch: MODE_LABEL.hedge,
+} as const;
+
 /**
- * Режим позиций для входа (spec 0012, PR 2c). One-way и пустой счёт — включить Hedge; иначе вход в
- * том режиме, что есть (переключить биржа не даст: -4067/-4068). null — режим узнать не удалось.
+ * Режим позиций для входа (spec 0012, PR 2c). Автопереключение (FUTURES_AUTO_HEDGE) и пустой счёт —
+ * включить Hedge; иначе вход в том режиме, что есть. null — режим узнать не удалось.
  */
 async function resolveMode(
   creds: BinanceCredentials,
@@ -91,23 +99,17 @@ async function resolveMode(
     steps.push({ label, ok: false, detail: errorText(error) });
     return null;
   }
+  // Пустоту счёта проверяем, только если автопереключение включено: иначе POST не нужен вовсе.
   let busy: boolean | null = null;
-  if (current === "oneway")
+  if (current === "oneway" && FUTURES_AUTO_HEDGE)
     try {
       busy = await fetchDemoFuturesAccountBusy(creds);
     } catch {
       busy = null;
     }
-  const chosen = choosePositionMode(current, busy);
+  const chosen = choosePositionMode(current, busy, FUTURES_AUTO_HEDGE);
   if (!chosen.enableHedge) {
-    steps.push({
-      label,
-      ok: true,
-      detail:
-        current === "oneway"
-          ? `${MODE_LABEL.oneway}: на счёте есть позиции или ордера — Hedge не включить`
-          : MODE_LABEL.hedge,
-    });
+    steps.push({ label, ok: true, detail: MODE_REASON[chosen.reason] });
     return chosen.mode;
   }
   try {
