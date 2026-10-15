@@ -21,7 +21,8 @@
   `ResponseFormatError` (для ордеров значит «скорее всего исполнен»).
 - `markets.ts` — имена рынков (spec 0023): `BinanceMarket` = `spot` / `usdm` (USDⓈ-M, fapi) / `coinm` (COIN-M, dapi),
   `FuturesMarket`, `Market` = `spot` / `usdm` — рынки ручных сделок и Binance Demo; `tradeMarketSchema` читает старое
-  `futures` как `usdm` (сетапы и сделки от старого клиента), `withLegacyMarketField` — то же для объектов с полем market.
+  `futures` как `usdm` (сетапы и сделки от старого клиента), `withLegacyMarketField` — то же для объектов с полем market;
+  сама нормализация — одна, в `trading-core` (`normalizeMarket`).
 - `marketApi.ts` — **среда-независимые** публичные рыночные запросы (`createMarketApi(getJson)`): тикеры
   (`fetch24hTickers` — Spot/USDⓈ-M, `fetchCoinmTickers` — COIN-M: оборот в контрактах), свечи по любому рынку,
   бессрочные контракты `fetchPerpetuals(market)` (символ → размер контракта COIN-M; у dapi статус — `contractStatus`),
