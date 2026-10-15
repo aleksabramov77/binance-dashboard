@@ -8,12 +8,14 @@ import { UserMenu } from "@/features/auth";
 import { EngineToggle } from "@/features/engine-toggle";
 import { NAV_ITEMS } from "@/shared/config";
 import { cn } from "@/shared/lib";
+import { NewVersionBanner } from "./NewVersionBanner";
 
 // Хедер — слой платформы: склеивает домены (Лаборатория, ИИ-кредиты, вход) только через их public API.
 export function AppHeader() {
   const pathname = usePathname();
   return (
     <header className="border-b bg-card/60 backdrop-blur">
+      <NewVersionBanner />
       <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 sm:px-8">
         <Link
           href="/"
