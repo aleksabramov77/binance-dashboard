@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { LogEntry } from "@/entities/log-entry";
 import { cn } from "@/shared/lib";
+import { Button } from "@/shared/ui/button";
 
 const LEVEL_TONE: Record<LogEntry["level"], string> = {
   debug: "text-muted-foreground",
@@ -21,8 +22,15 @@ function Row({ entry }: { entry: LogEntry }) {
         className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left"
         onClick={() => hasDetails && setOpen(!open)}
       >
-        <span className="w-20 shrink-0 font-mono text-xs text-muted-foreground">
-          {new Date(entry.ts).toLocaleTimeString("ru-RU")}
+        <span className="w-28 shrink-0 font-mono text-xs text-muted-foreground">
+          {/* Журнал до 14 суток — с датой. */}
+          {new Date(entry.ts).toLocaleString("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })}
         </span>
         <span
           className={cn(
@@ -56,9 +64,25 @@ function Row({ entry }: { entry: LogEntry }) {
   );
 }
 
-export function LogList({ entries }: { entries: LogEntry[] }) {
+export function LogList({
+  entries,
+  onReset,
+}: {
+  entries: LogEntry[];
+  /** Есть активные фильтры — в пустом состоянии кнопка «Сбросить фильтры». */
+  onReset?: () => void;
+}) {
   if (entries.length === 0)
-    return <p className="text-sm text-muted-foreground">Записей нет.</p>;
+    return (
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span>Записей нет.</span>
+        {onReset && (
+          <Button variant="outline" size="sm" onClick={onReset}>
+            Сбросить фильтры
+          </Button>
+        )}
+      </div>
+    );
   return (
     <ul className="rounded-xl border bg-card px-4">
       {entries.map((entry, i) => (

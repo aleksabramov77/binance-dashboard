@@ -1,8 +1,22 @@
 "use client";
 
-import { parseAsStringLiteral, useQueryState } from "nuqs";
-import { Suspense } from "react";
-import { LOG_LEVELS, type LogLevel, useLogs } from "@/entities/log-entry";
+import {
+  parseAsInteger,
+  parseAsString,
+  parseAsStringLiteral,
+  useQueryStates,
+} from "nuqs";
+import { Suspense, useMemo } from "react";
+import {
+  LOG_DAYS_DEFAULT,
+  LOG_DAYS_MAX,
+  LOG_LEVELS,
+  type LogLevel,
+  parseLogFilters,
+  useLogs,
+} from "@/entities/log-entry";
+import { Button } from "@/shared/ui/button";
+import { Input } from "@/shared/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { LogList } from "@/widgets/log-list";
 
@@ -13,36 +27,102 @@ const LEVEL_LABELS: Record<LogLevel, string> = {
   error: "Ошибки",
 };
 
+const DAYS_OPTIONS = [LOG_DAYS_DEFAULT, 7, LOG_DAYS_MAX] as const;
+
+const daysLabel = (n: number) => (n < 5 ? `${n} дня` : `${n} дней`);
+
+// Фильтры — в URL (spec 0016): на них ведёт ссылка из «N отказ · M пропуск» в лаборатории.
+const parsers = {
+  level: parseAsStringLiteral(LOG_LEVELS).withDefault("info"),
+  event: parseAsString.withDefault(""),
+  experiment: parseAsString.withDefault(""),
+  days: parseAsInteger.withDefault(LOG_DAYS_DEFAULT),
+};
+
 function Logs() {
-  const [level, setLevel] = useQueryState(
-    "level",
-    parseAsStringLiteral(LOG_LEVELS).withDefault("info"),
+  const [{ level, event, experiment, days }, setFilters] = useQueryStates(
+    parsers,
+    { clearOnDefault: true },
   );
-  const logs = useLogs(level);
+  // Те же правила разбора, что у сервера: события списком, days зажат в 1…14.
+  const filters = useMemo(
+    () =>
+      parseLogFilters(
+        new URLSearchParams({ level, event, experiment, days: String(days) }),
+      ),
+    [level, event, experiment, days],
+  );
+  const logs = useLogs(filters);
+  const active =
+    filters.events.length > 0 ||
+    filters.experiment !== "" ||
+    filters.days !== LOG_DAYS_DEFAULT ||
+    filters.level !== "info";
+  const reset = () => void setFilters(null);
 
   return (
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Логи</h1>
         <p className="text-sm text-muted-foreground">
-          Журнал сервера за сегодня и вчера: запросы к Binance и OpenRouter,
-          сделки, предпроверки и ошибки из браузера. Обновляется каждые 10
-          секунд. Файлы — <code>data/logs/app-YYYY-MM-DD.jsonl</code>; ключи и
-          подписи в журнал не пишутся.
+          Журнал сервера за {daysLabel(filters.days)}: запросы к Binance и
+          OpenRouter, сделки, предпроверки, отказы и пропуски демо-зеркала,
+          ошибки из браузера. Хранится {LOG_DAYS_MAX} дней, обновляется каждые
+          10 секунд. Ключи и подписи в журнал не пишутся.
         </p>
       </header>
-      <Tabs value={level} onValueChange={(v) => setLevel(v as LogLevel)}>
-        <TabsList>
-          {LOG_LEVELS.map((l) => (
-            <TabsTrigger key={l} value={l}>
-              {LEVEL_LABELS[l]}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-col gap-3">
+        <Tabs
+          value={level}
+          onValueChange={(v) => void setFilters({ level: v as LogLevel })}
+        >
+          <TabsList>
+            {LOG_LEVELS.map((l) => (
+              <TabsTrigger key={l} value={l}>
+                {LEVEL_LABELS[l]}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
+            value={event}
+            onChange={(e) => void setFilters({ event: e.target.value })}
+            placeholder="Событие (через запятую)"
+            aria-label="События через запятую"
+            className="w-80 font-mono text-xs"
+          />
+          <Input
+            value={experiment}
+            onChange={(e) => void setFilters({ experiment: e.target.value })}
+            placeholder="Эксперимент"
+            aria-label="Код эксперимента"
+            className="w-32 font-mono text-xs"
+          />
+          <Tabs
+            value={String(filters.days)}
+            onValueChange={(v) => void setFilters({ days: Number(v) })}
+          >
+            <TabsList>
+              {DAYS_OPTIONS.map((d) => (
+                <TabsTrigger key={d} value={String(d)}>
+                  {daysLabel(d)}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          {active && (
+            <Button variant="ghost" size="sm" onClick={reset}>
+              Сбросить фильтры
+            </Button>
+          )}
+        </div>
+      </div>
       {logs.isPending && <p className="text-muted-foreground">Загрузка…</p>}
       {logs.error && <p className="text-destructive">{logs.error.message}</p>}
-      {logs.data && <LogList entries={logs.data} />}
+      {logs.data && (
+        <LogList entries={logs.data} onReset={active ? reset : undefined} />
+      )}
     </div>
   );
 }

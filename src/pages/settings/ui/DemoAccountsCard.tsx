@@ -8,6 +8,7 @@ import {
   pnlTone,
   useResetDemo,
 } from "@/entities/experiment";
+import { mirrorLogsHref } from "@/entities/log-entry";
 import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
 import {
   cn,
@@ -164,8 +165,18 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
               </li>
               <li>Демо-статистика всех экспериментов — с нуля.</li>
               <li>
-                Paper-счета и галочки «торговля» не меняются. Баланс самого
-                демо-счёта (USDT) сбрасывается на demo.binance.com.
+                Paper-счета и галочки «торговля» не меняются. Баланс демо-счёта
+                приложение сбросить не может (у Binance нет такого API): чтобы
+                начать и баланс с нуля, нажмите «Сброс» на сайте Binance:{" "}
+                <a
+                  href="https://demo.binance.com/en/my/wallet/demo/main"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-4"
+                >
+                  Сбросить баланс на demo.binance.com
+                </a>
+                .
               </li>
             </ul>
           </ConfirmAction>
@@ -245,7 +256,7 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
                     {d.open > 0 && (
                       <span className="text-muted-foreground"> +{d.open}</span>
                     )}
-                    <DemoMisses d={d} />
+                    <DemoMisses d={d} logsHref={mirrorLogsHref(e.id)} />
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
                     {d.closed ? formatRate(d.wins / d.closed) : "—"}

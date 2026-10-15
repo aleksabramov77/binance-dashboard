@@ -1,21 +1,22 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { type LogLevel, logsResponseSchema } from "../model/schema";
+import { type LogFilters, logFiltersSearch } from "../model/filters";
+import { logsResponseSchema } from "../model/schema";
 
-async function getLogs(level: LogLevel) {
-  const res = await fetch(`/api/logs?level=${level}&limit=300`, {
-    cache: "no-store",
-  });
+async function getLogs(filters: LogFilters) {
+  const qs = new URLSearchParams(logFiltersSearch(filters));
+  qs.set("limit", "300");
+  const res = await fetch(`/api/logs?${qs}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Журнал не загрузился (${res.status})`);
   return logsResponseSchema.parse(await res.json()).entries;
 }
 
-/** Журнал сервера; обновляется каждые 10 секунд. */
-export function useLogs(level: LogLevel) {
+/** Журнал сервера с фильтрами (spec 0016); обновляется каждые 10 секунд. */
+export function useLogs(filters: LogFilters) {
   return useQuery({
-    queryKey: ["logs", level],
-    queryFn: () => getLogs(level),
+    queryKey: ["logs", filters],
+    queryFn: () => getLogs(filters),
     refetchInterval: 10_000,
   });
 }

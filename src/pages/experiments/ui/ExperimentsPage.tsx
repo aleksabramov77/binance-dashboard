@@ -15,6 +15,7 @@ import {
   pnlTone,
   useExperiments,
 } from "@/entities/experiment";
+import { mirrorLogsHref } from "@/entities/log-entry";
 import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
 import {
   cn,
@@ -204,7 +205,7 @@ function DemoCells({
             {d.open > 0 && (
               <span className="text-muted-foreground"> +{d.open}</span>
             )}
-            <DemoMisses d={d} />
+            <DemoMisses d={d} logsHref={mirrorLogsHref(e.id)} />
           </>
         ) : (
           <span className="text-muted-foreground">—</span>

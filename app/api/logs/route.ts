@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 import { readLogs } from "@/app/server/logs";
-import { clientErrorSchema, LOG_LEVELS } from "@/entities/log-entry";
+import { clientErrorSchema, parseLogFilters } from "@/entities/log-entry";
 import { log } from "@/shared/lib/logger.server";
 import { withLogging } from "@/shared/lib/route.server";
 
@@ -9,9 +9,10 @@ export const GET = withLogging(
   async (request) => {
     await connection();
     const params = new URL(request.url).searchParams;
-    const level = LOG_LEVELS.find((l) => l === params.get("level")) ?? "info";
     const limit = Math.min(Number(params.get("limit")) || 300, 1000);
-    return Response.json({ entries: await readLogs(level, limit) });
+    return Response.json({
+      entries: await readLogs(parseLogFilters(params), limit),
+    });
   },
   { quiet: true },
 );
