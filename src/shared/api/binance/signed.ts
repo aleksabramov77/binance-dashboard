@@ -40,11 +40,12 @@ export async function signedRequest<T extends z.ZodType>(
 ): Promise<z.infer<T>> {
   const attempt = async () => {
     // Подпись и timestamp — заново на каждую попытку.
+    // recvWindow по умолчанию 10 с; ордера входа задают своё (ORDER_RECV_WINDOW_MS, orderOutcome.ts).
     const query = new URLSearchParams({
+      recvWindow: "10000",
       ...Object.fromEntries(
         Object.entries(params).map(([k, v]) => [k, String(v)]),
       ),
-      recvWindow: "10000",
       timestamp: String(Date.now()),
     });
     query.set(

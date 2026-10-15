@@ -28,14 +28,17 @@ import {
   positionRiskSchema,
   priceSchema,
   type SpotOrder,
+  type SpotOrderQuery,
   spotAccountBalancesSchema,
   spotAllOrdersSchema,
   spotMyTradesSchema,
+  spotOrderQuerySchema,
   spotOrderSchema,
   spotOrderStatusSchema,
   symbolRowsSchema,
 } from "./demoSchemas";
 import type { Market } from "./market";
+import { ORDER_RECV_WINDOW_MS } from "./orderOutcome";
 import { BinanceApiError, signedRequest } from "./signed";
 
 /** Binance Demo Trading — виртуальные деньги, реальные котировки. */
@@ -141,11 +144,13 @@ export async function fetchDemoUsdtBalances(
   };
 }
 
+/** clientOrderId — свой id ордера: по нему перечитываем ордер, если исход заявки неизвестен. */
 export async function demoSpotMarketOrder(
   creds: BinanceCredentials,
   symbol: string,
   side: "BUY" | "SELL",
   quantity: string,
+  clientOrderId?: string,
 ): Promise<SpotOrder> {
   return signedRequest(
     DEMO_URL.spot,
@@ -153,7 +158,15 @@ export async function demoSpotMarketOrder(
     "POST",
     "/api/v3/order",
     spotOrderSchema,
-    { symbol, side, type: "MARKET", quantity, newOrderRespType: "FULL" },
+    {
+      symbol,
+      side,
+      type: "MARKET",
+      quantity,
+      newOrderRespType: "FULL",
+      recvWindow: ORDER_RECV_WINDOW_MS,
+      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
+    },
   );
 }
 
@@ -222,7 +235,7 @@ export async function demoSpotBuyProtected(
     "POST",
     path,
     orderListReportsSchema,
-    params,
+    { ...params, recvWindow: ORDER_RECV_WINDOW_MS },
   );
   return summarizeSpotEntryList(res, p.symbol.replace(/USDT$/, ""));
 }
@@ -242,6 +255,30 @@ export async function fetchDemoSpotOrderStatus(
     { symbol, orderId },
   );
   return order.status;
+}
+
+/**
+ * Ордер спота по своему clientOrderId; null — такого ордера на бирже нет (-2013 NO_SUCH_ORDER).
+ * Нужен, когда исход заявки неизвестен (-1007, 5xx, обрыв сети): дошла ли она до биржи.
+ */
+export async function fetchDemoSpotOrderByClientId(
+  creds: BinanceCredentials,
+  symbol: string,
+  clientOrderId: string,
+): Promise<SpotOrderQuery | null> {
+  try {
+    return await signedRequest(
+      DEMO_URL.spot,
+      creds,
+      "GET",
+      "/api/v3/order",
+      spotOrderQuerySchema,
+      { symbol, origClientOrderId: clientOrderId },
+    );
+  } catch (error) {
+    if (error instanceof BinanceApiError && error.code === -2013) return null;
+    throw error;
+  }
 }
 
 /** Изолированная маржа и плечо для символа. «Уже установлено» — не ошибка. */
@@ -286,7 +323,14 @@ export async function demoFuturesMarketOrder(
     "POST",
     "/fapi/v1/order",
     futuresOrderSchema,
-    { symbol, side, type: "MARKET", quantity, newOrderRespType: "RESULT" },
+    {
+      symbol,
+      side,
+      type: "MARKET",
+      quantity,
+      newOrderRespType: "RESULT",
+      recvWindow: ORDER_RECV_WINDOW_MS,
+    },
   );
 }
 

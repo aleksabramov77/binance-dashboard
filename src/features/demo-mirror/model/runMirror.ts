@@ -1,3 +1,4 @@
+import { MIRROR } from "../config/mirror";
 import type { MirrorOrderRequest } from "../lib/planMirror";
 import {
   listingKey,
@@ -72,6 +73,8 @@ export interface MirrorRunResult {
   configured: boolean;
   opened: { tradeId: string; symbol: string; status: string }[];
   skipped: number;
+  /** Не начаты из-за бюджета времени прогона — их возьмёт следующий прогон. */
+  deferred: number;
   closed: { tradeId: string; symbol: string; status: string }[];
 }
 
@@ -85,9 +88,11 @@ export async function runMirror(deps: MirrorDeps): Promise<MirrorRunResult> {
     configured: deps.configured,
     opened: [],
     skipped: 0,
+    deferred: 0,
     closed: [],
   };
   if (!deps.configured) return result;
+  const startedAt = deps.now();
 
   for (const m of await deps.claimToClose()) {
     const r = await deps.close(m);
@@ -107,7 +112,13 @@ export async function runMirror(deps: MirrorDeps): Promise<MirrorRunResult> {
     now,
     await checkListing(deps, candidates),
   );
-  for (const d of decisions) {
+  for (const [i, d] of decisions.entries()) {
+    // Бюджет исчерпан — не захватываем ничего, в том числе пропуски: план следующего прогона
+    // учтёт, что отложенные входы не открылись (иначе соседний кандидат мог бы уйти в «занята»).
+    if (deps.now() - startedAt > MIRROR.runBudgetMs) {
+      result.deferred = decisions.length - i;
+      break;
+    }
     if (!(await deps.claim(d.tradeId))) continue;
     if (d.kind === "skip") {
       await deps.markSkipped(d.tradeId, d.reason);

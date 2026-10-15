@@ -38,6 +38,13 @@
 - `demoOrderLists.ts` — спот-вход одной заявкой (spec 0012): параметры OTOCO/OTO (`spotEntryListRequest`,
   рабочий `LIMIT BUY FOK`) и разбор ответа (`summarizeSpotEntryList`); сеть — `demoSpotBuyProtected`,
   статус отложенного ордера — `fetchDemoSpotOrderStatus`. Тесты — `demoOrderLists.test.ts`.
+- `orderOutcome.ts` — `orderErrorOutcome(error)`: ошибка ордера — `rejected` (биржа точно отказала) или `unknown`
+  (`-1006`/`-1007` «execution status unknown», HTTP 5xx, сеть, нераспознанный ответ — ордер мог исполниться).
+  Список кодов — `UNKNOWN_OUTCOME_CODES`, по документации Binance (Spot и USDⓈ-M Futures, 2026-10-15).
+  `ORDER_RECV_WINDOW_MS` (5 с) — `recvWindow` ордеров входа (у остальных запросов 10 с); `unknownOutcomeDeadline`
+  и `nextRecheckDelay` — сколько перечитывать заявку с неизвестным исходом, прежде чем сказать «её нет».
+  Перечитать ордер спота по своему id — `fetchDemoSpotOrderByClientId` (null — `-2013`, ордера нет);
+  `clientOrderId` задают `demoSpotMarketOrder` и `spotEntryListRequest` (`clientIds`).
 - `*Schemas.ts` — Zod-схемы ответов. Числа Binance приходят строками → `z.coerce.number()`.
 
 ## Подводные камни
