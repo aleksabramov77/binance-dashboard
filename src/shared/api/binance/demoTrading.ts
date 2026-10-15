@@ -336,7 +336,7 @@ export async function demoSpotCancelByClientId(
 
 /**
  * Изолированная маржа и плечо для символа. «Уже установлено» (-4046) — не ошибка. По символу уже
- * есть ордера/позиция другого зеркала (-4047/-4048 — в Hedge это нормально): тип маржи не меняется,
+ * есть ордера/позиция другого зеркала (-4047/-4048, на демо -4067): тип маржи не меняется,
  * вход идёт с тем, что есть — "kept". Плечо меняется и при открытой позиции.
  */
 export async function demoFuturesPrepare(
@@ -356,7 +356,9 @@ export async function demoFuturesPrepare(
     );
   } catch (error) {
     const code = error instanceof BinanceApiError ? error.code : undefined;
-    if (code === -4047 || code === -4048) margin = "kept";
+    // Демо на marginType при открытых ордерах отвечает -4067 (проверено 2026-10-15), по документации — -4047.
+    if (code !== undefined && [-4047, -4048, -4067, -4068].includes(code))
+      margin = "kept";
     else if (code !== -4046) throw error;
   }
   await signedRequest(
@@ -497,6 +499,22 @@ export async function fetchDemoFuturesSymbolState(
     orders,
     algos,
   };
+}
+
+/**
+ * Открытые algo-ордера (TP/SL) всего фьючерсного счёта одним запросом — для сверки своих ног
+ * зеркал за прогон (spec 0012, PR 2d).
+ */
+export async function fetchDemoOpenAlgoOrders(
+  creds: BinanceCredentials,
+): Promise<FuturesSymbolState["algos"]> {
+  return signedRequest(
+    DEMO_URL.futures,
+    creds,
+    "GET",
+    "/fapi/v1/openAlgoOrders",
+    futuresOpenAlgoOrdersSchema,
+  );
 }
 
 /** Отменить обычный ордер фьючерсов. false — отменять нечего (-2011). */
@@ -671,6 +689,7 @@ export async function demoFuturesReduceMarket(
   side: "BUY" | "SELL",
   quantity: string,
   pos: FuturesSide,
+  clientOrderId?: string,
 ): Promise<FuturesOrder> {
   return signedRequest(
     DEMO_URL.futures,
@@ -685,6 +704,8 @@ export async function demoFuturesReduceMarket(
       quantity,
       ...reduceParams(pos),
       newOrderRespType: "RESULT",
+      // Свой id закрытия — сделка в истории «Демо-сделки» не смешается с соседними по монете.
+      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
     },
   );
 }
@@ -774,6 +795,8 @@ export interface DemoFill {
   commissionAsset: string;
   /** Только фьючерсы: зафиксированный PnL исполнения. */
   realizedPnl: number | null;
+  /** Сторона позиции: Hedge — LONG/SHORT, One-way и спот — BOTH. */
+  positionSide: string;
 }
 
 const symbolsOf = (rows: { symbol: string }[]) =>
@@ -920,6 +943,7 @@ export async function fetchDemoFills(
         commission: r.commission,
         commissionAsset: r.commissionAsset,
         realizedPnl: null,
+        positionSide: "BOTH",
       }));
     }
     const rows = await signedRequest(
@@ -942,6 +966,7 @@ export async function fetchDemoFills(
       commission: r.commission,
       commissionAsset: r.commissionAsset,
       realizedPnl: r.realizedPnl,
+      positionSide: r.positionSide,
     }));
   } catch (error) {
     // -1121 Invalid symbol: монета на балансе без пары к USDT.
@@ -992,16 +1017,23 @@ export async function fetchDemoSymbolOrders(
     return toFuturesSymbolOrders(algos, orders);
   } catch (error) {
     if (error instanceof BinanceApiError && error.code === -1121)
-      return { closeKinds: new Map(), openStops: [] };
+      return {
+        closeKinds: new Map(),
+        openStops: [],
+        groups: new Map(),
+        fullExits: new Set(),
+      };
     throw error;
   }
 }
 
 export interface DemoPosition {
-  /** Размер со знаком: минус — шорт. */
+  /** Размер со знаком: минус — шорт (в Hedge — сумма сторон). */
   amount: number;
   entryPrice: number;
   unrealizedPnl: number;
+  /** Размер по сторонам (positionSide → размер со знаком): Hedge — LONG/SHORT, One-way — BOTH. */
+  bySide: Record<string, number>;
 }
 
 /** Открытые позиции демо-фьючерсов по символам. */
@@ -1023,6 +1055,7 @@ export async function fetchDemoFuturesPositions(
       amount: (prev?.amount ?? 0) + r.positionAmt,
       entryPrice: r.entryPrice,
       unrealizedPnl: (prev?.unrealizedPnl ?? 0) + r.unRealizedProfit,
+      bySide: { ...prev?.bySide, [r.positionSide]: r.positionAmt },
     });
   }
   return bySymbol;

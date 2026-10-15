@@ -70,6 +70,7 @@ export const mirrorProtectRefsSchema = z.discriminatedUnion("market", [
   z.object({
     market: z.literal("futures"),
     entryOrderId: z.number().nullable(),
+    legs: z.literal("quantity").optional(),
     stop: algoRefSchema.nullable(),
     takeProfit: algoRefSchema.nullable(),
   }),

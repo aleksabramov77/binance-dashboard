@@ -1,5 +1,5 @@
 import { MIRROR } from "../config/mirror";
-import type { MirrorOrderRequest } from "../lib/planMirror";
+import type { ActiveMirror, MirrorOrderRequest } from "../lib/planMirror";
 import {
   listingKey,
   type MirrorListing,
@@ -43,7 +43,13 @@ export interface MirrorDeps<
   /** Ключ Binance Demo задан — иначе прогон ничего не делает. */
   configured: boolean;
   listCandidates: (since: Date) => Promise<MirrorTradeInput[]>;
-  busySymbols: () => Promise<Set<string>>;
+  /** Зеркала, которые держат или открывают позицию: монета и сторона (лимит на монету, встречные). */
+  activeMirrors: () => Promise<ActiveMirror[]>;
+  /**
+   * Режим позиций демо-фьючерсов: в One-way встречная сторона по монете — пропуск, в Hedge — вход.
+   * Исключение — режим неизвестен: встречные кандидаты ждут следующего прогона.
+   */
+  positionMode: () => Promise<"oneway" | "hedge">;
   /**
    * Есть ли символ на демо-рынке: false — точно нет (вход пропускается), исключение — сеть
    * (кандидат ждёт следующего прогона). Проверяется до захвата сделки и запроса на вход.
@@ -55,6 +61,13 @@ export interface MirrorDeps<
   /** Отметить захваченную сделку пропущенной (не открывалась). */
   markSkipped: (tradeId: string, reason: string) => Promise<void>;
   saveOpen: (tradeId: string, result: R) => Promise<void>;
+  /**
+   * Сверка своих ног открытых зеркал: своя нога сработала — вторая снимается, строка закрыта биржей
+   * (не дожидаясь paper-сделки). Возвращает такие зеркала; сбой — пусто (повтор на следующем прогоне).
+   */
+  sweepLegs: (
+    overBudget: () => boolean,
+  ) => Promise<{ tradeId: string; symbol: string }[]>;
   /** id демо-позиций на закрытие (без захвата). */
   listToClose: () => Promise<string[]>;
   /** Захват одной позиции на закрытие; null — её уже взял другой прогон. */
@@ -79,6 +92,8 @@ export interface MirrorRunResult {
   deferred: number;
   /** Закрытия, не начатые из-за бюджета времени, — следующему прогону. */
   deferredCloses: number;
+  /** Закрыты биржей своей ногой (вторая нога снята) до закрытия paper-сделки. */
+  swept: { tradeId: string; symbol: string }[];
   closed: { tradeId: string; symbol: string; status: string }[];
 }
 
@@ -97,11 +112,15 @@ export async function runMirror<
     skipped: 0,
     deferred: 0,
     deferredCloses: 0,
+    swept: [],
     closed: [],
   };
   if (!deps.configured) return result;
   const startedAt = deps.now();
   const overBudget = () => deps.now() - startedAt > MIRROR.runBudgetMs;
+
+  // Сначала свои ноги: висящий reduceOnly-ордер сработавшего зеркала закрыл бы объём соседнего.
+  result.swept = await deps.sweepLegs(overBudget);
 
   // Захват по одному: после бюджета строки не уходят в closing и достаются следующему прогону.
   const toClose = await deps.listToClose();
@@ -123,15 +142,19 @@ export async function runMirror<
 
   const now = deps.now();
   const candidates = await deps.listCandidates(new Date(now - 60 * 60_000));
+  let futuresMode: "oneway" | "hedge" | null = null;
+  if (candidates.some((c) => c.market === "futures"))
+    futuresMode = await deps.positionMode().catch(() => null);
   const decisions = planMirror(
     candidates,
-    await deps.busySymbols(),
+    await deps.activeMirrors(),
     now,
     await checkListing(deps, candidates),
+    futuresMode,
   );
   for (const [i, d] of decisions.entries()) {
     // Бюджет исчерпан — не захватываем ничего, в том числе пропуски: план следующего прогона
-    // учтёт, что отложенные входы не открылись (иначе соседний кандидат мог бы уйти в «занята»).
+    // учтёт, что отложенные входы не открылись (лимит на монету, встречные стороны).
     if (overBudget()) {
       result.deferred = decisions.length - i;
       break;

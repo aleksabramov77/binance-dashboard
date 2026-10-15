@@ -1,5 +1,6 @@
 import type { TradeResult } from "@/entities/trade";
 import { SPOT_ENTRY_SLIPPAGE_TEXT } from "../config/spot";
+import { FUTURES_GROWTH_TOLERANCE } from "../config/trade";
 
 // Выбор исхода сделки по результатам шагов placeTrade (spec 0012): чистые функции, сеть — в model.
 // Правило: позиция без стопа — только unprotected; rejected — только когда позиции точно нет.
@@ -49,16 +50,43 @@ export function afterEntryError(
 }
 
 /**
- * Фьючерсы, исход входа неизвестен: позиция на бирже (null — проверить не удалось).
- * Позиция есть — { protect }: ставить защиту на неё.
+ * Фьючерсы, исход входа неизвестен, свой ордер `-M` не подтверждён — сверка по позиции своей стороны
+ * (null — проверить не удалось) относительно снимка до входа (before): на стороне могут быть позиции
+ * других зеркал (PR 2d), их объём — не наш. { protect } — свой объём (прирост), entryPrice null —
+ * средняя цена стороны не наша, берём текущую.
+ * - сторона до входа пуста: позиция есть — вся она наша, нет — вход не прошёл;
+ * - не пуста — решает прирост стороны, а не то, нашёлся ли свой ордер (missing и unknown одинаково:
+ *   ордер мог исполниться, пока его искали; ревью #66): прирост ≈ объёму заявки
+ *   (FUTURES_GROWTH_TOLERANCE) — защищаем прирост; прироста нет — вход не прошёл; иначе неясно, чей
+ *   объём, — unprotected без защиты и без отката (не тронуть чужое).
  */
-export function afterFuturesPositionCheck<P extends { amount: number }>(
-  position: P | null,
-): TradeOutcome | { protect: P } {
+export function afterFuturesPositionCheck(
+  position: { amount: number; entryPrice: number } | null,
+  before: number,
+  order: "missing" | "unknown",
+  expectedQty: number,
+): TradeOutcome | { protect: { amount: number; entryPrice: number | null } } {
   if (position === null) return outcome("unprotected", UNKNOWN_FUTURES);
-  if (position.amount === 0)
-    return outcome("rejected", "Вход не исполнился — позиции на бирже нет.");
-  return { protect: position };
+  if (before <= 0) {
+    if (position.amount === 0)
+      return outcome("rejected", "Вход не исполнился — позиции на бирже нет.");
+    return { protect: position };
+  }
+  const growth = position.amount - before;
+  const tolerance = expectedQty * FUTURES_GROWTH_TOLERANCE;
+  if (Math.abs(growth - expectedQty) <= tolerance)
+    return { protect: { amount: growth, entryPrice: null } };
+  if (Math.abs(growth) <= tolerance)
+    return outcome(
+      "rejected",
+      order === "missing"
+        ? "Вход не исполнился — своего ордера на бирже нет, сторона не выросла (её держат другие зеркала)."
+        : "Вход не исполнился — сторона не выросла (её держат другие зеркала).",
+    );
+  return outcome(
+    "unprotected",
+    "Неизвестно, исполнился ли свой вход: сторона уже открыта другими зеркалами, прирост не совпал с заявкой — защиту и откат не ставили, проверьте на demo.binance.com.",
+  );
 }
 
 const FUTURES_FINAL = [

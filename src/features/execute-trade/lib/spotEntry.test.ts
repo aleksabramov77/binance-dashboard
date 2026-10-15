@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { clientIdGroup } from "@/shared/api/binance/demo.server";
 import {
   ceilToTick,
   chooseSpotEntry,
@@ -87,12 +88,16 @@ describe("заявка с неизвестным исходом", () => {
       stop: "bd3f2a9c1e7b4d4e8f9a012345-S",
       takeProfit: "bd3f2a9c1e7b4d4e8f9a012345-T",
       market: "bd3f2a9c1e7b4d4e8f9a012345-M",
+      close: "bd3f2a9c1e7b4d4e8f9a012345-C",
       protectList: "bd3f2a9c1e7b4d4e8f9a012345-L2",
       protectStop: "bd3f2a9c1e7b4d4e8f9a012345-S2",
       protectTakeProfit: "bd3f2a9c1e7b4d4e8f9a012345-T2",
     });
-    for (const id of Object.values(ids))
+    for (const id of Object.values(ids)) {
       expect(id).toMatch(/^[A-Za-z0-9_-]{1,36}$/);
+      // История «Демо-сделки» узнаёт сделку по любому её id (PR 2d).
+      expect(clientIdGroup(id)).toBe("bd3f2a9c1e7b4d4e8f9a012345");
+    }
   });
   it("перечитанная заявка — в виде ответа биржи, комиссия по ставке 0,1%", () => {
     // Демо 2026-10-15: OTO по BATUSDT, перечитано GET /api/v3/order по clientOrderId.

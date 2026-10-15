@@ -636,7 +636,13 @@ async function protectOrSell(
   const sellLabel = "Продажа по рынку (стоп не встал)";
   let sold = false;
   try {
-    const order = await demoSpotMarketOrder(creds, req.symbol, "SELL", sellQty);
+    const order = await demoSpotMarketOrder(
+      creds,
+      req.symbol,
+      "SELL",
+      sellQty,
+      c.ids.close,
+    );
     sold = true;
     steps.push({
       label: sellLabel,

@@ -60,14 +60,29 @@ export function ownPosition(
 }
 
 /**
- * Занята ли своя сторона символа (ручной вход с /signals и зеркало): Hedge — позиция или ордера
- * своей стороны (другая сторона — отдельная позиция); One-way — любая позиция или ордер по символу:
- * маржу при ордерах не поменять, а вход в другую сторону закрыл бы чужую позицию.
+ * Можно ли входить. Ручной вход с /signals: Hedge — своя сторона свободна (нет позиции и ордеров
+ * своего positionSide), One-way — по символу нет ничего (вход в другую сторону закрыл бы чужую
+ * позицию). Зеркало (shared, PR 2d): своя сторона может быть общей с другими зеркалами — у каждого
+ * свой объём и TP/SL; One-way — мешает только встречная позиция (opposite), Hedge — ничего.
  */
 export function ownSideBusy(
   state: FuturesSymbolState,
   side: FuturesSide,
-): boolean {
+  shared = false,
+): false | "busy" | "opposite" {
+  if (shared) {
+    if (side.mode === "hedge") return false;
+    const opposite = ownPosition(state.positions, {
+      ...side,
+      direction: side.direction === "long" ? "short" : "long",
+    });
+    return opposite.amount > 0 ? "opposite" : false;
+  }
+  const busy = isSideBusy(state, side);
+  return busy ? "busy" : false;
+}
+
+function isSideBusy(state: FuturesSymbolState, side: FuturesSide): boolean {
   if (side.mode === "oneway")
     return (
       state.positions.some((p) => p.amount !== 0) ||
