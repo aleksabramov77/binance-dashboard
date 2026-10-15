@@ -1,9 +1,27 @@
+import { checkDbSpace } from "@/app/server/dbSpace";
 import { runLogMonitor, sendMonitorTest } from "@/app/server/logMonitor";
 import { getCronSecret } from "@/shared/config/env.server";
 import { checkCronAuth } from "@/shared/lib/auth/cronAuth.server";
+import { log } from "@/shared/lib/logger.server";
 import { withLogging } from "@/shared/lib/route.server";
 
-// Монитор журнала: pg_cron в Supabase раз в 15 минут. ?test=1 — тестовое сообщение в Telegram.
+/** Свободное место в базе (spec 0021): сбой замера не ломает монитор журнала — ошибка в ответе и журнале. */
+async function dbSpace() {
+  try {
+    return await checkDbSpace();
+  } catch (error) {
+    log.error(
+      "monitor.db_space",
+      "Проверка свободного места в базе не удалась",
+      undefined,
+      error,
+    );
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+// Монитор журнала и свободного места в базе: pg_cron в Supabase раз в 15 минут.
+// ?test=1 — тестовое сообщение в Telegram.
 export const POST = withLogging(
   "cron.monitor",
   async (request) => {
@@ -29,6 +47,7 @@ export const POST = withLogging(
       resolved: r.resolved,
       sent: r.sent,
       pruned: r.pruned,
+      dbSpace: await dbSpace(),
     });
   },
   { quiet: true },

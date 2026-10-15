@@ -15,6 +15,7 @@
     "engine:supabase": "tsx scripts/engine-supabase.ts",
     "earn:supabase": "tsx scripts/earn-supabase.ts",
     "monitor:supabase": "tsx scripts/monitor-supabase.ts",
+    "telegram:setup": "tsx scripts/telegram-setup.ts",
     "mirror:supabase": "tsx scripts/mirror-supabase.ts",
     "wt": "tsx scripts/worktree.ts",
     "lab:private": "tsx scripts/lab-private.ts",
