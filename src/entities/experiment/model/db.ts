@@ -125,6 +125,11 @@ export const demoMirrorOrdersTable = pgTable(
     exitPrice: doublePrecision("exit_price"),
     message: text("message").notNull().default(""),
     steps: jsonb("steps").$type<unknown[]>().notNull().default([]),
+    /**
+     * Свои защитные ордера на демо (algoId стопа/тейка, clientOrderId спота) — spec 0012, PR 2b.
+     * Читать через mirrorProtectRefsSchema. null — строки до PR 2b: закрытие снимает все ордера символа.
+     */
+    protectRefs: jsonb("protect_refs"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -7,7 +7,9 @@ import {
 } from "../model/db";
 import {
   ACTIVE_MIRROR_STATUSES,
+  type MirrorProtectRefs,
   type MirrorStatus,
+  mirrorProtectRefsSchema,
   OPEN_MIRROR_STATUSES,
 } from "../model/mirror";
 
@@ -39,7 +41,28 @@ export interface MirrorToClose {
   /** Исполненное количество входа (для спота — сколько продавать). */
   quantity: number;
   exitReason: string | null;
+  /** Свои защитные ордера; null — строка до PR 2b (закрытие снимает все ордера символа). */
+  protectRefs: MirrorProtectRefs | null;
 }
+
+/** jsonb из БД → ссылки; битые/старые — null (закрытие по-старому, а не падение прогона). */
+const parseProtectRefs = (raw: unknown): MirrorProtectRefs | null => {
+  const parsed = mirrorProtectRefsSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+};
+
+const toClose = (
+  r: typeof demoMirrorOrdersTable.$inferSelect,
+  exitReason: string | null,
+): MirrorToClose => ({
+  tradeId: r.tradeId,
+  market: r.market as MirrorToClose["market"],
+  symbol: r.symbol,
+  direction: r.direction as MirrorToClose["direction"],
+  quantity: r.quantity ?? 0,
+  exitReason,
+  protectRefs: parseProtectRefs(r.protectRefs),
+});
 
 export async function setExperimentDemoMirror(
   db: Db,
@@ -144,6 +167,7 @@ export async function updateMirror(
     entryPrice?: number | null;
     quantity?: number | null;
     exitPrice?: number | null;
+    protectRefs?: MirrorProtectRefs | null;
     closed?: boolean;
   },
 ): Promise<void> {
@@ -164,43 +188,57 @@ export async function updateMirror(
 }
 
 /**
- * Демо-позиции, которые надо закрыть: вход исполнен (protected/unprotected), а paper-сделка закрыта.
- * Захват на закрытие — тем же UPDATE … WHERE status: второй прогон строку уже не получит.
+ * Демо-позиции, которые надо закрыть: вход исполнен (protected/unprotected/close_failed), а
+ * paper-сделка закрыта. Только id, без захвата: захват — по одной (claimMirrorToClose), чтобы
+ * прогон с исчерпанным бюджетом времени не держал строки в closing.
  */
-export async function claimMirrorsToClose(db: Db): Promise<MirrorToClose[]> {
+export async function listMirrorsToClose(db: Db): Promise<string[]> {
+  const rows = await db
+    .select({ tradeId: demoMirrorOrdersTable.tradeId })
+    .from(demoMirrorOrdersTable)
+    .innerJoin(
+      paperTradesTable,
+      eq(paperTradesTable.id, demoMirrorOrdersTable.tradeId),
+    )
+    .where(
+      and(
+        inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
+        isNotNull(paperTradesTable.closedAt),
+      ),
+    )
+    .orderBy(demoMirrorOrdersTable.updatedAt);
+  return rows.map((r) => r.tradeId);
+}
+
+/**
+ * Захват одной демо-позиции на закрытие — UPDATE … WHERE status: второй прогон строку уже не
+ * получит (null). null и если paper-сделка снова открыта (не бывает) или статус уже другой.
+ */
+export async function claimMirrorToClose(
+  db: Db,
+  tradeId: string,
+): Promise<MirrorToClose | null> {
   const closedTrades = db
     .select({ id: paperTradesTable.id })
     .from(paperTradesTable)
     .where(isNotNull(paperTradesTable.closedAt));
-  const rows = await db
+  const [row] = await db
     .update(demoMirrorOrdersTable)
     .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
     .where(
       and(
+        eq(demoMirrorOrdersTable.tradeId, tradeId),
         inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
         inArray(demoMirrorOrdersTable.tradeId, closedTrades),
       ),
     )
     .returning();
-  if (rows.length === 0) return [];
-  const reasons = await db
-    .select({ id: paperTradesTable.id, reason: paperTradesTable.exitReason })
+  if (!row) return null;
+  const [paper] = await db
+    .select({ reason: paperTradesTable.exitReason })
     .from(paperTradesTable)
-    .where(
-      inArray(
-        paperTradesTable.id,
-        rows.map((r) => r.tradeId),
-      ),
-    );
-  const reasonById = new Map(reasons.map((r) => [r.id, r.reason]));
-  return rows.map((r) => ({
-    tradeId: r.tradeId,
-    market: r.market as MirrorToClose["market"],
-    symbol: r.symbol,
-    direction: r.direction as MirrorToClose["direction"],
-    quantity: r.quantity ?? 0,
-    exitReason: reasonById.get(r.tradeId) ?? null,
-  }));
+    .where(eq(paperTradesTable.id, tradeId));
+  return toClose(row, paper?.reason ?? null);
 }
 
 /** Статусы зеркала по сделкам — для таблицы сделок эксперимента. */
@@ -340,14 +378,7 @@ export async function claimOpenMirrors(
       ),
     )
     .returning();
-  return rows.map((r) => ({
-    tradeId: r.tradeId,
-    market: r.market as MirrorToClose["market"],
-    symbol: r.symbol,
-    direction: r.direction as MirrorToClose["direction"],
-    quantity: r.quantity ?? 0,
-    exitReason: "manual",
-  }));
+  return rows.map((r) => toClose(r, "manual"));
 }
 
 /** Отметка демо-сброса: статистика эксперимента (или всех) начинается заново. */

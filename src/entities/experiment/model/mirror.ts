@@ -51,6 +51,36 @@ export const experimentDemoMirrorSchema = z.object({
 });
 export type ExperimentDemoMirror = z.infer<typeof experimentDemoMirrorSchema>;
 
+/**
+ * Свои защитные ордера зеркала на Binance Demo (spec 0012, PR 2b): закрытие снимает только их и
+ * по их статусу понимает, сработал ли стоп/тейк. Та же форма, что demoProtectRefsSchema в
+ * shared/api/binance (этот слайс — без @/…, его читает Deno); совместимость проверяет компилятор
+ * в src/app/server/demoMirror.ts. null — старые строки и входы без защиты: закрытие по-старому.
+ */
+const algoRefSchema = z.object({
+  algoId: z.number(),
+  clientAlgoId: z.string().nullable(),
+});
+const spotOrderRefSchema = z.object({
+  orderId: z.number().nullable(),
+  clientOrderId: z.string(),
+});
+export const mirrorProtectRefsSchema = z.discriminatedUnion("market", [
+  z.object({
+    market: z.literal("futures"),
+    entryOrderId: z.number().nullable(),
+    stop: algoRefSchema.nullable(),
+    takeProfit: algoRefSchema.nullable(),
+  }),
+  z.object({
+    market: z.literal("spot"),
+    orderListId: z.number().nullable(),
+    stop: spotOrderRefSchema.nullable(),
+    takeProfit: spotOrderRefSchema.nullable(),
+  }),
+]);
+export type MirrorProtectRefs = z.infer<typeof mirrorProtectRefsSchema>;
+
 export const mirrorViewSchema = z.object({
   status: mirrorStatusSchema,
   message: z.string(),
