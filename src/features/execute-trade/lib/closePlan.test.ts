@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   afterAlgoUnknown,
+  afterTriggeredLeg,
   algoLeg,
   algoLookup,
   averagePrice,
@@ -259,5 +260,12 @@ describe("закрытие после сработавшей своей ноги
     expect(closeVerdict(plan, ownCloseQuantity(40, plan.soldByLegs, 70))).toBe(
       "closedByExchange",
     );
+  });
+});
+
+describe("afterTriggeredLeg (стоп сработал раньше входа, ревью #80)", () => {
+  it("нога исполнила объём — закрыто биржей; 0 — позиция открыта без стопа", () => {
+    expect(afterTriggeredLeg(40)).toBe("closed");
+    expect(afterTriggeredLeg(0)).toBe("unprotected");
   });
 });

@@ -122,7 +122,19 @@ async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
         overBudget,
       );
       const closed: { tradeId: string; symbol: string }[] = [];
-      for (const m of swept)
+      for (const m of swept) {
+        // Нога сработала раньше входа: позиция открыта без стопа — строка не закрыта, тревога.
+        if (m.status === "unprotected") {
+          await updateMirror(db, m.tradeId, {
+            status: "unprotected",
+            message: m.message,
+            steps: m.steps,
+          });
+          log.error("mirror.legs", `${m.symbol}: ${m.message}`, {
+            tradeId: m.tradeId,
+          });
+          continue;
+        }
         if (
           await markMirrorClosedByExchange(db, m.tradeId, {
             message: m.message,
@@ -131,6 +143,7 @@ async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
           })
         )
           closed.push({ tradeId: m.tradeId, symbol: m.symbol });
+      }
       return closed;
     },
     listToClose: () => listMirrorsToClose(db),

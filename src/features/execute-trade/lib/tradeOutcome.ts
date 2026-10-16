@@ -160,6 +160,44 @@ export function afterStopBeforeEntry(placed: boolean): TradeOutcome | "enter" {
     : outcome("rejected", "Стоп не принят биржей — вход не отправлялся.");
 }
 
+/** Чем кончилось снятие своего algo-ордера: снят, уже не активен, не было ссылки, ошибка. */
+export type CancelResult = "cancelled" | "inactive" | "none" | "error";
+
+/**
+ * Вход не прошёл, стоп «до входа» снимаем (Hedge: стоп с positionSide + quantity без reduceOnly —
+ * висящий при срабатывании закроет объём соседа). Снять не удалось — не rejected: unprotected без цены
+ * и объёма, но со ссылкой на стоп (protectRefs.stop) — закрытие строки снимет его и ничего не докроет.
+ */
+export function afterEarlyStopDrop(
+  failed: TradeOutcome,
+  drop: CancelResult,
+): TradeOutcome {
+  if (drop !== "error") return failed;
+  return outcome(
+    "unprotected",
+    `${failed.message} Свой стоп «до входа» снять не удалось — он на бирже; закрытие строки снимет его.`,
+  );
+}
+
+/**
+ * «Стоп до входа» стоит на объём заявки, а вход исполнился частично: стоп переставляется на
+ * исполненный объём (иначе при срабатывании закрыл бы лишнее — объём соседа). Старый снять не удалось —
+ * unprotected с ценой и объёмом (проверить вручную); новый не встал — откат; иначе — дальше.
+ */
+export function afterPartialEntryRestop(
+  cancel: CancelResult,
+  newStopPlaced: boolean | null,
+): TradeOutcome | "rollback" | "continue" {
+  if (cancel === "error")
+    return outcome(
+      "unprotected",
+      "Вход исполнен частично, а стоп «до входа» на полный объём снять не удалось — проверьте на demo.binance.com.",
+      true,
+    );
+  if (newStopPlaced === false) return "rollback";
+  return "continue";
+}
+
 /** Общий срок сделки истёк до отправки входа — ничего не отправлено. */
 export const DEADLINE_BEFORE_ENTRY = outcome(
   "rejected",

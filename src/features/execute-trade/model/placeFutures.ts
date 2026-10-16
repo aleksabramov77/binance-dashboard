@@ -35,14 +35,18 @@ import {
 } from "../lib/futuresMode";
 import { tradeClientIds } from "../lib/spotEntry";
 import {
+  afterEarlyStopDrop,
   afterEntryError,
   afterFuturesOrderCheck,
   afterFuturesPositionCheck,
   afterFuturesRollback,
   afterFuturesStop,
   afterFuturesTakeProfit,
+  afterPartialEntryRestop,
   afterStopBeforeEntry,
+  type CancelResult,
   DEADLINE_BEFORE_ENTRY,
+  type TradeOutcome,
   UNCONFIRMED_ENTRY,
 } from "../lib/tradeOutcome";
 import { floorToStep, type ValidatedTrade } from "../lib/validateTrade";
@@ -223,21 +227,27 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
       v.quantity,
       ids.stop,
     );
-    const next = afterStopBeforeEntry(stop.placed);
-    if (next !== "enter") {
-      await cancelOwnAlgo(creds, stop.ref, steps);
-      return done(next);
-    }
+    // Ссылка — сразу: исход стопа мог быть неизвестен, а снять его не выйдет — закрытие строки снимет.
     futuresRefs.stop = stop.ref;
+    const next = afterStopBeforeEntry(stop.placed);
+    if (next !== "enter")
+      return done(
+        afterEarlyStopDrop(next, await cancelOwnAlgo(creds, stop.ref, steps)),
+      );
   }
-  // Сделка без входа (вход не прошёл) — снять уже стоящий стоп «до входа».
-  const dropEarlyStop = () =>
-    stopFirst ? cancelOwnAlgo(creds, futuresRefs.stop, steps) : undefined;
+  // Вход не прошёл — снять стоп «до входа»; не снялся — unprotected со ссылкой на него, а не rejected.
+  const failWithoutEntry = async (failed: TradeOutcome) =>
+    done(
+      stopFirst
+        ? afterEarlyStopDrop(
+            failed,
+            await cancelOwnAlgo(creds, futuresRefs.stop, steps),
+          )
+        : failed,
+    );
 
-  if (Date.now() > c.tradeDeadline) {
-    await dropEarlyStop();
-    return done(DEADLINE_BEFORE_ENTRY);
-  }
+  if (Date.now() > c.tradeDeadline)
+    return failWithoutEntry(DEADLINE_BEFORE_ENTRY);
 
   const entryLabel = `${req.direction === "long" ? "Лонг" : "Шорт"} по рынку`;
   let entryPrice: number;
@@ -268,8 +278,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
     const failed = afterEntryError(orderErrorOutcome(error), "futures");
     if (failed !== "recheck") {
       steps.push({ label: entryLabel, ok: false, detail: errorText(error) });
-      await dropEarlyStop();
-      return done(failed);
+      return failWithoutEntry(failed);
     }
     // Исход неизвестен (-1007, 5xx, обрыв сети): сверяем свой ордер по clientOrderId, затем позицию.
     steps.push({
@@ -304,8 +313,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
         ok: true,
         detail: byOrder.message,
       });
-      await dropEarlyStop();
-      return done(byOrder);
+      return failWithoutEntry(byOrder);
     }
     if (byOrder !== "checkPosition") {
       const o = byOrder.filled;
@@ -351,7 +359,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
             detail: "Своей позиции нет",
           });
         // Позиции точно нет — стоп «до входа» снять; не проверили — оставить (он защищает).
-        if (checked.status === "rejected") await dropEarlyStop();
+        if (checked.status === "rejected") return failWithoutEntry(checked);
         return done(checked);
       }
       filled = checked.protect.amount;
@@ -368,6 +376,38 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   }
   // Защита — на свой исполненный объём (без closePosition): у каждого зеркала свои TP/SL.
   const protectQty = floorToStep(filled, rules.stepSize);
+  // Стоп «до входа» стоит на объём заявки, а исполнено меньше — переставить на исполненный: в Hedge
+  // стоп без reduceOnly при срабатывании закрыл бы лишнее (объём соседа).
+  if (stopFirst && Number(protectQty) < Number(v.quantity)) {
+    const cancel = await cancelOwnAlgo(creds, futuresRefs.stop, steps);
+    const restop =
+      cancel === "error"
+        ? null
+        : await placeProtectiveAlgo(
+            algoCtx,
+            "STOP_MARKET",
+            v.stopLoss,
+            protectQty,
+            ids.stop,
+          );
+    if (restop) futuresRefs.stop = restop.ref;
+    const next = afterPartialEntryRestop(cancel, restop?.placed ?? null);
+    if (next === "rollback")
+      return rollbackFutures({
+        creds,
+        req,
+        rules,
+        side,
+        exitSide,
+        entryPrice,
+        filled,
+        stopRef: restop?.ref ?? null,
+        closeId: ids.close,
+        steps,
+        done,
+      });
+    if (next !== "continue") return done(next, entryPrice, filled);
+  }
   // Вход не подтверждён биржей — защита ставится, но «protected» не объявляем (PR 2e).
   const doneEntry: Done = (o, e, f) =>
     done(unconfirmed && o.status === "protected" ? UNCONFIRMED_ENTRY : o, e, f);
@@ -429,14 +469,18 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   return doneEntry(afterFuturesTakeProfit(tp.placed), entryPrice, filled);
 }
 
-/** Снять свой algo-ордер (стоп «до входа» сделки, которая не открылась). Ошибку — только в шаги. */
+/**
+ * Снять свой algo-ордер (стоп «до входа» сделки, которая не открылась, или на объём больше
+ * исполненного). Результат решает исход (lib/tradeOutcome → afterEarlyStopDrop): ошибка — стоп мог
+ * остаться на бирже.
+ */
 async function cancelOwnAlgo(
   creds: BinanceCredentials,
   ref: StoredAlgoRef | null,
   steps: TradeStep[],
-): Promise<void> {
+): Promise<CancelResult> {
   const lookup = ref && algoLookup(ref);
-  if (!lookup) return;
+  if (!lookup) return "none";
   try {
     const cancelled = await demoCancelAlgoOrder(creds, lookup);
     steps.push({
@@ -444,12 +488,14 @@ async function cancelOwnAlgo(
       ok: true,
       detail: cancelled ? "Снят" : "Уже не активен",
     });
+    return cancelled ? "cancelled" : "inactive";
   } catch (error) {
     steps.push({
       label: "Снять свой стоп",
       ok: false,
       detail: errorText(error),
     });
+    return "error";
   }
 }
 

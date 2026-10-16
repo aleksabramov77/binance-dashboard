@@ -5,6 +5,7 @@ const api = vi.hoisted(() => ({
   fetchDemoOpenAlgoOrders: vi.fn(),
   fetchDemoAlgoOrder: vi.fn(),
   demoCancelAlgoOrder: vi.fn(),
+  fetchDemoFuturesOrder: vi.fn(),
 }));
 vi.mock("@/shared/api/binance/demo.server", () => api);
 vi.mock("@/shared/config/env.server", () => ({
@@ -77,5 +78,74 @@ describe("sweepTriggeredLegs: зеркало без тейка (stopOnly)", () =
     api.fetchDemoOpenAlgoOrders.mockResolvedValue([]);
     expect(await sweepTriggeredLegs([stopOnly], () => true)).toEqual([]);
     expect(api.fetchDemoAlgoOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe("sweepTriggeredLegs: нога сработала раньше входа (ревью #80)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const both = {
+    tradeId: "m2",
+    symbol: "ADAUSDT",
+    protectRefs: {
+      market: "usdm" as const,
+      entryOrderId: 1,
+      legs: "quantity" as const,
+      stop: { algoId: 31, clientAlgoId: "bdm2-S" },
+      takeProfit: { algoId: 32, clientAlgoId: "bdm2-T" },
+    },
+  };
+
+  it("исполнено 0 — строка unprotected (позиция без стопа), тейк не снимаем", async () => {
+    api.fetchDemoOpenAlgoOrders.mockResolvedValue([
+      { algoId: 32, clientAlgoId: "bdm2-T" },
+    ]);
+    api.fetchDemoAlgoOrder.mockResolvedValue({
+      algoId: 31,
+      algoStatus: "FINISHED",
+      actualOrderId: 901,
+      actualPrice: 0,
+      actualQty: 0,
+    });
+    api.fetchDemoFuturesOrder.mockResolvedValue({
+      orderId: 901,
+      status: "EXPIRED",
+      executedQty: 0,
+      avgPrice: 0,
+    });
+    const swept = await sweepTriggeredLegs([both]);
+    expect(swept).toEqual([
+      expect.objectContaining({ tradeId: "m2", status: "unprotected" }),
+    ]);
+    expect(api.demoCancelAlgoOrder).not.toHaveBeenCalled();
+    // Уже помечена unprotected — повторно не сообщаем.
+    expect(
+      await sweepTriggeredLegs([{ ...both, status: "unprotected" }]),
+    ).toEqual([]);
+  });
+
+  it("исполнено по рыночному ордеру (actualQty нет) — закрыто биржей, тейк снят", async () => {
+    api.fetchDemoOpenAlgoOrders.mockResolvedValue([
+      { algoId: 32, clientAlgoId: "bdm2-T" },
+    ]);
+    api.fetchDemoAlgoOrder.mockResolvedValue({
+      algoId: 31,
+      algoStatus: "FINISHED",
+      actualOrderId: 902,
+      actualPrice: 0.21,
+      actualQty: 0,
+    });
+    api.fetchDemoFuturesOrder.mockResolvedValue({
+      orderId: 902,
+      status: "FILLED",
+      executedQty: 40,
+      avgPrice: 0.21,
+    });
+    api.demoCancelAlgoOrder.mockResolvedValue(true);
+    expect(await sweepTriggeredLegs([both])).toEqual([
+      expect.objectContaining({ tradeId: "m2", status: "closed" }),
+    ]);
+    expect(api.demoCancelAlgoOrder).toHaveBeenCalledWith(expect.anything(), {
+      algoId: 32,
+    });
   });
 });

@@ -307,15 +307,19 @@ export async function claimMirrorToClose(
 /**
  * Открытые фьючерсные зеркала со своими ссылками — для сверки ног (своя нога сработала — снять вторую).
  */
-export async function listOpenMirrorLegs(
-  db: Db,
-): Promise<
-  { tradeId: string; symbol: string; protectRefs: MirrorProtectRefs }[]
+export async function listOpenMirrorLegs(db: Db): Promise<
+  {
+    tradeId: string;
+    symbol: string;
+    status: MirrorStatus;
+    protectRefs: MirrorProtectRefs;
+  }[]
 > {
   const rows = await db
     .select({
       tradeId: demoMirrorOrdersTable.tradeId,
       symbol: demoMirrorOrdersTable.symbol,
+      status: demoMirrorOrdersTable.status,
       protectRefs: demoMirrorOrdersTable.protectRefs,
     })
     .from(demoMirrorOrdersTable)
@@ -329,7 +333,14 @@ export async function listOpenMirrorLegs(
   return rows.flatMap((r) => {
     const protectRefs = parseProtectRefs(r.protectRefs);
     return protectRefs
-      ? [{ tradeId: r.tradeId, symbol: r.symbol, protectRefs }]
+      ? [
+          {
+            tradeId: r.tradeId,
+            symbol: r.symbol,
+            status: r.status as MirrorStatus,
+            protectRefs,
+          },
+        ]
       : [];
   });
 }

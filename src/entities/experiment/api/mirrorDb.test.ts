@@ -420,7 +420,7 @@ describe("protect_refs", () => {
       protectRefs,
     });
     expect(await listOpenMirrorLegs(db)).toEqual([
-      { tradeId: "a", symbol: "ETHUSDT", protectRefs },
+      { tradeId: "a", symbol: "ETHUSDT", status: "protected", protectRefs },
     ]);
     expect(
       await markMirrorClosedByExchange(db, "a", {
