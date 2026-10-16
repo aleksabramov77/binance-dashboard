@@ -10,6 +10,8 @@ export {
   saveMirrorAuto,
   setExperimentMirrorMode,
 } from "./api/mirrorAutoDb";
+// Что останется без проверки при выключении «Автоторговли» (spec 0044): подсчёт (сервер), хук модалки.
+export { readEngineExposure } from "./api/exposureDb";
 // Demo-зеркало (spec 008): какие сделки повторить на Binance Demo и какие закрыть (только сервер).
 export {
   type ActiveMirrorRow,
@@ -55,7 +57,11 @@ export {
   resetRun,
   setExperimentEnabled,
 } from "./api/settingsDb";
-// Клиентские хуки и UI лаборатории (хедер, spec 003 · 3a).
+// Клиентские хуки и UI лаборатории (хедер, spec 003 · 3a; модалка «Автоторговли» — spec 0044).
+export {
+  engineExposureQueryKey,
+  useEngineExposure,
+} from "./api/useEngineExposure";
 export {
   engineStatusQueryKey,
   readEngineStatus,
@@ -111,6 +117,7 @@ export {
   describeTakeProfit,
   describeUniverse,
 } from "./lib/describeConfig";
+export { describeExposure } from "./lib/exposureText";
 export {
   formatProfitFactor,
   formatR,
@@ -163,6 +170,10 @@ export {
   type MarketBudget,
   marketBudgetSchema,
 } from "./model/budget";
+export {
+  type EngineExposure,
+  engineExposureSchema,
+} from "./model/exposure";
 export {
   ACTIVE_MIRROR_STATUSES,
   type ExperimentDemoMirror,
