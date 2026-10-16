@@ -476,7 +476,7 @@ export const DisableEngineDialogCountError = meta.story({
     const dialog = await openEngineDialog(context);
     await visible(
       await within(dialog).findByText(
-        /перестанут проверяться до включения/,
+        /^Открытые paper-сделки и демо-позиции/,
         {},
         WAIT,
       ),
@@ -487,7 +487,12 @@ export const DisableEngineDialogCountError = meta.story({
 export const DisableEngineDialogNothingOpen = meta.story({
   name: "Модалка: открытых сделок нет",
   args: { exposure: "нет открытых" },
-  play: DisableEngineDialog.input.play,
+  play: async (context) => {
+    const dialog = await openEngineDialog(context);
+    await visible(
+      await within(dialog).findByText(/^Открыто 0 paper-сделок/, {}, WAIT),
+    );
+  },
 });
 
 export const EnableEngineDialog = meta.story({
