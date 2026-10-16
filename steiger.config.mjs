@@ -16,6 +16,9 @@ export default defineConfig([
       "fsd/no-public-api-sidestep": "off",
       // `entities/ai-credits` — название понятия (баланс кредитов), не множественное число.
       "fsd/inconsistent-naming": "off",
+      // Слайсы делятся по доменам (docs/ai/architecture.md → «Домены и изоляция»), а не группами папок: в features
+      // их больше 20 (spec 0050). Группировка по доменам — отдельной задачей, если понадобится.
+      "fsd/excessive-slicing": "off",
     },
   },
   {

@@ -9,7 +9,7 @@ import {
   DISABLE_REASONS,
   type DisableForm,
   disableFormSchema,
-  type LabSettings,
+  LabSettingsError,
   useSetExperimentEnabled,
 } from "@/entities/experiment";
 import { Button } from "@/shared/ui/button";
@@ -30,26 +30,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
-
-type Experiment = LabSettings["experiments"][number];
+import { variantsToConfirm } from "../lib/variantsToConfirm";
 
 /**
  * Окно выключения эксперимента (spec 0046, AC6): категория причины обязательна, текст — до 200 символов.
  * Контрольный с включёнными вариантами — предупреждение со списком и обязательная галочка. Отмена — эксперимент
- * остаётся включённым (тумблер показывает состояние с сервера).
+ * остаётся включённым (тумблер показывает состояние с сервера). Общее для /settings, /experiments и страницы
+ * эксперимента (spec 0050).
  */
 export function DisableExperimentDialog({
   experiment,
-  variants,
+  variants: known,
   onClose,
+  onDisabled,
 }: {
-  experiment: Experiment;
-  /** Включённые варианты этого контрольного. */
-  variants: string[];
+  experiment: { id: string; name: string };
+  /** Включённые варианты этого контрольного — по данным страницы. */
+  variants: readonly string[];
+  /** Окно закрыто: «Отмена», крестик или после выключения. */
   onClose: () => void;
+  /** Сервер выключил эксперимент (вызывается перед onClose). */
+  onDisabled?: () => void;
 }) {
   const ids = { reason: useId(), note: useId(), confirm: useId() };
   const toggle = useSetExperimentEnabled();
+  // Данные страницы устарели и вариант включили в другом месте — сервер ответил 409 со списком.
+  const conflict =
+    toggle.error instanceof LabSettingsError ? toggle.error.variants : [];
+  const variants = variantsToConfirm(known, conflict);
   const form = useForm<DisableForm>({
     resolver: zodResolver(disableFormSchema),
     defaultValues: { note: "", confirmControl: false },
@@ -68,7 +76,12 @@ export function DisableExperimentDialog({
         note: values.note || undefined,
         confirmControl: variants.length > 0 ? values.confirmControl : undefined,
       },
-      { onSuccess: onClose },
+      {
+        onSuccess: () => {
+          onDisabled?.();
+          onClose();
+        },
+      },
     ),
   );
 
@@ -150,7 +163,8 @@ export function DisableExperimentDialog({
             </div>
           )}
 
-          {toggle.error && (
+          {/* Ответ 409 уже показан предупреждением с галочкой выше. */}
+          {toggle.error && conflict.length === 0 && (
             <p className="text-sm text-destructive">{toggle.error.message}</p>
           )}
 

@@ -81,6 +81,21 @@ describe("sortExperiments", () => {
       ).toBe("S01");
   });
 
+  it("вкл: по убыванию сначала включённые, при равенстве — по id", () => {
+    const rows = [
+      { ...summary("S03", "spot", []), enabled: false },
+      summary("S02", "spot", []),
+      { ...summary("S01", "spot", []), enabled: false },
+      summary("F01", "usdm", []),
+    ];
+    expect(
+      sortExperiments(rows, "all", "enabled", "desc").map((e) => e.id),
+    ).toEqual(["F01", "S02", "S01", "S03"]);
+    expect(
+      sortExperiments(rows, "all", "enabled", "asc").map((e) => e.id),
+    ).toEqual(["S01", "S03", "F01", "S02"]);
+  });
+
   it("ag: spot раньше usdm по возрастанию, при равенстве — по id", () => {
     const groups = [
       summary("F02", "usdm", []),

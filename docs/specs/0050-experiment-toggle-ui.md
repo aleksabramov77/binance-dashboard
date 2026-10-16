@@ -66,3 +66,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-16 | ТЗ утверждено; решения пользователя — тумблер в таблице `/experiments` и в шапке страницы эксперимента; включение — сразу, выключение — окно из `/settings` |
+| 2026-10-16 | Ветка `feature/0050-experiment-toggle-ui`: слайс `features/experiment-toggle` (`ExperimentEnabledSwitch` + перенесённый `DisableExperimentDialog`, окну нужны только `id` и название); тумблер — в `/settings`, первой колонкой «Вкл» таблицы `/experiments` (сортируется, затемнение строки — без ячейки тумблера) и в шапке `/experiments/<id>`; варианты для окна — `enabledVariantsOf` / семья вариантов, а при устаревших данных — из ответа 409 (`LabSettingsError.variants`); Steiger `fsd/excessive-slicing` выключен — в `features` стал 21 слайс |
