@@ -47,7 +47,7 @@ VM общая для нескольких личных проектов (поз�
 - [ ] AC4. **HTTPS и Binance.** `https://binance.<ip>.sslip.io` отвечает с сертификатом Let's Encrypt. С IP VM
   `api.binance.com` и `fapi.binance.com` отвечают 200 (проверка в `bootstrap.sh`).
 - [ ] AC5. **Выкатка из CI.** `.github/workflows/deploy.yml`:
-  - собирает Next.js в режиме `output: "standalone"`;
+  - собирает Next.js в режиме `output: "standalone"` (только при `BUILD_STANDALONE=1` — сборку Vercel не меняем, пока прод на нём);
   - копирует бандл на VM под `deploy`, перезапускает сервис и ждёт ответа сервера;
   - при сбое печатает журнал сервиса.
   Ветка — параметр запуска. Автоматического запуска с `main` пока нет, чтобы прод на Vercel не дублировался.

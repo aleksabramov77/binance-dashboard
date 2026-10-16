@@ -56,6 +56,8 @@ jobs:
 
       - name: Build
         run: pnpm build
+        env:
+          BUILD_STANDALONE: "1" # output: "standalone" (next.config.ts) — только для VM
 
       # server.js + трассированные node_modules + миграции drizzle/; static и public standalone не копирует сам.
       - name: Бандл
