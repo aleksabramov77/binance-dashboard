@@ -2,9 +2,13 @@ name: Deploy
 
 # Выкатка на свою VM apps-tokyo (AWS Lightsail, spec 0017, docs/ai/deploy-lightsail.md).
 # На 512 МБ VM `next build` не помещается: собираем здесь (output: "standalone") и копируем готовый бандл.
-# Пока прод на Vercel, запуск только вручную — с любой ветки (проверка ветки на VM до переключения).
-# Автовыкатка после зелёного CI на main включается на шаге «переключение» плана переезда.
+# Прод — VM (spec 0055): каждый зелёный CI на main сам выкатывает VM (workflow_run). Ручной запуск — с любой ветки
+# или коммита (повторная выкатка, проверка ветки). Vercel из main больше не выкатывается (vercel.json).
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
@@ -29,6 +33,11 @@ jobs:
     name: build → rsync → restart
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Автовыкатка — только после успешного CI от push в main (не PR, не отменённый и не упавший прогон).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     env:
       VM_HOST: ${{ secrets.APPS_TOKYO_HOST }}
       VM_USER: ${{ secrets.APPS_TOKYO_USER }}
@@ -43,7 +52,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          # workflow_run — ровно тот коммит, который проверил CI; ручной запуск — выбранная ветка или коммит.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.ref }}
 
       - uses: pnpm/action-setup@v4
 
