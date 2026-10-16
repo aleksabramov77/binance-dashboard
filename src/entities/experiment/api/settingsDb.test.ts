@@ -98,7 +98,7 @@ const input = (fromRunId: number): ResetRunInput => ({
   initialBudget: 20_000,
 });
 
-describe("сброс тестовых капиталов (PGlite)", () => {
+describe("сброс тестовых капиталов (SQLite)", () => {
   it("закрывает открытые сделки эпохи по плану (manual) и помечает закрытые без цены", async () => {
     const { runId } = await setup();
     const out = await resetRun(db, input(runId));
@@ -187,6 +187,22 @@ describe("сброс тестовых капиталов (PGlite)", () => {
       .where(eq(paperTradesTable.id, "done"));
     expect(done.exitReason).toBe("tp");
     expect(done.pnl).toBe(3.9);
+  });
+
+  it("сбой посреди сброса откатывает всё: сделки открыты, эпоха и бюджеты прежние (транзакция SQLite)", async () => {
+    const { runId, store } = await setup();
+    // Значение engine_state пишется после закрытий и новой эпохи; BigInt не сериализуется в JSON — сбой.
+    await expect(
+      resetRun(db, { ...input(runId), state: { bars: BigInt(1) } }),
+    ).rejects.toThrow(/BigInt/);
+    expect(await store.currentRunId()).toBe(runId);
+    expect(await db.select().from(runsTable)).toHaveLength(1);
+    expect((await store.openTrades(runId)).map((t) => t.id)).toEqual([
+      "open-1",
+      "open-2",
+    ]);
+    const budgets = (await store.listExperiments()).map((e) => e.initialBudget);
+    expect(budgets).toEqual([10_000, 10_000]);
   });
 });
 

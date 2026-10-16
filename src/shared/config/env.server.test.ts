@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   getAppHost,
   getDatabaseConfig,
-  getDbSizeLimit,
   getDeploymentVersion,
   getGithubAlertsConfig,
   getLiveAppUrl,
@@ -59,52 +58,27 @@ describe("getDeploymentVersion", () => {
 });
 
 describe("getDatabaseConfig", () => {
-  it("Postgres по DATABASE_URL — локально и на Vercel", () => {
-    expect(getDatabaseConfig({ DATABASE_URL: URL })).toEqual({
-      kind: "postgres",
-      url: URL,
-    });
-    expect(getDatabaseConfig({ DATABASE_URL: URL, VERCEL: "1" }).kind).toBe(
-      "postgres",
-    );
+  it("файл SQLite из DATABASE_PATH; DATABASE_URL не читается", () => {
+    expect(
+      getDatabaseConfig({
+        DATABASE_PATH: " /var/lib/binance/app.db ",
+        DATABASE_URL: URL,
+      }),
+    ).toEqual({ kind: "sqlite", path: "/var/lib/binance/app.db" });
   });
 
-  it("без DATABASE_URL локально — PGlite в data/pglite", () => {
+  it("без DATABASE_PATH — data/app.db", () => {
     expect(getDatabaseConfig({})).toEqual({
-      kind: "pglite",
-      dir: "data/pglite",
+      kind: "sqlite",
+      path: "data/app.db",
     });
+    expect(
+      getDatabaseConfig({ DATABASE_PATH: " ", DATABASE_URL: URL }),
+    ).toEqual({ kind: "sqlite", path: "data/app.db" });
   });
 
-  it("без DATABASE_URL на Vercel — понятная ошибка вместо PGlite", () => {
-    expect(() => getDatabaseConfig({ VERCEL: "1" })).toThrow(/DATABASE_URL/);
-    expect(() => getDatabaseConfig({ VERCEL: "1", DATABASE_URL: "" })).toThrow(
-      /DATABASE_URL/,
-    );
-  });
-});
-
-describe("getDbSizeLimit", () => {
-  const MB = 1024 * 1024;
-
-  it("по умолчанию 500 МБ (Supabase Free)", () => {
-    expect(getDbSizeLimit({})).toEqual({ limitBytes: 500 * MB, invalid: null });
-    expect(getDbSizeLimit({ DB_SIZE_LIMIT_MB: " " }).invalid).toBeNull();
-  });
-
-  it("берёт DB_SIZE_LIMIT_MB", () => {
-    expect(getDbSizeLimit({ DB_SIZE_LIMIT_MB: "8192" })).toEqual({
-      limitBytes: 8192 * MB,
-      invalid: null,
-    });
-  });
-
-  it("некорректное значение — 500 МБ и само значение для предупреждения", () => {
-    for (const raw of ["abc", "0", "-5", "Infinity"])
-      expect(getDbSizeLimit({ DB_SIZE_LIMIT_MB: raw })).toEqual({
-        limitBytes: 500 * MB,
-        invalid: raw,
-      });
+  it("на Vercel — понятная ошибка: файлу базы там негде жить", () => {
+    expect(() => getDatabaseConfig({ VERCEL: "1" })).toThrow(/SQLite/);
   });
 });
 

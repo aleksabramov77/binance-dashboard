@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
 import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { demoMirrorOrdersTable, experimentsTable } from "../model/db";
@@ -322,39 +321,6 @@ describe("демо-сводка и демо-сброс", () => {
   });
 });
 
-describe("data-fix drizzle/0005 (spec 0012, AC2)", () => {
-  it("отказы «нет в Binance Demo Trading» переносятся в пропуски, прочие отказы остаются", async () => {
-    await setup();
-    await setExperimentDemoMirror(db, "F01", true);
-    await setExperimentDemoMirror(db, "F02", true);
-    const [a, b] = await listMirrorCandidates(db, SINCE);
-    await claimMirror(db, a);
-    await claimMirror(db, b);
-    await updateMirror(db, "a", {
-      status: "rejected",
-      message: "ETHUSDT нет в Binance Demo Trading (Futures).",
-      steps: [],
-    });
-    await updateMirror(db, "b", {
-      status: "rejected",
-      message: "Биржа отклонила вход — позиция не открыта.",
-      steps: [],
-    });
-    const fix = readFileSync(
-      "drizzle/0005_mirror_missing_symbols_skipped.sql",
-      "utf8",
-    );
-    await db.execute(sql.raw(fix));
-    await db.execute(sql.raw(fix));
-    const statuses = await mirrorStatuses(db, ["a", "b"]);
-    expect(statuses.get("a")).toEqual({
-      status: "skipped",
-      message: "ETHUSDT: нет на демо-фьючерсах.",
-    });
-    expect(statuses.get("b")?.status).toBe("rejected");
-  });
-});
-
 describe("protect_refs", () => {
   it("нога сработала раньше входа: unprotected только из открытых статусов (сброс мог закрыть строку)", async () => {
     await setup();
@@ -419,10 +385,8 @@ describe("protect_refs", () => {
     await setExperimentDemoMirror(db, "F01", true);
     const [c] = await listMirrorCandidates(db, SINCE);
     await claimMirror(db, c);
-    await db.execute(
-      sql.raw(
-        "update demo_mirror_orders set market = 'spot' where trade_id = 'a'",
-      ),
+    db.run(
+      "update demo_mirror_orders set market = 'spot' where trade_id = 'a'",
     );
     await updateMirror(db, "a", {
       status: "protected",
@@ -509,8 +473,8 @@ describe("protect_refs", () => {
         hasRefs: false,
       },
     ]);
-    await db.execute(
-      sql`update demo_mirror_orders set protect_refs = '{"market":"spot"}'::jsonb where trade_id = 'a'`,
+    db.run(
+      `update demo_mirror_orders set protect_refs = '{"market":"spot"}' where trade_id = 'a'`,
     );
     await store.closeTrade("a", {
       closedAt: "2026-10-11T12:30:00.000Z",

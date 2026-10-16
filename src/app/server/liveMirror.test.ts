@@ -36,7 +36,7 @@ import {
   skipLive,
 } from "./liveMirror";
 
-// Хранилище реального зеркала без биржи (spec 0049): PGlite в памяти; Telegram и цены — моки. Id — фиктивные.
+// Хранилище реального зеркала без биржи (spec 0049): SQLite в памяти; Telegram и цены — моки. Id — фиктивные.
 let db: Db;
 let close: () => Promise<void>;
 
@@ -160,8 +160,8 @@ beforeEach(async () => {
   vi.stubEnv("TELEGRAM_BOT_TOKEN", "bot");
   vi.stubEnv("TELEGRAM_CHAT_ID", "42");
   await db.delete(liveWorkerStateTable);
-  await db.execute("delete from live_mirror_orders");
-  await db.execute("delete from live_trading_halt");
+  db.run("delete from live_mirror_orders");
+  db.run("delete from live_trading_halt");
   await db
     .update(experimentsTable)
     .set({ liveMirror: false })
@@ -390,8 +390,8 @@ describe("повтор закрытий (приёмка 0049)", () => {
   };
   /** Пауза между повторами — по updated_at: «прошла минута». */
   const minuteLater = (id: string) =>
-    db.execute(
-      `update live_mirror_orders set updated_at = now() - interval '2 minutes' where trade_id = '${id}'`,
+    db.run(
+      `update live_mirror_orders set updated_at = ${Date.now() - 2 * 60_000} where trade_id = '${id}'`,
     );
 
   it("сбой закрытия → повтор на следующем прогоне → успех; Telegram о сбое один раз, итог — «после N попыток»", async () => {
@@ -529,8 +529,8 @@ describe("повтор закрытий (приёмка 0049)", () => {
     await liveHaltAction("close_all", actor);
     await liveCloseAll({ phase: "claim" });
     expect((await getLiveMirror(db, a))?.status).toBe("closing");
-    await db.execute(
-      `update live_mirror_orders set updated_at = now() - interval '6 minutes' where trade_id = '${a}'`,
+    db.run(
+      `update live_mirror_orders set updated_at = ${Date.now() - 6 * 60_000} where trade_id = '${a}'`,
     );
     expect((await liveMirrorState()).toClose).toContain(a);
   });
@@ -578,8 +578,8 @@ describe("сверка «потерянного» входа (ревью PR #89)
     return id;
   };
   const age = (id: string, minutes: number) =>
-    db.execute(
-      `update live_mirror_orders set created_at = now() - interval '${minutes} minutes' where trade_id = '${id}'`,
+    db.run(
+      `update live_mirror_orders set created_at = ${Date.now() - minutes * 60_000} where trade_id = '${id}'`,
     );
 
   it("pending дольше 3 минут — в stalePending; свежий — нет", async () => {
@@ -628,8 +628,8 @@ describe("сверка «потерянного» входа (ревью PR #89)
     expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toMatch(/⚠️/);
     // Как после неудачного закрытия: пауза между повторами, затем — в очереди закрытия каждый прогон.
-    await db.execute(
-      `update live_mirror_orders set updated_at = now() - interval '2 minutes' where trade_id = '${a}'`,
+    db.run(
+      `update live_mirror_orders set updated_at = ${Date.now() - 2 * 60_000} where trade_id = '${a}'`,
     );
     expect((await liveMirrorState()).toClose).toContain(a);
   });

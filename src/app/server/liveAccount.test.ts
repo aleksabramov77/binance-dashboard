@@ -64,7 +64,7 @@ const statusLogs = () =>
     .filter(([event]) => event === "live.status")
     .map(([, message, data]) => ({ message, telegram: data?.telegram }));
 
-// Одна PGlite с миграциями на файл (создание медленное), строка пульса чистится перед каждым тестом.
+// Одна SQLite с миграциями на файл (создание медленное), строка пульса чистится перед каждым тестом.
 beforeAll(async () => {
   ({ db, close } = await createMemoryDb());
 }, 60_000);

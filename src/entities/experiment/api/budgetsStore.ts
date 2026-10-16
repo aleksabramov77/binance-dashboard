@@ -1,12 +1,12 @@
 import { and, eq, isNotNull, isNull, sum } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type { BudgetInputs } from "../lib/budgets";
 import { experimentsTable, paperTradesTable } from "../model/db";
 import { directionSchema, marketSchema } from "../model/schema";
 import { countedTrade } from "./accounting";
 import { ensureRun } from "./dbStore";
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = BaseSQLiteDatabase<"sync", unknown>;
 
 /** Данные для бюджетов текущей эпохи: стартовые капиталы, итоги закрытых сделок и открытые позиции. */
 export async function loadBudgetInputs(

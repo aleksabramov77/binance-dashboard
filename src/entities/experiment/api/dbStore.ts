@@ -15,7 +15,6 @@ import {
   isNotNull,
   isNull,
   lt,
-  sql,
   sum,
 } from "drizzle-orm";
 import {
@@ -73,9 +72,13 @@ export async function seedExperiments(
   db: Db,
   catalog: Experiment[],
 ): Promise<void> {
+  seedExperimentsSync(db, catalog);
+}
+
+/** То же синхронно — внутри транзакции SQLite (`pnpm lab:private`: все эксперименты одной транзакцией). */
+export function seedExperimentsSync(db: Db, catalog: Experiment[]): void {
   for (const e of catalog)
-    await db
-      .insert(experimentsTable)
+    db.insert(experimentsTable)
       .values({
         id: e.id,
         market: e.market,
@@ -98,9 +101,10 @@ export async function seedExperiments(
           config: e.config,
           parentId: e.parentId ?? null,
           variantNote: e.variantNote ?? null,
-          updatedAt: sql`now()`,
+          updatedAt: new Date(),
         },
-      });
+      })
+      .run();
 }
 
 /** Хранилище движка лаборатории поверх таблиц домена. */
@@ -248,7 +252,7 @@ export function createDbExperimentStore(db: Db) {
         .values({ key, value })
         .onConflictDoUpdate({
           target: engineStateTable.key,
-          set: { value, updatedAt: sql`now()` },
+          set: { value, updatedAt: new Date() },
         });
     },
   };

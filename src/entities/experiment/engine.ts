@@ -6,8 +6,9 @@ export {
   type DbExperimentStore,
   ensureRun,
   seedExperiments,
+  seedExperimentsSync,
 } from "./api/dbStore.ts";
-// Межпроцессная блокировка тика (advisory lock в общей БД, spec 007b).
+// Блокировка тика (в памяти процесса: база — файл SQLite одного процесса, spec 0059).
 export {
   ENGINE_TICK_LOCK_KEY,
   type ExperimentDb,

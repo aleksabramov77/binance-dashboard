@@ -1,5 +1,5 @@
 import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { computeDemoStats } from "../lib/stats";
 import {
   DEMO_MIRROR_MARKETS,
@@ -19,11 +19,12 @@ import {
   OPEN_MIRROR_STATUSES,
 } from "../model/mirror";
 import type { DemoSummary } from "../model/view";
+import { MIN_TIME_MS } from "./accounting";
 
 // Demo-зеркало (spec 008): какие paper-сделки повторить на Binance Demo и какие демо-позиции закрыть.
 // Без @/… и node:* — как dbStore. Сделки с биржей делает композиция src/app/server/demoMirror.ts.
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = BaseSQLiteDatabase<"sync", unknown>;
 
 /** Paper-сделка, которую можно зеркалить. */
 export interface MirrorCandidate {
@@ -82,7 +83,7 @@ export async function setExperimentDemoMirror(
 ): Promise<boolean> {
   const rows = await db
     .update(experimentsTable)
-    .set({ demoMirror, updatedAt: sql`now()` })
+    .set({ demoMirror, updatedAt: new Date() })
     .where(
       and(
         eq(experimentsTable.id, id),
@@ -239,8 +240,8 @@ export async function updateMirror(
     .update(demoMirrorOrdersTable)
     .set({
       ...fields,
-      updatedAt: sql`now()`,
-      ...(closed && { closedAt: sql`now()` }),
+      updatedAt: new Date(),
+      ...(closed && { closedAt: new Date() }),
     })
     .where(eq(demoMirrorOrdersTable.tradeId, tradeId));
   if (patch.demoRef)
@@ -287,7 +288,7 @@ export async function claimMirrorToClose(
     .where(isNotNull(paperTradesTable.closedAt));
   const [row] = await db
     .update(demoMirrorOrdersTable)
-    .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
+    .set({ status: "closing" satisfies MirrorStatus, updatedAt: new Date() })
     .where(
       and(
         eq(demoMirrorOrdersTable.tradeId, tradeId),
@@ -362,8 +363,8 @@ export async function markMirrorClosedByExchange(
       message: patch.message,
       steps: patch.steps,
       exitPrice: patch.exitPrice,
-      updatedAt: sql`now()`,
-      closedAt: sql`now()`,
+      updatedAt: new Date(),
+      closedAt: new Date(),
     })
     .where(
       and(
@@ -391,7 +392,7 @@ export async function markMirrorUnprotected(
       status: "unprotected" satisfies MirrorStatus,
       message: patch.message,
       steps: patch.steps,
-      updatedAt: sql`now()`,
+      updatedAt: new Date(),
     })
     .where(
       and(
@@ -495,7 +496,7 @@ export async function mirrorSummaries(
     )
     .where(
       scope === "current"
-        ? sql`${demoMirrorOrdersTable.createdAt} >= coalesce((select ${experimentsTable.demoResetAt} from ${experimentsTable} where ${experimentsTable.id} = ${demoMirrorOrdersTable.experimentId}), '-infinity'::timestamptz)`
+        ? sql`${demoMirrorOrdersTable.createdAt} >= coalesce((select ${experimentsTable.demoResetAt} from ${experimentsTable} where ${experimentsTable.id} = ${demoMirrorOrdersTable.experimentId}), ${MIN_TIME_MS})`
         : scope === "all"
           ? undefined
           : eq(paperTradesTable.runId, scope.runId),
@@ -563,7 +564,7 @@ export async function claimOpenMirrors(
 ): Promise<MirrorToClose[]> {
   const rows = await db
     .update(demoMirrorOrdersTable)
-    .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
+    .set({ status: "closing" satisfies MirrorStatus, updatedAt: new Date() })
     .where(
       and(
         inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
@@ -591,7 +592,7 @@ export async function markDemoReset(
 ): Promise<number> {
   const rows = await db
     .update(experimentsTable)
-    .set({ demoResetAt: sql`now()`, updatedAt: sql`now()` })
+    .set({ demoResetAt: new Date(), updatedAt: new Date() })
     .where(
       scope === null
         ? undefined

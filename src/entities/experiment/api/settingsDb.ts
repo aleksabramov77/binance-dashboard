@@ -1,6 +1,5 @@
 import type { PaperTrade } from "@binance-dashboard/trading-core";
 import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import {
   engineStateTable,
   experimentsTable,
@@ -9,12 +8,14 @@ import {
 } from "../model/db";
 import type { DisableReason } from "../model/disable";
 import type { Epoch } from "../model/settings";
+import type { ExperimentDb } from "./tickLock";
 
 // Запросы /settings лаборатории (spec 003, задача 3d): эпоха, тумблеры экспериментов, атомарный
 // сброс. Без @/… и node:* — как dbStore. Чистую часть сброса (цены, PnL, метки свечей) считает
-// движок (features/paper-engine → planReset), сюда приходит готовый план.
+// движок (features/paper-engine → planReset), сюда приходит готовый план. Транзакции SQLite синхронные
+// (better-sqlite3, spec 0059): внутри них только запросы .all()/.get()/.run(), без await и сети.
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = ExperimentDb;
 
 /** Сводка эпохи: номер, начало, сколько сделок (всего и открытых). */
 export async function getEpoch(db: Db, runId: number): Promise<Epoch> {
@@ -58,6 +59,7 @@ export async function setExperimentEnabled(
   id: string,
   state: ExperimentEnabledState,
 ): Promise<boolean> {
+  const now = new Date();
   const rows = await db
     .update(experimentsTable)
     .set(
@@ -67,14 +69,14 @@ export async function setExperimentEnabled(
             disabledReason: null,
             disabledNote: null,
             disabledAt: null,
-            updatedAt: sql`now()`,
+            updatedAt: now,
           }
         : {
             enabled: false,
             disabledReason: state.reason,
             disabledNote: cleanNote(state.note),
-            disabledAt: sql`now()`,
-            updatedAt: sql`now()`,
+            disabledAt: now,
+            updatedAt: now,
           },
     )
     .where(eq(experimentsTable.id, id))
@@ -91,13 +93,14 @@ export async function setDisableReason(
   id: string,
   reason: { reason: DisableReason; note?: string | null },
 ): Promise<boolean> {
+  const now = new Date();
   const rows = await db
     .update(experimentsTable)
     .set({
       disabledReason: reason.reason,
       disabledNote: cleanNote(reason.note),
-      disabledAt: sql`coalesce(${experimentsTable.disabledAt}, now())`,
-      updatedAt: sql`now()`,
+      disabledAt: sql`coalesce(${experimentsTable.disabledAt}, ${now.getTime()})`,
+      updatedAt: now,
     })
     .where(
       and(eq(experimentsTable.id, id), eq(experimentsTable.enabled, false)),
@@ -131,23 +134,23 @@ type Closes = ResetRunInput["closes"];
  * Закрыть открытые сделки эпохи runId по плану (manual); уже закрытые пропускаются. experimentIds — закрывать только
  * сделки этих экспериментов (сброс группы: чужое закрытие в плане не применяется).
  */
-async function applyCloses(
+function applyCloses(
   tx: Db,
   runId: number,
   closes: Closes,
   experimentIds?: string[],
-): Promise<{ closed: number; closedWithoutPrice: number }> {
+): { closed: number; closedWithoutPrice: number } {
   let closed = 0;
   let closedWithoutPrice = 0;
   for (const { id, close, noPrice } of closes) {
-    const rows = await tx
+    const rows = tx
       .update(paperTradesTable)
       .set({
         ...close,
         closedAt: new Date(close.closedAt),
         ...(noPrice
           ? {
-              signal: sql`${paperTradesTable.signal} || '{"resetWithoutPrice": true}'::jsonb`,
+              signal: sql`json_patch(${paperTradesTable.signal}, '{"resetWithoutPrice": true}')`,
             }
           : {}),
       })
@@ -161,7 +164,8 @@ async function applyCloses(
             : inArray(paperTradesTable.experimentId, experimentIds),
         ),
       )
-      .returning({ id: paperTradesTable.id });
+      .returning({ id: paperTradesTable.id })
+      .all();
     if (rows.length === 0) continue;
     closed++;
     if (noPrice) closedWithoutPrice++;
@@ -180,71 +184,83 @@ export type ResetRunOutcome =
 
 /**
  * Сброс тестовых капиталов одной транзакцией: закрыть открытые сделки эпохи, начать новую эпоху,
- * записать метки свечей и бюджет. Старые сделки остаются со своим run_id. Строка текущей эпохи
- * блокируется (FOR UPDATE) — параллельный сброс ждёт и видит, что эпоха уже сменилась.
+ * записать метки свечей и бюджет. Старые сделки остаются со своим run_id. Транзакция берёт блокировку записи
+ * сразу (BEGIN IMMEDIATE) — параллельный сброс ждёт и видит, что эпоха уже сменилась.
  */
 export async function resetRun(
   db: Db,
   input: ResetRunInput,
 ): Promise<ResetRunOutcome> {
-  return db.transaction(async (tx) => {
-    const [last] = await tx
-      .select({ id: runsTable.id })
-      .from(runsTable)
-      .orderBy(desc(runsTable.id))
-      .limit(1)
-      .for("update");
-    if (!last || last.id !== input.fromRunId)
-      return { created: false, runId: last?.id ?? 0 };
+  return db.transaction(
+    (tx): ResetRunOutcome => {
+      const now = new Date();
+      const last = tx
+        .select({ id: runsTable.id })
+        .from(runsTable)
+        .orderBy(desc(runsTable.id))
+        .limit(1)
+        .get();
+      if (!last || last.id !== input.fromRunId)
+        return { created: false, runId: last?.id ?? 0 };
 
-    const { closed, closedWithoutPrice } = await applyCloses(
-      tx,
-      input.fromRunId,
-      input.closes,
-    );
+      const { closed, closedWithoutPrice } = applyCloses(
+        tx,
+        input.fromRunId,
+        input.closes,
+      );
 
-    const [run] = await tx
-      .insert(runsTable)
-      .values({ note: input.note?.trim() || "Сброс тестовых капиталов" })
-      .returning({ id: runsTable.id });
+      const run = tx
+        .insert(runsTable)
+        .values({
+          note: input.note?.trim() || "Сброс тестовых капиталов",
+          startedAt: now,
+        })
+        .returning({ id: runsTable.id })
+        .get();
 
-    for (const [key, value] of Object.entries(input.state))
-      await tx
-        .insert(engineStateTable)
-        .values({ key, value })
-        .onConflictDoUpdate({
-          target: engineStateTable.key,
-          set: { value, updatedAt: sql`now()` },
-        });
+      for (const [key, value] of Object.entries(input.state))
+        tx.insert(engineStateTable)
+          .values({ key, value, updatedAt: now })
+          .onConflictDoUpdate({
+            target: engineStateTable.key,
+            set: { value, updatedAt: now },
+          })
+          .run();
 
-    if (input.initialBudget !== undefined)
-      await tx.update(experimentsTable).set({
-        initialBudget: input.initialBudget,
-        resetAt: null,
-        updatedAt: sql`now()`,
-      });
+      if (input.initialBudget !== undefined)
+        tx.update(experimentsTable)
+          .set({
+            initialBudget: input.initialBudget,
+            resetAt: null,
+            updatedAt: now,
+          })
+          .run();
 
-    return { created: true, runId: run.id, closed, closedWithoutPrice };
-  });
+      return { created: true, runId: run.id, closed, closedWithoutPrice };
+    },
+    { behavior: "immediate" },
+  );
 }
 
 /** Дописать метки свечей в engine_state[barsKey], не трогая метки других экспериментов. */
-async function mergeBars(
+function mergeBars(
   tx: Db,
   barsKey: string,
   bars: Record<string, number>,
-): Promise<void> {
+  now: Date,
+): void {
   if (Object.keys(bars).length === 0) return;
-  await tx
-    .insert(engineStateTable)
-    .values({ key: barsKey, value: bars })
+  tx.insert(engineStateTable)
+    .values({ key: barsKey, value: bars, updatedAt: now })
     .onConflictDoUpdate({
       target: engineStateTable.key,
       set: {
-        value: sql`${engineStateTable.value} || ${JSON.stringify(bars)}::jsonb`,
-        updatedAt: sql`now()`,
+        // Слияние объектов, как jsonb || в Postgres: ключи bars заменяются, остальные метки остаются.
+        value: sql`json_patch(${engineStateTable.value}, ${JSON.stringify(bars)})`,
+        updatedAt: now,
       },
-    });
+    })
+    .run();
 }
 
 /**
@@ -268,29 +284,35 @@ export async function resetGroupRun(
   closed: number;
   closedWithoutPrice: number;
 }> {
-  return db.transaction(async (tx) => {
-    const rows = await tx
-      .update(experimentsTable)
-      .set({
-        resetAt: sql`now()`,
-        initialBudget: input.initialBudget,
-        updatedAt: sql`now()`,
-      })
-      .where(eq(experimentsTable.market, input.market))
-      .returning({ id: experimentsTable.id });
-    if (rows.length === 0)
-      return { experiments: 0, closed: 0, closedWithoutPrice: 0 };
-    const ids = new Set(rows.map((r) => r.id));
-    const result = await applyCloses(tx, input.runId, input.closes, [...ids]);
-    await mergeBars(
-      tx,
-      input.barsKey,
-      Object.fromEntries(
-        Object.entries(input.bars).filter(([id]) => ids.has(id)),
-      ),
-    );
-    return { experiments: rows.length, ...result };
-  });
+  return db.transaction(
+    (tx) => {
+      const now = new Date();
+      const rows = tx
+        .update(experimentsTable)
+        .set({
+          resetAt: now,
+          initialBudget: input.initialBudget,
+          updatedAt: now,
+        })
+        .where(eq(experimentsTable.market, input.market))
+        .returning({ id: experimentsTable.id })
+        .all();
+      if (rows.length === 0)
+        return { experiments: 0, closed: 0, closedWithoutPrice: 0 };
+      const ids = new Set(rows.map((r) => r.id));
+      const result = applyCloses(tx, input.runId, input.closes, [...ids]);
+      mergeBars(
+        tx,
+        input.barsKey,
+        Object.fromEntries(
+          Object.entries(input.bars).filter(([id]) => ids.has(id)),
+        ),
+        now,
+      );
+      return { experiments: rows.length, ...result };
+    },
+    { behavior: "immediate" },
+  );
 }
 
 /**
@@ -310,17 +332,22 @@ export async function resetExperimentRun(
     barsKey: string;
   },
 ): Promise<{ found: boolean; closed: number; closedWithoutPrice: number }> {
-  return db.transaction(async (tx) => {
-    const rows = await tx
-      .update(experimentsTable)
-      .set({ resetAt: sql`now()`, updatedAt: sql`now()` })
-      .where(eq(experimentsTable.id, input.experimentId))
-      .returning({ id: experimentsTable.id });
-    if (rows.length === 0)
-      return { found: false, closed: 0, closedWithoutPrice: 0 };
-    const result = await applyCloses(tx, input.runId, input.closes);
-    if (input.bar !== undefined)
-      await mergeBars(tx, input.barsKey, { [input.experimentId]: input.bar });
-    return { found: true, ...result };
-  });
+  return db.transaction(
+    (tx) => {
+      const now = new Date();
+      const rows = tx
+        .update(experimentsTable)
+        .set({ resetAt: now, updatedAt: now })
+        .where(eq(experimentsTable.id, input.experimentId))
+        .returning({ id: experimentsTable.id })
+        .all();
+      if (rows.length === 0)
+        return { found: false, closed: 0, closedWithoutPrice: 0 };
+      const result = applyCloses(tx, input.runId, input.closes);
+      if (input.bar !== undefined)
+        mergeBars(tx, input.barsKey, { [input.experimentId]: input.bar }, now);
+      return { found: true, ...result };
+    },
+    { behavior: "immediate" },
+  );
 }

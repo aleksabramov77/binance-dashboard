@@ -1,4 +1,4 @@
-// Композиция монитора журнала (платформа): данные из БД (журнал, движок, Earn, pg_cron), разбор ИИ
+// Композиция монитора журнала (платформа): данные из БД (журнал, движок, Earn), разбор ИИ
 // через OpenRouter, задача в приватном репозитории GitHub (spec 0037), уведомление в Telegram.
 // Только сервер; вызывает POST /api/cron/log-monitor.
 import { and, desc, gte, inArray, or, sql } from "drizzle-orm";
@@ -27,7 +27,7 @@ import {
   getSiteUrl,
   getTelegramConfig,
 } from "@/shared/config/env.server";
-import { getDb, rowsOf } from "@/shared/db/client.server";
+import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { loadAlertState, saveAlertState } from "./alertState";
 import { checkLiveSilence } from "./liveAccount";
@@ -38,17 +38,19 @@ const iso = (ms: number) => new Date(ms).toISOString();
 async function collect(now: number): Promise<MonitorSnapshot> {
   const db = getDb();
   const windowStart = iso(now - MONITOR.windowMs);
+  // В сыром SQL параметр не проходит через тип колонки: app_logs.ts в SQLite — миллисекунды (spec 0059).
+  const windowStartMs = now - MONITOR.windowMs;
   const baselineStart = iso(now - MONITOR.windowMs - MONITOR.baselineMs);
 
   const errorsByEvent = await db
     .select({
       event: appLogsTable.event,
       window:
-        sql<number>`count(*) filter (where ${appLogsTable.ts} >= ${windowStart})`.mapWith(
+        sql<number>`count(*) filter (where ${appLogsTable.ts} >= ${windowStartMs})`.mapWith(
           Number,
         ),
       baseline:
-        sql<number>`count(*) filter (where ${appLogsTable.ts} < ${windowStart})`.mapWith(
+        sql<number>`count(*) filter (where ${appLogsTable.ts} < ${windowStartMs})`.mapWith(
           Number,
         ),
     })
@@ -71,7 +73,7 @@ async function collect(now: number): Promise<MonitorSnapshot> {
       and(
         gte(appLogsTable.ts, windowStart),
         sql`${appLogsTable.event} like 'http%'`,
-        sql`(${appLogsTable.data}->>'status')::int >= 500`,
+        sql`cast(${appLogsTable.data}->>'status' as integer) >= 500`,
       ),
     )
     .groupBy(sql`${appLogsTable.data}->>'path'`);
@@ -90,30 +92,9 @@ async function collect(now: number): Promise<MonitorSnapshot> {
     | { at?: string; errors?: unknown[] }
     | undefined;
 
-  // pg_cron есть только в Supabase; локально (PGlite) таблиц cron нет — пропускаем.
-  let cronFailures: MonitorSnapshot["cronFailures"] = [];
-  try {
-    cronFailures = rowsOf<{
-      job: string;
-      failed: number;
-      last_message: string | null;
-    }>(
-      await db.execute(sql`
-        select j.jobname as job, count(*)::int as failed, max(d.return_message) as last_message
-        from cron.job_run_details d join cron.job j using (jobid)
-        where d.status = 'failed' and d.start_time >= ${windowStart}::timestamptz
-        group by j.jobname`),
-    ).map((r) => ({
-      job: r.job,
-      failed: r.failed,
-      lastMessage: r.last_message,
-    }));
-  } catch {
-    cronFailures = [];
-  }
-
   const [earn] = await db
-    .select({ at: sql<string | null>`max(${earnSnapshotsTable.fetchedAt})` })
+    // fetched_at в SQLite — миллисекунды UTC; max() отдаёт число без преобразования колонки.
+    .select({ at: sql<number | null>`max(${earnSnapshotsTable.fetchedAt})` })
     .from(earnSnapshotsTable);
 
   // Воркер реального счёта (spec 0047): «молчит» — запись live.status один раз; сбой не ломает монитор.
@@ -138,8 +119,9 @@ async function collect(now: number): Promise<MonitorSnapshot> {
       lastTickAt: lastTick?.at ? Date.parse(lastTick.at) : null,
       lastErrors: Array.isArray(lastTick?.errors) ? lastTick.errors.length : 0,
     },
-    cronFailures,
-    earnLastAt: earn?.at ? Date.parse(earn.at) : null,
+    // pg_cron был только в Supabase; фоновые задачи VM — таймеры процесса (spec 0048), их сбои — в журнале.
+    cronFailures: [],
+    earnLastAt: earn?.at ?? null,
     live,
   };
 }
@@ -186,7 +168,7 @@ async function analyze(
     { ...llm, model: getLogAnalysisModel() },
     {
       system:
-        "Ты дежурный инженер личного дашборда Binance (Next.js на Vercel, Postgres и Edge Function в Supabase, публичное API Binance, OpenRouter). По найденным проблемам и записям журнала коротко объясни по-русски: что сломалось, вероятная причина, что проверить первым. 2–4 предложения, без воды и без markdown.",
+        "Ты дежурный инженер личного дашборда Binance (Next.js на своей VM AWS Lightsail, база SQLite, публичное API Binance, OpenRouter). По найденным проблемам и записям журнала коротко объясни по-русски: что сломалось, вероятная причина, что проверить первым. 2–4 предложения, без воды и без markdown.",
       user: JSON.stringify({ issues, logs }),
       schemaName: "incident",
       jsonSchema: {

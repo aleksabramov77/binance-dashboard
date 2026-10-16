@@ -1,54 +1,45 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
-import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
-import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
-import { migrate as migratePostgres } from "drizzle-orm/postgres-js/migrator";
-import postgres from "postgres";
+import Database from "better-sqlite3";
+import {
+  type BetterSQLite3Database,
+  drizzle,
+} from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { type DatabaseConfig, getDatabaseConfig } from "../config/env.server";
 import { log } from "../lib/logger.server";
 // Доменно-нейтральный слой: подключение и миграции. Таблицы живут в слайсах своих доменов
 // (src/entities/*/model/db.ts) и передаются в запросы явно — db.select().from(table).
+// База — файл SQLite (spec 0059): на VM /var/lib/binance/app.db, локально data/app.db, в тестах — в памяти.
 
-/** Общий тип для Postgres и PGlite: запросы Drizzle одинаковые. */
-export type Db = PgDatabase<PgQueryResultHKT>;
+/** БД приложения: SQLite через better-sqlite3 (запросы синхронные, транзакции — тоже). */
+export type Db = BetterSQLite3Database;
 
 interface Connection {
   db: Db;
-  kind: DatabaseConfig["kind"];
-  migrate: () => Promise<void>;
-  close: () => Promise<void>;
+  client: Database.Database;
+  path: string;
 }
 
 const MIGRATIONS = { migrationsFolder: path.join(process.cwd(), "drizzle") };
 
-function connect(config: DatabaseConfig): Connection {
-  if (config.kind === "postgres") {
-    // prepare: false — пулер Supabase в режиме transaction не держит prepared statements.
-    const client = postgres(config.url, { max: 5, prepare: false });
-    const db = drizzlePostgres(client);
-    return {
-      db: db as unknown as Db,
-      kind: "postgres",
-      migrate: () => migratePostgres(db, MIGRATIONS),
-      close: () => client.end(),
-    };
-  }
-  // PGlite создаёт только последний каталог пути — родительские (data/) готовим сами.
-  mkdirSync(config.dir, { recursive: true });
-  return pgliteConnection(new PGlite(config.dir));
-}
+/** Сколько ждать чужую блокировку записи (другой процесс: `pnpm lab:*`, `sqlite3 .backup`), мс. */
+const BUSY_TIMEOUT_MS = 5000;
 
-function pgliteConnection(client: PGlite): Connection {
-  const db = drizzlePglite(client);
-  return {
-    db: db as unknown as Db,
-    kind: "pglite",
-    migrate: () => migratePglite(db, MIGRATIONS),
-    close: () => client.close(),
-  };
+export const MEMORY_PATH = ":memory:";
+
+/** Открывает файл (или базу в памяти) с настройками приложения: WAL, ожидание блокировки, внешние ключи. */
+export function openSqlite(file: string): Connection {
+  if (file !== MEMORY_PATH)
+    mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+  const client = new Database(file);
+  // WAL: читатели не ждут писателя, `.backup` и копия с VM — без остановки сервиса. В памяти WAL не бывает.
+  if (file !== MEMORY_PATH) client.pragma("journal_mode = WAL");
+  // NORMAL в режиме WAL: сбой питания теряет максимум последние транзакции, но не портит файл.
+  client.pragma("synchronous = NORMAL");
+  client.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
+  client.pragma("foreign_keys = ON");
+  return { db: drizzle(client), client, path: file };
 }
 
 // Одно подключение на процесс: в dev instrumentation и роуты — разные бандлы, поэтому в globalThis.
@@ -56,24 +47,24 @@ const key = Symbol.for("binance-dashboard.db");
 type GlobalWithDb = typeof globalThis & { [key]?: Connection };
 const g = globalThis as GlobalWithDb;
 
-function connection(): Connection {
-  g[key] ??= connect(getDatabaseConfig());
+function connection(config: DatabaseConfig = getDatabaseConfig()): Connection {
+  g[key] ??= openSqlite(config.path);
   return g[key];
 }
 
-/** БД приложения: Postgres по DATABASE_URL или локальный PGlite. */
+/** БД приложения: файл SQLite из DATABASE_PATH (по умолчанию data/app.db). */
 export const getDb = (): Db => connection().db;
 
-/** Какая БД у приложения: postgres (прод, Supabase) или pglite (локально). */
-export const getDbKind = (): DatabaseConfig["kind"] => connection().kind;
+/** Путь к файлу базы этого процесса (`:memory:` — в памяти) — для замера места и скриптов. */
+export const getDbPath = (): string => connection().path;
 
 /** Применяет миграции из `drizzle/`. Вызывается при старте сервера и `pnpm db:migrate`. */
 export async function migrateDb(): Promise<void> {
   const conn = connection();
   const started = Date.now();
-  await conn.migrate();
-  log.info("db.migrate", `Миграции применены (${conn.kind})`, {
-    kind: conn.kind,
+  migrate(conn.db, MIGRATIONS);
+  log.info("db.migrate", "Миграции применены (sqlite)", {
+    kind: "sqlite",
     ms: Date.now() - started,
   });
 }
@@ -82,21 +73,23 @@ export async function migrateDb(): Promise<void> {
 export async function closeDb(): Promise<void> {
   const conn = g[key];
   g[key] = undefined;
-  await conn?.close();
+  conn?.client.close();
 }
 
-/** Строки результата db.execute: postgres.js отдаёт массив, PGlite — { rows }. */
-export const rowsOf = <T>(result: unknown): T[] =>
-  Array.isArray(result)
-    ? (result as T[])
-    : ((result as { rows?: T[] }).rows ?? []);
+/** Применяет миграции к уже открытой базе (скрипт переноса, тесты). */
+export const migrateSqlite = (db: Db): void => migrate(db, MIGRATIONS);
 
 /** Чистая БД в памяти с применёнными миграциями — для тестов. */
 export async function createMemoryDb(): Promise<{
   db: Db;
   close: () => Promise<void>;
 }> {
-  const conn = pgliteConnection(new PGlite());
-  await conn.migrate();
-  return { db: conn.db, close: conn.close };
+  const conn = openSqlite(MEMORY_PATH);
+  migrate(conn.db, MIGRATIONS);
+  return {
+    db: conn.db,
+    close: async () => {
+      conn.client.close();
+    },
+  };
 }

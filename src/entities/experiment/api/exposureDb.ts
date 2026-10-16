@@ -1,10 +1,10 @@
 import { count, inArray, isNull } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { demoMirrorOrdersTable, paperTradesTable } from "../model/db";
 import type { EngineExposure } from "../model/exposure";
 import { ACTIVE_MIRROR_STATUSES } from "../model/mirror";
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = BaseSQLiteDatabase<"sync", unknown>;
 
 /**
  * Сколько позиций перестанет проверяться, если выключить движок (spec 0044): открытые paper-сделки

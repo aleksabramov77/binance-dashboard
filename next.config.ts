@@ -15,8 +15,8 @@ const nextConfig: NextConfig = {
     process.env.NEXT_DEPLOYMENT_ID ||
     process.env.VERCEL_DEPLOYMENT_ID ||
     undefined,
-  // PGlite грузит WASM и данные по путям пакета, postgres.js — нативный node-клиент: не бандлить.
-  serverExternalPackages: ["@electric-sql/pglite", "postgres"],
+  // better-sqlite3 — нативный модуль (.node): не бандлить, standalone-трассировка копирует пакет с бинарником (spec 0059).
+  serverExternalPackages: ["better-sqlite3"],
   partialPrefetching: true,
   turbopack: {
     rules: {

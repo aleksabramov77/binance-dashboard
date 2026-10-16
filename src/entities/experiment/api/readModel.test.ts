@@ -128,8 +128,8 @@ describe("чтение для страниц лаборатории", () => {
     await seedExperiments(db, [exp("F01")]);
     const run = await ensureRun(db);
     // Строка прод-формата: новые колонки не заданы — значения по умолчанию миграции.
-    await db.execute(
-      sql`insert into paper_trades (id, run_id, experiment_id, market, symbol, direction, opened_at, entry_price, quantity, initial_stop, stop, atr, extreme, checked_until, closed_at, exit_price, exit_reason, pnl, r_multiple) values ('old', ${run}, 'F01', 'usdm', 'BTCUSDT', 'long', now() - interval '1 hour', 100, 1, 98, 98, 1, 101, 0, now(), 101, 'tp', 1, 0.5)`,
+    db.run(
+      sql`insert into paper_trades (id, run_id, experiment_id, market, symbol, direction, opened_at, entry_price, quantity, initial_stop, stop, atr, extreme, checked_until, closed_at, exit_price, exit_reason, pnl, r_multiple) values ('old', ${run}, 'F01', 'usdm', 'BTCUSDT', 'long', ${Date.now() - 3_600_000}, 100, 1, 98, 98, 1, 101, 0, ${Date.now()}, 101, 'tp', 1, 0.5)`,
     );
     const detail = await readExperimentDetail(db, "F01", false, 10);
     expect(detail?.trades[0]).toMatchObject({ mae: null, entryContext: {} });
