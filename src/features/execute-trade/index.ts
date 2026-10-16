@@ -1,6 +1,7 @@
 // Серверный слайс: подписывает ордера секретом демо-ключа. Не импортировать из клиентских компонентов.
 
 export { SPOT_ENTRY_SLIPPAGE } from "./config/spot";
+export { algoTriggered } from "./lib/closePlan";
 // Площадка сделки (spec 0049): демо по умолчанию; реальный счёт передаёт воркер. Объём реального входа на $10.
 export { type EntrySize, sizeEntry } from "./lib/sizeEntry";
 export { tradeClientIds } from "./lib/spotEntry";

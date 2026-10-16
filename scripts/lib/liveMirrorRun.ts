@@ -33,6 +33,7 @@ import {
   runMirror,
 } from "@/features/demo-mirror";
 import {
+  algoTriggered,
   type CloseDemoRequest,
   type EntrySize,
   type OpenMirrorLegs,
@@ -308,6 +309,8 @@ export function estimateExit(
   item: Pick<LiveToClose, "market" | "direction" | "entryPrice" | "quantity">,
   exitPrice: number | null,
   reason: string,
+  /** Цена выхода не известна — взят худший случай (свой стоп или текущая цена): пометка в тексте. */
+  priceSource: string | null = null,
 ): ExitFigures {
   if (item.entryPrice === null || exitPrice === null || item.quantity <= 0)
     return {
@@ -327,23 +330,43 @@ export function estimateExit(
     realizedPnl: sign * (exitPrice - item.entryPrice) * item.quantity - fees,
     pnlEstimated: true,
     leftover: null,
-    note: `PnL — оценка по ценам входа и выхода, комиссия по ставке: ${reason}`,
+    note: `PnL — оценка по ценам входа и выхода${priceSource ? ` (выход — ${priceSource})` : ""}, комиссия по ставке: ${reason}`,
   };
+}
+
+type EstimateItem = Pick<
+  LiveToClose,
+  "market" | "symbol" | "direction" | "entryPrice" | "quantity" | "stopLoss"
+>;
+
+/**
+ * Оценка без исполнений. Цена выхода не известна (биржа закрыла по TP/SL, а исполнения не прочитаны) — худший
+ * разумный случай: цена своего стопа, иначе текущая цена символа. Не 0: убыток идёт в дневной лимит.
+ */
+async function estimateWorst(
+  ex: LiveExchange,
+  item: EstimateItem,
+  exitPrice: number | null,
+  reason: string,
+): Promise<ExitFigures> {
+  if (exitPrice !== null) return estimateExit(item, exitPrice, reason);
+  if (item.stopLoss !== null && item.stopLoss > 0)
+    return estimateExit(item, item.stopLoss, reason, "цена своего стопа");
+  const now = await ex.price(item.market, item.symbol).catch(() => null);
+  return estimateExit(item, now, reason, now === null ? null : "текущая цена");
 }
 
 async function exitByFills(
   ex: LiveExchange,
-  item: Pick<
-    LiveToClose,
-    "tradeId" | "market" | "symbol" | "direction" | "entryPrice" | "quantity"
-  >,
+  item: EstimateItem & Pick<LiveToClose, "tradeId">,
   fallbackExit: number | null,
 ): Promise<ExitFigures> {
   const asset = item.symbol.replace(/USDT$/, "");
   try {
     const orderIds = await ownOrderIds(ex, item);
     if (orderIds.size === 0)
-      return estimateExit(
+      return estimateWorst(
+        ex,
         item,
         fallbackExit,
         "свои ордера на бирже не найдены",
@@ -355,7 +378,8 @@ async function exitByFills(
       orderIds,
     });
     if (pnl.realizedPnl === null)
-      return estimateExit(
+      return estimateWorst(
+        ex,
         item,
         pnl.exitPrice ?? fallbackExit,
         "исполнения выхода не найдены",
@@ -379,7 +403,8 @@ async function exitByFills(
       note: notes.join(" ") || null,
     };
   } catch (error) {
-    return estimateExit(
+    return estimateWorst(
+      ex,
       item,
       fallbackExit,
       `исполнения не прочитаны (${error instanceof Error ? error.message : String(error)})`,
@@ -514,13 +539,17 @@ export async function reconcileEntry(
         await ex.algoOrder(ids.stop),
         await ex.algoOrder(ids.takeProfit),
       ];
-      const protectedNow = stop?.algoStatus === "NEW";
+      // Свой стоп или тейк уже сработал — позицию закрыла биржа: открыта (закрытие это распознает), а не «без защиты».
+      const closedByExchange = algoTriggered(stop) || algoTriggered(take);
+      const protectedNow = stop?.algoStatus === "NEW" || closedByExchange;
       return {
         tradeId: item.tradeId,
         outcome: protectedNow ? "open" : "unprotected",
-        message: protectedNow
-          ? "Вход найден на бирже по своему ордеру, свой стоп стоит."
-          : "Вход найден на бирже, своего стопа нет — позиция без защиты, закрытие повторяется каждый прогон.",
+        message: closedByExchange
+          ? "Вход найден на бирже, свой стоп или тейк уже сработал — позицию закрыла биржа."
+          : protectedNow
+            ? "Вход найден на бирже по своему ордеру, свой стоп стоит."
+            : "Вход найден на бирже, своего стопа нет — позиция без защиты, закрытие повторяется каждый прогон.",
         entryPrice: entry.avgPrice > 0 ? entry.avgPrice : null,
         quantity: entry.executedQty,
         protectRefs: {
@@ -559,13 +588,18 @@ export async function reconcileEntry(
       ? ids.takeProfit
       : ids.protectTakeProfit;
     const take = await ex.spotOrder(item.symbol, takeId);
-    const protectedNow = stop !== null && SPOT_ACTIVE.includes(stop.status);
+    // Свой стоп или тейк уже исполнен — монеты продала биржа: открыта (закрытие распознает «закрыта биржей»), без ⚠️.
+    const closedByExchange = [stop, take].some((o) => o?.status === "FILLED");
+    const protectedNow =
+      closedByExchange || (stop !== null && SPOT_ACTIVE.includes(stop.status));
     return {
       tradeId: item.tradeId,
       outcome: protectedNow ? "open" : "unprotected",
-      message: protectedNow
-        ? "Вход найден на бирже по своему ордеру, свой стоп стоит."
-        : "Вход найден на бирже, свой стоп не стоит — позиция без защиты, закрытие повторяется каждый прогон.",
+      message: closedByExchange
+        ? "Вход найден на бирже, свой стоп или тейк уже исполнен — монеты продала биржа."
+        : protectedNow
+          ? "Вход найден на бирже по своему ордеру, свой стоп стоит."
+          : "Вход найден на бирже, свой стоп не стоит — позиция без защиты, закрытие повторяется каждый прогон.",
       entryPrice: bought.cummulativeQuoteQty / bought.executedQty,
       quantity: bought.executedQty,
       protectRefs: {
@@ -763,6 +797,7 @@ export async function runLiveMirror(
                   direction: active.direction,
                   entryPrice: active.entryPrice,
                   quantity: active.quantity ?? 0,
+                  stopLoss: active.stopLoss,
                 },
                 m.exitPrice,
               )

@@ -1,0 +1,1 @@
+ALTER TABLE "live_mirror_orders" ADD COLUMN IF NOT EXISTS "stop_loss" double precision;

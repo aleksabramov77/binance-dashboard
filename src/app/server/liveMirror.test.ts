@@ -705,3 +705,46 @@ describe("PnL — оценка (исполнения не прочитаны)", 
     );
   });
 });
+
+describe("итог входа доставлен дважды (ревью PR #89, круг 2)", () => {
+  it("второй вызов не пишет журнал и не шлёт Telegram; свой стоп сохранён для оценки PnL", async () => {
+    await toggleOn("S98");
+    const id = await newTrade("S98", "ATOMUSDT");
+    await claimLive(id);
+    const body = {
+      tradeId: id,
+      result: {
+        id: `r-${id}`,
+        status: "protected" as const,
+        message: "ok",
+        entryPrice: 100,
+        filledQuantity: 0.1,
+        steps: [],
+        protectRefs: null,
+      },
+      order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: null },
+    };
+    vi.clearAllMocks();
+    await saveLiveOpen(body);
+    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    const entries = () =>
+      vi.mocked(log.info).mock.calls.filter((c) => c[0] === "live.entry");
+    expect(entries()).toHaveLength(1);
+    // Ответ потерялся по таймауту — воркер прислал тот же итог ещё раз; или outbox после сверки — уже «без защиты».
+    await saveLiveOpen(body);
+    await saveLiveOpen({
+      ...body,
+      result: { ...body.result, status: "unprotected" },
+    });
+    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(entries()).toHaveLength(1);
+    expect(vi.mocked(log.error)).not.toHaveBeenCalled();
+    expect((await getLiveMirror(db, id))?.status).toBe("protected");
+
+    await liveHaltAction("close_all", actor);
+    const [claimed] = (await liveCloseAll({ phase: "claim" })).filter(
+      (i) => i.tradeId === id,
+    );
+    expect(claimed).toMatchObject({ stopLoss: 95, entryPrice: 100 });
+  });
+});

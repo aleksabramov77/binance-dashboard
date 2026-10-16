@@ -52,6 +52,8 @@ export const liveMirrorStateSchema = z.object({
       /** Цена и объём входа — оценка PnL, если исполнения не прочитаны. */
       entryPrice: z.number().nullable().default(null),
       quantity: z.number().nullable().default(null),
+      /** Цена своего стопа — худший случай оценки PnL без цены выхода. */
+      stopLoss: z.number().nullable().default(null),
     }),
   ),
   /** Реализованный PnL экспериментов за текущие сутки UTC, $. */
@@ -129,6 +131,8 @@ export const liveToCloseSchema = z.object({
   exitReason: z.string().nullable(),
   protectRefs: mirrorProtectRefsSchema.nullable(),
   entryPrice: z.number().nullable(),
+  /** Цена своего стопа — худший случай оценки PnL без цены выхода; null — не известна. */
+  stopLoss: z.number().nullable().default(null),
   openedAt: isoTime,
 });
 export type LiveToClose = z.infer<typeof liveToCloseSchema>;

@@ -44,6 +44,7 @@ const parseProtectRefs = (raw: unknown): MirrorProtectRefs | null => {
 export interface LiveMirrorToClose extends MirrorToClose {
   experimentId: string;
   entryPrice: number | null;
+  stopLoss: number | null;
   openedAt: string;
 }
 
@@ -60,6 +61,7 @@ const toClose = (
   exitReason,
   protectRefs: parseProtectRefs(r.protectRefs),
   entryPrice: r.entryPrice,
+  stopLoss: r.stopLoss,
   openedAt: r.createdAt.toISOString(),
 });
 
@@ -149,6 +151,7 @@ export interface LiveActiveRow {
   entryPrice: number | null;
   quantity: number | null;
   notionalUsd: number | null;
+  stopLoss: number | null;
   openedAt: string;
 }
 
@@ -169,6 +172,7 @@ export async function liveActiveRows(db: Db): Promise<LiveActiveRow[]> {
     entryPrice: r.entryPrice,
     quantity: r.quantity,
     notionalUsd: r.notionalUsd,
+    stopLoss: r.stopLoss,
     openedAt: r.createdAt.toISOString(),
   }));
 }
@@ -289,6 +293,7 @@ export interface LiveMirrorPatch {
   entryPrice?: number | null;
   quantity?: number | null;
   notionalUsd?: number | null;
+  stopLoss?: number | null;
   exitPrice?: number | null;
   feesUsd?: number | null;
   realizedPnl?: number | null;

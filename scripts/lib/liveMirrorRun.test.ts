@@ -244,6 +244,7 @@ describe("runLiveMirror: вход", () => {
             openedAt: new Date(NOW - 3_600_000).toISOString(),
             entryPrice: 2000,
             quantity: 0.005,
+            stopLoss: 1900,
           },
         ],
       }),
@@ -294,6 +295,7 @@ const item: LiveToClose = {
   exitReason: "takeProfit",
   protectRefs: null,
   entryPrice: 2000,
+  stopLoss: null,
   openedAt: new Date(NOW - 60_000).toISOString(),
 };
 
@@ -763,5 +765,85 @@ describe("сверка «потерянного» входа (pending дольш
       keyAccepted: false,
     });
     expect(rejected.reconcile).not.toHaveBeenCalled();
+  });
+});
+
+describe("ревью PR #89, круг 2", () => {
+  const exchangeClosed = {
+    status: "closed" as const,
+    message: "Позиция уже закрыта биржей (сработал стоп/тейк).",
+    steps: [],
+    exitPrice: null,
+  };
+  const fillsDown = vi.fn(async () => {
+    throw new Error("-1003 Too many requests");
+  });
+
+  it("сработал стоп на бирже + сбой fills → оценка по своему стопу, PnL отрицательный, закрыта по SL", async () => {
+    const ex = fakeExchange({
+      closePosition: vi.fn(async () => exchangeClosed),
+      fills: fillsDown,
+    });
+    const body = await closeOne(ex, { ...item, stopLoss: 1900 }, "mirror");
+    expect(body.exit.pnlEstimated).toBe(true);
+    expect(body.exit.exitPrice).toBe(1900);
+    // long 0.005: (1900 − 2000) × 0.005 = −0,5 минус taker 0,05% с обеих сторон.
+    expect(body.exit.realizedPnl).toBeCloseTo(-0.5 - 0.005 * 3900 * 0.0005);
+    expect(body.exit.closedBy).toBe("sl");
+    expect(body.exit.message).toMatch(/выход — цена своего стопа/);
+    expect(ex.price).not.toHaveBeenCalled();
+  });
+
+  it("стоп не известен — оценка по текущей цене; цена не прочитана — PnL не посчитан", async () => {
+    const ex = fakeExchange({
+      closePosition: vi.fn(async () => exchangeClosed),
+      fills: fillsDown,
+      price: vi.fn(async () => 1950),
+    });
+    const body = await closeOne(ex, item, "mirror");
+    expect(body.exit).toMatchObject({ exitPrice: 1950, pnlEstimated: true });
+    expect(body.exit.realizedPnl).toBeLessThan(0);
+    expect(body.exit.message).toMatch(/выход — текущая цена/);
+
+    const blind = fakeExchange({
+      closePosition: vi.fn(async () => exchangeClosed),
+      fills: fillsDown,
+      price: vi.fn(async () => {
+        throw new Error("сеть");
+      }),
+    });
+    const none = await closeOne(blind, item, "mirror");
+    expect(none.exit).toMatchObject({ realizedPnl: null, pnlEstimated: false });
+  });
+
+  it("сверка: свой стоп или тейк уже сработал — open без ⚠️ (фьючерсы и спот)", async () => {
+    const futures = fakeExchange({
+      algoOrder: vi.fn(async (cid: string) =>
+        cid.endsWith("-S")
+          ? { algoId: 7, algoStatus: "FINISHED", actualOrderId: 103 }
+          : { algoId: 8, algoStatus: "CANCELED", actualOrderId: null },
+      ),
+    });
+    const f = await reconcileEntry(futures, stale());
+    expect(f).toMatchObject({ outcome: "open" });
+    expect(f?.message).toMatch(/закрыла биржа/);
+
+    const spot = fakeExchange({
+      spotOrder: vi.fn(async (_s: string, cid: string) =>
+        cid.endsWith("-W")
+          ? spotOrd(321, "FILLED", 0.0001, 8.2)
+          : cid.endsWith("-S")
+            ? spotOrd(322, "EXPIRED", 0, 0, 56)
+            : cid.endsWith("-T")
+              ? spotOrd(323, "FILLED", 0.0001, 8.8, 56)
+              : null,
+      ),
+    });
+    const s = await reconcileEntry(
+      spot,
+      stale({ market: "spot", symbol: "BTCUSDT" }),
+    );
+    expect(s).toMatchObject({ outcome: "open" });
+    expect(s?.message).toMatch(/продала биржа/);
   });
 });

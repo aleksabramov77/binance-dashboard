@@ -109,6 +109,7 @@ export async function liveMirrorState(
       openedAt: a.openedAt,
       entryPrice: a.entryPrice,
       quantity: a.quantity,
+      stopLoss: a.stopLoss,
     })),
     dailyPnl: Object.fromEntries(daily),
     dayStart: dayStart.toISOString(),
@@ -219,7 +220,9 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
     r.entryPrice !== null && r.filledQuantity !== null
       ? r.entryPrice * r.filledQuantity
       : null;
-  await updateLiveMirror(
+  // Только из pending: повтор того же итога (ответ потерялся по таймауту, досылка outbox после сверки) не пишет
+  // журнал и не шлёт Telegram второй раз.
+  const changed = await updateLiveMirror(
     db,
     body.tradeId,
     {
@@ -231,10 +234,12 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
       entryPrice: r.entryPrice,
       quantity: r.filledQuantity,
       notionalUsd,
+      stopLoss: body.order.stopLoss > 0 ? body.order.stopLoss : null,
       protectRefs: r.protectRefs,
     },
     ["pending"],
   );
+  if (!changed) return;
   const row = await getLiveMirror(db, body.tradeId);
   if (!row) return;
   const s = subjectOf(row);

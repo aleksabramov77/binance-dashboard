@@ -241,6 +241,8 @@ export const liveMirrorOrdersTable = pgTable(
     quantity: doublePrecision("quantity"),
     /** Объём входа в $ (цена входа × количество). */
     notionalUsd: doublePrecision("notional_usd"),
+    /** Цена своего стопа при входе — худший случай для оценки PnL, если цена выхода неизвестна; null — не известна. */
+    stopLoss: doublePrecision("stop_loss"),
     exitPrice: doublePrecision("exit_price"),
     /** Комиссии по исполнениям, $; null — не посчитаны. */
     feesUsd: doublePrecision("fees_usd"),
