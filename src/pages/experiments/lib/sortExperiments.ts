@@ -8,6 +8,7 @@ import type { SortDir } from "@/shared/lib";
 import type { MarketFilter } from "../model/useExperimentsView";
 
 export const SORT_KEYS = [
+  "enabled",
   "id",
   "ag",
   "trades",
@@ -16,6 +17,7 @@ export const SORT_KEYS = [
   "profitFactor",
   "maxDrawdown",
   "equity",
+  "live",
   "demo",
   "demoTrades",
   "demoWinRate",
@@ -34,6 +36,8 @@ const AG_ORDER = Object.keys(ASSET_GROUPS);
 function sortValue(e: ExperimentSummary, key: SortKey): number | null {
   const s = e.stats;
   switch (key) {
+    case "enabled":
+      return e.enabled ? 1 : 0;
     case "id":
       return null;
     case "ag":
@@ -53,6 +57,9 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
       return s.closed ? s.maxDrawdownPct : null;
     case "equity":
       return s.equity;
+    case "live":
+      // Сначала торгующие на реальном счёте.
+      return e.liveMirror ? 1 : 0;
     case "demo":
       // Сначала торгующие на демо, среди них — по числу демо-сделок.
       return (e.demoMirror ? 1e6 : 0) + e.demo.trades;

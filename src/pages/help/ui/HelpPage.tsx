@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { docUrl } from "@/shared/config";
 import type { Glossary } from "@/shared/lib";
-import { Input } from "@/shared/ui/input";
+import { Input } from "@/shared/ui/Input";
 import {
   Table,
   TableBody,
@@ -12,7 +12,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
 import glossaryJson from "../config/glossary.json";
 import { filterGlossary } from "../lib/filterGlossary";
 

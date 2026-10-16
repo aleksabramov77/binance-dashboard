@@ -1,0 +1,2 @@
+ALTER TABLE "live_mirror_orders" ADD COLUMN IF NOT EXISTS "pnl_estimated" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "live_mirror_orders" ADD COLUMN IF NOT EXISTS "no_protection" boolean DEFAULT false NOT NULL;

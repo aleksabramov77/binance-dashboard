@@ -5,8 +5,8 @@ import {
   type KindSummary,
   RiskDots,
 } from "@/entities/earn-product";
-import { Badge } from "@/shared/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Badge } from "@/shared/ui/Badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 
 /** Карточки «ставки сейчас» по видам из публичной сводки Binance (работает без ключа). */
 export function KindSummaryCards({

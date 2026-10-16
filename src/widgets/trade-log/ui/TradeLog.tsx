@@ -15,8 +15,8 @@ import {
   formatPrice,
   formatUsd,
 } from "@/shared/lib";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
-import { Table, TableBody, TableCell, TableRow } from "@/shared/ui/table";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
+import { Table, TableBody, TableCell, TableRow } from "@/shared/ui/Table";
 import { summarizeTrades, type TradeSummary } from "../lib/summarizeTrades";
 
 /** Подсказка индикатора: статус сделки, роль ордера, у открытых — стоп и uPnL. */

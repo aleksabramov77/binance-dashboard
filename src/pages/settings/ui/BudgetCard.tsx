@@ -13,15 +13,15 @@ import {
   useSetNextBudget,
 } from "@/entities/experiment";
 import { formatUsd } from "@/shared/lib";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/shared/ui/card";
-import { Input } from "@/shared/ui/input";
+} from "@/shared/ui/Card";
+import { Input } from "@/shared/ui/Input";
 
 type GroupBudget = LabSettings["groupBudgets"][number];
 

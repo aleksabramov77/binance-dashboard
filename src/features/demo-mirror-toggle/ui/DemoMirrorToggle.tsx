@@ -10,7 +10,7 @@ import {
   useSetExperimentMirrorMode,
 } from "@/entities/experiment";
 import { cn } from "@/shared/lib";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import {
   Dialog,
   DialogContent,
@@ -18,7 +18,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/shared/ui/dialog";
+} from "@/shared/ui/Dialog";
 import { MODE_MEANING, mirrorModeHint } from "../lib/modeHint";
 
 const LABEL: Record<DemoMirrorMode, string> = {

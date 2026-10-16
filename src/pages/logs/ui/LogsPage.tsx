@@ -15,9 +15,9 @@ import {
   parseLogFilters,
   useLogs,
 } from "@/entities/log-entry";
-import { Button } from "@/shared/ui/button";
-import { Input } from "@/shared/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+import { Button } from "@/shared/ui/Button";
+import { Input } from "@/shared/ui/Input";
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
 import { LogList } from "@/widgets/log-list";
 
 const LEVEL_LABELS: Record<LogLevel, string> = {

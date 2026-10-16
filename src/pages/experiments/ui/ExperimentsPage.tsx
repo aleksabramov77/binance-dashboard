@@ -11,6 +11,7 @@ import {
   DisabledBadge,
   describeRunView,
   type ExperimentSummary,
+  enabledVariantsOf,
   formatProfitFactor,
   formatRate,
   formatSignedUsd,
@@ -21,6 +22,7 @@ import {
 } from "@/entities/experiment";
 import { mirrorLogsHref } from "@/entities/log-entry";
 import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
+import { ExperimentEnabledSwitch } from "@/features/experiment-toggle";
 import {
   cn,
   defineSortTable,
@@ -29,8 +31,8 @@ import {
   type SortHeadProps,
   useTableSort,
 } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { SortableHead } from "@/shared/ui/sortable-head";
+import { Badge } from "@/shared/ui/Badge";
+import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
   TableBody,
@@ -38,8 +40,9 @@ import {
   TableFrame,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+} from "@/shared/ui/Table";
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
+import { LiveMirrorToggle, LiveTradingStrip } from "@/widgets/live-trading";
 import {
   arrangeVariants,
   type ExperimentRowView,
@@ -71,6 +74,13 @@ const COLUMNS: {
   numeric: boolean;
   description: string;
 }[] = [
+  {
+    key: "enabled",
+    label: "Вкл",
+    numeric: false,
+    description:
+      "Включён ли эксперимент сейчас — при любой эпохе в выборе периода. Включённый открывает новые paper-сделки; включение — сразу. Выключенный новых сделок не открывает, а открытые доводит до выхода; выключение — с причиной (окно), контрольный, у которого идут варианты, — только с подтверждением. Тот же тумблер — в /settings и на странице эксперимента.",
+  },
   {
     key: "id",
     label: "Эксперимент",
@@ -122,6 +132,13 @@ const COLUMNS: {
     label: "Equity",
     numeric: true,
     description: "Капитал эксперимента: стартовый бюджет + реализованный PnL.",
+  },
+  {
+    key: "live",
+    label: "Реальный счёт",
+    numeric: false,
+    description:
+      "Переключатель «Выкл / Вкл» — повторяет ли эксперимент свежие входы на торговом субсчёте Binance реальными деньгами: $10 на сделку (минимум биржи — до $50), не больше 5 позиций на субсчёт, −$15 за сутки у эксперимента → его входы до 00:00 UTC. «Вкл» — с подтверждением словом «РЕАЛ» и только при годном ключе (карточка «Реальный счёт» в /settings). COIN-M — недоступно.",
   },
   {
     key: "demo",
@@ -192,7 +209,10 @@ function ColumnHead({
     <SortableHead
       className={cn(
         column.numeric && "text-right",
-        column.key === "demo" && "text-center",
+        (column.key === "demo" ||
+          column.key === "live" ||
+          column.key === "enabled") &&
+          "text-center",
         isDemoColumn(column.key) && DEMO_HEAD_TONE,
       )}
       {...head}
@@ -321,11 +341,14 @@ function ExperimentCell({
 
 function ExperimentRow({
   row,
+  variants,
   demoConfigured,
   collapsed,
   onToggle,
 }: {
   row: ExperimentRowView;
+  /** Включённые варианты, если строка — контрольный (окно выключения). */
+  variants: readonly string[];
   demoConfigured: boolean;
   collapsed: boolean;
   onToggle: (id: string) => void;
@@ -334,8 +357,15 @@ function ExperimentRow({
   const s = e.stats;
   return (
     <TableRow
-      className={cn(!e.enabled && "opacity-50", row.variantOf && "bg-muted/30")}
+      className={cn(
+        // Выключенный затемнён, кроме ячейки тумблера (первой): иначе тумблер плохо видно (spec 0050).
+        !e.enabled && "[&>td:not(:first-child)]:opacity-50",
+        row.variantOf && "bg-muted/30",
+      )}
     >
+      <TableCell className="text-center">
+        <ExperimentEnabledSwitch experiment={e} variants={variants} />
+      </TableCell>
       <ExperimentCell row={row} collapsed={collapsed} onToggle={onToggle} />
       <TableCell>
         <Badge
@@ -371,6 +401,9 @@ function ExperimentRow({
       </TableCell>
       <TableCell className="text-right font-mono tabular-nums">
         {formatUsd(s.equity)}
+      </TableCell>
+      <TableCell className="text-center">
+        <LiveMirrorToggle experiment={e} />
       </TableCell>
       <DemoCells e={e} demoConfigured={demoConfigured} />
     </TableRow>
@@ -442,6 +475,7 @@ function ExperimentsDashboard() {
       {data && (
         <MissingRunNotice view={data} onReset={() => setView({ run: null })} />
       )}
+      {data && <LiveTradingStrip />}
 
       {data && total === 0 && (
         <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
@@ -473,6 +507,7 @@ function ExperimentsDashboard() {
                 <ExperimentRow
                   key={r.e.id}
                   row={r}
+                  variants={enabledVariantsOf(data.experiments, r.e.id)}
                   demoConfigured={data.demoConfigured}
                   collapsed={collapsed.has(r.e.id)}
                   onToggle={toggle}

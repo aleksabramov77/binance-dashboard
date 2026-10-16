@@ -4,8 +4,8 @@ import { type RiskSettings, sizePosition } from "@/features/position-sizing";
 import { SetupReview } from "@/features/setup-review";
 import { TradeTicketDialog } from "@/features/trade-ticket";
 import { cn, formatAmount, formatPrice, formatUsd } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Badge } from "@/shared/ui/Badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 
 const KIND_LABELS: Record<Setup["kind"], string> = {
   "rebound-long": "Отскок после падения",

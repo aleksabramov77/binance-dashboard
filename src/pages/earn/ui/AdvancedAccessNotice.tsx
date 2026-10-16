@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 
 /** Почему нет полного каталога: без ключа локально — как включить; в облаке — только на компьютере. */
 export function AdvancedAccessNotice({

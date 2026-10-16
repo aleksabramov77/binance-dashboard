@@ -11,8 +11,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "./dropdown-menu";
-import { TableHead } from "./table";
+} from "../DropdownMenu";
+import { TableHead } from "../Table";
 
 type Dir = "asc" | "desc";
 

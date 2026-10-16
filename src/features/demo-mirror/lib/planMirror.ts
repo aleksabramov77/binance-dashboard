@@ -71,7 +71,35 @@ export interface MirrorListing {
 
 export const listingKey = key;
 
-const MARKET_NAME = { spot: "демо-споте", usdm: "демо-фьючерсах" } as const;
+/**
+ * Что отличает площадку зеркала в плане (spec 0049): лимит на монету и тексты пропусков. Демо — DEMO_MIRROR_POLICY
+ * (поведение до 0049); реальный счёт — одна позиция на монету.
+ */
+export interface MirrorPlanPolicy {
+  /** null — без лимита на монету. */
+  maxPerCoin: number | null;
+  /** «на демо-споте» / «на демо-фьючерсах» — где нет символа. */
+  marketName: Record<"spot" | "usdm", string>;
+  /** Кто торгует только пары к USDT. */
+  name: string;
+  /** Причина пропуска, когда лимит на монету исчерпан. */
+  coinBusy: (
+    t: { symbol: string; market: "spot" | "usdm" },
+    count: number,
+    limit: number,
+  ) => string;
+}
+
+export const DEMO_MIRROR_POLICY: MirrorPlanPolicy = {
+  // Читается при каждом плане: лимит демо — MIRROR.maxPerCoin (config), как до spec 0049.
+  get maxPerCoin() {
+    return MIRROR.maxPerCoin;
+  },
+  marketName: { spot: "демо-споте", usdm: "демо-фьючерсах" },
+  name: "демо-зеркало",
+  coinBusy: (t, count, limit) =>
+    `По ${t.symbol} (${t.market}) уже ${count} зеркал — лимит на монету ${limit}.`,
+};
 
 /** Зеркало, которое держит или открывает позицию (из БД). */
 export interface ActiveMirror {
@@ -95,6 +123,7 @@ export function planMirror(
   now: number,
   listing: MirrorListing = { missing: new Set(), unknown: new Set() },
   futuresMode: "oneway" | "hedge" | null = "oneway",
+  policy: MirrorPlanPolicy = DEMO_MIRROR_POLICY,
 ): MirrorDecision[] {
   const taken: ActiveMirror[] = [...active];
   const decisions: MirrorDecision[] = [];
@@ -112,7 +141,7 @@ export function planMirror(
       decisions.push({
         tradeId: t.tradeId,
         kind: "skip",
-        reason: `${t.symbol}: демо-зеркало торгует только пары к USDT.`,
+        reason: `${t.symbol}: ${policy.name} торгует только пары к USDT.`,
       });
       continue;
     }
@@ -128,7 +157,7 @@ export function planMirror(
       decisions.push({
         tradeId: t.tradeId,
         kind: "skip",
-        reason: `${t.symbol}: нет на ${MARKET_NAME[t.market]}.`,
+        reason: `${t.symbol}: нет на ${policy.marketName[t.market]}.`,
       });
       continue;
     }
@@ -145,11 +174,11 @@ export function planMirror(
       });
       continue;
     }
-    if (MIRROR.maxPerCoin !== null && sameCoin.length >= MIRROR.maxPerCoin) {
+    if (policy.maxPerCoin !== null && sameCoin.length >= policy.maxPerCoin) {
       decisions.push({
         tradeId: t.tradeId,
         kind: "skip",
-        reason: `По ${t.symbol} (${t.market}) уже ${sameCoin.length} зеркал — лимит на монету ${MIRROR.maxPerCoin}.`,
+        reason: policy.coinBusy(t, sameCoin.length, policy.maxPerCoin),
       });
       continue;
     }

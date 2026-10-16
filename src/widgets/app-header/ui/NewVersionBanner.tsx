@@ -1,7 +1,7 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import { useNewVersionAvailable } from "../api/useNewVersionAvailable";
 
 /**

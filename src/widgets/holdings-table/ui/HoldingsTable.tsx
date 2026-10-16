@@ -17,7 +17,7 @@ import {
   sortRows,
   useTableSort,
 } from "@/shared/lib";
-import { SortableHead } from "@/shared/ui/sortable-head";
+import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
   TableBody,
@@ -25,7 +25,7 @@ import {
   TableFrame,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
 
 // `yearly` — бывшая «Доход / год», ключ сохранён: сохранённая сортировка продолжает работать (spec 0022).
 const SORT_KEYS = [

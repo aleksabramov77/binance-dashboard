@@ -10,6 +10,7 @@ import { CooldownError, NetworkError } from "@/shared/lib/fetchRetry";
 import {
   applyReply,
   appUrlRefusal,
+  demoVenueRefusal,
   emptyMemory,
   fixtureHeartbeat,
   fixtureRefusal,
@@ -386,6 +387,7 @@ describe("pulseWithHandshake", () => {
     const handshake = noKeyHeartbeat(base);
     const build = vi.fn(async () => ({
       ...handshake,
+      handshake: true,
       verdict: "blocked" as const,
       reasons: [MAIN_UID_PENDING_REASON],
       uid: { status: "pending" as const, note: MAIN_UID_PENDING_REASON },
@@ -538,5 +540,35 @@ describe("пульс без ключа, фикстуры и отправка", (
       toWire({ ...h, apiKey: "KEY123", apiSecret: "SECRET456" } as typeof h),
     );
     expect(wire).not.toMatch(/KEY123|SECRET456|apiKey|apiSecret/);
+  });
+});
+
+describe("demoVenueRefusal: площадка демо — только локально (ревью PR #89)", () => {
+  const ok = {
+    production: false,
+    hasTradeKey: false,
+    appUrl: "http://localhost:5002",
+  };
+  it("localhost и 127.0.0.1 без торгового ключа — можно", () => {
+    expect(demoVenueRefusal(ok)).toBeNull();
+    expect(
+      demoVenueRefusal({ ...ok, appUrl: "http://127.0.0.1:5002" }),
+    ).toBeNull();
+  });
+  it("production — нельзя", () => {
+    expect(demoVenueRefusal({ ...ok, production: true })).toMatch(/production/);
+  });
+  it("задан торговый ключ (окружение VM, даже без NODE_ENV) — нельзя", () => {
+    expect(demoVenueRefusal({ ...ok, hasTradeKey: true })).toMatch(
+      /BINANCE_TRADE_API_KEY/,
+    );
+  });
+  it("приложение не на localhost — нельзя; адрес не распознан — нельзя", () => {
+    expect(demoVenueRefusal({ ...ok, appUrl: "https://example.com" })).toMatch(
+      /не localhost/,
+    );
+    expect(demoVenueRefusal({ ...ok, appUrl: "не адрес" })).toMatch(
+      /не распознан/,
+    );
   });
 });

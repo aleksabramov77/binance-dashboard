@@ -1,6 +1,9 @@
 import type { Mover, ScanResult, Setup } from "@/entities/market-signal";
 import type { Candle, Ticker24h } from "@/shared/api/binance";
-import { fetchDemoSymbolRules } from "@/shared/api/binance/demo.server";
+import {
+  DEMO_PUBLIC_VENUE,
+  fetchDemoSymbolRules,
+} from "@/shared/api/binance/demo.server";
 import {
   fetch24hTickers,
   fetchKlines,
@@ -120,7 +123,11 @@ export async function scanMarket(force = false): Promise<ScanResult> {
     await Promise.all(
       found.map(async (s) => ({
         ...s,
-        demoTradable: await fetchDemoSymbolRules(s.market, s.symbol)
+        demoTradable: await fetchDemoSymbolRules(
+          s.market,
+          s.symbol,
+          DEMO_PUBLIC_VENUE,
+        )
           .then((rules) => rules !== null)
           .catch((error) => {
             log.warn(

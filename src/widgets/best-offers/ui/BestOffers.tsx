@@ -1,7 +1,7 @@
 import { OfferName } from "@/entities/earn-offer";
 import type { RankedOffer } from "@/features/offer-filters";
 import { formatAmount, formatPercent, formatUsd } from "@/shared/lib";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 
 interface BestOffersProps {
   ranked: RankedOffer[];

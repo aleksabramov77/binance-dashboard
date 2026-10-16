@@ -20,8 +20,8 @@ import {
   type SymbolRules,
   unknownOutcomeDeadline,
 } from "@/shared/api/binance/demo.server";
-import type { BinanceCredentials } from "@/shared/config/env.server";
-import { FUTURES_AUTO_HEDGE, FUTURES_STOP_BEFORE_ENTRY } from "../config/trade";
+import type { TradeVenue } from "@/shared/api/binance/venue.server";
+import { FUTURES_STOP_BEFORE_ENTRY } from "../config/trade";
 import {
   afterAlgoUnknown,
   algoLookup,
@@ -61,7 +61,7 @@ import {
 } from "./tradeSteps";
 
 export interface FuturesContext {
-  creds: BinanceCredentials;
+  venue: TradeVenue;
   req: TradeRequest;
   v: ValidatedTrade;
   rules: SymbolRules;
@@ -73,6 +73,8 @@ export interface FuturesContext {
   done: Done;
   /** Общий срок сделки (config/trade → TRADE_DEADLINE_MS). */
   tradeDeadline: number;
+  /** Можно ли переключить пустой счёт в Hedge (демо — FUTURES_AUTO_HEDGE, реальный счёт — нет). */
+  autoHedge: boolean;
 }
 
 const MODE_LABEL: Record<PositionMode, string> = {
@@ -93,32 +95,33 @@ const MODE_REASON = {
  * включить Hedge; иначе вход в том режиме, что есть. null — режим узнать не удалось.
  */
 async function resolveMode(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   steps: TradeStep[],
+  autoHedge: boolean,
 ): Promise<PositionMode | null> {
   const label = "Режим позиций";
   let current: PositionMode;
   try {
-    current = await fetchDemoPositionMode(creds);
+    current = await fetchDemoPositionMode(venue);
   } catch (error) {
     steps.push({ label, ok: false, detail: errorText(error) });
     return null;
   }
   // Пустоту счёта проверяем, только если автопереключение включено: иначе POST не нужен вовсе.
   let busy: boolean | null = null;
-  if (current === "oneway" && FUTURES_AUTO_HEDGE)
+  if (current === "oneway" && autoHedge)
     try {
-      busy = await fetchDemoFuturesAccountBusy(creds);
+      busy = await fetchDemoFuturesAccountBusy(venue);
     } catch {
       busy = null;
     }
-  const chosen = choosePositionMode(current, busy, FUTURES_AUTO_HEDGE);
+  const chosen = choosePositionMode(current, busy, autoHedge);
   if (!chosen.enableHedge) {
     steps.push({ label, ok: true, detail: MODE_REASON[chosen.reason] });
     return chosen.mode;
   }
   try {
-    const r = await demoEnableHedgeMode(creds);
+    const r = await demoEnableHedgeMode(venue);
     steps.push({
       label,
       ok: true,
@@ -140,8 +143,8 @@ async function resolveMode(
  * объём (стоп, затем тейк; «стоп до входа» — за флагом). Стоп не встал — откат по своей стороне.
  */
 export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
-  const { creds, req, v, rules, price, steps, finish, done, refs } = c;
-  const mode = await resolveMode(creds, steps);
+  const { venue, req, v, rules, price, steps, finish, done, refs } = c;
+  const mode = await resolveMode(venue, steps, c.autoHedge);
   if (!mode)
     return finish(
       "rejected",
@@ -156,7 +159,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   // Своя сторона до входа: при неизвестном исходе свой объём — только прирост (на стороне соседи).
   let sideBefore = 0;
   try {
-    const state = await fetchDemoFuturesSymbolState(creds, req.symbol);
+    const state = await fetchDemoFuturesSymbolState(venue, req.symbol);
     sideBefore = ownPosition(state.positions, side).amount;
     const busy = ownSideBusy(state, side, req.mirror === true);
     if (busy === "opposite")
@@ -179,7 +182,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   }
 
   try {
-    const margin = await demoFuturesPrepare(creds, req.symbol, req.leverage);
+    const margin = await demoFuturesPrepare(venue, req.symbol, req.leverage);
     steps.push({
       label: "Маржа и плечо",
       ok: true,
@@ -198,7 +201,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
 
   const ids = tradeClientIds(c.tradeId);
   const algoCtx = {
-    creds,
+    venue,
     symbol: req.symbol,
     exitSide,
     side,
@@ -232,7 +235,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
     const next = afterStopBeforeEntry(stop.placed);
     if (next !== "enter")
       return done(
-        afterEarlyStopDrop(next, await cancelOwnAlgo(creds, stop.ref, steps)),
+        afterEarlyStopDrop(next, await cancelOwnAlgo(venue, stop.ref, steps)),
       );
   }
   // Вход не прошёл — снять стоп «до входа»; не снялся — unprotected со ссылкой на него, а не rejected.
@@ -241,7 +244,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
       stopFirst
         ? afterEarlyStopDrop(
             failed,
-            await cancelOwnAlgo(creds, futuresRefs.stop, steps),
+            await cancelOwnAlgo(venue, futuresRefs.stop, steps),
           )
         : failed,
     );
@@ -256,7 +259,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   const sentAt = Date.now();
   try {
     const order = await demoFuturesMarketOrder(
-      creds,
+      venue,
       req.symbol,
       entrySide,
       v.quantity,
@@ -267,7 +270,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
     filled = order.executedQty || Number(v.quantity);
     entryPrice =
       order.avgPrice ||
-      (await futuresFillPrice(creds, req.symbol, order.orderId)) ||
+      (await futuresFillPrice(venue, req.symbol, order.orderId)) ||
       price;
     steps.push({
       label: entryLabel,
@@ -293,7 +296,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
         deadline,
         c.tradeDeadline,
         () =>
-          fetchDemoFuturesOrder(creds, req.symbol, {
+          fetchDemoFuturesOrder(venue, req.symbol, {
             clientOrderId: ids.market,
           }),
         (o) => o !== null && o.executedQty > 0,
@@ -321,7 +324,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
       filled = o.executedQty;
       entryPrice =
         o.avgPrice ||
-        (await futuresFillPrice(creds, req.symbol, o.orderId)) ||
+        (await futuresFillPrice(venue, req.symbol, o.orderId)) ||
         price;
       steps.push({
         label: "Проверка ордера",
@@ -335,7 +338,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
           deadline,
           c.tradeDeadline,
           async () =>
-            ownPosition(await demoFuturesPositions(creds, req.symbol), side),
+            ownPosition(await demoFuturesPositions(venue, req.symbol), side),
           (p) => p.amount > sideBefore,
         );
       } catch (checkError) {
@@ -380,7 +383,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   // стоп без reduceOnly при срабатывании закрыл бы лишнее (объём соседа). Новый — со своим id `-S2`
   // (не тем же, что снятый `-S`): перечитывание и снятие по clientAlgoId не спутают их.
   if (stopFirst && Number(protectQty) < Number(v.quantity)) {
-    const cancel = await cancelOwnAlgo(creds, futuresRefs.stop, steps);
+    const cancel = await cancelOwnAlgo(venue, futuresRefs.stop, steps);
     const restop =
       cancel === "error"
         ? null
@@ -395,7 +398,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
     const next = afterPartialEntryRestop(cancel, restop?.placed ?? null);
     if (next === "rollback")
       return rollbackFutures({
-        creds,
+        venue,
         req,
         rules,
         side,
@@ -427,7 +430,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
     const afterStop = afterFuturesStop(stop.placed, req.stopOnly === true);
     if (afterStop === "rollback")
       return rollbackFutures({
-        creds,
+        venue,
         req,
         rules,
         side,
@@ -476,14 +479,14 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
  * остаться на бирже.
  */
 async function cancelOwnAlgo(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   ref: StoredAlgoRef | null,
   steps: TradeStep[],
 ): Promise<CancelResult> {
   const lookup = ref && algoLookup(ref);
   if (!lookup) return "none";
   try {
-    const cancelled = await demoCancelAlgoOrder(creds, lookup);
+    const cancelled = await demoCancelAlgoOrder(venue, lookup);
     steps.push({
       label: "Снять свой стоп",
       ok: true,
@@ -507,7 +510,7 @@ async function cancelOwnAlgo(
  */
 async function placeProtectiveAlgo(
   c: {
-    creds: BinanceCredentials;
+    venue: TradeVenue;
     symbol: string;
     exitSide: "BUY" | "SELL";
     side: FuturesSide;
@@ -526,7 +529,7 @@ async function placeProtectiveAlgo(
     const algo = await withPositionRetry(() => {
       sentAt = Date.now();
       return demoFuturesProtect(
-        c.creds,
+        c.venue,
         c.symbol,
         c.exitSide,
         type,
@@ -558,7 +561,7 @@ async function placeProtectiveAlgo(
     found = await recheckUntil(
       unknownOutcomeDeadline(sentAt, Date.now()),
       c.tradeDeadline,
-      () => fetchDemoAlgoOrder(c.creds, { clientAlgoId }),
+      () => fetchDemoAlgoOrder(c.venue, { clientAlgoId }),
       (a) => a !== null,
     );
   } catch (error) {
@@ -587,7 +590,7 @@ async function placeProtectiveAlgo(
  * Позиции нет — rejected без цены входа; не закрылась — unprotected (тревога).
  */
 async function rollbackFutures(c: {
-  creds: BinanceCredentials;
+  venue: TradeVenue;
   req: TradeRequest;
   rules: SymbolRules;
   side: FuturesSide;
@@ -600,13 +603,13 @@ async function rollbackFutures(c: {
   steps: TradeStep[];
   done: Done;
 }): Promise<TradeResult> {
-  const { creds, req, steps } = c;
+  const { venue, req, steps } = c;
   const label = "Закрытие по рынку (стоп не встал)";
   try {
     const qty = floorToStep(c.filled, c.rules.stepSize);
     const order = await withPositionRetry(() =>
       demoFuturesReduceMarket(
-        creds,
+        venue,
         req.symbol,
         c.exitSide,
         qty,
@@ -623,6 +626,6 @@ async function rollbackFutures(c: {
     steps.push({ label, ok: false, detail: errorText(error) });
     return c.done(afterFuturesRollback(false), c.entryPrice, c.filled);
   }
-  await cancelOwnAlgo(creds, c.stopRef, steps);
+  await cancelOwnAlgo(venue, c.stopRef, steps);
   return c.done(afterFuturesRollback(true));
 }

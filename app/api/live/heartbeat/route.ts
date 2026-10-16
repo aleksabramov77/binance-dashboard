@@ -1,7 +1,6 @@
 import { ingestHeartbeat } from "@/app/server/liveAccount";
+import { liveWorkerAuth } from "@/app/server/liveWorkerRoute";
 import { liveHeartbeatSchema } from "@/entities/live-account";
-import { getLiveWorkerSecret } from "@/shared/config/env.server";
-import { checkCronAuth } from "@/shared/lib/auth/cronAuth.server";
 import { withLogging } from "@/shared/lib/route.server";
 
 // Пульс воркера реального счёта (spec 0047, AC4): раз в минуту, Bearer LIVE_WORKER_SECRET. Входа через GitHub
@@ -11,18 +10,8 @@ export const POST = withLogging(
   "live.heartbeat",
   async (request) => {
     const isProduction = process.env.NODE_ENV === "production";
-    const auth = checkCronAuth(
-      request.headers.get("authorization"),
-      getLiveWorkerSecret(),
-      isProduction,
-    );
-    if (auth === "unavailable")
-      return Response.json(
-        { error: "LIVE_WORKER_SECRET не задан" },
-        { status: 503 },
-      );
-    if (auth === "unauthorized")
-      return Response.json({ error: "Неверный секрет" }, { status: 401 });
+    const denied = liveWorkerAuth(request);
+    if (denied) return denied;
 
     const parsed = liveHeartbeatSchema.safeParse(
       await request.json().catch(() => null),

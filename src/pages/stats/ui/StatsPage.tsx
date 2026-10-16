@@ -31,16 +31,16 @@ import {
   type SortHeadProps,
   useTableSort,
 } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { Button } from "@/shared/ui/button";
+import { Badge } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/shared/ui/select";
-import { SortableHead } from "@/shared/ui/sortable-head";
+} from "@/shared/ui/Select";
+import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
   TableBody,
@@ -48,8 +48,8 @@ import {
   TableFrame,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+} from "@/shared/ui/Table";
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
 import {
   GROUP_SORT_KEYS,
   type GroupSortKey,

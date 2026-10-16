@@ -10,15 +10,15 @@ import {
 } from "@/entities/experiment";
 import { DEMO_WALLET_URL } from "@/shared/config";
 import { formatUsd } from "@/shared/lib";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/shared/ui/card";
-import { ConfirmAction } from "@/shared/ui/confirm-action";
+} from "@/shared/ui/Card";
+import { ConfirmAction } from "@/shared/ui/ConfirmAction";
 import {
   Table,
   TableBody,
@@ -27,7 +27,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
 
 // «Сбросы по группам» (spec 0038): Paper или Demo одной группы активов — «эра группы» без новой эпохи.
 // Ссылка «Сбросы →» из шапки ведёт сюда (/settings#groups).

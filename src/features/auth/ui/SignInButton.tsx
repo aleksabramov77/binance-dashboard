@@ -2,7 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { useState } from "react";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 
 export function SignInButton({ callbackUrl }: { callbackUrl: string }) {
   const [pending, setPending] = useState(false);

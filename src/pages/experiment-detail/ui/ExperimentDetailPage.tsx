@@ -24,6 +24,7 @@ import {
   type TradeStatsView,
   useExperiment,
 } from "@/entities/experiment";
+import { ExperimentEnabledSwitch } from "@/features/experiment-toggle";
 import {
   cn,
   defineSortTable,
@@ -35,9 +36,9 @@ import {
   sortRows,
   useTableSort,
 } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
-import { SortableHead } from "@/shared/ui/sortable-head";
+import { Badge } from "@/shared/ui/Badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
+import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
   TableBody,
@@ -45,7 +46,8 @@ import {
   TableFrame,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
+import { enabledFamilyVariants } from "../lib/familyVariants";
 import { useDetailView } from "../model/useDetailView";
 import { VariantFamily } from "./VariantFamily";
 
@@ -423,6 +425,13 @@ export function ExperimentDetailPage({ id }: { id: string }) {
                 {!data.experiment.enabled && (
                   <DisabledBadge disabled={data.disabled} />
                 )}
+                <ExperimentEnabledSwitch
+                  experiment={data.experiment}
+                  variants={enabledFamilyVariants(
+                    data.experiment.id,
+                    data.family,
+                  )}
+                />
               </div>
               <p className="max-w-3xl text-muted-foreground">
                 {data.experiment.hypothesis}
