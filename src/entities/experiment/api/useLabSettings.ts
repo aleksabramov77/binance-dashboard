@@ -12,6 +12,9 @@ import {
   type ExperimentReset,
   type ExperimentResetResult,
   experimentResetResultSchema,
+  type GroupResetRequest,
+  type GroupResetResult,
+  groupResetResultSchema,
   type LabSettings,
   labSettingsSchema,
   type ResetRequest,
@@ -121,6 +124,29 @@ export function useResetExperimentPaper() {
     onSuccess: (data) => {
       queryClient.setQueryData(labSettingsQueryKey, data.settings);
       void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+    },
+  });
+}
+
+/**
+ * Остатки счетов в шапке (`entities/account-balance`, ключ ["accounts", "balances"]): сброс группы меняет Paper
+ * группы, а демо-сброс — позиции демо-счёта. Ключ строкой, без импорта слайса: сущности одного слоя не знают друг о друге.
+ */
+const ACCOUNTS_QUERY_KEY = ["accounts"] as const;
+
+/** Сброс группы активов (spec 0038): Paper или Demo всех экспериментов группы; эпоха и другие группы — без изменений. */
+export function useResetGroup() {
+  const queryClient = useQueryClient();
+  return useMutation<GroupResetResult, Error, GroupResetRequest>({
+    mutationFn: (body) =>
+      request("/api/experiments/reset/group", groupResetResultSchema, {
+        method: "POST",
+        body,
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(labSettingsQueryKey, data.settings);
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      void queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY });
     },
   });
 }

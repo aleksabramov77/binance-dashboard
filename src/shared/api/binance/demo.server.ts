@@ -39,6 +39,7 @@ export {
   demoSpotOcoSell,
   demoSpotStopLossSell,
   fetchDemoAlgoOrder,
+  fetchDemoEquity,
   fetchDemoFills,
   fetchDemoFuturesAccountBusy,
   fetchDemoFuturesOrder,

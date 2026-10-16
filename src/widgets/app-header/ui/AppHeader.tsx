@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AiCreditsBadge } from "@/entities/ai-credits";
-import { MarketBudgets } from "@/entities/experiment";
 import { UserMenu } from "@/features/auth";
 import { EngineToggle } from "@/features/engine-toggle";
 import { NAV_ITEMS } from "@/shared/config";
 import { cn } from "@/shared/lib";
+import { AccountBalances } from "./AccountBalances";
 import { NewVersionBanner } from "./NewVersionBanner";
 
-// Хедер — слой платформы: склеивает домены (Лаборатория, ИИ-кредиты, вход) только через их public API.
+// Хедер — слой платформы: склеивает домены (Лаборатория, счета Binance, ИИ-кредиты, вход) только через их public API.
 export function AppHeader() {
   const pathname = usePathname();
   return (
@@ -27,7 +27,7 @@ export function AppHeader() {
         {/* Лаборатория: на узком экране — отдельной строкой под логотипом, с переносом. */}
         <div className="order-last flex w-full min-w-0 flex-wrap items-center gap-x-4 gap-y-1 lg:order-none lg:w-auto">
           <EngineToggle />
-          <MarketBudgets />
+          <AccountBalances />
         </div>
         <div className="ml-auto flex items-center gap-4">
           <AiCreditsBadge />

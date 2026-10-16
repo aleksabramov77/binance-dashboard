@@ -3,7 +3,7 @@ import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { demoMirrorOrdersTable } from "../model/db";
+import { demoMirrorOrdersTable, experimentsTable } from "../model/db";
 import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
 import {
   activeMirrors,
@@ -482,5 +482,74 @@ describe("protect_refs", () => {
       tradeId: "a",
       protectRefs: null,
     });
+  });
+});
+
+describe("демо-сброс группы (spec 0038)", () => {
+  /** F01 (usdm) и S01 (spot) с открытыми зеркалами; F02 (usdm) без зеркала. */
+  async function groups() {
+    await seedExperiments(db, [
+      exp("F01"),
+      exp("F02"),
+      { ...exp("S01"), market: "spot" },
+    ]);
+    const runId = await ensureRun(db);
+    const store = createDbExperimentStore(db);
+    await store.insertTrade(trade("f", runId, "F01"));
+    await store.insertTrade({ ...trade("s", runId, "S01"), market: "spot" });
+    await setExperimentDemoMirror(db, "F01", true);
+    await setExperimentDemoMirror(db, "S01", true);
+    for (const c of await listMirrorCandidates(db, SINCE)) {
+      await claimMirror(db, c);
+      await updateMirror(db, c.tradeId, {
+        status: "protected",
+        message: "ok",
+        steps: [],
+        entryPrice: 100,
+        quantity: 0.5,
+      });
+    }
+  }
+
+  const demoResetAt = async () =>
+    new Map(
+      (
+        await db
+          .select({ id: experimentsTable.id, at: experimentsTable.demoResetAt })
+          .from(experimentsTable)
+      ).map((r) => [r.id, r.at]),
+    );
+
+  const ids = (list: { tradeId: string }[]) =>
+    list.map((m) => m.tradeId).sort();
+
+  it("группа: захватывает позиции и отмечает сброс только у экспериментов группы", async () => {
+    await groups();
+    expect(ids(await claimOpenMirrors(db, { market: "usdm" }))).toEqual(["f"]);
+    expect(await markDemoReset(db, { market: "usdm" })).toBe(2);
+    const at = await demoResetAt();
+    expect(at.get("F01")).not.toBeNull();
+    expect(at.get("F02")).not.toBeNull();
+    expect(at.get("S01")).toBeNull();
+    // Спот не тронут: его позиция всё ещё открыта.
+    expect(ids(await claimOpenMirrors(db, { market: "spot" }))).toEqual(["s"]);
+  });
+
+  it("регрессия AC9: null — все эксперименты и все позиции, как раньше", async () => {
+    await groups();
+    expect(ids(await claimOpenMirrors(db, null))).toEqual(["f", "s"]);
+    expect(await markDemoReset(db, null)).toBe(3);
+    expect([...(await demoResetAt()).values()].every((v) => v !== null)).toBe(
+      true,
+    );
+  });
+
+  it("один эксперимент (id) — только он", async () => {
+    await groups();
+    expect(ids(await claimOpenMirrors(db, "S01"))).toEqual(["s"]);
+    expect(await markDemoReset(db, "S01")).toBe(1);
+    const at = await demoResetAt();
+    expect(at.get("S01")).not.toBeNull();
+    expect(at.get("F01")).toBeNull();
   });
 });
