@@ -17,6 +17,10 @@ import {
   skippedSignalsTable,
 } from "../model/db";
 import {
+  type DemoMirrorMode,
+  mirrorAutoSnapshotSchema,
+} from "../model/mirrorAuto";
+import {
   type OnInvalidExperiment,
   parseExperimentRow,
   parseExperimentRows,
@@ -102,7 +106,8 @@ export async function readExperimentsOverview(
     engineEnabled,
     demoConfigured,
     experiments: parseExperimentRows(rows, onInvalid).map(
-      ({ experiment: e }) => {
+      ({ experiment: e, row }) => {
+        const auto = mirrorAutoSnapshotSchema.safeParse(row.demoMirrorAuto);
         return {
           id: e.id,
           market: e.market,
@@ -111,6 +116,8 @@ export async function readExperimentsOverview(
           initialBudget: e.initialBudget,
           enabled: e.enabled,
           demoMirror: e.demoMirror,
+          demoMirrorMode: row.demoMirrorMode,
+          demoMirrorAuto: auto.success ? auto.data : null,
           stats: computeStats(byExperiment.get(e.id) ?? [], e.initialBudget),
           demo: toDemoSummary(
             demo.get(e.id) ?? emptyMirrorSummary(),
@@ -304,10 +311,10 @@ export async function readLabDataset(
 }
 
 /** Тумблеры всех экспериментов — для `pnpm lab:apply` (сравнить «было → стало» перед записью). */
-export async function readExperimentFlags(
-  db: Db,
-): Promise<
-  Pick<Experiment, "id" | "name" | "market" | "enabled" | "demoMirror">[]
+export async function readExperimentFlags(db: Db): Promise<
+  (Pick<Experiment, "id" | "name" | "market" | "enabled" | "demoMirror"> & {
+    demoMirrorMode: DemoMirrorMode;
+  })[]
 > {
   return db
     .select({
@@ -316,6 +323,7 @@ export async function readExperimentFlags(
       market: experimentsTable.market,
       enabled: experimentsTable.enabled,
       demoMirror: experimentsTable.demoMirror,
+      demoMirrorMode: experimentsTable.demoMirrorMode,
     })
     .from(experimentsTable)
     .orderBy(asc(experimentsTable.id))

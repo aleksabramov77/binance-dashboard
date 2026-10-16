@@ -354,7 +354,7 @@ describe("данные для отчёта лаборатории (pnpm lab:repo
     await seedExperiments(db, [exp("F01"), exp("F02")]);
     await db
       .update(experimentsTable)
-      .set({ enabled: false, demoMirror: true })
+      .set({ enabled: false, demoMirror: true, demoMirrorMode: "on" })
       .where(eq(experimentsTable.id, "F02"));
     expect(await readExperimentFlags(db)).toEqual([
       {
@@ -363,6 +363,7 @@ describe("данные для отчёта лаборатории (pnpm lab:repo
         market: "usdm",
         enabled: true,
         demoMirror: false,
+        demoMirrorMode: "auto",
       },
       {
         id: "F02",
@@ -370,6 +371,7 @@ describe("данные для отчёта лаборатории (pnpm lab:repo
         market: "usdm",
         enabled: false,
         demoMirror: true,
+        demoMirrorMode: "on",
       },
     ]);
   });

@@ -35,6 +35,8 @@ const summary = (
   initialBudget: 1000,
   enabled: true,
   demoMirror: false,
+  demoMirrorMode: "auto",
+  demoMirrorAuto: null,
   demo: demo(),
   stats: computeStats(
     pnls.map((pnl, i) => ({

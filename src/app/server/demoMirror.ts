@@ -35,6 +35,7 @@ import {
 import {
   fetchDemoPositionMode,
   fetchDemoSymbolRules,
+  fetchDemoUsdtBalances,
 } from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { type Db, getDb, getDbKind } from "@/shared/db/client.server";
@@ -68,6 +69,8 @@ export async function runDemoMirror(): Promise<MirrorRunResult> {
 async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
   // Кандидаты прогона — чтобы claim знал поля сделки по id.
   const byId = new Map<string, MirrorCandidate>();
+  // Свободные USDT обоих кошельков — один запрос на прогон (runMirror спрашивает по рынку, spec 0043).
+  let balances: ReturnType<typeof fetchDemoUsdtBalances> | null = null;
   const result = await runMirror({
     now: Date.now,
     configured: getDemoTradingConfig() !== null,
@@ -86,6 +89,20 @@ async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
     // справочник кэшируется на 10 минут, спот — запрос на символ.
     hasSymbol: async (market, symbol) =>
       (await fetchDemoSymbolRules(market, symbol)) !== null,
+    freeUsd: async (market) => {
+      const config = getDemoTradingConfig();
+      if (!config) throw new Error("Demo не настроен");
+      // Сбой — одна запись на прогон (промис общий), вход идёт без проверки резерва (fail-open в runMirror).
+      balances ??= fetchDemoUsdtBalances(config.credentials).catch((error) => {
+        log.warn(
+          "mirror.balance",
+          "Остаток демо-кошелька не прочитан — входы этого прогона без проверки резерва",
+          { error: error instanceof Error ? error.message : String(error) },
+        );
+        throw error;
+      });
+      return (await balances)[market];
+    },
     claim: async (tradeId) => {
       const c = byId.get(tradeId);
       return c ? claimMirror(db, c) : false;

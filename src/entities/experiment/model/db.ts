@@ -28,6 +28,20 @@ export const experimentsTable = pgTable("experiments", {
   enabled: boolean("enabled").notNull().default(true),
   demoMirror: boolean("demo_mirror").notNull().default(false),
   /**
+   * Положение переключателя демо-зеркала (spec 0043): `auto` — demo_mirror ставит авто-зеркало по paper-сделкам,
+   * `on` / `off` — ручное решение пользователя, автомат его не меняет (только подсказывает).
+   */
+  demoMirrorMode: text("demo_mirror_mode")
+    .$type<"auto" | "on" | "off">()
+    .notNull()
+    .default("auto"),
+  /** Последнее изменение demo_mirror — начало окна сделок авто-зеркала; null — не менялось с миграции. */
+  demoMirrorSince: timestamp("demo_mirror_since", { withTimezone: true }),
+  /** Последняя отправленная подсказка по ручному положению: что сделал бы автомат (`on` / `off`); null — нет. */
+  demoMirrorAdvice: text("demo_mirror_advice").$type<"on" | "off">(),
+  /** Последнее решение авто-зеркала для подсказки в UI (mirrorAutoSnapshotSchema); null — ещё не решал. */
+  demoMirrorAuto: jsonb("demo_mirror_auto").$type<Json>(),
+  /**
    * Отдельный сброс paper-капитала эксперимента: в учёт эпохи идут только его сделки, открытые
    * не раньше этого момента. null — не сбрасывался (весь учёт эпохи).
    */

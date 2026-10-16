@@ -66,7 +66,8 @@ export async function ensureRun(db: Db): Promise<number> {
 
 /**
  * Сид каталога: upsert по id. Обновляет описание и конфиг из кода; включённость, demo-зеркало и
- * стартовый бюджет — настройки пользователя — пишутся только при первой вставке.
+ * стартовый бюджет — настройки пользователя — пишутся только при первой вставке. Положение зеркала (spec 0043):
+ * `demoMirror: true` — ручное «Вкл», иначе «Авто».
  */
 export async function seedExperiments(
   db: Db,
@@ -84,6 +85,7 @@ export async function seedExperiments(
         initialBudget: e.initialBudget,
         enabled: e.enabled,
         demoMirror: e.demoMirror,
+        demoMirrorMode: e.demoMirror ? "on" : "auto",
       })
       .onConflictDoUpdate({
         target: experimentsTable.id,
