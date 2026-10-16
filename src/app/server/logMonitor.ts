@@ -1,5 +1,6 @@
 // Композиция монитора журнала (платформа): данные из БД (журнал, движок, Earn, pg_cron), разбор ИИ
-// через OpenRouter, уведомление в Telegram. Только сервер; вызывает POST /api/cron/log-monitor.
+// через OpenRouter, задача в приватном репозитории GitHub (spec 0037), уведомление в Telegram.
+// Только сервер; вызывает POST /api/cron/log-monitor.
 import { and, desc, gte, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { earnSnapshotsTable } from "@/entities/earn-offer";
@@ -7,17 +8,20 @@ import { engineStateTable } from "@/entities/experiment";
 import { appLogsTable } from "@/entities/log-entry";
 import {
   type AlertRow,
+  githubWarnings,
   type Issue,
   MONITOR,
   type MonitorResult,
   type MonitorSnapshot,
   runMonitor,
   type SampleLog,
+  trackAlertIssues,
 } from "@/features/log-monitor";
 import { ENGINE_KEYS } from "@/features/paper-engine";
 import { completeJson } from "@/shared/api/openrouter";
 import { sendTelegramMessage } from "@/shared/api/telegram";
 import {
+  getGithubAlertsConfig,
   getLlmConfig,
   getLogAnalysisModel,
   getSiteUrl,
@@ -196,12 +200,16 @@ async function loadAlerts(): Promise<AlertRow[]> {
 export async function runLogMonitor(): Promise<MonitorResult> {
   const telegram = getTelegramConfig();
   const chatId = telegram?.chatId;
+  const github = getGithubAlertsConfig();
   const result = await runMonitor({
     collect,
     samples,
     analyze,
     loadAlerts,
     saveAlerts: saveAlertState,
+    trackIssues: github
+      ? (input) => trackAlertIssues(github, input)
+      : undefined,
     notify:
       telegram && chatId
         ? (text) => sendTelegramMessage(telegram.token, chatId, text)
@@ -216,6 +224,12 @@ export async function runLogMonitor(): Promise<MonitorResult> {
     );
   if (result.analysisError)
     log.warn("monitor.ai", `Разбор ИИ не удался: ${result.analysisError}`);
+  for (const w of githubWarnings({
+    invalid: github?.invalid ?? [],
+    errors: result.githubErrors,
+    repo: github ? `${github.owner}/${github.repo}` : null,
+  }))
+    log.warn(w.event, w.message, w.data);
   if (result.issues.length || result.resolved)
     log.info(
       "monitor.run",
@@ -224,6 +238,7 @@ export async function runLogMonitor(): Promise<MonitorResult> {
         issues: result.issues.map((i) => i.key),
         notified: result.notified,
         resolved: result.resolved,
+        tracked: result.tracked.map((t) => `${t.key}:${t.action}`),
       },
     );
   return result;
