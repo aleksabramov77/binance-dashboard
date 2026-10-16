@@ -10,6 +10,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { computeLiveStats, type LiveStatsRow } from "../lib/liveStats";
 import {
   DEMO_MIRROR_MARKETS,
   demoMirrorMarketSchema,
@@ -26,6 +27,7 @@ import {
   mirrorProtectRefsSchema,
   OPEN_MIRROR_STATUSES,
 } from "../model/mirror";
+import type { LiveSummary } from "../model/view";
 import type { MirrorCandidate, MirrorToClose } from "./mirrorDb";
 import type { ExperimentDb } from "./tickLock";
 
@@ -545,4 +547,27 @@ export async function recentLiveClosed(
     .where(isNotNull(liveMirrorOrdersTable.closedAt))
     .orderBy(desc(liveMirrorOrdersTable.closedAt))
     .limit(limit);
+}
+
+/** Real-колонки /experiments (spec 0054): метрики реальных сделок по экспериментам за всё время (сбросов нет). */
+export async function liveSummaries(db: Db): Promise<Map<string, LiveSummary>> {
+  const rows = await db
+    .select({
+      experimentId: liveMirrorOrdersTable.experimentId,
+      status: liveMirrorOrdersTable.status,
+      realizedPnl: liveMirrorOrdersTable.realizedPnl,
+      pnlEstimated: liveMirrorOrdersTable.pnlEstimated,
+      closedAt: liveMirrorOrdersTable.closedAt,
+    })
+    .from(liveMirrorOrdersTable);
+  const byExperiment = new Map<string, LiveStatsRow[]>();
+  for (const r of rows) {
+    const row: LiveStatsRow = { ...r, status: r.status as MirrorStatus };
+    const list = byExperiment.get(r.experimentId);
+    if (list) list.push(row);
+    else byExperiment.set(r.experimentId, [row]);
+  }
+  return new Map(
+    [...byExperiment].map(([id, list]) => [id, computeLiveStats(list)]),
+  );
 }

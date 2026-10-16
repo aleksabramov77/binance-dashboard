@@ -40,6 +40,7 @@ export {
   liveActiveRows,
   liveDailyPnl,
   liveEnabledExperiments,
+  liveSummaries,
   markLiveCloseFailed,
   recentLiveClosed,
   skipLiveMirror,
@@ -179,6 +180,7 @@ export {
   formatR,
   formatRate,
   formatSignedUsd,
+  liveEstimateHint,
   pnlTone,
 } from "./lib/formatStats";
 export {
@@ -193,6 +195,12 @@ export {
   planLiveAuto,
   stopLossPnl,
 } from "./lib/liveAuto";
+// Real-колонки /experiments (spec 0054).
+export {
+  computeLiveStats,
+  emptyLiveSummary,
+  type LiveStatsRow,
+} from "./lib/liveStats";
 export { describeMirrorAuto, formatAvgR, tradesLabel } from "./lib/mirrorAuto";
 export {
   mirrorAdviceMessage,
@@ -413,6 +421,8 @@ export {
   experimentsResponseSchema,
   type FamilyMember,
   familyMemberSchema,
+  type LiveSummary,
+  liveSummarySchema,
   parseRunParam,
   type RunParam,
   type RunView,

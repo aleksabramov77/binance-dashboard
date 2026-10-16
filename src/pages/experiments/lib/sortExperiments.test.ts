@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeLiveStats,
   computeStats,
   type DemoSummary,
   type ExperimentSummary,
+  emptyLiveSummary,
 } from "@/entities/experiment";
 import type { SortDir } from "@/shared/lib";
 import type { MarketFilter } from "../model/useExperimentsView";
@@ -56,6 +58,7 @@ const summary = (
   demoMirrorMode: "auto",
   demoMirrorAuto: null,
   demo: demo(),
+  live: emptyLiveSummary(),
   stats: computeStats(
     pnls.map((pnl, i) => ({
       openedAt: "2026-10-10T00:00:00Z",
@@ -149,6 +152,57 @@ describe("sortExperiments", () => {
     expect(
       sortExperiments(rows, "all", "live", "desc").map((e) => e.id),
     ).toEqual(["S98", "S97", "S96"]);
+  });
+
+  it("Real-метрики (spec 0054): PnL, PF, Max DD и Equity в $; без закрытых с PnL и COIN-M — в конце в обе стороны", () => {
+    const real = (id: string, pnls: (number | null)[], open = 0) => ({
+      ...summary(id, "usdm", []),
+      live: computeLiveStats([
+        ...pnls.map((realizedPnl, i) => ({
+          status: "closed" as const,
+          realizedPnl,
+          pnlEstimated: false,
+          closedAt: `2026-10-12T0${i + 1}:00:00Z`,
+        })),
+        ...Array.from({ length: open }, () => ({
+          status: "protected" as const,
+          realizedPnl: null,
+          pnlEstimated: false,
+          closedAt: null,
+        })),
+      ]),
+    });
+    const none = real("S95", [], 1);
+    const unknown = real("S96", [null]);
+    const low = real("S97", [2, -3]);
+    const high = real("S98", [1, 0.84]);
+    const coinm = { ...real("PS99", [5]), market: "coinm" as const };
+    const rows = [none, unknown, low, high, coinm];
+    expect(
+      sortExperiments(rows, "all", "livePnl", "desc").map((e) => e.id),
+    ).toEqual(["S98", "S97", "PS99", "S95", "S96"]);
+    expect(sortExperiments(rows, "all", "liveProfitFactor", "desc")[0].id).toBe(
+      "S98",
+    );
+    expect(sortExperiments(rows, "all", "liveMaxDrawdown", "desc")[0].id).toBe(
+      "S97",
+    );
+    for (const dir of ["asc", "desc"] as const)
+      for (const key of [
+        "livePnl",
+        "liveEquity",
+        "liveMaxDrawdown",
+        "liveProfitFactor",
+      ] as const)
+        expect(
+          sortExperiments(rows, "all", key, dir)
+            .slice(-3)
+            .map((e) => e.id)
+            .sort(),
+        ).toEqual(["PS99", "S95", "S96"]);
+    expect(
+      sortExperiments(rows, "all", "liveTrades", "desc").map((e) => e.id),
+    ).toEqual(["S97", "S98", "S95", "S96", "PS99"]);
   });
 
   it("ag: spot раньше usdm по возрастанию, при равенстве — по id", () => {
