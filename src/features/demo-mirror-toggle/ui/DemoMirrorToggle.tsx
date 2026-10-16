@@ -130,12 +130,12 @@ export function DemoMirrorToggle({
         </span>
       )}
       {caption && (
-        <span className="max-w-32 text-center text-[10px] leading-tight text-muted-foreground">
+        <span className="max-w-32 whitespace-normal text-center text-[10px] leading-tight text-muted-foreground">
           {caption}
         </span>
       )}
       {mutation.error && !confirmOn && (
-        <span className="max-w-40 text-[10px] leading-tight text-destructive">
+        <span className="max-w-40 whitespace-normal text-[10px] leading-tight text-destructive">
           {mutation.error.message}
         </span>
       )}

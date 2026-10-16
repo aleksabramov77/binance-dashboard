@@ -136,22 +136,22 @@ export function LiveMirrorToggle({
         </button>
       </fieldset>
       {coinm && (
-        <span className="max-w-32 text-center text-[10px] leading-tight text-muted-foreground">
+        <span className="max-w-32 whitespace-normal text-center text-[10px] leading-tight text-muted-foreground">
           {COINM_REASON}
         </span>
       )}
       {!coinm && !liveMirror && keyReason && live.data && (
-        <span className="max-w-40 text-center text-[10px] leading-tight text-muted-foreground">
+        <span className="max-w-40 whitespace-normal text-center text-[10px] leading-tight text-muted-foreground">
           {keyReason}
         </span>
       )}
       {limit && (
-        <span className="max-w-40 text-center text-[10px] leading-tight text-destructive">
+        <span className="max-w-40 whitespace-normal text-center text-[10px] leading-tight text-destructive">
           дневной лимит: {limit}
         </span>
       )}
       {mutation.error && !confirmOn && (
-        <span className="max-w-40 text-[10px] leading-tight text-destructive">
+        <span className="max-w-40 whitespace-normal text-[10px] leading-tight text-destructive">
           {mutation.error.message}
         </span>
       )}
