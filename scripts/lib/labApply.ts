@@ -1,5 +1,6 @@
 // План применения решений лаборатории (`pnpm lab:apply`): разбор аргументов и проверка, что изменения не
 // противоречат друг другу. Сами записи в БД — scripts/lab-apply.ts через public API entities/experiment.
+import { PRIVATE_ID_PATTERN } from "./labPrivate";
 
 export interface ApplyPlan {
   disable: string[];
@@ -28,14 +29,17 @@ export interface ApplyChange {
   to: boolean;
 }
 
-const ID = /^[SF]\d{2}$/;
+/** id каталога (S01…, F01…); приватные (PS01, PF01, PC01) — формат lab:private, общий PRIVATE_ID_PATTERN. */
+const CATALOG_ID = /^[SF]\d{2}$/;
+const isExperimentId = (id: string) =>
+  CATALOG_ID.test(id) || PRIVATE_ID_PATTERN.test(id);
 
 const normalize = (ids: string[] | undefined, flag: string): string[] => {
   const out = [...new Set((ids ?? []).map((id) => id.trim().toUpperCase()))];
   for (const id of out)
-    if (!ID.test(id))
+    if (!isExperimentId(id))
       throw new Error(
-        `${flag}: «${id}» — не похоже на id эксперимента (S01…F20)`,
+        `${flag}: «${id}» — не похоже на id эксперимента: каталог S01…F20, приватные PS01, PF01, PC01`,
       );
   return out;
 };
