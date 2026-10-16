@@ -292,7 +292,9 @@ export interface LiveMirrorPatch {
   exitPrice?: number | null;
   feesUsd?: number | null;
   realizedPnl?: number | null;
+  pnlEstimated?: boolean;
   closedBy?: string | null;
+  noProtection?: boolean;
   leftoverQty?: number | null;
   leftoverUsd?: number | null;
   protectRefs?: MirrorProtectRefs | null;
@@ -434,22 +436,24 @@ export async function countLiveActive(db: Db): Promise<number> {
 }
 
 /**
- * Закрытие не удалось: строка снова в очереди (close_failed, или unprotected — свои TP/SL уже сняты), попытка
- * засчитана. Только из closing. Возвращает номер неудачной попытки; null — строка уже не закрывалась.
+ * Закрытие не удалось: строка снова в очереди, попытка засчитана. Статус — «без защиты», если свои TP/SL сняты в этой
+ * попытке или позиция уже была без защиты (no_protection — повторная неудача не понижает до close_failed), иначе
+ * close_failed. Только из closing. null — строка уже не закрывалась.
  */
 export async function markLiveCloseFailed(
   db: Db,
   tradeId: string,
-  patch: {
-    status: "close_failed" | "unprotected";
-    message: string;
-    steps: unknown[];
-  },
-): Promise<number | null> {
+  patch: { protectionRemoved: boolean; message: string; steps: unknown[] },
+): Promise<{
+  attempts: number;
+  status: "close_failed" | "unprotected";
+} | null> {
+  const noProtection = sql`(${liveMirrorOrdersTable.noProtection} or ${patch.protectionRemoved})`;
   const [row] = await db
     .update(liveMirrorOrdersTable)
     .set({
-      status: patch.status,
+      status: sql`case when ${noProtection} then 'unprotected' else 'close_failed' end`,
+      noProtection: sql`${noProtection}`,
       message: patch.message,
       steps: patch.steps,
       closeAttempts: sql`${liveMirrorOrdersTable.closeAttempts} + 1`,
@@ -461,8 +465,52 @@ export async function markLiveCloseFailed(
         eq(liveMirrorOrdersTable.status, "closing"),
       ),
     )
-    .returning({ attempts: liveMirrorOrdersTable.closeAttempts });
-  return row?.attempts ?? null;
+    .returning({
+      attempts: liveMirrorOrdersTable.closeAttempts,
+      status: liveMirrorOrdersTable.status,
+    });
+  return row
+    ? {
+        attempts: row.attempts,
+        status: row.status === "unprotected" ? "unprotected" : "close_failed",
+      }
+    : null;
+}
+
+/** Вход дольше этого в pending (воркер упал или итог не дошёл) — сверка с биржей по своему clientOrderId. */
+export const LIVE_PENDING_STALE_S = 180;
+
+/** «Потерянные» входы: pending дольше LIVE_PENDING_STALE_S. */
+export async function listStaleLivePending(db: Db): Promise<
+  {
+    tradeId: string;
+    experimentId: string;
+    market: "spot" | "usdm";
+    symbol: string;
+    direction: "long" | "short";
+    openedAt: string;
+  }[]
+> {
+  const rows = await db
+    .select()
+    .from(liveMirrorOrdersTable)
+    .where(
+      and(
+        eq(liveMirrorOrdersTable.status, "pending"),
+        lt(
+          liveMirrorOrdersTable.createdAt,
+          sql`now() - make_interval(secs => ${LIVE_PENDING_STALE_S})`,
+        ),
+      ),
+    );
+  return rows.map((r) => ({
+    tradeId: r.tradeId,
+    experimentId: r.experimentId,
+    market: demoMirrorMarketSchema.parse(r.market),
+    symbol: r.symbol,
+    direction: r.direction === "short" ? "short" : "long",
+    openedAt: r.createdAt.toISOString(),
+  }));
 }
 
 /** Открытые фьючерсные реальные позиции со своими ссылками — для сверки ног. */

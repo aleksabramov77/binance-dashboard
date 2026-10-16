@@ -34,6 +34,7 @@ import {
   sweepTriggeredLegs,
 } from "@/features/execute-trade";
 import {
+  DEMO_PUBLIC_VENUE,
   fetchDemoPositionMode,
   fetchDemoSymbolRules,
   fetchDemoUsdtBalances,
@@ -90,7 +91,7 @@ async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
     // null — символа нет на демо; сетевой сбой — исключение (кандидат подождёт). Фьючерсный
     // справочник кэшируется на 10 минут, спот — запрос на символ.
     hasSymbol: async (market, symbol) =>
-      (await fetchDemoSymbolRules(market, symbol)) !== null,
+      (await fetchDemoSymbolRules(market, symbol, DEMO_PUBLIC_VENUE)) !== null,
     freeUsd: async (market) => {
       const config = getDemoTradingConfig();
       if (!config) throw new Error("Demo не настроен");

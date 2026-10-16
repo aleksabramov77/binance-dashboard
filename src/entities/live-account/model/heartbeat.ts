@@ -137,3 +137,9 @@ export const liveStatusResponseSchema = z.object({
   trading: liveTradingSchema,
 });
 export type LiveStatusResponse = z.infer<typeof liveStatusResponseSchema>;
+
+/**
+ * Заголовок запросов воркера в режиме «площадка демо» (spec 0049): production-приложение отклоняет такие запросы
+ * (пульс и маршруты зеркала) — защита не зависит от NODE_ENV на стороне воркера.
+ */
+export const DEMO_VENUE_HEADER = "x-live-venue";

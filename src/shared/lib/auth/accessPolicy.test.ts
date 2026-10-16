@@ -114,6 +114,7 @@ describe("decideAccess", () => {
       "close",
       "legs",
       "close-all",
+      "reconcile",
     ])
       expect(decide(`/api/live/mirror/${p}`, null)).toBe("allow");
     expect(decide("/api/live/mirror/other", null)).toBe("unauthorized");

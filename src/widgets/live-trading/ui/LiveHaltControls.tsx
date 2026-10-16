@@ -16,6 +16,11 @@ export function LiveHaltControls() {
   const error = halt.error?.message ?? null;
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {stopped && closeAllPending && live.data && (
+        <span className="text-xs text-muted-foreground">
+          Возобновить можно после «Закрыть всё»
+        </span>
+      )}
       {stopped ? (
         <ConfirmAction
           label="Возобновить"
@@ -23,7 +28,7 @@ export function LiveHaltControls() {
           title="Возобновить реальные входы?"
           description="Включённые эксперименты снова будут повторять свежие входы на торговом субсчёте Binance."
           confirmLabel="Возобновить"
-          disabled={!live.data || halt.isPending}
+          disabled={!live.data || halt.isPending || closeAllPending}
           pending={halt.isPending}
           error={error}
           onOpen={() => halt.reset()}

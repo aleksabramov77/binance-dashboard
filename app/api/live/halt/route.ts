@@ -14,9 +14,11 @@ export const POST = withLogging("live.halt", async (request) => {
       { status: 400 },
     );
   const session = nextAuth ? await nextAuth.auth() : null;
-  await liveHaltAction(parsed.data.action, {
+  const r = await liveHaltAction(parsed.data.action, {
     by: session?.user?.login ?? null,
     authEnabled: nextAuth !== null,
   });
-  return Response.json({ ok: true });
+  return r.ok
+    ? Response.json(r)
+    : Response.json({ error: r.error }, { status: r.status });
 });

@@ -71,6 +71,8 @@ export const liveClosedSchema = z.object({
   symbol: z.string(),
   closedAt: isoTime,
   realizedPnl: z.number().nullable(),
+  /** PnL — оценка по ценам входа и выхода (исполнения не прочитаны). */
+  pnlEstimated: z.boolean().default(false),
   closedBy: z.string().nullable(),
   leftoverQty: z.number().nullable(),
   leftoverUsd: z.number().nullable(),

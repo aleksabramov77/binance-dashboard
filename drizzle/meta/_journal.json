@@ -99,6 +99,13 @@
       "when": 1792161663150,
       "tag": "0013_live_mirror_close_retry",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792164973921,
+      "tag": "0014_live_mirror_protection_pnl",
+      "breakpoints": true
     }
   ]
 }

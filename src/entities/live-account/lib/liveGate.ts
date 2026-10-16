@@ -16,6 +16,7 @@ export interface LiveOpenDecision {
     symbol: string;
     quantity: number;
     stopLoss: number;
+    leverage: number;
     fitMinNotional: boolean;
   };
 }
@@ -118,6 +119,8 @@ export function createLiveGate(deps: LiveGateDeps) {
         request: {
           ...d.request,
           quantity: size.quantity,
+          // Плечо реального счёта — своё (LIVE.leverage), а не демо-зеркала из плана.
+          leverage: d.request.market === "usdm" ? LIVE.leverage : 1,
           // Объём уже посчитан под минимум биржи — ещё раз не поднимаем.
           fitMinNotional: false,
         },

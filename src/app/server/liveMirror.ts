@@ -14,10 +14,12 @@ import {
   type LiveLegsRequest,
   type LiveMirrorState,
   type LiveOpenRequest,
+  type LiveReconcileRequest,
   type LiveToClose,
   listLiveCandidates,
   listLiveToClose,
   listOpenLiveLegs,
+  listStaleLivePending,
   liveActiveRows,
   liveDailyPnl,
   liveEnabledExperiments,
@@ -81,7 +83,7 @@ export async function liveMirrorState(
 ): Promise<LiveMirrorState> {
   const db = getDb();
   const dayStart = utcDayStart(now);
-  const [halt, candidates, active, daily, toClose, openLegs] =
+  const [halt, candidates, active, daily, toClose, openLegs, stalePending] =
     await Promise.all([
       loadLiveHalt(db),
       listLiveCandidates(db, new Date(now - CANDIDATES_WINDOW_MS)),
@@ -89,6 +91,7 @@ export async function liveMirrorState(
       liveDailyPnl(db, dayStart),
       listLiveToClose(db),
       listOpenLiveLegs(db),
+      listStaleLivePending(db),
     ]);
   return {
     halt: {
@@ -104,10 +107,13 @@ export async function liveMirrorState(
       direction: a.direction,
       status: a.status,
       openedAt: a.openedAt,
+      entryPrice: a.entryPrice,
+      quantity: a.quantity,
     })),
     dailyPnl: Object.fromEntries(daily),
     dayStart: dayStart.toISOString(),
     toClose,
+    stalePending,
     openLegs,
   };
 }
@@ -221,6 +227,7 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
       message: r.message,
       steps: r.steps,
       liveRef: r.id,
+      noProtection: r.status === "unprotected",
       entryPrice: r.entryPrice,
       quantity: r.filledQuantity,
       notionalUsd,
@@ -287,6 +294,7 @@ async function announceExit(
     exitPrice: exit.exitPrice,
     feesUsd: exit.feesUsd,
     realizedPnl: exit.realizedPnl,
+    pnlEstimated: exit.pnlEstimated,
     closedBy: exit.closedBy,
     leftover: exit.leftover,
     attempts,
@@ -303,6 +311,7 @@ const closedPatch = (e: LiveCloseRequest["exit"]) => ({
   exitPrice: e.exitPrice,
   feesUsd: e.feesUsd,
   realizedPnl: e.realizedPnl,
+  pnlEstimated: e.pnlEstimated,
   closedBy: e.closedBy,
   leftoverQty: e.leftover?.qty ?? null,
   leftoverUsd: e.leftover?.usd ?? null,
@@ -323,37 +332,34 @@ export async function saveLiveClose(body: LiveCloseRequest): Promise<void> {
       await announceExit(body.tradeId, e, (before?.closeAttempts ?? 0) + 1);
     return;
   }
-  const status = body.protectionRemoved ? "unprotected" : "close_failed";
-  const attempts = await markLiveCloseFailed(db, body.tradeId, {
-    status,
+  const failed = await markLiveCloseFailed(db, body.tradeId, {
+    protectionRemoved: body.protectionRemoved,
     message: e.message,
     steps: e.steps,
   });
-  if (attempts === null) return;
+  if (failed === null) return;
   const row = await getLiveMirror(db, body.tradeId);
   if (!row) return;
   const s = subjectOf(row);
-  const text = body.protectionRemoved
+  const unprotected = failed.status === "unprotected";
+  const text = unprotected
     ? liveUnprotectedText(
         s,
-        `${e.message} Свои TP/SL уже сняты — закрытие повторяется каждый прогон.`,
+        `${e.message} ${body.protectionRemoved ? "Свои TP/SL уже сняты" : "Своего стопа нет"} — закрытие повторяется каждый прогон.`,
       )
     : liveCloseFailedText(s, e.message);
-  const notify = attempts === 1 || body.protectionRemoved;
-  log.error(
-    body.protectionRemoved ? "live.unprotected" : "live.close_failed",
-    text,
-    {
-      experimentId: row.experimentId,
-      tradeId: body.tradeId,
-      symbol: row.symbol,
-      attempts,
-      steps: e.steps,
-      telegram: notify
-        ? await notifyLive(text)
-        : "не отправлен: повтор (сообщение было)",
-    },
-  );
+  // Один раз на позицию: первая неудача или защита снята именно сейчас.
+  const notify = failed.attempts === 1 || body.protectionRemoved;
+  log.error(unprotected ? "live.unprotected" : "live.close_failed", text, {
+    experimentId: row.experimentId,
+    tradeId: body.tradeId,
+    symbol: row.symbol,
+    attempts: failed.attempts,
+    steps: e.steps,
+    telegram: notify
+      ? await notifyLive(text)
+      : "не отправлен: повтор (сообщение было)",
+  });
 }
 
 /** Сверка ног: позицию закрыла биржа (вторая нога снята) или нога сработала до входа (без защиты — в очередь закрытия). */
@@ -373,7 +379,12 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
       await updateLiveMirror(
         db,
         item.tradeId,
-        { status: "unprotected", message: e.message, steps: e.steps },
+        {
+          status: "unprotected",
+          noProtection: true,
+          message: e.message,
+          steps: e.steps,
+        },
         ["protected", "close_failed"],
       )
     ) {
@@ -387,6 +398,58 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
       });
     }
   }
+}
+
+/**
+ * Итог сверки «потерянного» входа (pending дольше LIVE_PENDING_STALE_S) с биржей: вход нашёлся — строка открыта
+ * (стоп стоит) или «без защиты» (⚠️, очередь закрытия); входа нет — пропуск с причиной. Только из pending.
+ */
+export async function saveLiveReconcile(
+  body: LiveReconcileRequest,
+): Promise<void> {
+  const db = getDb();
+  const changed = await updateLiveMirror(
+    db,
+    body.tradeId,
+    body.outcome === "skipped"
+      ? { status: "skipped", message: body.message, steps: [] }
+      : {
+          status: body.outcome === "open" ? "protected" : "unprotected",
+          noProtection: body.outcome === "unprotected",
+          message: body.message,
+          steps: [],
+          entryPrice: body.entryPrice,
+          quantity: body.quantity,
+          notionalUsd:
+            body.entryPrice !== null && body.quantity !== null
+              ? body.entryPrice * body.quantity
+              : null,
+          protectRefs: body.protectRefs,
+        },
+    ["pending"],
+  );
+  if (!changed) return;
+  const row = await getLiveMirror(db, body.tradeId);
+  if (!row) return;
+  const data = {
+    experimentId: row.experimentId,
+    tradeId: body.tradeId,
+    symbol: row.symbol,
+    outcome: body.outcome,
+  };
+  if (body.outcome === "unprotected") {
+    const text = liveUnprotectedText(subjectOf(row), body.message);
+    log.error("live.reconcile", text, {
+      ...data,
+      telegram: await notifyLive(text),
+    });
+    return;
+  }
+  log.warn(
+    "live.reconcile",
+    `${row.experimentId} ${row.symbol}: сверка «потерянного» входа — ${body.message}`,
+    data,
+  );
 }
 
 /**
@@ -490,9 +553,20 @@ export async function setLiveMirror(
 export async function liveHaltAction(
   action: LiveHaltAction,
   actor: EngineToggleActor,
-): Promise<void> {
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const db = getDb();
   const by = actorLabel(actor);
+  // Возобновить посреди «Закрыть всё» — прогон закрыл бы всё и тут же открыл новые сделки (комиссии, запрос не дойдёт до 0).
+  if (
+    action === "resume" &&
+    (await loadLiveHalt(db)).closeAllRequestedAt !== null
+  )
+    return {
+      ok: false,
+      status: 409,
+      error:
+        "Идёт «Закрыть всё» — возобновить входы можно, когда реальных позиций не останется",
+    };
   if (action === "close_all") await requestLiveCloseAll(db, by);
   else await setLiveStopped(db, action === "stop", by);
   const text = liveHaltText(action, by);
@@ -501,6 +575,7 @@ export async function liveHaltAction(
     by,
     telegram: await notifyLive(text, null, "live-stop"),
   });
+  return { ok: true };
 }
 
 /** Торговля реального счёта для карточки и полосы /experiments: стоп, позиции (PnL ≈), дневные лимиты. */
@@ -526,6 +601,7 @@ export async function getLiveTradingView(
             symbol: r.symbol,
             closedAt: r.closedAt.toISOString(),
             realizedPnl: r.realizedPnl,
+            pnlEstimated: r.pnlEstimated,
             closedBy: r.closedBy,
             leftoverQty: r.leftoverQty,
             leftoverUsd: r.leftoverUsd,

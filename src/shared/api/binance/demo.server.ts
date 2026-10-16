@@ -21,6 +21,7 @@ export type {
 } from "./demoSchemas";
 export type { AlgoRef, PublicVenue } from "./demoTrading";
 export {
+  DEMO_PUBLIC_VENUE,
   type DemoFill,
   type DemoPosition,
   type DemoTradeSnapshot,

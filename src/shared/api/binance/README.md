@@ -38,7 +38,8 @@
   localhost). Импортирует только воркер.
 - `venue.server.ts` — `TradeVenue` (подписанный запрос к рынку + публичные адреса), `demoVenue(creds)`, `DEMO_URL`.
   Функции `demoTrading.ts` (ордера, чтение позиций, исполнения) принимают площадку; `fetchDemoSymbolRules` /
-  `fetchDemoPrice` — публичную часть площадки (по умолчанию демо). `enableOnewayMode` — One-way для реальных фьючерсов.
+  `fetchDemoPrice` — публичную часть площадки (`PublicVenue`) **обязательным** параметром: умолчания нет, чтобы правила и
+  цена реального счёта не пришли с демо-хоста. Демо-вызовы передают `DEMO_PUBLIC_VENUE` (экспорт `demo.server.ts`). `enableOnewayMode` — One-way для реальных фьючерсов.
 - `liveRestrictions.ts` (клиент-безопасно) — оценка прав ключа `evaluateRestrictions`: годится, если `ipRestrict`,
   `enableReading`, `enableSpotAndMarginTrading` включены, а `enableWithdrawals`, `enableInternalTransfer`,
   `permitsUniversalTransfer`, `enableMargin` выключены; `enableFutures = false` — только предупреждение. Причина

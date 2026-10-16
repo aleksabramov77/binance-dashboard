@@ -31,6 +31,7 @@ const PUBLIC_PATHS = [
   "/api/live/mirror/close",
   "/api/live/mirror/legs",
   "/api/live/mirror/close-all",
+  "/api/live/mirror/reconcile",
 ];
 
 export const isPublicPath = (pathname: string) =>

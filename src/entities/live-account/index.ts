@@ -64,6 +64,7 @@ export {
   liveTradingSchema,
 } from "./model/halt";
 export {
+  DEMO_VENUE_HEADER,
   LIVE_FIXTURES,
   LIVE_VERDICTS,
   type LiveFixture,

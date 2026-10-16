@@ -97,4 +97,26 @@ describe("POST /api/live/heartbeat", () => {
     vi.stubEnv("LIVE_WORKER_SECRET", "");
     expect((await post({ ...pulse, fixture: "ok" })).status).toBe(200);
   });
+
+  it("площадка демо в production — 400: пульс с пометкой demo-venue и любой запрос с заголовком площадки демо", async () => {
+    const res = await post(
+      { ...pulse, fixture: "demo-venue" },
+      "Bearer s3cret",
+    );
+    expect(res.status).toBe(400);
+    const withHeader = await POST(
+      new Request("http://localhost/api/live/heartbeat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer s3cret",
+          "x-live-venue": "demo",
+        },
+        body: JSON.stringify(pulse),
+      }),
+      undefined,
+    );
+    expect(withHeader.status).toBe(400);
+    expect(ingest).not.toHaveBeenCalled();
+  });
 });

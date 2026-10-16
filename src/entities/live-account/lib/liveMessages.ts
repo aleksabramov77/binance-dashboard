@@ -67,10 +67,16 @@ export function liveExitText(
     closedBy: string | null;
     leftover?: { qty: number; asset: string; usd: number } | null;
     attempts?: number;
+    /** PnL — оценка по ценам входа и выхода (исполнения не прочитаны). */
+    pnlEstimated?: boolean;
   },
 ): string {
   const pnl =
-    o.realizedPnl === null ? "PnL не посчитан" : liveUsd(o.realizedPnl, true);
+    o.realizedPnl === null
+      ? "PnL не посчитан"
+      : o.pnlEstimated
+        ? `≈ ${liveUsd(o.realizedPnl, true)} (оценка)`
+        : liveUsd(o.realizedPnl, true);
   const by = o.closedBy ? ` (${CLOSED_BY[o.closedBy] ?? o.closedBy})` : "";
   const extra = [
     o.leftover ? `${liveLeftoverText(o.leftover)}, в PnL не входит` : null,

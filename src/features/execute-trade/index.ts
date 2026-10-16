@@ -3,6 +3,7 @@
 export { SPOT_ENTRY_SLIPPAGE } from "./config/spot";
 // Площадка сделки (spec 0049): демо по умолчанию; реальный счёт передаёт воркер. Объём реального входа на $10.
 export { type EntrySize, sizeEntry } from "./lib/sizeEntry";
+export { tradeClientIds } from "./lib/spotEntry";
 export {
   type CloseDemoRequest,
   type CloseDemoResult,

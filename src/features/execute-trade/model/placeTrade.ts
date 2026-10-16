@@ -68,11 +68,18 @@ import { demoTradeContext, type TradeVenueContext } from "./tradeVenue";
 export async function placeTrade(
   req: TradeRequest,
   ctx: TradeVenueContext | null = demoTradeContext(),
+  opts: {
+    /**
+     * Id попытки (основа своих clientOrderId, `bd<id>-…`). Реальный счёт передаёт детерминированный id из paper-сделки
+     * (spec 0049): «потерянный» вход находится на бирже по строке. Демо — случайный, как раньше.
+     */
+    tradeId?: string;
+  } = {},
 ): Promise<TradeResult> {
   const steps: TradeStep[] = [];
   const tradeDeadline = Date.now() + TRADE_DEADLINE_MS;
   const base = {
-    id: randomUUID(),
+    id: opts.tradeId ?? randomUUID(),
     at: new Date().toISOString(),
     environment: ctx?.venue.kind ?? ("demo" as const),
     request: req,

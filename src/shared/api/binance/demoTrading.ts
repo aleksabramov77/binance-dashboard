@@ -80,9 +80,15 @@ const futuresRules = new Map<
   { at: number; bySymbol: Map<string, SymbolRules> }
 >();
 
-/** Публичная часть площадки: адреса справочников и цен. По умолчанию — Binance Demo. */
+/**
+ * Публичная часть площадки: адреса справочников и цен. Обязательный параметр — чтобы код реального счёта не взял
+ * по ошибке демо-цены; демо передаёт DEMO_PUBLIC_VENUE.
+ */
 export type PublicVenue = Pick<TradeVenue, "kind" | "publicUrl">;
-const DEMO_PUBLIC_VENUE: PublicVenue = { kind: "demo", publicUrl: DEMO_PUBLIC };
+export const DEMO_PUBLIC_VENUE: PublicVenue = {
+  kind: "demo",
+  publicUrl: DEMO_PUBLIC,
+};
 
 const getJson = (url: string, venue: PublicVenue) =>
   getJsonWithRetry(url, venue.kind === "demo" ? "Binance Demo" : "Binance");
@@ -103,13 +109,13 @@ function indexRules(market: Market, raw: unknown): Map<string, SymbolRules> {
 }
 
 /**
- * Правила округления символа на площадке (по умолчанию демо); null — символа точно нет на её рынке.
+ * Правила округления символа на площадке; null — символа точно нет на её рынке.
  * Сетевой сбой — исключение NetworkError, а не null.
  */
 export async function fetchDemoSymbolRules(
   market: Market,
   symbol: string,
-  venue: PublicVenue = DEMO_PUBLIC_VENUE,
+  venue: PublicVenue,
 ): Promise<SymbolRules | null> {
   if (market === "spot") {
     try {
@@ -142,7 +148,7 @@ export async function fetchDemoSymbolRules(
 export async function fetchDemoPrice(
   market: Market,
   symbol: string,
-  venue: PublicVenue = DEMO_PUBLIC_VENUE,
+  venue: PublicVenue,
 ): Promise<number> {
   const raw = await getJson(
     `${venue.publicUrl[market]}${PREFIX[market]}/ticker/price?symbol=${symbol}`,

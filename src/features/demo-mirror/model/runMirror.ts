@@ -95,6 +95,8 @@ export interface MirrorDeps<
     tradeId: string,
     result: Awaited<ReturnType<MirrorDeps<C, R>["close"]>>,
   ) => Promise<void>;
+  /** Остановка процесса запрошена: новые входы и закрытия не начинаются, начатые доделываются (spec 0049). */
+  stopRequested?: () => boolean;
   /** Лимит на монету и тексты пропусков площадки; нет — демо (DEMO_MIRROR_POLICY). */
   policy?: MirrorPlanPolicy;
   /**
@@ -152,7 +154,10 @@ export async function runMirror<
   const result = emptyMirrorRunResult(deps.configured);
   if (!deps.configured) return result;
   const startedAt = deps.now();
-  const overBudget = () => deps.now() - startedAt > MIRROR.runBudgetMs;
+  // Бюджет времени или запрошена остановка (воркер реального счёта на SIGTERM): начатое доделывается, новое — нет.
+  const overBudget = () =>
+    deps.now() - startedAt > MIRROR.runBudgetMs ||
+    (deps.stopRequested?.() ?? false);
 
   // Сначала свои ноги: висящий reduceOnly-ордер сработавшего зеркала закрыл бы объём соседнего.
   result.swept = await deps.sweepLegs(overBudget);

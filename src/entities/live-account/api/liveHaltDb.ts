@@ -63,7 +63,10 @@ async function upsert(
     });
 }
 
-/** «Стоп входов» (true) или «Возобновить» (false). Возобновление снимает и незавершённое «Закрыть всё» нельзя: оно остаётся. */
+/**
+ * «Стоп входов» (true) или «Возобновить» (false). Пока идёт «Закрыть всё», возобновлять нельзя — это проверяет
+ * композиция (liveHaltAction, ответ 409); запрос «Закрыть всё» этой функцией не снимается.
+ */
 export function setLiveStopped(db: Db, stopped: boolean, by: string) {
   return upsert(db, { stopped, stoppedAt: new Date(), stoppedBy: by });
 }

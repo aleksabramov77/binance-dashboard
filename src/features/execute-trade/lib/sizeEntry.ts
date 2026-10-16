@@ -90,6 +90,8 @@ export function sizeEntry(input: {
   )
     k++;
   const quantity = steps(k);
+  // Шаг продажи стопа спота мог поднять объём выше maxUsd — понятный пропуск, а не отказ заявки потолком в проверке.
+  if (quantity * price > maxUsd) return { ok: false, minUsd: quantity * price };
   return {
     ok: true,
     quantity,

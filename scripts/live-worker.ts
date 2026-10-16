@@ -16,6 +16,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { z } from "zod";
 import {
+  DEMO_VENUE_HEADER,
   LIVE,
   LIVE_FIXTURES,
   type LiveFixture,
@@ -33,10 +34,13 @@ import {
 import { KEY_REJECTED_REASON } from "@/shared/api/binance";
 import {
   enableOnewayMode,
+  fetchDemoAlgoOrder,
   fetchDemoFills,
   fetchDemoFuturesAccountBusy,
+  fetchDemoFuturesOrder,
   fetchDemoPositionMode,
   fetchDemoPrice,
+  fetchDemoSpotOrderByClientId,
   fetchDemoSymbolRules,
   fetchDemoUsdtBalances,
 } from "@/shared/api/binance/demo.server";
@@ -61,6 +65,7 @@ import { disableLogFiles, log } from "@/shared/lib/logger.server";
 import {
   type LiveExchange,
   mirrorApi,
+  type OutboxItem,
   runLiveMirror,
 } from "./lib/liveMirrorRun";
 import {
@@ -157,8 +162,11 @@ if (args.fixture) {
 }
 
 if (args.demoVenue) {
+  // Независимо от NODE_ENV (на VM он не задан): отказ при любом торговом ключе в env и при адресе не localhost;
+  // production-приложение само отклоняет пульс и маршруты зеркала с пометкой «площадка демо».
   const refusal = demoVenueRefusal({
     production: process.env.NODE_ENV === "production",
+    hasTradeKey: hasAnyTradeKey(process.env),
     appUrl,
   });
   if (refusal) fail(refusal);
@@ -199,6 +207,15 @@ const deps: WorkerDeps | null = client
     }
   : null;
 const memory = emptyMemory();
+/** Неотправленные итоги для приложения (вход, закрытие…): досылаются следующим прогоном. */
+const outbox: OutboxItem[] = [];
+/** SIGTERM получен: прогон не начинает новое, процесс выходит после текущего прогона. */
+let stopping = false;
+/**
+ * Сколько ждать конца прогона на SIGTERM: вход + защита — до TRADE_DEADLINE_MS (60 с) + отправка итога с повторами.
+ * В unit — TimeoutStopSec больше этого (docs/ai/architecture.md).
+ */
+const STOP_GRACE_MS = 90_000;
 
 /** Биржа реального зеркала: общая логика ордеров execute-trade на площадке Live. */
 const exchange: LiveExchange | null = venue
@@ -210,7 +227,13 @@ const exchange: LiveExchange | null = venue
         autoHedge: false,
       };
       return {
-        placeTrade: (req) => placeTrade(req, ctx),
+        placeTrade: (req, seed) => placeTrade(req, ctx, { tradeId: seed }),
+        spotOrder: (symbol, clientOrderId) =>
+          fetchDemoSpotOrderByClientId(venue, symbol, clientOrderId),
+        futuresOrder: (symbol, clientOrderId) =>
+          fetchDemoFuturesOrder(venue, symbol, { clientOrderId }),
+        algoOrder: (clientAlgoId) =>
+          fetchDemoAlgoOrder(venue, { clientAlgoId }),
         closePosition: (req) => closeDemoPosition(req, venue),
         sweepLegs: (legs, overBudget) =>
           sweepTriggeredLegs(legs, overBudget, venue),
@@ -241,6 +264,8 @@ async function post<T extends z.ZodType>(
       headers: {
         "Content-Type": "application/json",
         ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+        // «Площадка демо»: production-приложение такие запросы отклоняет (защита не зависит от env воркера).
+        ...(args.demoVenue ? { [DEMO_VENUE_HEADER]: "demo" } : {}),
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
@@ -321,7 +346,22 @@ async function cycle(): Promise<void> {
       now: Date.now,
       verdictOk: last.verdict === "ok",
       keyAccepted: !last.reasons.includes(KEY_REJECTED_REASON),
+      outbox,
+      stopRequested: () => stopping,
+      onLost: (item, error) =>
+        log.error(
+          "live.outbox",
+          `Итог «${item.kind}» не дошёл до приложения — дошлю следующим прогоном: ${error instanceof Error ? error.message : String(error)}`,
+          { tradeId: "tradeId" in item.body ? item.body.tradeId : null },
+        ),
     });
+    if (r.flushed)
+      log.info("live.outbox", `Дослано итогов прошлых прогонов: ${r.flushed}`);
+    for (const c of r.reconciled)
+      log.warn(
+        "live.reconcile",
+        `Сверка «потерянного» входа ${c.tradeId}: ${c.outcome} — ${c.message}`,
+      );
     const run = r.run;
     if (
       r.closeAll ||
@@ -371,20 +411,50 @@ log.info(
 async function main() {
   if (args.once) {
     process.exitCode = (await safeCycle()) ? 0 : 1;
+    if (outbox.length)
+      log.error(
+        "live.outbox",
+        `Не доставлено итогов: ${outbox.length} — строки останутся pending до сверки с биржей следующим запуском`,
+      );
     return;
   }
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let current: Promise<boolean> | null = null;
   const loop = async () => {
-    await safeCycle();
-    timer = setTimeout(loop, HEARTBEAT_EVERY_MS);
+    if (stopping) return;
+    current = safeCycle();
+    await current;
+    current = null;
+    if (!stopping) timer = setTimeout(loop, HEARTBEAT_EVERY_MS);
   };
-  const stop = (signal: string) => {
+  /**
+   * SIGTERM (systemctl restart, деплой) посреди сделки: новые входы и закрытия не начинаются, начатое доделывается
+   * (вход + защита — до TRADE_DEADLINE_MS) и итог отправляется; ждём не дольше STOP_GRACE_MS, потом выходим.
+   */
+  const stop = async (signal: string) => {
+    if (stopping) return;
+    stopping = true;
     if (timer) clearTimeout(timer);
+    if (current) {
+      log.info(
+        "live.worker",
+        `${signal}: дожидаюсь конца текущего прогона (до ${STOP_GRACE_MS / 1000} с)`,
+      );
+      await Promise.race([
+        current,
+        new Promise((resolve) => setTimeout(resolve, STOP_GRACE_MS)),
+      ]);
+    }
+    if (outbox.length)
+      log.error(
+        "live.outbox",
+        `Остановка с недоставленными итогами: ${outbox.length} — строки останутся pending до сверки с биржей после запуска`,
+      );
     log.info("live.worker", `Остановлен (${signal})`);
     process.exit(0);
   };
-  process.on("SIGTERM", () => stop("SIGTERM"));
-  process.on("SIGINT", () => stop("SIGINT"));
+  process.on("SIGTERM", () => void stop("SIGTERM"));
+  process.on("SIGINT", () => void stop("SIGINT"));
   await loop();
 }
 

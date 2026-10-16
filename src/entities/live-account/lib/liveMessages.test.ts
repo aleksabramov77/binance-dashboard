@@ -42,6 +42,16 @@ describe("тексты реального зеркала", () => {
       liveExitText(s, { realizedPnl: -1.5, closedBy: "close_all" }),
     ).toMatch(/−\$1,50 \(«Закрыть всё»\)$/);
   });
+  it("PnL-оценка (исполнения не прочитаны) — с пометкой", () => {
+    expect(
+      liveExitText(s, {
+        realizedPnl: -2.5,
+        closedBy: "mirror",
+        pnlEstimated: true,
+      }),
+    ).toMatch(/≈ −\$2,50 \(оценка\)/);
+  });
+
   it("дневной лимит — эксперимент и сумма", () => {
     expect(liveDailyLimitText("S98", -15.2)).toMatch(
       /S98 −\$15,20 за сутки \(лимит −\$15\)/,

@@ -6,6 +6,8 @@
 // субсчёте и в PnL не входит — он отдельно, с оценкой по цене выхода.
 
 export interface FillLike {
+  /** Ордер исполнения: с orderIds в расчёт идут только свои ордера сделки. */
+  orderId?: number;
   /** Unix ms. */
   time: number;
   side: "BUY" | "SELL";
@@ -40,10 +42,19 @@ const DUST_EPS = 1e-9;
 
 export function fillsPnl(
   fills: readonly FillLike[],
-  input: { direction: "long" | "short"; since: number; baseAsset: string },
+  input: {
+    direction: "long" | "short";
+    since: number;
+    baseAsset: string;
+    /** Свои ордера сделки (вход, свои TP/SL, своё закрытие): есть — фильтр по ним, а не по времени. */
+    orderIds?: ReadonlySet<number>;
+  },
 ): FillsPnl {
   const entrySide = input.direction === "long" ? "BUY" : "SELL";
-  const own = fills.filter((f) => f.time >= input.since);
+  const ids = input.orderIds;
+  const own = fills.filter((f) =>
+    ids ? f.orderId !== undefined && ids.has(f.orderId) : f.time >= input.since,
+  );
   let entryQty = 0;
   let entryQuote = 0;
   let exitQty = 0;

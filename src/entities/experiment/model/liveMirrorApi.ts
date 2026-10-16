@@ -47,14 +47,30 @@ export const liveMirrorStateSchema = z.object({
       symbol: z.string(),
       direction,
       status: mirrorStatusSchema,
-      /** Когда строка создана (вход) — окно исполнений для PnL. */
+      /** Когда строка создана (вход). */
       openedAt: isoTime,
+      /** Цена и объём входа — оценка PnL, если исполнения не прочитаны. */
+      entryPrice: z.number().nullable().default(null),
+      quantity: z.number().nullable().default(null),
     }),
   ),
   /** Реализованный PnL экспериментов за текущие сутки UTC, $. */
   dailyPnl: z.record(z.string(), z.number()),
   dayStart: isoTime,
   toClose: z.array(z.string()),
+  /** «Потерянные» входы: pending дольше LIVE_PENDING_STALE_S — воркер сверяет их с биржей по своему clientOrderId. */
+  stalePending: z
+    .array(
+      z.object({
+        tradeId: z.string(),
+        experimentId: z.string(),
+        market,
+        symbol: z.string(),
+        direction,
+        openedAt: isoTime,
+      }),
+    )
+    .default([]),
   openLegs: z.array(
     z.object({
       tradeId: z.string(),
@@ -129,6 +145,8 @@ export const liveExitSchema = z.object({
   feesUsd: z.number().nullable(),
   realizedPnl: z.number().nullable(),
   closedBy: z.enum(["tp", "sl", "mirror", "close_all"]).nullable(),
+  /** PnL — оценка по ценам входа и выхода с комиссией по ставке (исполнения не прочитаны). */
+  pnlEstimated: z.boolean().default(false),
   /** Нераспроданный остаток монеты (спот) — на субсчёте, в PnL не входит; null — остатка нет. */
   leftover: z
     .object({ qty: z.number(), asset: z.string(), usd: z.number() })
@@ -187,3 +205,17 @@ export const liveMirrorToggleReplySchema = z.object({
   id: z.string(),
   liveMirror: z.boolean(),
 });
+
+/**
+ * Итог сверки «потерянного» входа (pending дольше LIVE_PENDING_STALE_S) с биржей по своему clientOrderId: open — вход
+ * нашёлся и стоп стоит; unprotected — вход нашёлся, стопа нет (⚠️, позиция уйдёт в очередь закрытия); skipped — ордера
+ * на бирже нет, входа не было.
+ */
+export const liveReconcileRequestSchema = liveTradeIdSchema.extend({
+  outcome: z.enum(["open", "unprotected", "skipped"]),
+  message: text,
+  entryPrice: z.number().nullable(),
+  quantity: z.number().nullable(),
+  protectRefs: mirrorProtectRefsSchema.nullable(),
+});
+export type LiveReconcileRequest = z.infer<typeof liveReconcileRequestSchema>;

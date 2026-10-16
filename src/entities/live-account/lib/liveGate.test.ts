@@ -13,6 +13,7 @@ const open = (
     symbol: "ADAUSDT",
     quantity: 100,
     stopLoss: 0.4,
+    leverage: market === "usdm" ? 3 : 1,
     fitMinNotional: true,
     takeProfit: 0.6,
     ...extra,
@@ -43,7 +44,12 @@ describe("createLiveGate", () => {
     const r = await createLiveGate(deps()).check(open("t1"));
     expect(r).toEqual({
       ...open("t1"),
-      request: { ...open("t1").request, quantity: 20, fitMinNotional: false },
+      request: {
+        ...open("t1").request,
+        quantity: 20,
+        leverage: 1,
+        fitMinNotional: false,
+      },
     });
   });
 
@@ -152,5 +158,10 @@ describe("createLiveGate", () => {
         open("a"),
       ),
     ).toBeNull();
+  });
+
+  it("плечо реальных фьючерсов — LIVE.leverage (1), даже если план демо-зеркала дал другое", async () => {
+    const r = await createLiveGate(deps()).check(open("f1", "usdm"));
+    expect(r?.kind === "open" && r.request.leverage).toBe(1);
   });
 });

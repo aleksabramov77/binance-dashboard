@@ -6,7 +6,9 @@
 Клиентская часть сделки (окно, форма) — `features/trade-ticket`.
 
 ## Публичный API
-- `placeTrade(request): TradeResult` — вход + защита TP/SL, пошаговый отчёт `steps`.
+- `placeTrade(request, ctx?, { tradeId? }): TradeResult` — вход + защита TP/SL, пошаговый отчёт `steps`. `tradeId` —
+  основа своих `clientOrderId` (`bd<tradeId>-…`); не задан — случайный (демо). Реальный счёт передаёт детерминированный
+  (`liveOrderSeed` из id paper-сделки): «потерянный» вход и исполнения своих ордеров находятся на бирже по строке.
 - `getTradeOverview()` — настроен ли демо-ключ, лимит объёма, балансы USDT и `openSymbols` — символы
   с открытой позицией или ордерами (по ним карточки сетапов помечаются «уже в сделке»).
 - `closeDemoPosition({ market, symbol, direction, quantity })` — закрыть демо-позицию по рынку: снять все
@@ -46,14 +48,16 @@
 - `TradeVenueContext` (`model/tradeVenue.ts`): площадка + лимит объёма + доля риска + `autoHedge`. По умолчанию —
   `demoTradeContext()` из `BINANCE_DEMO_*` (`DEMO_MAX_NOTIONAL_USD`, `MAX_RISK_PCT`, `FUTURES_AUTO_HEDGE`): поведение демо
   до 0049 не меняется, существующие вызовы (`placeTrade(req)`, `closeDemoPosition(req)`, `sweepTriggeredLegs(m)`) — те же.
-- Реальный счёт передаёт только воркер (`scripts/live-worker.ts`): `placeTrade(req, liveCtx)`,
+- Реальный счёт передаёт только воркер (`scripts/live-worker.ts`): `placeTrade(req, liveCtx, { tradeId: seed })`,
   `closeDemoPosition(req, liveVenue)`, `sweepTriggeredLegs(legs, overBudget, liveVenue)`. Его контекст: лимит объёма
   `LIVE.notionalHardCapUsd` ($55 — потолок проверки; объём $10–50 считает воркер), риск `LIVE.maxRiskPct`,
   `autoHedge: false` — реальные фьючерсы только в One-way (одна позиция на монету), режим держит воркер
   (`enableOnewayMode` на пустом счёте), Hedge сам не включается никогда.
 - `lib/sizeEntry.ts` — объём реального входа: $10 после округления вниз по шагу; минимум биржи (minNotional, minQty,
   у спота — стоп после комиссии) выше — до минимума с запасом 1% (без запаса, если он выводит за максимум), но минимум
-  не выше $50, иначе `{ ok: false, minUsd }` — вход пропускается. Тесты — `lib/sizeEntry.test.ts`.
+  не выше $50, иначе `{ ok: false, minUsd }` — вход пропускается; подъём для стопа спота после комиссии тоже
+  перепроверяется против $50. Тесты — `lib/sizeEntry.test.ts`. `tradeClientIds(seed)` — свои `clientOrderId` сделки
+  (вход `-W`/`-M`, TP/SL `-S`/`-T` и `-S2`/`-T2`, закрытие `-C`) — экспорт для сверки и PnL воркера.
 - Справочник фьючерсов и кэш режима позиций — свои у каждой площадки (по адресу), демо и реальный счёт не смешиваются.
   `closeDemoPosition` берёт справочник и цены той же площадки, что и ордера.
 - `CloseDemoResult.protectionRemoved` — в этой попытке свои TP/SL сняты; при `failed` позиция осталась без защиты.

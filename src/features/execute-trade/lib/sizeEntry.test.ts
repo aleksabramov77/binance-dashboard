@@ -113,4 +113,17 @@ describe("sizeEntry: объём реального входа", () => {
     });
     expect(r).toMatchObject({ ok: true, raised: "minQty" });
   });
+
+  it("поднятый под стоп спота объём вышел за $50 — пропуск с этой суммой", () => {
+    // Минимум ордера $5, стоп на 10% от цены: стоп после комиссии требует ~$50,5 покупки — больше $50.
+    const r = sizeEntry({
+      price: 1,
+      rules: rules(4.99, "1", 1),
+      targetUsd: 10,
+      maxUsd: 50,
+      spotStop: 0.1,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.minUsd).toBeGreaterThan(50);
+  });
 });

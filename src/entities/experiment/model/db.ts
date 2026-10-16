@@ -246,8 +246,15 @@ export const liveMirrorOrdersTable = pgTable(
     feesUsd: doublePrecision("fees_usd"),
     /** Реализованный PnL по исполнениям, $ (после комиссий в USDT); null — не посчитан. */
     realizedPnl: doublePrecision("realized_pnl"),
+    /** PnL — оценка по ценам входа и выхода (исполнения не прочитаны), а не по исполнениям. */
+    pnlEstimated: boolean("pnl_estimated").notNull().default(false),
     /** Чем закрыта: tp | sl | mirror (с paper-сделкой) | close_all (аварийный стоп). */
     closedBy: text("closed_by"),
+    /**
+     * Позиция была без защиты (вход без стопа, сработавшая до входа нога, снятые при неудачном закрытии TP/SL,
+     * найденный на бирже «потерянный» вход без стопа): повторная неудача закрытия не понижает «без защиты» до close_failed.
+     */
+    noProtection: boolean("no_protection").notNull().default(false),
     /** Неудачных попыток закрытия подряд: Telegram — на первой, итог «закрыто после N попыток» — один раз. */
     closeAttempts: integer("close_attempts").notNull().default(0),
     /** Нераспроданный остаток монеты после выхода (спот: комиссия в монете и шаг) — в PnL не входит. */

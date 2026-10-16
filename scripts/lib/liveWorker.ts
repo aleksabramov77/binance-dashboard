@@ -411,13 +411,20 @@ export const DEMO_VENUE_FLAGS = {
   enableMargin: false,
 } as const;
 
-/** «Площадка демо» — только для локальной проверки: не в production и только на localhost/127.0.0.1. null — можно. */
+/**
+ * «Площадка демо» — только для локальной проверки: не в production, без торгового ключа в env и только на
+ * localhost/127.0.0.1. null — можно.
+ */
 export function demoVenueRefusal(input: {
   production: boolean;
+  /** Задан любой из BINANCE_TRADE_API_KEY / SECRET — это окружение настоящего воркера (VM). */
+  hasTradeKey: boolean;
   appUrl: string;
 }): string | null {
   if (input.production)
     return "--venue demo запрещён в production: площадка демо — только для локальной проверки";
+  if (input.hasTradeKey)
+    return "--venue demo запрещён: задан BINANCE_TRADE_API_KEY или BINANCE_TRADE_API_SECRET — это окружение реального счёта";
   let host: string;
   try {
     host = new URL(input.appUrl).hostname;

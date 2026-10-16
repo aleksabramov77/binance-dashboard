@@ -2,6 +2,7 @@
 // секрета или с неверным — 401; в production без LIVE_WORKER_SECRET — 503 (закрыто); локально без секрета — открыто,
 // как cron. Тело — по Zod-схеме (иначе 400). Пути публичны в accessPolicy только поштучно.
 import type { z } from "zod";
+import { DEMO_VENUE_HEADER } from "@/entities/live-account";
 import { getLiveWorkerSecret } from "@/shared/config/env.server";
 import { checkCronAuth } from "@/shared/lib/auth/cronAuth.server";
 import { withLogging } from "@/shared/lib/route.server";
@@ -20,6 +21,15 @@ export function liveWorkerAuth(request: Request): Response | null {
     );
   if (auth === "unauthorized")
     return Response.json({ error: "Неверный секрет" }, { status: 401 });
+  // «Площадка демо» (локальная проверка) в production не принимается — даже если воркер считает себя локальным.
+  if (
+    process.env.NODE_ENV === "production" &&
+    request.headers.get(DEMO_VENUE_HEADER) !== null
+  )
+    return Response.json(
+      { error: "Площадка демо — только для локальной проверки" },
+      { status: 400 },
+    );
   return null;
 }
 
