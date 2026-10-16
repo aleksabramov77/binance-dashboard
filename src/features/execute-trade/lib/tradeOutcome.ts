@@ -50,13 +50,25 @@ export function afterEntryError(
 }
 
 /**
+ * Итог сделки, чей вход биржа не подтвердила (свой `-M` не найден), а позиция на пустой до входа
+ * стороне появилась: защита выставлена, но статус — unprotected, чтобы человек проверил (PR 2e).
+ */
+export const UNCONFIRMED_ENTRY = outcome(
+  "unprotected",
+  "Вход не подтверждён биржей (свой ордер не найден), но позиция появилась — защита выставлена, проверьте на demo.binance.com.",
+  true,
+);
+
+/**
  * Фьючерсы, исход входа неизвестен, свой ордер `-M` не подтверждён — сверка по позиции своей стороны
  * (null — проверить не удалось) относительно снимка до входа (before): на стороне могут быть позиции
  * других зеркал (PR 2d), их объём — не наш. { protect } — свой объём (прирост), entryPrice null —
  * средняя цена стороны не наша, берём текущую.
  * - свой ордер не найден и после дедлайна (missing; поиск — до отправки + recvWindow, позже биржа его не
- *   примет): прироста нет — вход не прошёл; прирост есть, даже ≈ заявке, — это может быть вход соседнего
- *   зеркала параллельного прогона: unprotected без защиты и отката (PR 2e; с блокировкой прогона редкость);
+ *   примет): прироста нет — вход не прошёл; сторона до входа была пуста и выросла — позиция почти
+ *   наверняка своя (с блокировкой прогона параллельного входа соседа нет): защищаем её, но итог —
+ *   unprotected «вход не подтверждён» ({ protect, unconfirmed }); сторона не была пуста — прирост может
+ *   быть входом соседа: unprotected без защиты и отката (PR 2e);
  * - ордер не прочитан (unknown), сторона до входа пуста: позиция есть — вся она наша, нет — вход не прошёл;
  * - unknown, сторона не пуста: прирост ≈ объёму заявки (FUTURES_GROWTH_TOLERANCE) — защищаем прирост;
  *   прироста нет — вход не прошёл; иначе неясно, чей объём, — unprotected без защиты и отката.
@@ -66,12 +78,20 @@ export function afterFuturesPositionCheck(
   before: number,
   order: "missing" | "unknown",
   expectedQty: number,
-): TradeOutcome | { protect: { amount: number; entryPrice: number | null } } {
+):
+  | TradeOutcome
+  | {
+      protect: { amount: number; entryPrice: number | null };
+      /** Свой ордер входа не найден — защиту ставим, но итог сделки — UNCONFIRMED_ENTRY. */
+      unconfirmed?: true;
+    } {
   if (position === null) return outcome("unprotected", UNKNOWN_FUTURES);
   // Свой ордер `-M` не найден и после дедлайна: прирост стороны, даже ≈ заявке, может быть входом
   // соседнего зеркала (параллельный прогон) — не защищаем его как свой и не откатываем (PR 2e).
   if (order === "missing") {
     const grown = position.amount - before;
+    if (grown > expectedQty * FUTURES_GROWTH_TOLERANCE && before <= 0)
+      return { protect: position, unconfirmed: true };
     if (grown > expectedQty * FUTURES_GROWTH_TOLERANCE)
       return outcome(
         "unprotected",

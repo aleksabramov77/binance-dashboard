@@ -2,9 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { withMirrorRunLock } from "./mirrorLock";
 import type { ExperimentDb } from "./tickLock";
 
+/** Текст SQL-запроса Drizzle (куски строк) — чтобы проверить, что именно выполнено. */
+const sqlText = (q: unknown) =>
+  JSON.stringify((q as { queryChunks?: unknown }).queryChunks ?? q);
+
 /** БД-заглушка: транзакция отвечает на pg_try_advisory_xact_lock заданным значением. */
 const fakeDb = (locked: boolean) => {
-  const execute = vi.fn(async () => ({ rows: [{ locked }] }));
+  const execute = vi.fn(async (_q: unknown) => ({ rows: [{ locked }] }));
   const db = {
     transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({ execute }),
@@ -20,7 +24,11 @@ describe("withMirrorRunLock", () => {
       acquired: true,
       value: "ok",
     });
-    expect(free.execute).toHaveBeenCalledTimes(1);
+    // Замок взят — в той же транзакции таймаут простоя (SET LOCAL через set_config).
+    expect(free.execute).toHaveBeenCalledTimes(2);
+    expect(sqlText(free.execute.mock.calls[1]?.[0])).toContain(
+      "idle_in_transaction_session_timeout",
+    );
 
     const busy = fakeDb(false);
     const skipped = vi.fn(async () => "never");
@@ -28,6 +36,8 @@ describe("withMirrorRunLock", () => {
       acquired: false,
     });
     expect(skipped).not.toHaveBeenCalled();
+    // Замок не взят — таймаут не ставим.
+    expect(busy.execute).toHaveBeenCalledTimes(1);
   });
 
   it("второй одновременный прогон в процессе (PGlite) — locked; после первого — снова можно", async () => {

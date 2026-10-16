@@ -20,7 +20,7 @@ function rowsOf(result: unknown): Record<string, unknown>[] {
  * Выполняет fn, если прогон зеркала больше нигде не идёт. Не взяли — fn не вызывается
  * (`acquired: false`): следующий прогон через минуту.
  * - Postgres (holdLock): `pg_try_advisory_xact_lock` в отдельной транзакции, которая держится всё время
- *   fn. Сама fn работает через обычный db (другие соединения пула): её записи не откатываются, если
+ *   fn; в ней же — таймаут простоя idleTimeoutS (больше maxDuration крона). Сама fn работает через обычный db (другие соединения пула): её записи не откатываются, если
  *   прогон оборвётся (ордера на бирже уже стоят), а блокировка снимается при обрыве соединения сама.
  *   Транзакционная — работает и через Transaction pooler Supabase (сеансовые там ненадёжны).
  * - PGlite (holdLock false): одно соединение — запросы fn внутри открытой транзакции зависли бы;
@@ -30,6 +30,7 @@ export async function withMirrorRunLock<T>(
   db: ExperimentDb,
   fn: () => Promise<T>,
   holdLock: boolean,
+  idleTimeoutS = 330,
 ): Promise<LockedResult<T>> {
   if (runningHere) return { acquired: false };
   runningHere = true;
@@ -42,6 +43,12 @@ export async function withMirrorRunLock<T>(
         ),
       );
       if (row?.locked !== true) return { acquired: false as const };
+      // SET LOCAL idle_in_transaction_session_timeout (set_config с is_local = true принимает параметр):
+      // транзакция с замком простаивает весь прогон; если экземпляр функции заморозят с открытым
+      // сокетом, сервер закроет сеанс через idleTimeoutS — замок не повиснет навсегда.
+      await tx.execute(
+        sql`select set_config('idle_in_transaction_session_timeout', ${`${Math.round(idleTimeoutS)}s`}, true)`,
+      );
       return { acquired: true as const, value: await fn() };
     });
   } finally {

@@ -17,6 +17,7 @@ import {
 } from "@/entities/experiment";
 import {
   emptyMirrorRunResult,
+  MIRROR,
   type MirrorRunResult,
   mirrorLogEntry,
   runMirror,
@@ -48,6 +49,7 @@ export async function runDemoMirror(): Promise<MirrorRunResult> {
     db,
     () => runDemoMirrorUnlocked(db),
     getDbKind() === "postgres",
+    MIRROR.lockIdleTimeoutS,
   );
   if (run.acquired) return run.value;
   log.info(

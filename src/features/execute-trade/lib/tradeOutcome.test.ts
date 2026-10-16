@@ -14,6 +14,7 @@ import {
   afterStopBeforeEntry,
   afterStopLost,
   afterTakeProfitCancel,
+  UNCONFIRMED_ENTRY,
 } from "./tradeOutcome";
 
 describe("ошибка отправки входа", () => {
@@ -75,16 +76,37 @@ describe("фьючерсы", () => {
       ),
     ).toMatchObject({ status: "rejected", withEntry: false });
   });
-  it("свой ордер не найден и после дедлайна, а сторона выросла на заявку — может быть вход соседа: unprotected без защиты и отката (PR 2e)", () => {
+  it("свой ордер не найден, сторона до входа НЕ пуста и выросла — может быть вход соседа: unprotected без защиты и отката (PR 2e)", () => {
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 70, entryPrice: 0.22 },
+        30,
+        "missing",
+        40,
+      ),
+    ).toMatchObject({ status: "unprotected", withEntry: false });
+  });
+  it("свой ордер не найден, сторона до входа пуста и выросла — защищаем, но итог «вход не подтверждён» (PR 2e)", () => {
+    const position = { amount: 40, entryPrice: 0.22 };
+    expect(afterFuturesPositionCheck(position, 0, "missing", 40)).toEqual({
+      protect: position,
+      unconfirmed: true,
+    });
+    expect(UNCONFIRMED_ENTRY).toMatchObject({
+      status: "unprotected",
+      withEntry: true,
+    });
+  });
+  it("свой ордер не найден, сторона не выросла — rejected", () => {
     for (const before of [0, 30])
       expect(
         afterFuturesPositionCheck(
-          { amount: before + 40, entryPrice: 0.22 },
+          { amount: before, entryPrice: 0.22 },
           before,
           "missing",
           40,
         ),
-      ).toMatchObject({ status: "unprotected", withEntry: false });
+      ).toMatchObject({ status: "rejected", withEntry: false });
   });
   it("соседи на стороне, свой ордер не найден, прирост неясен — unprotected, не rejected", () => {
     expect(
