@@ -12,6 +12,8 @@ export interface AlertRow {
 export interface AlertPlan {
   /** Новые проблемы и те, о которых пора напомнить. */
   notify: Issue[];
+  /** Ключи новых проблем из notify (не напоминаний): по ним заводится задача в GitHub. */
+  fresh: string[];
   /** Были активны, теперь пропали — «восстановлено». */
   resolved: AlertRow[];
   /** Что записать в alert_state. */
@@ -32,21 +34,23 @@ export function planAlerts(
   const byKey = new Map(previous.map((r) => [r.key, r]));
   const current = new Set(issues.map((i) => i.key));
   const notify: Issue[] = [];
+  const fresh: string[] = [];
   const rows: AlertRow[] = [];
 
   for (const issue of issues) {
     const prev = byKey.get(issue.key);
-    const fresh = !prev || prev.status === "resolved";
+    const isNew = !prev || prev.status === "resolved";
     const due =
-      fresh ||
+      isNew ||
       prev.lastSent === null ||
       now - Date.parse(prev.lastSent) >= repeatMs;
     if (due) notify.push(issue);
+    if (isNew) fresh.push(issue.key);
     rows.push({
       key: issue.key,
       status: "active",
       title: issue.title,
-      firstSeen: fresh ? at : prev.firstSeen,
+      firstSeen: isNew ? at : prev.firstSeen,
       lastSeen: at,
       lastSent: due ? at : (prev?.lastSent ?? null),
     });
@@ -57,5 +61,5 @@ export function planAlerts(
   );
   for (const r of resolved)
     rows.push({ ...r, status: "resolved", lastSeen: at });
-  return { notify, resolved, rows };
+  return { notify, fresh, resolved, rows };
 }

@@ -8,6 +8,7 @@ export {
   claimMirror,
   claimMirrorToClose,
   claimOpenMirrors,
+  type DemoResetScope,
   emptyMirrorSummary,
   listMirrorCandidates,
   listMirrorsToClose,
@@ -21,6 +22,8 @@ export {
   toDemoSummary,
   updateMirror,
 } from "./api/mirrorDb";
+// Блокировка прогона demo-зеркала (spec 0012, PR 2e): два прогона крона не идут одновременно.
+export { MIRROR_RUN_LOCK_KEY, withMirrorRunLock } from "./api/mirrorLock";
 // Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
 export {
   type LabExperiment,
@@ -38,6 +41,7 @@ export {
   type ResetRunInput,
   type ResetRunOutcome,
   resetExperimentRun,
+  resetGroupRun,
   resetRun,
   setExperimentEnabled,
 } from "./api/settingsDb";
@@ -64,6 +68,7 @@ export {
   useResetCapitals,
   useResetDemo,
   useResetExperimentPaper,
+  useResetGroup,
   useSetExperimentDemoMirror,
   useSetExperimentEnabled,
   useSetNextBudget,
@@ -164,6 +169,10 @@ export {
   experimentEnabledSchema,
   experimentResetResultSchema,
   experimentResetSchema,
+  type GroupResetRequest,
+  type GroupResetResult,
+  groupResetRequestSchema,
+  groupResetResultSchema,
   type LabSettings,
   labSettingsSchema,
   MAX_INITIAL_BUDGET,
@@ -208,4 +217,3 @@ export {
 } from "./model/view";
 export { DemoMisses } from "./ui/DemoMisses";
 export { EquityChart } from "./ui/EquityChart";
-export { MarketBudgets } from "./ui/MarketBudgets";

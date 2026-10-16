@@ -5,16 +5,9 @@ import {
   type MonitorSnapshot,
 } from "../lib/detectIssues";
 import { formatAlert } from "../lib/formatAlert";
+import type { SampleLog, TrackedIssue } from "../lib/formatAlertIssue";
 import { type AlertRow, planAlerts } from "../lib/planAlerts";
-
-/** Запись журнала для разбора ИИ (уже без секретов). */
-export interface SampleLog {
-  ts: string;
-  level: string;
-  event: string;
-  message: string;
-  error?: string;
-}
+import type { TrackIssuesInput, TrackIssuesResult } from "./trackAlertIssues";
 
 export interface MonitorDeps {
   collect: (now: number) => Promise<MonitorSnapshot>;
@@ -23,6 +16,11 @@ export interface MonitorDeps {
   saveAlerts: (rows: AlertRow[]) => Promise<void>;
   /** Разбор ИИ; null или ошибка — уведомление уходит без него. */
   analyze?: (issues: Issue[], samples: SampleLog[]) => Promise<string | null>;
+  /**
+   * Задачи в GitHub по тревогам (spec 0037); не задана — как раньше. Вызывается до отправки, ссылки идут
+   * в текст; ошибка не мешает уведомлению.
+   */
+  trackIssues?: (input: TrackIssuesInput) => Promise<TrackIssuesResult>;
   /** Отправка уведомления; не задана — только состояние в БД. */
   notify?: (text: string) => Promise<void>;
   prune: () => Promise<number>;
@@ -36,7 +34,13 @@ export interface MonitorResult {
   sent: boolean;
   pruned: number;
   analysisError?: string;
+  /** Задачи в GitHub, заведённые или дополненные в этом прогоне. */
+  tracked: TrackedIssue[];
+  /** Сбои GitHub — в журнал как warn monitor.github. */
+  githubErrors: string[];
 }
+
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Один прогон монитора: собрать срез → найти проблемы → решить, о чём писать → отправить. */
 export async function runMonitor(
@@ -50,12 +54,30 @@ export async function runMonitor(
 
   let analysis: string | null = null;
   let analysisError: string | undefined;
-  if (plan.notify.length && deps.analyze) {
+  let samples: SampleLog[] = [];
+  if (plan.notify.length && (deps.analyze || deps.trackIssues)) {
     try {
-      const samples = await deps.samples(plan.notify, now - rules.windowMs);
-      analysis = await deps.analyze(plan.notify, samples);
+      samples = await deps.samples(plan.notify, now - rules.windowMs);
+      if (deps.analyze) analysis = await deps.analyze(plan.notify, samples);
     } catch (error) {
-      analysisError = error instanceof Error ? error.message : String(error);
+      analysisError = message(error);
+    }
+  }
+
+  let tracked: TrackedIssue[] = [];
+  let githubErrors: string[] = [];
+  if (plan.notify.length && deps.trackIssues) {
+    try {
+      ({ tracked, errors: githubErrors } = await deps.trackIssues({
+        notify: plan.notify,
+        fresh: plan.fresh,
+        analysis,
+        samples,
+        logsUrl: deps.logsUrl,
+        now,
+      }));
+    } catch (error) {
+      githubErrors = [message(error)];
     }
   }
 
@@ -64,6 +86,7 @@ export async function runMonitor(
     resolved: plan.resolved,
     analysis,
     logsUrl: deps.logsUrl,
+    tracked,
   });
   let sent = false;
   if (text && deps.notify) {
@@ -83,5 +106,7 @@ export async function runMonitor(
     sent,
     pruned: await deps.prune(),
     analysisError,
+    tracked,
+    githubErrors,
   };
 }

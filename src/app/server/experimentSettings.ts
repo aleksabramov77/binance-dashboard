@@ -10,12 +10,15 @@ import {
   type ExperimentMarket,
   type ExperimentResetResult,
   experimentsTable,
+  type GroupResetResult,
   getEpoch,
   type LabSettings,
+  MARKETS,
   type ResetRequest,
   type ResetResult,
   readExperimentsOverview,
   resetExperimentRun,
+  resetGroupRun,
   resetRun,
   setExperimentDemoMirror,
   setExperimentEnabled,
@@ -72,7 +75,17 @@ export async function getLabSettings(): Promise<LabSettings> {
   const summaries = new Map(overview.experiments.map((e) => [e.id, e]));
   return {
     epoch,
-    currentBudget: Math.max(0, ...rows.map((e) => e.initialBudget)),
+    groupBudgets: MARKETS.map((market) => {
+      const budgets = rows
+        .filter((e) => e.market === market)
+        .map((e) => e.initialBudget);
+      return {
+        market,
+        experiments: budgets.length,
+        min: budgets.length ? Math.min(...budgets) : 0,
+        max: budgets.length ? Math.max(...budgets) : 0,
+      };
+    }),
     nextBudget,
     demoConfigured,
     demoBalances,
@@ -307,6 +320,69 @@ export function resetExperimentCapital(
       return {
         closed: outcome.closed,
         closedWithoutPrice: outcome.closedWithoutPrice,
+        settings: await getLabSettings(),
+      };
+    }
+    throw new Error(
+      "Сброс не выполнен: блокировку тика держит другой процесс дольше минуты. Повторите позже.",
+    );
+  });
+}
+
+/**
+ * Сброс Paper группы активов — «эра группы» (spec 0038, решение 4): под блокировкой тика для всех экспериментов
+ * группы (включая выключенные) закрыть открытые сделки по последней цене (manual; без цены — по цене входа),
+ * начать учёт заново (reset_at) с бюджета next_budget и пометить текущие свечи обработанными. Новой эпохи нет,
+ * другие группы не меняются; демо-позиции закрытых сделок закроет крон зеркала.
+ */
+export function resetGroupCapital(
+  market: ExperimentMarket,
+): Promise<GroupResetResult> {
+  return withTickLock(async () => {
+    await ensureEngineReady();
+    const db = getDb();
+    const store = createDbExperimentStore(db);
+    const inGroup = (e: { market: ExperimentMarket }) => e.market === market;
+    const runId = await store.currentRunId();
+    const openBefore = (await store.openTrades(runId)).filter(inGroup);
+    const prices = await lastPrices(new Set(openBefore.map((t) => t.market)));
+
+    for (let attempt = 0; attempt < RESET_LOCK_ATTEMPTS; attempt++) {
+      const locked = await withEngineTickLock(db, async (tx) => {
+        const s = createDbExperimentStore(tx);
+        const current = await s.currentRunId();
+        const [experiments, open, initialBudget] = await Promise.all([
+          s.listExperiments().then((list) => list.filter(inGroup)),
+          s.openTrades(current).then((list) => list.filter(inGroup)),
+          readNextBudget(s),
+        ]);
+        const plan = planReset({ experiments, open, prices, now: Date.now() });
+        const outcome = await resetGroupRun(tx, {
+          runId: current,
+          market,
+          closes: plan.closes,
+          initialBudget,
+          bars: plan.bars,
+          barsKey: ENGINE_KEYS.bars,
+        });
+        return { ...outcome, runId: current, initialBudget };
+      });
+      if (!locked.acquired) {
+        await new Promise((r) => setTimeout(r, RESET_LOCK_RETRY_MS));
+        continue;
+      }
+      const outcome = locked.value;
+      log.info(
+        "experiments.reset_group",
+        `${ASSET_GROUPS[market].code}: Paper группы сброшен — экспериментов ${outcome.experiments}, закрыто сделок ${outcome.closed}, бюджет $${outcome.initialBudget}`,
+        { market, ...outcome },
+      );
+      return {
+        account: "paper",
+        experiments: outcome.experiments,
+        closed: outcome.closed,
+        closedWithoutPrice: outcome.closedWithoutPrice,
+        failed: 0,
         settings: await getLabSettings(),
       };
     }

@@ -16,6 +16,7 @@ export {
   planMirror,
 } from "./lib/planMirror";
 export {
+  emptyMirrorRunResult,
   type MirrorCloseItem,
   type MirrorDeps,
   type MirrorOpenResult,

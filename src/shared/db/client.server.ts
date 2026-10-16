@@ -64,6 +64,9 @@ function connection(): Connection {
 /** БД приложения: Postgres по DATABASE_URL или локальный PGlite. */
 export const getDb = (): Db => connection().db;
 
+/** Какая БД у приложения: postgres (прод, Supabase) или pglite (локально). */
+export const getDbKind = (): DatabaseConfig["kind"] => connection().kind;
+
 /** Применяет миграции из `drizzle/`. Вызывается при старте сервера и `pnpm db:migrate`. */
 export async function migrateDb(): Promise<void> {
   const conn = connection();

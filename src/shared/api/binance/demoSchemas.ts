@@ -291,6 +291,31 @@ export const futuresBalancesSchema = z.array(
     .loose(),
 );
 
+/**
+ * Активы счёта USDⓈ-M (`/fapi/v3/account`). У `/fapi/v3/balance` нереализованный PnL только кросс-позиций
+ * (`crossUnPnl`), а зеркало открывает изолированные — поэтому equity берётся отсюда: `unrealizedProfit` по всем.
+ */
+export const futuresAccountAssetsSchema = z
+  .object({
+    assets: z.array(
+      z
+        .object({
+          asset: z.string(),
+          walletBalance: decimal,
+          unrealizedProfit: decimal,
+        })
+        .loose(),
+    ),
+  })
+  .loose();
+
+/** Балансы COIN-M (`/dapi/v1/balance`): в монете актива; нереализованный PnL — `crossUnPnl`. */
+export const coinmBalancesSchema = z.array(
+  z
+    .object({ asset: z.string(), balance: decimal, crossUnPnl: decimal })
+    .loose(),
+);
+
 /** Любой список, где у строк есть символ: OCO-история, ордера, income, позиции. */
 export const symbolRowsSchema = z.array(
   z.object({ symbol: z.string() }).loose(),

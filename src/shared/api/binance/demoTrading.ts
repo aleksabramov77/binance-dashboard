@@ -19,9 +19,11 @@ import {
   algoOrderQuerySchema,
   algoOrderSchema,
   anySchema,
+  coinmBalancesSchema,
   exchangeInfoSchema,
   type FuturesOrder,
   type FuturesSymbolState,
+  futuresAccountAssetsSchema,
   futuresAllOrdersSchema,
   futuresBalancesSchema,
   futuresOpenAlgoOrdersSchema,
@@ -46,6 +48,7 @@ import {
   symbolRowsSchema,
 } from "./demoSchemas";
 import type { Market } from "./market";
+import type { BinanceMarket } from "./markets";
 import { ORDER_RECV_WINDOW_MS } from "./orderOutcome";
 import {
   entryParams,
@@ -55,11 +58,21 @@ import {
   reduceParams,
 } from "./positionMode";
 import { BinanceApiError, type SignedParams, signedRequest } from "./signed";
+import {
+  sumUsd,
+  type UsdPrice,
+  type WalletEquity,
+  type WalletEquityResult,
+} from "./walletEquity";
 
-/** Binance Demo Trading — виртуальные деньги, реальные котировки. Хосты: spot и фьючерсы USDⓈ-M. */
+/**
+ * Binance Demo Trading — виртуальные деньги, реальные котировки. Хосты: spot, фьючерсы USDⓈ-M и COIN-M
+ * (demo-dapi — пока только чтение баланса, spec 0038; демо-зеркала COIN-M нет).
+ */
 const DEMO_URL = {
   spot: "https://demo-api.binance.com",
   futures: "https://demo-fapi.binance.com",
+  coinm: "https://demo-dapi.binance.com",
 } as const;
 const DEMO_HOST: Record<Market, string> = {
   spot: DEMO_URL.spot,
@@ -161,6 +174,78 @@ export async function fetchDemoUsdtBalances(
     spot: spot.balances.find((b) => b.asset === "USDT")?.free ?? 0,
     usdm: futures.find((b) => b.asset === "USDT")?.availableBalance ?? 0,
   };
+}
+
+const settle = (p: Promise<WalletEquity>): Promise<WalletEquityResult> =>
+  p.then(
+    (e): WalletEquityResult => ({ ok: true, ...e }),
+    (error: unknown): WalletEquityResult => ({ ok: false, error }),
+  );
+
+/**
+ * Equity демо-счёта в $ по кошелькам, как на demo.binance.com (spec 0038): Spot — free + locked всех активов;
+ * USDⓈ-M — walletBalance + unrealizedProfit; COIN-M — balance + crossUnPnl; всё × цена актива в $. Кошельки
+ * читаются параллельно и независимо: ошибка одного не мешает остальным. Только чтение.
+ */
+export async function fetchDemoEquity(
+  creds: BinanceCredentials,
+  price: UsdPrice,
+): Promise<Record<BinanceMarket, WalletEquityResult>> {
+  const [spot, usdm, coinm] = await Promise.all([
+    settle(
+      signedRequest(
+        DEMO_URL.spot,
+        creds,
+        "GET",
+        "/api/v3/account",
+        spotAccountBalancesSchema,
+        { omitZeroBalances: true },
+      ).then((a) =>
+        sumUsd(
+          a.balances.map((b) => ({
+            asset: b.asset,
+            amount: b.free + b.locked,
+          })),
+          price,
+        ),
+      ),
+    ),
+    settle(
+      signedRequest(
+        DEMO_URL.futures,
+        creds,
+        "GET",
+        "/fapi/v3/account",
+        futuresAccountAssetsSchema,
+      ).then((a) =>
+        sumUsd(
+          a.assets.map((b) => ({
+            asset: b.asset,
+            amount: b.walletBalance + b.unrealizedProfit,
+          })),
+          price,
+        ),
+      ),
+    ),
+    settle(
+      signedRequest(
+        DEMO_URL.coinm,
+        creds,
+        "GET",
+        "/dapi/v1/balance",
+        coinmBalancesSchema,
+      ).then((rows) =>
+        sumUsd(
+          rows.map((b) => ({
+            asset: b.asset,
+            amount: b.balance + b.crossUnPnl,
+          })),
+          price,
+        ),
+      ),
+    ),
+  ]);
+  return { spot, usdm, coinm };
 }
 
 /** clientOrderId — свой id ордера: по нему перечитываем ордер, если исход заявки неизвестен. */

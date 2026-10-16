@@ -20,3 +20,33 @@ export const MONITOR = {
   samples: 15,
 } as const;
 export type MonitorRules = typeof MONITOR;
+
+/** Задачи по тревогам в приватном репозитории GitHub (spec 0037). */
+export const ALERT_ISSUES = {
+  /** За какое окно считаем автозапуски Claude для лимита ALERT_AUTOFIX_PER_DAY. */
+  autofixWindowMs: 24 * 60 * 60_000,
+  labels: {
+    /** Метка запускает routine Claude (webhook-триггер issues.labeled). */
+    autofix: {
+      name: "alert",
+      color: "d73a4a",
+      description: "Тревога монитора: Claude разбирает",
+    },
+    queued: {
+      name: "alert-queued",
+      color: "fbca04",
+      description:
+        "Сверх лимита автозапусков: смените на alert, чтобы запустить",
+    },
+    noCode: {
+      name: "alert-no-code",
+      color: "c5def5",
+      description: "Разбор Claude: не баг в коде",
+    },
+    pr: {
+      name: "alert-pr",
+      color: "0e8a16",
+      description: "Разбор Claude: готов draft PR",
+    },
+  },
+} as const;
