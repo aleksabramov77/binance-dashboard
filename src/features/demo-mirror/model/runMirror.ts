@@ -1,5 +1,9 @@
 import { MIRROR } from "../config/mirror";
-import type { ActiveMirror, MirrorOrderRequest } from "../lib/planMirror";
+import type {
+  ActiveMirror,
+  MirrorDecision,
+  MirrorOrderRequest,
+} from "../lib/planMirror";
 import {
   listingKey,
   type MirrorListing,
@@ -55,6 +59,11 @@ export interface MirrorDeps<
    * (кандидат ждёт следующего прогона). Проверяется до захвата сделки и запроса на вход.
    */
   hasSymbol: (market: "spot" | "usdm", symbol: string) => Promise<boolean>;
+  /**
+   * Свободные USDT демо-кошелька группы (Spot — free, USDⓈ-M — availableBalance) для резерва MIRROR.minFreeUsd
+   * (spec 0043). Читается раз за прогон на рынок и только если есть вход; исключение — входы идут без проверки.
+   */
+  freeUsd: (market: "spot" | "usdm") => Promise<number>;
   /** Захват сделки (вставка pending). false — её уже взял другой прогон. */
   claim: (tradeId: string) => Promise<boolean>;
   open: (req: MirrorOrderRequest) => Promise<R>;
@@ -154,6 +163,10 @@ export async function runMirror<
   let futuresMode: "oneway" | "hedge" | null = null;
   if (candidates.some((c) => c.market === "usdm"))
     futuresMode = await deps.positionMode().catch(() => null);
+  const notional = new Map(
+    candidates.map((c) => [c.tradeId, c.quantity * c.entryPrice]),
+  );
+  const reserve = freeFunds(deps);
   const decisions = planMirror(
     candidates,
     await deps.activeMirrors(),
@@ -168,21 +181,69 @@ export async function runMirror<
       result.deferred = decisions.length - i;
       break;
     }
-    if (!(await deps.claim(d.tradeId))) continue;
-    if (d.kind === "skip") {
-      await deps.markSkipped(d.tradeId, d.reason);
+    // Резерв демо-кошелька (spec 0043) — до захвата: пропуск по нему отмечается, как остальные.
+    const step =
+      d.kind === "open"
+        ? await reserve.check(d, notional.get(d.tradeId) ?? 0)
+        : d;
+    if (!(await deps.claim(step.tradeId))) continue;
+    if (step.kind === "skip") {
+      await deps.markSkipped(step.tradeId, step.reason);
       result.skipped++;
       continue;
     }
-    const r = await deps.open(d.request);
-    await deps.saveOpen(d.tradeId, r);
+    const r = await deps.open(step.request);
+    if (r.status !== "rejected")
+      reserve.spend(step.request.market, notional.get(step.tradeId) ?? 0);
+    await deps.saveOpen(step.tradeId, r);
     result.opened.push({
-      tradeId: d.tradeId,
-      symbol: d.request.symbol,
+      tradeId: step.tradeId,
+      symbol: step.request.symbol,
       status: r.status,
     });
   }
   return result;
+}
+
+/**
+ * Резерв демо-кошелька прогона (spec 0043): остаток читается один раз на рынок и только при первом входе, каждый
+ * вход прогона вычитает свой объём (paper-объём, ~$50). Остаток не прочитался — входы идут как раньше.
+ */
+function freeFunds(deps: Pick<MirrorDeps, "freeUsd">) {
+  const left = new Map<"spot" | "usdm", Promise<number | null>>();
+  const read = (market: "spot" | "usdm") => {
+    let value = left.get(market);
+    if (!value) {
+      value = Promise.resolve()
+        .then(() => deps.freeUsd(market))
+        .catch(() => null);
+      left.set(market, value);
+    }
+    return value;
+  };
+  return {
+    /** Вход или пропуск «мало свободных средств», если после входа останется меньше резерва. */
+    async check(
+      d: Extract<MirrorDecision, { kind: "open" }>,
+      cost: number,
+    ): Promise<MirrorDecision> {
+      const free = await read(d.request.market);
+      if (free === null || free - cost >= MIRROR.minFreeUsd) return d;
+      return {
+        tradeId: d.tradeId,
+        kind: "skip",
+        reason: `мало свободных средств на демо: $${Math.round(free - cost)} < резерв $${MIRROR.minFreeUsd}`,
+      };
+    },
+    spend(market: "spot" | "usdm", cost: number) {
+      const value = left.get(market);
+      if (value)
+        left.set(
+          market,
+          value.then((v) => (v === null ? null : v - cost)),
+        );
+    },
+  };
 }
 
 /** Проверка символов кандидатов на демо: по разу на market:symbol. */
