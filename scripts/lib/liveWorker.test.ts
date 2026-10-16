@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { liveHeartbeatSchema } from "@/entities/live-account";
+import {
+  isHandshake,
+  type LiveHeartbeat,
+  liveHeartbeatSchema,
+} from "@/entities/live-account";
+import { MAIN_UID_PENDING_REASON } from "@/shared/api/binance";
 import { BinanceApiError } from "@/shared/api/binance/signed";
 import { CooldownError, NetworkError } from "@/shared/lib/fetchRetry";
 import {
@@ -11,6 +16,7 @@ import {
   hasAnyTradeKey,
   MAX_RESTRICTIONS_AGE_MS,
   noKeyHeartbeat,
+  pulseWithHandshake,
   RESTRICTIONS_EVERY_MS,
   runCheck,
   toWire,
@@ -182,6 +188,55 @@ describe("runCheck", () => {
     expect(full.spot).toBeNull();
   });
 
+  it("старт → рукопожатие → Spot падает во втором цикле: блокировка «UID субсчёта не прочитан», не рукопожатие", async () => {
+    const { d } = deps({
+      fetchSpotAccount: vi
+        .fn<WorkerDeps["fetchSpotAccount"]>()
+        .mockResolvedValueOnce({ uid: 111, balances: [] })
+        .mockRejectedValue(new CooldownError("Binance на паузе", 429)),
+    });
+    const memory = emptyMemory();
+    const first = await runCheck(d, memory, base);
+    expect(isHandshake(first)).toBe(true);
+    applyReply(memory, { uid: 999 });
+    const second = await runCheck(d, memory, base);
+    expect(isHandshake(second)).toBe(false);
+    expect(second.verdict).toBe("blocked");
+    expect(second.uid).toBeNull();
+    expect(second.reasons[0]).toMatch(/UID субсчёта не прочитан/);
+    expect(second.error).toMatch(/Binance на паузе/);
+  });
+
+  it("старт → рукопожатие → -2015 во втором цикле: «Binance не принял ключ», не рукопожатие", async () => {
+    const rejected = new BinanceApiError("Invalid API-key, IP", -2015, 401);
+    const { d, advance } = deps({
+      fetchRestrictions: vi
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValueOnce(GOOD)
+        .mockRejectedValue(rejected),
+      fetchSpotAccount: vi
+        .fn<WorkerDeps["fetchSpotAccount"]>()
+        .mockResolvedValueOnce({ uid: 111, balances: [] })
+        .mockRejectedValue(rejected),
+    });
+    const memory = emptyMemory();
+    expect(isHandshake(await runCheck(d, memory, base))).toBe(true);
+    applyReply(memory, { uid: 999 });
+    const second = await runCheck(d, memory, base);
+    expect(second.reasons).toEqual([
+      "Binance не принял ключ: проверьте ключ и IP-whitelist",
+    ]);
+    expect(isHandshake(second)).toBe(false);
+    // Следующий цикл: права перечитываются (ключ заблокирован), снова отказ — тоже не рукопожатие.
+    advance(60_000);
+    const third = await runCheck(d, memory, base);
+    expect(third.reasons).toEqual([
+      "Binance не принял ключ: проверьте ключ и IP-whitelist",
+    ]);
+    expect(third.uid?.status).not.toBe("pending");
+    expect(isHandshake(third)).toBe(false);
+  });
+
   it("аккаунт Spot ни разу не прочитан — UID субсчёта неизвестен, блокировка", async () => {
     const { d } = deps({
       fetchSpotAccount: vi.fn(async () => {
@@ -294,6 +349,102 @@ describe("runCheck", () => {
     expect(h.warnings).toEqual([expect.stringMatching(/фьючерсы недоступны/)]);
     expect(d.fetchFuturesAccount).not.toHaveBeenCalled();
     expect(h.balancesNote).toMatch(/фьючерсы недоступны/);
+  });
+});
+
+describe("pulseWithHandshake", () => {
+  const reply = (mainAccount?: { uid: number }) => ({
+    ok: true as const,
+    verdict: "ok" as const,
+    mainAccount,
+  });
+
+  it("старт с годным ключом: рукопожатие и ровно один повтор — полный пульс «годится»", async () => {
+    const { d } = deps();
+    const memory = emptyMemory();
+    const send = vi.fn(async (_h: LiveHeartbeat) => reply({ uid: 999 }));
+    const sent = await pulseWithHandshake({
+      memory,
+      build: () => runCheck(d, memory, base),
+      send,
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(isHandshake(sent[0])).toBe(true);
+    expect(sent[1].verdict).toBe("ok");
+    // Следующий цикл по таймеру — один пульс, без повтора.
+    const next = await pulseWithHandshake({
+      memory,
+      build: () => runCheck(d, memory, base),
+      send,
+    });
+    expect(next).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(3);
+  });
+
+  it("повтор после рукопожатия — не больше одного, даже если второй пульс снова «ждём UID»", async () => {
+    const memory = emptyMemory();
+    const handshake = noKeyHeartbeat(base);
+    const build = vi.fn(async () => ({
+      ...handshake,
+      verdict: "blocked" as const,
+      reasons: [MAIN_UID_PENDING_REASON],
+      uid: { status: "pending" as const, note: MAIN_UID_PENDING_REASON },
+    }));
+    const send = vi.fn(async () => reply({ uid: 999 }));
+    await pulseWithHandshake({ memory, build, send });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("приложение не прислало UID — повтора нет", async () => {
+    const { d } = deps();
+    const memory = emptyMemory();
+    const send = vi.fn(async () => reply());
+    const sent = await pulseWithHandshake({
+      memory,
+      build: () => runCheck(d, memory, base),
+      send,
+    });
+    expect(sent).toHaveLength(1);
+  });
+
+  it.each([
+    "cooldown",
+    "reject",
+  ] as const)("сценарий ревью (%s во втором цикле): цикл конечен, второй пульс сохраняемый", async (scenario) => {
+    const rejected = new BinanceApiError("Invalid API-key", -2015, 401);
+    let restrictionCalls = 0;
+    let spotCalls = 0;
+    const { d } = deps({
+      fetchRestrictions: vi.fn(async () => {
+        restrictionCalls++;
+        if (scenario === "reject" && restrictionCalls > 1) throw rejected;
+        return GOOD;
+      }),
+      fetchSpotAccount: vi.fn(async () => {
+        spotCalls++;
+        if (spotCalls > 1)
+          throw scenario === "reject"
+            ? rejected
+            : new CooldownError("Binance на паузе", 429);
+        return { uid: 1, balances: [] };
+      }),
+    });
+    const memory = emptyMemory();
+    const send = vi.fn(async (_h: LiveHeartbeat) => reply({ uid: 2 }));
+    for (let timerTick = 0; timerTick < 4; timerTick++)
+      await pulseWithHandshake({
+        memory,
+        build: () => runCheck(d, memory, base),
+        send,
+      });
+    // 4 цикла таймера: первый — рукопожатие + один повтор, остальные — по одному пульсу.
+    expect(send).toHaveBeenCalledTimes(5);
+    const pulses = send.mock.calls.map(([h]) => h);
+    expect(isHandshake(pulses[0])).toBe(true);
+    for (const h of pulses.slice(1)) {
+      expect(isHandshake(h)).toBe(false);
+      expect(h.verdict).toBe("blocked");
+    }
   });
 });
 

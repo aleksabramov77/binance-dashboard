@@ -1,3 +1,4 @@
+import { MAIN_UID_PENDING_REASON } from "@/shared/api/binance";
 import type {
   LiveHeartbeat,
   LiveState,
@@ -50,12 +51,17 @@ export interface LiveEvent {
 }
 
 /**
- * Рукопожатие после старта воркера: UID основного счёта ещё не получен (uid pending). Такой пульс — только запрос
- * UID: он не сохраняется и не считается сменой состояния, иначе каждый перезапуск давал бы пару сообщений
- * «заблокирован» → «годится». Воркер получает UID в ответе и сразу шлёт полный пульс.
+ * Рукопожатие после старта воркера: пульс заблокирован ТОЛЬКО ожиданием UID основного счёта (uid pending, единственная
+ * причина — MAIN_UID_PENDING_REASON, ошибок биржи нет). Такой пульс — лишь запрос UID: он не сохраняется и не считается
+ * сменой состояния, иначе каждый перезапуск давал бы пару сообщений «заблокирован» → «годится». Воркер получает UID
+ * в ответе и один раз сразу шлёт полный пульс. Любая другая блокировка или ошибка — обычный пульс, сохраняется.
  */
 export const isHandshake = (heartbeat: LiveHeartbeat): boolean =>
-  heartbeat.uid?.status === "pending";
+  heartbeat.uid?.status === "pending" &&
+  heartbeat.verdict === "blocked" &&
+  heartbeat.reasons.length === 1 &&
+  heartbeat.reasons[0] === MAIN_UID_PENDING_REASON &&
+  heartbeat.error === null;
 
 /**
  * Приём пульса: новое состояние и события. Смена оценки (годится ↔ заблокирован ↔ ключ не задан) или первый

@@ -1,9 +1,11 @@
 // Логика воркера реального счёта (spec 0047): цикл проверки ключа → пульс. Сеть и время внедряются (WorkerDeps),
 // поэтому цикл покрыт тестами без Binance. Запуск, env и отправка пульса — scripts/live-worker.ts.
 import {
+  isHandshake,
   LIVE_FIXTURES,
   type LiveFixture,
   type LiveHeartbeat,
+  type LiveHeartbeatReply,
   liveHeartbeatSchema,
 } from "@/entities/live-account";
 import {
@@ -206,7 +208,8 @@ export async function runCheck(
     reasons: [],
     warnings: r.verdict.warnings,
     restrictions,
-    uid: memory.uid,
+    // «Ждём UID» — только в ветке UID-проверки; блокировка по другой причине не должна выглядеть рукопожатием.
+    uid: memory.uid?.status === "pending" ? null : memory.uid,
     spot: null,
     usdm: null,
     balancesNote: null,
@@ -240,6 +243,8 @@ export async function runCheck(
         balancesNote: "ключ заблокирован — остатки не читаются",
       });
     }
+    // UID субсчёта из рукопожатия без UID основного ничего не доказывает — «не прочитан», блокировка сохранится.
+    if (memory.uid?.status === "pending") memory.uid = null;
     errors.push(`Аккаунт Spot не прочитан: ${message(error)}`);
     notes.push("Spot не прочитан");
   }
@@ -362,6 +367,27 @@ export const hasAnyTradeKey = (
   Boolean(
     env.BINANCE_TRADE_API_KEY?.trim() || env.BINANCE_TRADE_API_SECRET?.trim(),
   );
+
+/**
+ * Один пульс по таймеру: собрать → отправить → принять UID основного счёта. Если это было рукопожатие и UID теперь
+ * известен — ровно один повтор сразу, без рекурсии; дальше — следующий цикл по таймеру. Возвращает отправленные пульсы.
+ */
+export async function pulseWithHandshake(input: {
+  memory: WorkerMemory;
+  build: () => Promise<LiveHeartbeat>;
+  send: (heartbeat: LiveHeartbeat) => Promise<LiveHeartbeatReply>;
+}): Promise<LiveHeartbeat[]> {
+  const sent: LiveHeartbeat[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const heartbeat = await input.build();
+    const reply = await input.send(heartbeat);
+    applyReply(input.memory, reply.mainAccount);
+    sent.push(heartbeat);
+    if (!isHandshake(heartbeat) || input.memory.mainAccount === undefined)
+      break;
+  }
+  return sent;
+}
 
 /** Ответ приложения: UID основного счёта — поверх известного (ошибка чтения не затирает известный UID). */
 export function applyReply(

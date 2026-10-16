@@ -12,6 +12,7 @@ import {
   type LiveHeartbeat,
   liveWorkerStateTable,
 } from "@/entities/live-account";
+import { MAIN_UID_PENDING_REASON } from "@/shared/api/binance";
 import { fetchAccountUid } from "@/shared/api/binance/account.server";
 import { sendTelegramMessage } from "@/shared/api/telegram";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
@@ -145,14 +146,29 @@ describe("ingestHeartbeat", () => {
     ).toEqual({ uid: 777 });
   });
 
+  it("блокировка с uid pending, но по другой причине (ключ отвергнут) — сохраняется, не рукопожатие", async () => {
+    await ingestHeartbeat(pulse(), T0);
+    await ingestHeartbeat(
+      pulse({
+        verdict: "blocked",
+        reasons: ["Binance не принял ключ: проверьте ключ и IP-whitelist"],
+        uid: { status: "pending", note: MAIN_UID_PENDING_REASON },
+      }),
+      T0 + MIN,
+    );
+    const view = await getLiveStatusView(T0 + MIN);
+    expect(view.state?.status).toBe("blocked");
+    expect(view.state?.receivedAt).toBe(new Date(T0 + MIN).toISOString());
+  });
+
   it("рукопожатие после старта (UID pending) не сохраняется и не даёт сообщений", async () => {
     await ingestHeartbeat(pulse(), T0);
     vi.clearAllMocks();
     vi.mocked(fetchAccountUid).mockResolvedValue(777);
     const handshake = pulse({
       verdict: "blocked",
-      reasons: ["ждём UID основного счёта"],
-      uid: { status: "pending", note: "ждём UID основного счёта" },
+      reasons: [MAIN_UID_PENDING_REASON],
+      uid: { status: "pending", note: MAIN_UID_PENDING_REASON },
     });
     const reply = await ingestHeartbeat(handshake, T0 + MIN);
     expect(reply.mainAccount).toEqual({ uid: 777 });

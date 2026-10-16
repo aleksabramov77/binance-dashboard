@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { MAIN_UID_PENDING_REASON } from "@/shared/api/binance";
 import type { LiveHeartbeat, LiveState } from "../model/heartbeat";
 import { liveHeartbeatSchema } from "../model/heartbeat";
-import { deriveLiveStatus, planHeartbeat, planSilence } from "./status";
+import {
+  deriveLiveStatus,
+  isHandshake,
+  planHeartbeat,
+  planSilence,
+} from "./status";
 
 const T0 = Date.parse("2026-10-16T12:00:00Z");
 const MIN = 60_000;
@@ -127,9 +133,24 @@ describe("planHeartbeat", () => {
   it("рукопожатие после старта (UID pending) — ничего не сохраняется, событий нет", () => {
     const handshake = pulse({
       verdict: "blocked",
-      reasons: ["ждём UID"],
-      uid: { status: "pending", note: "ждём UID" },
+      reasons: [MAIN_UID_PENDING_REASON],
+      uid: { status: "pending", note: MAIN_UID_PENDING_REASON },
     });
+    expect(isHandshake(handshake)).toBe(true);
+    // Другая причина блокировки или ошибка биржи — обычный пульс, а не рукопожатие.
+    expect(
+      isHandshake({ ...handshake, reasons: ["Binance не принял ключ"] }),
+    ).toBe(false);
+    expect(
+      isHandshake({
+        ...handshake,
+        reasons: [MAIN_UID_PENDING_REASON, "ещё причина"],
+      }),
+    ).toBe(false);
+    expect(isHandshake({ ...handshake, error: "429" })).toBe(false);
+    expect(isHandshake({ ...handshake, verdict: "ok", reasons: [] })).toBe(
+      false,
+    );
     expect(planHeartbeat(state(), handshake, T0 + MIN, SILENT)).toEqual({
       next: null,
       events: [],

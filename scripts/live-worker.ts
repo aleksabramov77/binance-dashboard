@@ -30,7 +30,6 @@ import {
 import { describeNetworkError } from "@/shared/lib/fetchRetry";
 import { disableLogFiles, log } from "@/shared/lib/logger.server";
 import {
-  applyReply,
   appUrlRefusal,
   emptyMemory,
   fixtureHeartbeat,
@@ -39,6 +38,7 @@ import {
   hasAnyTradeKey,
   isLiveFixture,
   noKeyHeartbeat,
+  pulseWithHandshake,
   runCheck,
   toWire,
   type WorkerDeps,
@@ -157,20 +157,7 @@ async function send(heartbeat: LiveHeartbeat) {
 
 let lastSummary = "";
 
-async function cycle(): Promise<void> {
-  const base = {
-    version: VERSION,
-    sentAt: new Date().toISOString(),
-    fixture: args.fixture,
-  };
-  const heartbeat = args.fixture
-    ? fixtureHeartbeat(args.fixture, base)
-    : deps
-      ? await runCheck(deps, memory, base)
-      : noKeyHeartbeat(base);
-  const reply = await send(heartbeat);
-  applyReply(memory, reply.mainAccount);
-
+function logPulse(heartbeat: LiveHeartbeat) {
   const summary = [
     heartbeat.verdict,
     ...heartbeat.reasons,
@@ -187,10 +174,30 @@ async function cycle(): Promise<void> {
   else log.debug("live.pulse", `Пульс принят: ${heartbeat.verdict}`, data);
   lastSummary = summary;
   if (heartbeat.error) log.warn("live.binance", heartbeat.error);
+}
 
-  // Первый пульс не знал UID основного счёта — приложение прислало его: сразу проверяем и шлём снова.
-  if (heartbeat.uid?.status === "pending" && memory.mainAccount !== undefined)
-    await cycle();
+async function cycle(): Promise<void> {
+  // Рукопожатие после старта (ждём UID основного счёта) → один повтор сразу; дальше — по таймеру.
+  await pulseWithHandshake({
+    memory,
+    build: async () => {
+      const base = {
+        version: VERSION,
+        sentAt: new Date().toISOString(),
+        fixture: args.fixture,
+      };
+      return args.fixture
+        ? fixtureHeartbeat(args.fixture, base)
+        : deps
+          ? await runCheck(deps, memory, base)
+          : noKeyHeartbeat(base);
+    },
+    send: async (heartbeat) => {
+      const reply = await send(heartbeat);
+      logPulse(heartbeat);
+      return reply;
+    },
+  });
 }
 
 async function safeCycle(): Promise<boolean> {

@@ -6,6 +6,7 @@ export { loadLiveState, saveLiveState } from "./api/liveStateDb";
 export { liveAccountQueryKey, useLiveAccount } from "./api/useLiveAccount";
 export {
   deriveLiveStatus,
+  isHandshake,
   isSilent,
   type LiveEvent,
   planHeartbeat,
