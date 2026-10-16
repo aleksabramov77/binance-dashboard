@@ -22,9 +22,28 @@ describe("planApply", () => {
     });
     expect(planApply({ enable: ["S05"], local: true }).local).toBe(true);
   });
+  it("принимает id приватных экспериментов во всех флагах (bug 0040)", () => {
+    expect(
+      planApply({
+        disable: ["ps99", "S01"],
+        enable: [" PF15 "],
+        "mirror-on": ["PC05", "F20"],
+        "mirror-off": ["PS01"],
+      }),
+    ).toMatchObject({
+      disable: ["PS99", "S01"],
+      enable: ["PF15"],
+      mirrorOn: ["PC05", "F20"],
+      mirrorOff: ["PS01"],
+    });
+  });
   it("отклоняет пустой набор, чужие id и противоречия", () => {
     expect(() => planApply({})).toThrow(/нечего применять/);
     expect(() => planApply({ disable: ["X1"] })).toThrow(/не похоже на id/);
+    for (const bad of ["PZ01", "", "P01", "SF01", "S1"])
+      expect(() => planApply({ enable: [bad] })).toThrow(
+        /не похоже на id.*S01.*PS01/,
+      );
     expect(() => planApply({ disable: ["F17"], enable: ["F17"] })).toThrow(
       /противоречие/,
     );
