@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { countIssuesCreatedSince, listOpenIssues } from "./client.server";
+import {
+  countIssuesCreatedSince,
+  ensureLabels,
+  listOpenIssues,
+} from "./client.server";
 
 const CFG = { token: "secret-token", owner: "me", repo: "r" };
 const raw = (n: number, createdAt: string, pr = false) => ({
@@ -90,5 +94,29 @@ describe("github client: страницы", () => {
     vi.stubGlobal("fetch", fetchMock);
     await listOpenIssues(CFG);
     expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
+});
+
+describe("github client: метки", () => {
+  it("ищет существующие метки на всех страницах — уже есть на второй, не создаёт", async () => {
+    const names = (from: number, n: number) =>
+      Array.from({ length: n }, (_, k) => ({ name: `l${from + k}` }));
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") return Response.json({}, { status: 201 });
+      const p = Number(new URL(url).searchParams.get("page"));
+      return Response.json(
+        p === 1 ? names(1, 100) : [...names(101, 5), { name: "Alert" }],
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await ensureLabels(CFG, [
+      { name: "alert", color: "d73a4a" },
+      { name: "alert-pr", color: "0e8a16" },
+    ]);
+    const posts = fetchMock.mock.calls.filter(([, i]) => i?.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(String(posts[0][1]?.body))).toMatchObject({
+      name: "alert-pr",
+    });
   });
 });

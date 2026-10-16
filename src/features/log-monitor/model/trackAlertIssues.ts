@@ -73,7 +73,10 @@ export async function trackAlertIssues(
   for (const issue of input.notify) {
     try {
       const marker = alertMarker(issue.key);
-      const existing = open.find((i) => i.body.includes(marker));
+      // Маркер — всегда первая строка тела: в журнале ниже он может встретиться как текст.
+      const existing = open.find(
+        (i) => i.body.split(/\r?\n/, 1)[0].trim() === marker,
+      );
       if (existing) {
         await commentIssue(
           cfg,

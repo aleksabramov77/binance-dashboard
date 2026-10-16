@@ -21,7 +21,11 @@ const ICON = { critical: "🔴", warning: "🟡" } as const;
 
 /** Невидимый маркер в теле задачи: по нему повтор находит открытую задачу той же тревоги. */
 export const alertMarker = (key: string) =>
-  `<!-- alert:${key.replaceAll("--", "-")} -->`;
+  `<!-- alert:${key.replace(/-{2,}/g, "-")} -->`;
+
+/** Без @-упоминаний и ссылок #N в markdown GitHub: текст тревоги и разбора — не наш. */
+const plain = (s: string) =>
+  s.replaceAll("@", "@\u200b").replace(/#(\d)/g, "#\u200b$1");
 
 /** Тройные кавычки из журнала сломали бы блок кода в markdown. */
 const fence = (s: string) => s.replaceAll("```", "ʼʼʼ");
@@ -47,13 +51,13 @@ export function formatAlertIssue(
   const logs = relevant(issue, samples);
   const lines = [
     alertMarker(issue.key),
-    `${ICON[issue.severity]} **${issue.title}**`,
+    `${ICON[issue.severity]} **${plain(issue.title)}**`,
     "",
-    `- Детали: ${issue.details}`,
+    `- Детали: ${plain(issue.details)}`,
     `- Ключ тревоги: \`${issue.key}\``,
     "",
     "### Разбор ИИ",
-    analysis ?? "_нет (ИИ не настроен или не ответил)_",
+    analysis ? plain(analysis) : "_нет (ИИ не настроен или не ответил)_",
     "",
     `### Журнал: свежие warn/error (${logs.length})`,
     ...(logs.length
@@ -70,4 +74,4 @@ export function formatAlertIssue(
  * «повтор: 5 ответов 5xx за 15 мин», второй строкой — время.
  */
 export const formatAlertRepeat = (issue: Issue, now: number): string =>
-  `повтор: ${issue.details}\n${new Date(now).toISOString()}`;
+  `повтор: ${plain(issue.details)}\n${new Date(now).toISOString()}`;

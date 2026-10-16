@@ -92,12 +92,14 @@ function toIssue(raw: z.infer<typeof issueSchema>): GithubIssue {
   };
 }
 
-/** Все страницы списка задач (без pull request), не больше MAX_PAGES. */
-async function listIssues(
+/** Все страницы списка GET-ресурса репозитория, не больше MAX_PAGES. */
+async function listPages<T extends z.ZodType<unknown[]>>(
   cfg: GithubRepoConfig,
+  resource: string,
   query: Record<string, string>,
-): Promise<GithubIssue[]> {
-  const out: GithubIssue[] = [];
+  schema: T,
+): Promise<z.infer<T>> {
+  const out: unknown[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
     const params = new URLSearchParams({
       ...query,
@@ -107,14 +109,23 @@ async function listIssues(
     const list = await request(
       cfg,
       "GET",
-      `${repoPath(cfg)}/issues?${params}`,
-      issueListSchema,
+      `${repoPath(cfg)}/${resource}?${params}`,
+      schema,
     );
-    for (const raw of list)
-      if (raw.pull_request === undefined) out.push(toIssue(raw));
+    out.push(...list);
     if (list.length < PER_PAGE) break;
   }
-  return out;
+  return schema.parse(out);
+}
+
+/** Все страницы списка задач без pull request. */
+async function listIssues(
+  cfg: GithubRepoConfig,
+  query: Record<string, string>,
+): Promise<GithubIssue[]> {
+  return (await listPages(cfg, "issues", query, issueListSchema))
+    .filter((raw) => raw.pull_request === undefined)
+    .map(toIssue);
 }
 
 /** Открытые задачи репозитория, свежие первыми, все страницы; с label — только с этой меткой. */
@@ -151,14 +162,9 @@ export async function ensureLabels(
   labels: readonly GithubLabel[],
 ): Promise<void> {
   const existing = new Set(
-    (
-      await request(
-        cfg,
-        "GET",
-        `${repoPath(cfg)}/labels?per_page=${PER_PAGE}`,
-        labelListSchema,
-      )
-    ).map((l) => l.name.toLowerCase()),
+    (await listPages(cfg, "labels", {}, labelListSchema)).map((l) =>
+      l.name.toLowerCase(),
+    ),
   );
   for (const label of labels)
     if (!existing.has(label.name.toLowerCase()))

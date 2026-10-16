@@ -154,7 +154,8 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   `alert` или `alert-queued`, все страницы, до 1000); закрытый issue заново не заводится. Метки
   `alert`, `alert-queued`, `alert-no-code`, `alert-pr` код создаёт при первом issue. Ссылка на issue — строкой под
   тревогой в Telegram. Сбой GitHub не мешает уведомлению и `alert_state` — `warn monitor.github` (текст записи —
-  `githubWarnings`); без токена
+  `githubWarnings`). GitHub недоступен в момент новой тревоги — issue по ней не появится до её следующего возникновения
+  (после «восстановлено»): напоминания issue не заводят. Без токена
   монитор работает как раньше.
 - Свободное место в базе (spec 0021, `features/db-space`, `src/app/server/dbSpace.ts`): тот же cron замеряет размер
   базы (`getDbUsage`: `pg_database_size` и топ таблиц по `pg_total_relation_size`; на этапе 3 миграции меняется только

@@ -221,6 +221,38 @@ describe("trackAlertIssues", () => {
     expect(gh.comments[0].number).toBe(9);
   });
 
+  it("маркер ищется только в первой строке: упоминание в журнале чужой задачи — не она", async () => {
+    const gh = fakeGithub({
+      issues: [
+        alertIssue(5, {
+          state: "open",
+          body: "<!-- alert:errors:client -->\nжурнал: <!-- alert:http5xx:/api/x -->",
+        }),
+      ],
+    });
+    const r = await trackAlertIssues(CFG, input());
+    expect(r.tracked[0]).toMatchObject({ action: "created" });
+    expect(gh.comments).toEqual([]);
+  });
+
+  it("текст тревоги и разбора без @-упоминаний и ссылок #N; маркер без «--»", async () => {
+    const gh = fakeGithub();
+    await trackAlertIssues(
+      CFG,
+      input({
+        notify: [
+          { ...issue, key: "errors:a--->b", details: "@user и #12", match: {} },
+        ],
+        fresh: ["errors:a--->b"],
+        analysis: "см. @bot #3",
+      }),
+    );
+    const body = gh.created()[0].body;
+    expect(body.split("\n")[0]).toBe("<!-- alert:errors:a->b -->");
+    expect(body).not.toMatch(/@user|#12|@bot|#3/);
+    expect(body).toContain("@\u200buser и #\u200b12");
+  });
+
   it("напоминание, а задачу уже закрыли — ничего не заводим", async () => {
     const gh = fakeGithub();
     const r = await trackAlertIssues(CFG, input({ fresh: [] }));
@@ -338,5 +370,24 @@ describe("runMonitor + задачи в GitHub", () => {
     expect(r).toMatchObject({ sent: true, tracked: [], githubErrors: [] });
     expect(gh.calls).toEqual([]);
     expect(m.sent[0]).not.toContain("Задача");
+  });
+
+  it("Telegram упал после создания задачи — следующий прогон пишет комментарий, а не вторую задачу", async () => {
+    const gh = fakeGithub();
+    let fail = true;
+    const m = deps({
+      notify: async (t) => {
+        if (fail) throw new Error("Telegram 502");
+        m.sent.push(t);
+      },
+    });
+    await expect(runMonitor(m.d, NOW)).rejects.toThrow("Telegram 502");
+    expect(gh.created()).toHaveLength(1);
+
+    fail = false;
+    await runMonitor(m.d, NOW + 15 * 60_000);
+    expect(gh.created()).toHaveLength(1);
+    expect(gh.comments).toHaveLength(1);
+    expect(m.sent[0]).toContain(`📎 Задача: ${REPO}/issues/1000`);
   });
 });
