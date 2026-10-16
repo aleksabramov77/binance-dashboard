@@ -42,6 +42,8 @@
   Функции `demoTrading.ts` (ордера, чтение позиций, исполнения) принимают площадку; `fetchDemoSymbolRules` /
   `fetchDemoPrice` — публичную часть площадки (`PublicVenue`) **обязательным** параметром: умолчания нет, чтобы правила и
   цена реального счёта не пришли с демо-хоста. Демо-вызовы передают `DEMO_PUBLIC_VENUE` (экспорт `demo.server.ts`). `enableOnewayMode` — One-way для реальных фьючерсов.
+- Перечитанные ордера несут цену срабатывания: спот — `stopPrice` (`spotOrderQuerySchema`), algo-ордер фьючерсов —
+  `triggerPrice` (`algoOrderQuerySchema`); нет поля — 0. Нужна воркеру для стопа «потерянного» входа (spec 0053).
 - `liveRestrictions.ts` (клиент-безопасно) — оценка прав ключа `evaluateRestrictions`: годится, если `ipRestrict`,
   `enableReading`, `enableSpotAndMarginTrading` включены, а `enableWithdrawals`, `enableInternalTransfer`,
   `permitsUniversalTransfer`, `enableMargin` выключены; `enableFutures = false` — только предупреждение. Причина

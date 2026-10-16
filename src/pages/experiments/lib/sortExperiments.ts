@@ -17,7 +17,6 @@ export const SORT_KEYS = [
   "profitFactor",
   "maxDrawdown",
   "equity",
-  "live",
   "demo",
   "demoTrades",
   "demoWinRate",
@@ -25,12 +24,23 @@ export const SORT_KEYS = [
   "demoProfitFactor",
   "demoMaxDrawdown",
   "demoEquity",
+  "live",
+  "liveTrades",
+  "liveWinRate",
+  "livePnl",
+  "liveProfitFactor",
+  "liveMaxDrawdown",
+  "liveEquity",
 ] as const;
 
 export type SortKey = (typeof SORT_KEYS)[number];
 
 /** Порядок групп активов для сортировки по AG: как в карте ASSET_GROUPS (Spot, USDⓈ-M, COIN-M). */
 const AG_ORDER = Object.keys(ASSET_GROUPS);
+
+/** Есть закрытые реальные сделки с известным PnL — числовые Real-колонки не «—». */
+export const liveKnown = (e: Pick<ExperimentSummary, "live" | "market">) =>
+  e.market !== "coinm" && e.live.closed > e.live.unknown;
 
 /** Значение колонки для сортировки; null (нет данных) — всегда в конце. */
 function sortValue(e: ExperimentSummary, key: SortKey): number | null {
@@ -59,8 +69,8 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
     case "equity":
       return s.equity;
     case "live":
-      // Сначала торгующие на реальном счёте.
-      return e.liveMirror ? 1 : 0;
+      // Сначала торгующие на реальном счёте, потом ждущие «Авто».
+      return e.liveMirror ? 2 : e.liveMirrorMode === "off" ? 0 : 1;
     case "demo":
       // Сначала торгующие на демо, среди них — по числу демо-сделок.
       return (e.demoMirror ? 1e6 : 0) + e.demo.trades;
@@ -79,6 +89,21 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
       return e.demo.closed ? e.demo.maxDrawdownPct : null;
     case "demoEquity":
       return e.demo.closed ? e.demo.equity : null;
+    // Real-колонки (spec 0054): без закрытых сделок с PnL — «—», такие строки в конце. Equity Real = накопленный PnL.
+    case "liveTrades":
+      return e.market === "coinm" ? null : e.live.trades || null;
+    case "liveWinRate":
+      return e.market === "coinm" ? null : e.live.winRate;
+    case "livePnl":
+    case "liveEquity":
+      return liveKnown(e) ? e.live.pnl : null;
+    case "liveProfitFactor":
+      return liveKnown(e)
+        ? (e.live.profitFactor ??
+            (e.live.grossProfit > 0 ? Number.POSITIVE_INFINITY : null))
+        : null;
+    case "liveMaxDrawdown":
+      return liveKnown(e) ? e.live.maxDrawdown : null;
   }
 }
 

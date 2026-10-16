@@ -32,7 +32,7 @@ import {
   saveLiveClose,
   saveLiveOpen,
   saveLiveReconcile,
-  setLiveMirror,
+  setLiveMode,
   skipLive,
 } from "./liveMirror";
 
@@ -174,7 +174,7 @@ afterEach(() => {
 });
 
 const toggleOn = (id: string, confirm = "РЕАЛ") =>
-  setLiveMirror({ id, liveMirror: true, confirm }, actor);
+  setLiveMode({ id, mode: "on", confirm }, actor);
 
 describe("переключатель «Реальный счёт»", () => {
   it("включение — только со словом «РЕАЛ», при годном ключе; COIN-M — нельзя", async () => {
@@ -189,6 +189,7 @@ describe("переключатель «Реальный счёт»", () => {
     expect(await toggleOn("S98", " реал ")).toEqual({
       ok: true,
       id: "S98",
+      mode: "on",
       liveMirror: true,
     });
     expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
@@ -200,9 +201,9 @@ describe("переключатель «Реальный счёт»", () => {
   it("ключ не «✅» (воркер не подключён) — включить нельзя; выключить — можно", async () => {
     await db.delete(liveWorkerStateTable);
     expect(await toggleOn("S98")).toMatchObject({ ok: false, status: 409 });
-    expect(
-      await setLiveMirror({ id: "S98", liveMirror: false }, actor),
-    ).toMatchObject({ ok: true });
+    expect(await setLiveMode({ id: "S98", mode: "off" }, actor)).toMatchObject({
+      ok: true,
+    });
   });
 });
 
@@ -227,7 +228,7 @@ describe("захват, стоп и лимиты", () => {
     await liveHaltAction("stop", actor);
     expect(await claimLive(a)).toEqual({ claimed: false, reason: "halted" });
     await liveHaltAction("resume", actor);
-    await setLiveMirror({ id: "S98", liveMirror: false }, actor);
+    await setLiveMode({ id: "S98", mode: "off" }, actor);
     expect(await claimLive(a)).toEqual({ claimed: false, reason: "disabled" });
   });
 
@@ -600,6 +601,7 @@ describe("сверка «потерянного» входа (ревью PR #89)
       entryPrice: 100,
       quantity: 0.1,
       protectRefs: null,
+      stopLoss: null,
     };
     await saveLiveReconcile(body);
     const row = await getLiveMirror(db, a);
@@ -620,6 +622,7 @@ describe("сверка «потерянного» входа (ревью PR #89)
       entryPrice: 100,
       quantity: 0.1,
       protectRefs: null,
+      stopLoss: null,
     });
     expect((await getLiveMirror(db, a))?.status).toBe("unprotected");
     expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
@@ -642,6 +645,7 @@ describe("сверка «потерянного» входа (ревью PR #89)
       entryPrice: null,
       quantity: null,
       protectRefs: null,
+      stopLoss: null,
     });
     expect(await getLiveMirror(db, a)).toMatchObject({
       status: "skipped",

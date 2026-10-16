@@ -57,7 +57,7 @@ export function liveLeftoverText(l: {
 }
 
 /**
- * «🔴 Закрыта: S98 BTCUSDT +$0,84 (TP)». PnL null — не посчитан. Остаток монеты (в PnL не входит) и «после N
+ * «🔴 Закрыта: S98 BTCUSDT +$0,84 (TP)». PnL null — неизвестен (в порогах — убыток, spec 0053). Остаток монеты (в PnL не входит) и «после N
  * попыток» — в той же строке.
  */
 export function liveExitText(
@@ -73,7 +73,7 @@ export function liveExitText(
 ): string {
   const pnl =
     o.realizedPnl === null
-      ? "PnL не посчитан"
+      ? "⚠️ PnL неизвестен (исполнения и цена не прочитаны) — в порогах автовыключения считается убытком"
       : o.pnlEstimated
         ? `≈ ${liveUsd(o.realizedPnl, true)} (оценка)`
         : liveUsd(o.realizedPnl, true);
@@ -118,14 +118,4 @@ export function liveCloseAllDoneText(r: {
     return `🛑 «Закрыть всё»: закрыто ${r.closed}, не закрылось ${r.failed} — осталось ${r.remaining}, закрытие повторяется каждый прогон воркера.${errors}`;
   const runs = r.runs && r.runs > 1 ? ` за ${r.runs} прогонов` : "";
   return `🛑 «Закрыть всё» выполнено${runs}: реальных позиций не осталось (в последнем прогоне закрыто ${r.closed}).${errors}`;
-}
-
-export function liveToggleText(
-  experimentId: string,
-  enabled: boolean,
-  by: string,
-): string {
-  return enabled
-    ? `💰 Реальный счёт включён для ${experimentId} (${by}): $${LIVE.notionalUsd} на сделку, лимит −$${LIVE.dailyLossUsd} за сутки.`
-    : `💤 Реальный счёт выключен для ${experimentId} (${by}): новых входов нет, открытые позиции доживают со своими TP/SL.`;
 }

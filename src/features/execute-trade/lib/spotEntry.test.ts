@@ -113,6 +113,7 @@ describe("заявка с неизвестным исходом", () => {
       status: "FILLED",
       executedQty: 31,
       cummulativeQuoteQty: 5.2514,
+      stopPrice: 0,
     };
     const pending = {
       ...working,
@@ -122,6 +123,7 @@ describe("заявка с неизвестным исходом", () => {
       status: "NEW",
       executedQty: 0,
       cummulativeQuoteQty: 0,
+      stopPrice: 0.16,
     };
     const list = spotEntryFromQuery(working, [pending]);
     expect(list).toMatchObject({

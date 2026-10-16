@@ -11,6 +11,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { computeLiveStats, type LiveStatsRow } from "../lib/liveStats";
 import {
   LIVE_MIRROR_MARKETS,
   type LiveMirrorMarket,
@@ -28,6 +29,7 @@ import {
   mirrorProtectRefsSchema,
   OPEN_MIRROR_STATUSES,
 } from "../model/mirror";
+import type { LiveSummary } from "../model/view";
 import type { MirrorCandidate, MirrorToClose } from "./mirrorDb";
 
 // Реальное зеркало (spec 0049): какие paper-сделки повторить на торговом субсчёте и какие реальные позиции закрыть.
@@ -66,37 +68,6 @@ const toClose = (
   stopLoss: r.stopLoss,
   openedAt: r.createdAt.toISOString(),
 });
-
-/**
- * Переключатель «Реальный счёт». Включить можно только Spot и USDⓈ-M (LIVE_MIRROR_MARKETS — свой список, не демо-зеркала,
- * spec 0056): COIN-M — null, как и
- * неизвестный id. Возвращает market эксперимента.
- */
-export async function setExperimentLiveMirror(
-  db: Db,
-  id: string,
-  liveMirror: boolean,
-  by: string,
-): Promise<{ id: string; market: string } | null> {
-  const [row] = await db
-    .update(experimentsTable)
-    .set({
-      liveMirror,
-      liveMirrorSince: sql`now()`,
-      liveMirrorBy: by,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      and(
-        eq(experimentsTable.id, id),
-        liveMirror
-          ? inArray(experimentsTable.market, [...LIVE_MIRROR_MARKETS])
-          : undefined,
-      ),
-    )
-    .returning({ id: experimentsTable.id, market: experimentsTable.market });
-  return row ?? null;
-}
 
 /** Кандидат реального зеркала: как у демо, но только Spot и USDⓈ-M (COIN-M на реальном счёте не торгуется). */
 export type LiveMirrorCandidate = Omit<MirrorCandidate, "market"> & {
@@ -576,4 +547,27 @@ export async function recentLiveClosed(
     .where(isNotNull(liveMirrorOrdersTable.closedAt))
     .orderBy(desc(liveMirrorOrdersTable.closedAt))
     .limit(limit);
+}
+
+/** Real-колонки /experiments (spec 0054): метрики реальных сделок по экспериментам за всё время (сбросов нет). */
+export async function liveSummaries(db: Db): Promise<Map<string, LiveSummary>> {
+  const rows = await db
+    .select({
+      experimentId: liveMirrorOrdersTable.experimentId,
+      status: liveMirrorOrdersTable.status,
+      realizedPnl: liveMirrorOrdersTable.realizedPnl,
+      pnlEstimated: liveMirrorOrdersTable.pnlEstimated,
+      closedAt: liveMirrorOrdersTable.closedAt,
+    })
+    .from(liveMirrorOrdersTable);
+  const byExperiment = new Map<string, LiveStatsRow[]>();
+  for (const r of rows) {
+    const row: LiveStatsRow = { ...r, status: r.status as MirrorStatus };
+    const list = byExperiment.get(r.experimentId);
+    if (list) list.push(row);
+    else byExperiment.set(r.experimentId, [row]);
+  }
+  return new Map(
+    [...byExperiment].map(([id, list]) => [id, computeLiveStats(list)]),
+  );
 }

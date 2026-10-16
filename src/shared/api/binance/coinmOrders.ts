@@ -27,6 +27,8 @@ export const coinmOrderSchema = z
     // POST без newOrderRespType=RESULT не присылает avgPrice — это не ошибка ордера.
     executedQty: decimal.catch(0),
     avgPrice: decimal.catch(0),
+    // Цена срабатывания условного ордера; у обычных — 0.
+    stopPrice: decimal.catch(0),
   })
   .loose();
 export type CoinmOrder = z.infer<typeof coinmOrderSchema>;
@@ -66,6 +68,7 @@ export function coinmOrderAsAlgo(
     actualOrderId: o.executedQty > 0 ? o.orderId : null,
     actualPrice: o.avgPrice,
     actualQty: o.executedQty,
+    triggerPrice: o.stopPrice,
   };
 }
 

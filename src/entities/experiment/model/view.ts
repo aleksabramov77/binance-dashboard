@@ -6,6 +6,12 @@ import {
 } from "@binance-dashboard/trading-core";
 import { z } from "zod";
 import { disabledInfoSchema } from "./disable";
+import {
+  liveAutoOffSchema,
+  liveAutoSnapshotSchema,
+  liveMirrorModeSchema,
+  liveThresholdsSchema,
+} from "./liveAuto";
 import { mirrorViewSchema } from "./mirror";
 import { demoMirrorModeSchema, mirrorAutoSnapshotSchema } from "./mirrorAuto";
 
@@ -88,6 +94,35 @@ export const demoSummarySchema = z.object({
   equity: z.number(),
 });
 
+/**
+ * Реальный счёт эксперимента за всё время (spec 0054, computeLiveStats): PnL — по исполнениям с комиссиями, Max DD и
+ * Equity — в $ (Equity = pnl: капитала на эксперимент у реального счёта нет).
+ */
+export const liveSummarySchema = z.object({
+  /** Закрытые + открытые; без отказов и пропусков. */
+  trades: z.number().int(),
+  open: z.number().int(),
+  closed: z.number().int(),
+  wins: z.number().int(),
+  losses: z.number().int(),
+  /** Биржа не приняла вход. */
+  rejected: z.number().int(),
+  /** Вход не отправлялся: лимиты, монета занята, мало средств, стоп входов, вход не свежий. */
+  skipped: z.number().int(),
+  /** Доля прибыльных среди закрытых с известным PnL; null — таких нет. */
+  winRate: z.number().nullable(),
+  /** Σ реализованного PnL закрытых, $ (после комиссий). */
+  pnl: z.number(),
+  /** Закрытых, у которых PnL — оценка по ценам, а не по исполнениям. */
+  estimated: z.number().int(),
+  /** Закрытых без PnL (не посчитан) — в pnl не входят. */
+  unknown: z.number().int(),
+  grossProfit: z.number(),
+  profitFactor: z.number().nullable(),
+  /** Наибольшая просадка накопленного PnL от пика, $ (≥ 0). */
+  maxDrawdown: z.number(),
+});
+
 export const experimentSummarySchema = experimentSchema
   .pick({
     id: true,
@@ -104,8 +139,15 @@ export const experimentSummarySchema = experimentSchema
     demoMirrorAuto: mirrorAutoSnapshotSchema.nullable(),
     /** «Реальный счёт» включён (spec 0049): свежие входы повторяются на торговом субсчёте. */
     liveMirror: z.boolean(),
+    /** Положение «Выкл · Авто · Вкл · Вкл + автовыкл», пороги, последняя проверка «Авто» и автовыключение (spec 0053). */
+    liveMirrorMode: liveMirrorModeSchema,
+    liveThresholds: liveThresholdsSchema,
+    liveAuto: liveAutoSnapshotSchema.nullable(),
+    liveAutoOff: liveAutoOffSchema.nullable(),
     stats: tradeStatsSchema,
     demo: demoSummarySchema,
+    /** Реальный счёт за всё время (spec 0054): Real-колонки таблицы. */
+    live: liveSummarySchema,
     /** Контрольный эксперимент варианта (spec 0046); null — не вариант. */
     parentId: z.string().nullable(),
     variantNote: z.string().nullable(),
@@ -163,6 +205,7 @@ export const experimentDetailResponseSchema = runViewSchema.extend({
 export type TradeStatsView = z.infer<typeof tradeStatsSchema>;
 export type EquityPointView = z.infer<typeof equityPointSchema>;
 export type DemoSummary = z.infer<typeof demoSummarySchema>;
+export type LiveSummary = z.infer<typeof liveSummarySchema>;
 export type ExperimentSummary = z.infer<typeof experimentSummarySchema>;
 export type ExperimentsResponse = z.infer<typeof experimentsResponseSchema>;
 export type FamilyMember = z.infer<typeof familyMemberSchema>;

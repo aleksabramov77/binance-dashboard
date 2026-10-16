@@ -7,6 +7,7 @@ import {
 } from "@binance-dashboard/trading-core";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { emptyLiveSummary } from "../lib/liveStats";
 import { filterTrades, periodStart, sliceStats } from "../lib/slices";
 import { computeStats, equityCurve } from "../lib/stats";
 import { controlOf, variantLetters, variantsByControl } from "../lib/variants";
@@ -41,6 +42,8 @@ import type {
   RunView,
 } from "../model/view";
 import { toTrade } from "./dbStore";
+import { liveAutoOffOf, parseLiveAutoSnapshot } from "./liveAutoDb";
+import { liveSummaries } from "./liveMirrorDb";
 import {
   emptyMirrorSummary,
   type MirrorScope,
@@ -186,9 +189,11 @@ export async function readExperimentsOverview(
     .select()
     .from(experimentsTable)
     .orderBy(asc(experimentsTable.id));
-  const [trades, demo] = await Promise.all([
+  // Реальный счёт — за всё время при любом периоде: сбросов и эпох у него нет (spec 0054).
+  const [trades, demo, live] = await Promise.all([
     scopeTrades(db, scope, rows),
     mirrorSummaries(db, mirrors),
+    liveSummaries(db),
   ]);
   const tradesOf = byExperiment(trades);
   return {
@@ -209,6 +214,13 @@ export async function readExperimentsOverview(
           demoMirrorMode: row.demoMirrorMode,
           demoMirrorAuto: auto.success ? auto.data : null,
           liveMirror: row.liveMirror,
+          liveMirrorMode: row.liveMirrorMode,
+          liveThresholds: {
+            lossUsd: row.liveLossLimitUsd,
+            streak: row.liveLossStreak,
+          },
+          liveAuto: parseLiveAutoSnapshot(row.liveMirrorAuto),
+          liveAutoOff: liveAutoOffOf(row),
           parentId: e.parentId ?? null,
           variantNote: e.variantNote ?? null,
           disabled: toDisabledInfo(row),
@@ -217,6 +229,7 @@ export async function readExperimentsOverview(
             demo.get(e.id) ?? emptyMirrorSummary(),
             e.initialBudget,
           ),
+          live: live.get(e.id) ?? emptyLiveSummary(),
         };
       },
     ),

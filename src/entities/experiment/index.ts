@@ -6,6 +6,21 @@ export { readEngineExposure } from "./api/exposureDb";
 // Реальное зеркало (spec 0049): кандидаты, захват, закрытия, дневной PnL, «Закрыть всё» (только сервер: вызывает
 // композиция src/app/server/liveMirror.ts по API воркера).
 export {
+  closeLiveWithAuto,
+  LIVE_AUTO_BY,
+  type LiveAutoPatch,
+  type LiveAutoRow,
+  type LiveCloseAuto,
+  type LiveDemoTrade,
+  liveClosedSince,
+  liveDemoTrades,
+  parseLiveAutoSnapshot,
+  readLiveAutoRows,
+  saveLiveAuto,
+  setExperimentLiveMode,
+  setExperimentLiveThresholds,
+} from "./api/liveAutoDb";
+export {
   claimAllLiveOpen,
   claimLiveMirror,
   claimLiveToClose,
@@ -25,9 +40,9 @@ export {
   liveActiveRows,
   liveDailyPnl,
   liveEnabledExperiments,
+  liveSummaries,
   markLiveCloseFailed,
   recentLiveClosed,
-  setExperimentLiveMirror,
   skipLiveMirror,
   updateLiveMirror,
 } from "./api/liveMirrorDb";
@@ -119,11 +134,13 @@ export {
   useResetExperimentPaper,
   useResetGroup,
   useSetExperimentEnabled,
-  useSetExperimentLiveMirror,
+  useSetExperimentLiveMode,
   useSetExperimentMirrorMode,
   useSetNextBudget,
 } from "./api/useLabSettings";
 export { tradeStatsQueryKey, useTradeStats } from "./api/useTradeStats";
+// Режимы реального счёта «Авто» и «Вкл + автовыкл» (spec 0053): пороги, правило — чистые функции.
+export { LIVE_AUTO } from "./config/liveAuto";
 // Авто-зеркало (spec 0043): правило — чистая функция, тексты (Telegram, журнал, подсказка у переключателя).
 export { MIN_TRADES, R_THRESHOLD } from "./config/mirrorAuto";
 export * from "./engine.ts";
@@ -163,8 +180,27 @@ export {
   formatR,
   formatRate,
   formatSignedUsd,
+  liveEstimateHint,
   pnlTone,
 } from "./lib/formatStats";
+export {
+  demoTradeR,
+  type LiveAutoInput,
+  type LiveAutoPlan,
+  type LiveClosedTrade,
+  type LiveDemoVerdict,
+  type LiveThresholdVerdict,
+  liveDemoVerdict,
+  liveThresholdVerdict,
+  planLiveAuto,
+  stopLossPnl,
+} from "./lib/liveAuto";
+// Real-колонки /experiments (spec 0054).
+export {
+  computeLiveStats,
+  emptyLiveSummary,
+  type LiveStatsRow,
+} from "./lib/liveStats";
 export { describeMirrorAuto, formatAvgR, tradesLabel } from "./lib/mirrorAuto";
 export {
   mirrorAdviceMessage,
@@ -245,10 +281,27 @@ export {
   type EngineExposure,
   engineExposureSchema,
 } from "./model/exposure";
+export {
+  DEFAULT_LIVE_THRESHOLDS,
+  type ExperimentLiveMode,
+  experimentLiveModeSchema,
+  LIVE_MIRROR_MODES,
+  type LiveAutoDecision,
+  type LiveAutoOff,
+  type LiveAutoSnapshot,
+  type LiveMirrorMode,
+  type LiveThresholds,
+  type LiveTrip,
+  liveAutoDecisionSchema,
+  liveAutoOffSchema,
+  liveAutoSnapshotSchema,
+  liveMirrorModeSchema,
+  liveModeReplySchema,
+  liveThresholdsSchema,
+  liveTripSchema,
+} from "./model/liveAuto";
 // Контракт API реального зеркала воркер ↔ приложение и переключателя «Реальный счёт» (spec 0049).
 export {
-  type ExperimentLiveMirror,
-  experimentLiveMirrorSchema,
   type LiveCandidate,
   type LiveCloseRequest,
   type LiveLegsRequest,
@@ -367,6 +420,8 @@ export {
   experimentsResponseSchema,
   type FamilyMember,
   familyMemberSchema,
+  type LiveSummary,
+  liveSummarySchema,
   parseRunParam,
   type RunParam,
   type RunView,

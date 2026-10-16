@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Проект на VM apps-tokyo (spec 0017): Linux-пользователь, каталоги, секреты, systemd-сервис с лимитами, сайт в Caddy.
 # Запуск — от root после bootstrap.sh; повторный запуск обновляет unit и сайт, секреты и данные не трогает.
-#   sudo bash add-project.sh binance --port 5000                    сайт: https://binance.<ip>.sslip.io
-#   sudo bash add-project.sh binance-live --no-web --exec live-worker.mjs --memory 128M --heap 96
+#   sudo bash add-project.sh binance --port 5000 --stop-timeout 30  сайт: https://binance.<ip>.sslip.io
+#   sudo bash add-project.sh binance-live --no-web --exec live-worker.mjs --memory 128M --heap 96 --stop-timeout 120
 # Параметры:
 #   --port N        порт приложения на 127.0.0.1 (сайт); обязателен без --no-web
 #   --no-web        фоновый сервис: без порта и без Caddy
@@ -10,6 +10,8 @@
 #   --memory SIZE   MemoryMax сервиса (по умолчанию 300M)
 #   --heap MB       --max-old-space-size для node (по умолчанию не задаётся)
 #   --domain HOST   адрес сайта (по умолчанию <имя>.<публичный-ip>.sslip.io)
+#   --stop-timeout SEC  сколько секунд ждать остановки после SIGTERM до SIGKILL (TimeoutStopSec, KillSignal=SIGTERM);
+#                   по умолчанию не задаётся — systemd ждёт 90 с
 set -euo pipefail
 
 fail() { printf '\033[1;31mОШИБКА: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -18,7 +20,7 @@ NAME=${1:-}
 [[ "$NAME" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || fail "имя проекта: строчные латинские буквы, цифры и дефис"
 shift
 
-PORT="" WEB=1 EXEC=server.js MEMORY=300M HEAP="" DOMAIN=""
+PORT="" WEB=1 EXEC=server.js MEMORY=300M HEAP="" DOMAIN="" STOP_TIMEOUT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT=$2; shift 2 ;;
@@ -27,6 +29,7 @@ while [ $# -gt 0 ]; do
     --memory) MEMORY=$2; shift 2 ;;
     --heap) HEAP=$2; shift 2 ;;
     --domain) DOMAIN=$2; shift 2 ;;
+    --stop-timeout) STOP_TIMEOUT=${2:-}; shift 2 ;;
     *) fail "неизвестный параметр $1" ;;
   esac
 done
@@ -36,6 +39,7 @@ case "$NAME" in root | ubuntu | claude | aleksandr | deploy | caddy | www-data |
 [ -z "$HEAP" ] || [[ "$HEAP" =~ ^[0-9]+$ ]] || fail "--heap: число мегабайт"
 [[ "$EXEC" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$EXEC" != *..* ]] || fail "--exec: путь внутри каталога кода"
 [ -z "$DOMAIN" ] || [[ "$DOMAIN" =~ ^[a-z0-9.-]+$ ]] || fail "--domain: только имя хоста"
+[ -z "$STOP_TIMEOUT" ] || [[ "$STOP_TIMEOUT" =~ ^[1-9][0-9]{0,3}$ ]] || fail "--stop-timeout: целое число секунд от 1 до 9999"
 id deploy >/dev/null 2>&1 || fail "нет пользователя deploy — сначала bootstrap.sh"
 
 APP=/srv/$NAME/app
@@ -57,6 +61,9 @@ install -d -m 750 -o root -g "$NAME" "$ETC"
 
 NODE_OPTS=""
 [ -n "$HEAP" ] && NODE_OPTS="Environment=NODE_OPTIONS=--max-old-space-size=$HEAP"
+STOP_OPTS=""
+[ -n "$STOP_TIMEOUT" ] && STOP_OPTS="KillSignal=SIGTERM
+TimeoutStopSec=$STOP_TIMEOUT"
 WEB_ENV=""
 [ "$WEB" = 1 ] && WEB_ENV="Environment=PORT=$PORT
 Environment=HOSTNAME=127.0.0.1"
@@ -78,7 +85,10 @@ $WEB_ENV
 $NODE_OPTS
 ExecStart=/usr/bin/node $APP/$EXEC
 Restart=always
+# Node на SIGTERM выходит с кодом 143 — это штатная остановка, а не сбой.
+SuccessExitStatus=143
 RestartSec=10
+$STOP_OPTS
 MemoryMax=$MEMORY
 NoNewPrivileges=true
 PrivateTmp=true

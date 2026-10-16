@@ -1,4 +1,4 @@
-import { formatUsd } from "@/shared/lib";
+import { formatUsd, pluralRu } from "@/shared/lib";
 
 // Подписи метрик для таблиц лаборатории. null — метрики ещё нет (нет закрытых сделок).
 
@@ -36,3 +36,23 @@ export const pnlTone = (v: number | null) =>
     : v > 0
       ? "text-positive"
       : "text-destructive";
+
+/** «у 1 сделки», «у 3 сделок». */
+const DEALS_GEN = ["сделки", "сделок", "сделок"] as const;
+
+/**
+ * Подсказка к «≈» у Real PnL (spec 0054): сколько закрытых реальных сделок посчитано оценкой по ценам и сколько без
+ * PnL. null — всё по исполнениям, «≈» не нужен.
+ */
+export function liveEstimateHint(live: {
+  estimated: number;
+  unknown: number;
+}): string | null {
+  const parts = [
+    live.estimated > 0 &&
+      `у ${pluralRu(live.estimated, DEALS_GEN)} PnL — оценка по ценам входа и выхода (исполнения не прочитаны)`,
+    live.unknown > 0 &&
+      `у ${pluralRu(live.unknown, DEALS_GEN)} PnL неизвестен — в сумму не входит`,
+  ].filter((p) => p !== false);
+  return parts.length ? `Приблизительно: ${parts.join("; ")}.` : null;
+}

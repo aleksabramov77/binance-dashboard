@@ -65,6 +65,7 @@ describe("coinmOrders: условные ордера dapi в виде algo-ор�
       actualOrderId: null,
       actualPrice: 0,
       actualQty: 0,
+      triggerPrice: 76873.1,
     });
   });
 
