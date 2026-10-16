@@ -6,6 +6,7 @@ import { DemoAccountsCard } from "./DemoAccountsCard";
 import { EngineCard } from "./EngineCard";
 import { EpochCard } from "./EpochCard";
 import { GroupResetsCard } from "./GroupResetsCard";
+import { LiveAccountCard } from "./LiveAccountCard";
 import { PaperAccountsCard } from "./PaperAccountsCard";
 
 // /settings — настройки Лаборатории экспериментов (spec 003, задача 3d).
@@ -43,6 +44,9 @@ export function SettingsPage() {
           <GroupResetsCard settings={settings.data} />
         </>
       )}
+      {/* Реальный счёт не зависит от настроек лаборатории — свой запрос, видна и при их ошибке. */}
+      <h2 className="text-lg font-semibold">Реальный счёт — субсчёт Binance</h2>
+      <LiveAccountCard />
     </div>
   );
 }

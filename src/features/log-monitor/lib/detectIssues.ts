@@ -17,6 +17,11 @@ export interface MonitorSnapshot {
   cronFailures: { job: string; failed: number; lastMessage: string | null }[];
   /** Время последнего снимка Earn; null — снимков нет. */
   earnLastAt: number | null;
+  /**
+   * Воркер реального счёта (spec 0047): время последнего пульса и порог «молчит». null — пульса ещё не было
+   * (воркер не подключён) — правило не срабатывает. Необязательно: старые срезы без поля.
+   */
+  live?: { lastHeartbeatAt: number; silentAfterMs: number } | null;
 }
 
 export interface Issue {
@@ -27,6 +32,8 @@ export interface Issue {
   details: string;
   /** Что искать в журнале для примеров (событие или путь API). */
   match?: { event?: string; path?: string };
+  /** false — не напоминать каждые repeatMs: одно уведомление, пока проблема держится, и «восстановлено». */
+  repeat?: false;
 }
 
 const minutes = (ms: number) => Math.round(ms / 60_000);
@@ -107,6 +114,17 @@ export function detectIssues(
           ? "снимков нет"
           : `последний снимок ${Math.round((s.now - s.earnLastAt) / 3_600_000)} ч назад`,
       match: { event: "cron.earn" },
+    });
+
+  const live = s.live;
+  if (live && s.now - live.lastHeartbeatAt > live.silentAfterMs)
+    issues.push({
+      key: "live:silent",
+      severity: "critical",
+      title: "Воркер реального счёта молчит",
+      details: `последний пульс ${minutes(s.now - live.lastHeartbeatAt)} мин назад (порог ${minutes(live.silentAfterMs)} мин)`,
+      match: { event: "live.status" },
+      repeat: false,
     });
 
   return issues;

@@ -29,10 +29,12 @@ import {
   chipTitle,
   signedPct,
   signedUsd,
+  walletHint,
   walletText,
 } from "../lib/describe";
 
-// Счета по группам активов в шапке (spec 0038): Paper — лаборатория, D — Binance Demo, R — Real. Слой платформы,
+// Счета по группам активов в шапке (spec 0038): Paper — лаборатория, D — Binance Demo, R — Real (торговый субсчёт
+// по пульсу воркера, spec 0047). Слой платформы,
 // часть хедера: склеивает Лабораторию (бюджеты) и остатки Binance через их public API.
 
 const GROUPS = MARKETS.map((market) => ({
@@ -80,7 +82,7 @@ function WalletCell({
   if (data.balancesError) return <span title={data.balancesError}>—</span>;
   const w = data.balances?.[account][market];
   return (
-    <span title={w?.hint ?? undefined}>
+    <span title={walletHint(w) ?? undefined}>
       {walletText(w)}
       {w?.hint && w.usd !== null && (
         <span className="text-muted-foreground">*</span>
@@ -114,7 +116,7 @@ function BalancesTable({ data }: { data: Data }) {
               </TableHead>
               <TableHead
                 className="text-right"
-                title="Real — настоящий счёт Binance (только чтение): кошелёк в $"
+                title="Real — реальный счёт: торговый субсчёт Binance по последнему пульсу воркера, $"
               >
                 Real
               </TableHead>
@@ -175,7 +177,7 @@ function BalancesTable({ data }: { data: Data }) {
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
           {data.balances &&
-            `Demo и Real на ${formatDateTime(data.balances.at)}`}
+            `Demo на ${formatDateTime(data.balances.at)}, Real — по пульсу`}
         </span>
         <Link
           href="/settings#groups"

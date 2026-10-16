@@ -3,9 +3,13 @@ import type {
   WalletBalance,
 } from "@/entities/account-balance";
 import type { Market, MarketBudget } from "@/entities/experiment";
-import { formatUsd } from "@/shared/lib";
+import { formatDateTime, formatUsd } from "@/shared/lib";
 
-// Тексты чипов и поповера «Счета» (spec 0038): Paper — бюджеты лаборатории, Demo и Real — остатки кошельков Binance.
+// Тексты чипов и поповера «Счета» (spec 0038): Paper — бюджеты лаборатории, Demo — остатки демо-счёта Binance,
+// Real — торговый субсчёт по пульсу воркера реального счёта (spec 0047).
+
+export const REAL_LABEL =
+  "R — реальный счёт: торговый субсчёт Binance по пульсу воркера, $";
 
 export const signedUsd = (v: number) => `${v > 0 ? "+" : ""}${formatUsd(v)}`;
 
@@ -16,6 +20,13 @@ export const signedPct = (v: number) =>
 export function walletText(w: WalletBalance | undefined): string {
   if (!w) return "…";
   return w.usd === null ? "—" : formatUsd(w.usd);
+}
+
+/** Подсказка к остатку: причина или оговорка, у остатка из пульса — «пульс <время>». */
+export function walletHint(w: WalletBalance | undefined): string | null {
+  if (!w) return null;
+  const pulse = w.at ? `пульс ${formatDateTime(w.at)}` : null;
+  return [w.hint, pulse].filter(Boolean).join(", ") || null;
 }
 
 /** Строки подсказки Paper группы — как в прежней шапке (MarketBudgets): старт, изменение, PnL, комиссии, позиции. */
@@ -39,7 +50,8 @@ const walletLine = (
   if (error) return `${prefix}: — (${error})`;
   if (!w) return `${prefix}: загрузка…`;
   const value = walletText(w);
-  return w.hint ? `${prefix}: ${value} (${w.hint})` : `${prefix}: ${value}`;
+  const hint = walletHint(w);
+  return hint ? `${prefix}: ${value} (${hint})` : `${prefix}: ${value}`;
 };
 
 /** Подсказка чипа группы (AC1): что такое Paper, D и R, и их значения с причинами «—». */
@@ -64,11 +76,7 @@ export function chipTitle(input: {
       input.demo,
       input.balancesError,
     ),
-    walletLine(
-      "R — Real-счёт Binance (только чтение), кошелёк в $",
-      input.real,
-      input.balancesError,
-    ),
+    walletLine(REAL_LABEL, input.real, input.balancesError),
     "Нажмите — таблица по группам и ссылка на сбросы",
   ].join("\n");
 }
@@ -95,7 +103,7 @@ export function balanceNotes(
   ] as const) {
     const byHint = new Map<string, string[]>();
     for (const g of groups) {
-      const hint = wallets[g.market].hint;
+      const hint = walletHint(wallets[g.market]);
       if (hint) byHint.set(hint, [...(byHint.get(hint) ?? []), g.code]);
     }
     for (const [hint, codes] of byHint)

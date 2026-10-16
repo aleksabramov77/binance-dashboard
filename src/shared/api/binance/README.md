@@ -1,18 +1,44 @@
 # shared/api/binance
 
-Клиенты Binance. Три независимых «мира» с разными хостами и ключами — не путать.
+Клиенты Binance. Четыре независимых «мира» с разными хостами и ключами — не путать.
 
 | Мир | Хосты | Ключ | Точка входа |
 |---|---|---|---|
 | Публичное API (рынок, Earn) | `api.binance.com`, `fapi.binance.com`, `dapi.binance.com` (COIN-M), `www.binance.com/bapi` | не нужен | `public.server.ts` |
 | Аккаунт (read-only) | `api.binance.com` (`/sapi`, `/api/v3/account`) | `BINANCE_API_KEY/SECRET` | `account.server.ts` |
 | Demo Trading (сделки) | `demo-api.binance.com`, `demo-fapi.binance.com`; `demo-dapi.binance.com` (COIN-M) — только чтение баланса | `BINANCE_DEMO_API_KEY/SECRET` | `demo.server.ts` |
+| Live — реальный счёт (торговый субсчёт, spec 0047) | `api.binance.com` (`/sapi`, `/api/v3`), `fapi.binance.com` — только пути белого списка | `BINANCE_TRADE_API_KEY/SECRET` — **только у воркера на VM** (`scripts/live-worker.ts`), у веб-приложения его нет | `live.server.ts` |
 
 ## Публичный API модуля
 - `index.ts` — **клиент-безопасный**: только типы и чистые функции (`resolveUsdPrice`). Его можно
   импортировать из UI.
 - `*.server.ts` — сетевые функции, только сервер (логгер на `node:fs`, подпись на `node:crypto`).
   Импорт из клиентского компонента утянет `node:*` в браузерный бандл и сломает сборку.
+
+## Live: реальный счёт (spec 0047)
+- `liveAllowlist.ts` — белый список «метод + хост + путь» клиента реального счёта (`LIVE_ALLOWLIST`) и проверка
+  `assertLiveAllowed` до подписи и сети. Сейчас в списке только чтение: `GET /sapi/v1/account/apiRestrictions`,
+  `GET /api/v3/account`, `GET fapi /fapi/v3/account`. Пути со словами движения денег (`withdraw`, `transfer`, `capital`,
+  `sub-account`, `loan`, `borrow`, `repay`, `universal`) отвергаются всегда, даже если их добавят в список. Ордера
+  добавит задача «Реальное зеркало» — новыми строками списка и тестом.
+- `live.server.ts` — `liveSignedRequest` (единственный путь подписанных запросов с ключом `BINANCE_TRADE_*`: список →
+  `signedRequest`), `fetchLiveApiRestrictions` (ответ как есть), `fetchLiveSpotAccount` (`uid`, остатки,
+  `omitZeroBalances`), `fetchLiveFuturesAccount` (итоги `totalWalletBalance`, `availableBalance`,
+  `totalUnrealizedProfit`). Импортирует только воркер.
+- `liveRestrictions.ts` (клиент-безопасно) — оценка прав ключа `evaluateRestrictions`: годится, если `ipRestrict`,
+  `enableReading`, `enableSpotAndMarginTrading` включены, а `enableWithdrawals`, `enableInternalTransfer`,
+  `permitsUniversalTransfer`, `enableMargin` выключены; `enableFutures = false` — только предупреждение. Причина
+  блокировки — по каждому пункту, с английским названием переключателя Binance. Неизвестные поля не мешают,
+  отсутствие нужного — блокировка «неизвестный ответ». `isKeyRejected` — 401, `-2015`, `-2014`, `-1022` → «Binance не
+  принял ключ: проверьте ключ и IP-whitelist». `checkAccountUid` — UID субсчёта против UID основного счёта
+  (`fetchAccountUid` read-only ключом в приложении): совпал — блокировка, нет read-only ключа — пропуск с пометкой.
+- Форматы сверены с документацией Binance 2026-10-16: `apiRestrictions` — вес 1 (IP), поля — булевы (`ipRestrict`,
+  `enableReading`, `enableWithdrawals`, `enableInternalTransfer`, `enableMargin`, `enableFutures`,
+  `permitsUniversalTransfer`, `enableSpotAndMarginTrading`, ещё `createTime`, `enableVanillaOptions`, `enableFix*`,
+  `enablePortfolioMarginTrading`); `/api/v3/account` — вес 20, есть `uid`; `/fapi/v3/account` — вес 5, итоги в USDT
+  (одноактивный режим) или USD (мультиактивный).
+- Пауза после 429/418 и повторы чтения — общие (`signedRequest`, `fetchRetry`): на паузе воркер шлёт пульс с ошибкой,
+  прежняя оценка ключа не снимается.
 
 ## Внутри
 - `signed.ts` — `signedRequest(baseUrl, creds, method, path, schema, params)`: HMAC SHA256, новый
@@ -87,7 +113,8 @@
 - `*Schemas.ts` — Zod-схемы ответов. Числа Binance приходят строками → `z.coerce.number()`.
 
 ## Подводные камни
-- **Только демо-хосты для ордеров.** Live-торговли нет намеренно; не добавлять реальные торговые хосты.
+- **Только демо-хосты для ордеров.** Реальный счёт (Live) пока только читает: подписанные запросы с его ключом — только
+  через `live.server.ts` и его белый список; в обход списка реальные хосты с торговым ключом не вызывать.
 - Демо-фьючерсы иногда не присылают `avgPrice`/`executedQty` — схемы терпят это (`.catch(0)`).
 - `exchangeInfo` демо-фьючерсов ~900 КБ — кэшируется на 10 минут, при сбое используется старая копия.
 - Лимиты веса Binance: не делать запросов в цикле по сотням символов; кэшировать справочники. Лимит — 6000 веса

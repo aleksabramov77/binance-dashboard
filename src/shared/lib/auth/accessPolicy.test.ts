@@ -99,6 +99,16 @@ describe("decideAccess", () => {
     );
   });
 
+  it("пульс воркера реального счёта открыт без сессии, карточка /api/live/status — нет", () => {
+    expect(decide("/api/live/heartbeat", null)).toBe("allow");
+    expect(decide("/api/live/status", null)).toBe("unauthorized");
+    expect(isPublicPath("/api/live/heartbeatx")).toBe(false);
+    expect(isPublicPath("/api/live/")).toBe(false);
+    expect(decide("/api/live/heartbeat", null, "misconfigured")).toBe(
+      "unavailable",
+    );
+  });
+
   it("не настроено — закрыто всё, включая вход; выключено — всё открыто", () => {
     expect(decide("/login", null, "misconfigured")).toBe("unavailable");
     expect(decide("/api/auth/signin", null, "misconfigured")).toBe(

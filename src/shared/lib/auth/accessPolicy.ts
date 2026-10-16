@@ -15,10 +15,14 @@ export type AccessDecision =
 
 /** Пути без проверки сессии: сам вход, cron и webhook Telegram (у них свои секреты). */
 const PUBLIC_PREFIXES = ["/api/auth/", "/api/cron/", "/api/telegram/"];
-const LOGIN_PATH = "/login";
+/**
+ * Точные публичные пути: страница входа и пульс воркера реального счёта (Bearer LIVE_WORKER_SECRET, spec 0047).
+ * Остальные /api/live/* (карточка) — только после входа.
+ */
+const PUBLIC_PATHS = ["/login", "/api/live/heartbeat"];
 
 export const isPublicPath = (pathname: string) =>
-  pathname === LOGIN_PATH ||
+  PUBLIC_PATHS.includes(pathname) ||
   PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 
 /** Список логинов из env: «a, B» → ["a", "b"]. */

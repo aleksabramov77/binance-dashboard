@@ -5,6 +5,10 @@ import {
   getDbSizeLimit,
   getDeploymentVersion,
   getGithubAlertsConfig,
+  getLiveAppUrl,
+  getLiveSilentAfterMs,
+  getLiveTradeCredentials,
+  getLiveWorkerSecret,
   getTelegramConfig,
   isServerless,
 } from "./env.server";
@@ -157,5 +161,36 @@ describe("getGithubAlertsConfig", () => {
       autofixPerDay: 3,
       invalid: ["GITHUB_ALERTS_REPO", "ALERT_AUTOFIX_PER_DAY"],
     });
+  });
+});
+
+describe("реальный счёт (spec 0047)", () => {
+  it("торговый ключ — только когда заданы оба значения", () => {
+    expect(getLiveTradeCredentials({})).toBeNull();
+    expect(getLiveTradeCredentials({ BINANCE_TRADE_API_KEY: "k" })).toBeNull();
+    expect(
+      getLiveTradeCredentials({
+        BINANCE_TRADE_API_KEY: " k ",
+        BINANCE_TRADE_API_SECRET: "s",
+      }),
+    ).toEqual({ live: { apiKey: "k", apiSecret: "s" } });
+  });
+
+  it("секрет пульса и адрес приложения: пусто — null, «/» в конце убирается", () => {
+    expect(getLiveWorkerSecret({ LIVE_WORKER_SECRET: " " })).toBeNull();
+    expect(getLiveWorkerSecret({ LIVE_WORKER_SECRET: "x" })).toBe("x");
+    expect(getLiveAppUrl({})).toBeNull();
+    expect(getLiveAppUrl({ LIVE_APP_URL: "http://localhost:5003/" })).toBe(
+      "http://localhost:5003",
+    );
+  });
+
+  it("порог «молчит»: 5 мин по умолчанию, LIVE_SILENT_AFTER_SEC — в секундах, мусор — по умолчанию", () => {
+    expect(getLiveSilentAfterMs({})).toBe(300_000);
+    expect(getLiveSilentAfterMs({ LIVE_SILENT_AFTER_SEC: "60" })).toBe(60_000);
+    expect(getLiveSilentAfterMs({ LIVE_SILENT_AFTER_SEC: "abc" })).toBe(
+      300_000,
+    );
+    expect(getLiveSilentAfterMs({ LIVE_SILENT_AFTER_SEC: "-5" })).toBe(300_000);
   });
 });
