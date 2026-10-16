@@ -208,6 +208,7 @@ export async function readExperimentsOverview(
           demoMirror: e.demoMirror,
           demoMirrorMode: row.demoMirrorMode,
           demoMirrorAuto: auto.success ? auto.data : null,
+          liveMirror: row.liveMirror,
           parentId: e.parentId ?? null,
           variantNote: e.variantNote ?? null,
           disabled: toDisabledInfo(row),

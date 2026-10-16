@@ -19,8 +19,9 @@ export type {
   SpotOpenOrder,
   SpotOrderQuery,
 } from "./demoSchemas";
-export type { AlgoRef } from "./demoTrading";
+export type { AlgoRef, PublicVenue } from "./demoTrading";
 export {
+  DEMO_PUBLIC_VENUE,
   type DemoFill,
   type DemoPosition,
   type DemoTradeSnapshot,
@@ -38,6 +39,7 @@ export {
   demoSpotMarketOrder,
   demoSpotOcoSell,
   demoSpotStopLossSell,
+  enableOnewayMode,
   fetchDemoAlgoOrder,
   fetchDemoEquity,
   fetchDemoFills,

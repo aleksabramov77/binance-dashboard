@@ -88,6 +88,7 @@ type Base = Pick<LiveHeartbeat, "version" | "sentAt" | "fixture">;
 export function noKeyHeartbeat(base: Base): LiveHeartbeat {
   return {
     ...base,
+    handshake: false,
     verdict: "no-key",
     reasons: [],
     warnings: [],
@@ -205,6 +206,7 @@ export async function runCheck(
     over: Partial<LiveHeartbeat> & Pick<LiveHeartbeat, "verdict">,
   ): LiveHeartbeat => ({
     ...base,
+    handshake: false,
     reasons: [],
     warnings: r.verdict.warnings,
     restrictions,
@@ -268,6 +270,8 @@ export async function runCheck(
           : (memory.uid.note ?? "проверка UID не пройдена"),
       ],
       uid: memory.uid,
+      // Ждём UID основного счёта от приложения — рукопожатие: приложение его не сохраняет (spec 0049, явное поле).
+      handshake: memory.uid.status === "pending",
       balancesNote:
         memory.uid.status === "same"
           ? "ключ основного счёта — остатки не показываются"
@@ -319,6 +323,7 @@ export function fixtureHeartbeat(
     const verdict = evaluateRestrictions(bad);
     return {
       ...base,
+      handshake: false,
       verdict: "blocked",
       reasons: verdict.reasons,
       warnings: verdict.warnings,
@@ -333,6 +338,7 @@ export function fixtureHeartbeat(
   if (fixture === "main-account")
     return {
       ...base,
+      handshake: false,
       verdict: "blocked",
       reasons: [MAIN_ACCOUNT_REASON],
       warnings: [],
@@ -345,6 +351,7 @@ export function fixtureHeartbeat(
     };
   return {
     ...base,
+    handshake: false,
     verdict: "ok",
     reasons: [],
     warnings: [],
@@ -387,6 +394,46 @@ export async function pulseWithHandshake(input: {
       break;
   }
   return sent;
+}
+
+/**
+ * «Площадка демо» (spec 0049): на демо-хостах нет прав ключа (/sapi/v1/account/apiRestrictions) — права считаются
+ * годными, остальное (аккаунт, UID, ордера) — настоящие запросы к Binance Demo через тот же клиент Live.
+ */
+export const DEMO_VENUE_FLAGS = {
+  ipRestrict: true,
+  enableReading: true,
+  enableSpotAndMarginTrading: true,
+  enableFutures: true,
+  enableWithdrawals: false,
+  enableInternalTransfer: false,
+  permitsUniversalTransfer: false,
+  enableMargin: false,
+} as const;
+
+/**
+ * «Площадка демо» — только для локальной проверки: не в production, без торгового ключа в env и только на
+ * localhost/127.0.0.1. null — можно.
+ */
+export function demoVenueRefusal(input: {
+  production: boolean;
+  /** Задан любой из BINANCE_TRADE_API_KEY / SECRET — это окружение настоящего воркера (VM). */
+  hasTradeKey: boolean;
+  appUrl: string;
+}): string | null {
+  if (input.production)
+    return "--venue demo запрещён в production: площадка демо — только для локальной проверки";
+  if (input.hasTradeKey)
+    return "--venue demo запрещён: задан BINANCE_TRADE_API_KEY или BINANCE_TRADE_API_SECRET — это окружение реального счёта";
+  let host: string;
+  try {
+    host = new URL(input.appUrl).hostname;
+  } catch {
+    return `--venue demo: LIVE_APP_URL не распознан (${input.appUrl})`;
+  }
+  return LOCAL_HOSTS.includes(host)
+    ? null
+    : `--venue demo запрещён: LIVE_APP_URL не localhost/127.0.0.1 (${host})`;
 }
 
 /** Ответ приложения: UID основного счёта — поверх известного (ошибка чтения не затирает известный UID). */

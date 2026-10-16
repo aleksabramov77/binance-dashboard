@@ -41,7 +41,8 @@ export const tradeStepSchema = z.object({
 export const tradeResultSchema = z.object({
   id: z.string(),
   at: z.string(),
-  environment: z.literal("demo"),
+  /** Площадка: demo — Binance Demo Trading, live — реальный субсчёт (воркер, spec 0049). */
+  environment: z.enum(["demo", "live"]),
   request: tradeRequestSchema,
   /** protected — позиция открыта и TP/SL выставлены; unprotected — открыта без защиты. */
   status: z.enum(["protected", "unprotected", "rejected"]),

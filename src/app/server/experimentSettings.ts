@@ -1,6 +1,7 @@
 // Композиция /settings лаборатории (spec 003, задача 3d): сброс тестовых капиталов (новая эпоха),
 // стартовый бюджет следующей эпохи, вкл/выкл экспериментов, отдельный сброс paper-капитала
 // эксперимента. Демо-сброс — src/app/server/demoMirror.ts. Только сервер.
+
 import { asc, eq } from "drizzle-orm";
 import {
   ASSET_GROUPS,
@@ -31,6 +32,7 @@ import {
 import { ENGINE_KEYS, planReset, priceKey } from "@/features/paper-engine";
 import { fetchDemoUsdtBalances } from "@/shared/api/binance/demo.server";
 import { fetchTickerPrices } from "@/shared/api/binance/public.server";
+import { demoVenue } from "@/shared/api/binance/venue.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
@@ -56,7 +58,7 @@ async function readDemoBalances(): Promise<LabSettings["demoBalances"]> {
   const config = getDemoTradingConfig();
   if (!config) return null;
   try {
-    return await fetchDemoUsdtBalances(config.credentials);
+    return await fetchDemoUsdtBalances(demoVenue(config.credentials));
   } catch (error) {
     log.warn("experiments.settings", "Балансы Binance Demo не получены", {
       error: error instanceof Error ? error.message : String(error),

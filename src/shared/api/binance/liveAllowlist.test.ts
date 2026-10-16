@@ -5,7 +5,6 @@ import {
   isStrictLivePath,
   LIVE_ALLOWLIST,
   LIVE_FORBIDDEN_PATH_WORDS,
-  LIVE_HOSTS,
   LiveRequestDeniedError,
   type LiveRoute,
   liveDenyReason,
@@ -14,39 +13,71 @@ import {
 const MONEY_MOVES: LiveRoute[] = [
   {
     method: "POST",
-    host: LIVE_HOSTS.spot,
+    market: "spot",
     path: "/sapi/v1/capital/withdraw/apply",
   },
-  { method: "POST", host: LIVE_HOSTS.spot, path: "/sapi/v1/asset/transfer" },
+  { method: "POST", market: "spot", path: "/sapi/v1/asset/transfer" },
   {
     method: "GET",
-    host: LIVE_HOSTS.spot,
+    market: "spot",
     path: "/sapi/v1/capital/config/getall",
   },
   {
     method: "POST",
-    host: LIVE_HOSTS.spot,
+    market: "spot",
     path: "/sapi/v1/sub-account/universalTransfer",
   },
-  { method: "POST", host: LIVE_HOSTS.spot, path: "/sapi/v1/margin/loan" },
+  { method: "POST", market: "spot", path: "/sapi/v1/margin/loan" },
   {
     method: "POST",
-    host: LIVE_HOSTS.spot,
+    market: "spot",
     path: "/sapi/v1/margin/borrow-repay",
   },
-  { method: "POST", host: LIVE_HOSTS.spot, path: "/sapi/v1/loan/borrow" },
-  { method: "POST", host: LIVE_HOSTS.usdm, path: "/fapi/v1/asset/Universal" },
-  { method: "POST", host: LIVE_HOSTS.spot, path: "/sapi/v1/futures/transfer" },
+  { method: "POST", market: "spot", path: "/sapi/v1/loan/borrow" },
+  { method: "POST", market: "usdm", path: "/fapi/v1/asset/Universal" },
+  { method: "POST", market: "spot", path: "/sapi/v1/futures/transfer" },
 ];
 
 describe("белый список клиента реального счёта", () => {
-  it("в списке только чтение: права ключа, аккаунт Spot, аккаунт USDⓈ-M", () => {
-    expect(LIVE_ALLOWLIST.every((r) => r.method === "GET")).toBe(true);
-    expect(LIVE_ALLOWLIST.map((r) => `${r.host}${r.path}`)).toEqual([
-      "api.binance.com/sapi/v1/account/apiRestrictions",
-      "api.binance.com/api/v3/account",
-      "fapi.binance.com/fapi/v3/account",
+  it("список — ровно явный перечень: чтение счёта (0047) и ордера Spot / USDⓈ-M (0049)", () => {
+    expect(
+      LIVE_ALLOWLIST.map((r) => `${r.method} ${r.market} ${r.path}`),
+    ).toEqual([
+      "GET spot /sapi/v1/account/apiRestrictions",
+      "GET spot /api/v3/account",
+      "GET usdm /fapi/v3/account",
+      "POST spot /api/v3/order",
+      "GET spot /api/v3/order",
+      "DELETE spot /api/v3/order",
+      "POST spot /api/v3/orderList/otoco",
+      "POST spot /api/v3/orderList/oto",
+      "POST spot /api/v3/orderList/oco",
+      "GET spot /api/v3/openOrders",
+      "GET spot /api/v3/myTrades",
+      "GET usdm /fapi/v3/balance",
+      "GET usdm /fapi/v1/positionSide/dual",
+      "POST usdm /fapi/v1/positionSide/dual",
+      "POST usdm /fapi/v1/marginType",
+      "POST usdm /fapi/v1/leverage",
+      "GET usdm /fapi/v3/positionRisk",
+      "GET usdm /fapi/v1/openOrders",
+      "GET usdm /fapi/v1/openAlgoOrders",
+      "POST usdm /fapi/v1/order",
+      "GET usdm /fapi/v1/order",
+      "DELETE usdm /fapi/v1/order",
+      "POST usdm /fapi/v1/algoOrder",
+      "GET usdm /fapi/v1/algoOrder",
+      "DELETE usdm /fapi/v1/algoOrder",
+      "GET usdm /fapi/v1/userTrades",
     ]);
+  });
+
+  it("история счёта, переводы и `/sapi` кроме прав ключа — не в списке", () => {
+    for (const r of LIVE_ALLOWLIST) {
+      expect(r.path).not.toMatch(/allOrders|allAlgoOrders|income|asset/i);
+      if (r.path.startsWith("/sapi"))
+        expect(r.path).toBe("/sapi/v1/account/apiRestrictions");
+    }
   });
 
   it("ни один путь списка не содержит слов движения денег", () => {
@@ -95,7 +126,7 @@ describe("белый список клиента реального счёта",
     "/api/v3/account/",
     "",
   ])("путь не в строгом формате «%s» — отказ, даже если он в списке", (path) => {
-    const route = { method: "GET" as const, host: LIVE_HOSTS.spot, path };
+    const route = { method: "GET" as const, market: "spot" as const, path };
     expect(liveDenyReason(route, [...LIVE_ALLOWLIST, route])).toMatch(
       /не в строгом формате/,
     );
@@ -105,32 +136,39 @@ describe("белый список клиента реального счёта",
     for (const r of LIVE_ALLOWLIST) expect(isStrictLivePath(r.path)).toBe(true);
   });
 
-  it("отвергает запросы вне списка: ордер, другой метод, другой хост", () => {
+  it("отвергает запросы вне списка: другой путь, другой метод, другой рынок", () => {
     expect(
       liveDenyReason({
         method: "POST",
-        host: LIVE_HOSTS.spot,
+        market: "spot",
+        path: "/api/v3/order/test",
+      }),
+    ).toMatch(/нет в белом списке/);
+    expect(
+      liveDenyReason({
+        method: "POST",
+        market: "usdm",
         path: "/api/v3/order",
       }),
     ).toMatch(/нет в белом списке/);
     expect(
       liveDenyReason({
         method: "DELETE",
-        host: LIVE_HOSTS.spot,
+        market: "spot",
         path: "/api/v3/account",
       }),
     ).toMatch(/нет в белом списке/);
     expect(
       liveDenyReason({
         method: "GET",
-        host: "demo-api.binance.com",
-        path: "/api/v3/account",
+        market: "usdm",
+        path: "/api/v3/order/test",
       }),
     ).toMatch(/нет в белом списке/);
     expect(
       liveDenyReason({
         method: "GET",
-        host: LIVE_HOSTS.usdm,
+        market: "usdm",
         path: "/api/v3/account",
       }),
     ).toMatch(/нет в белом списке/);

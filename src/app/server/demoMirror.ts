@@ -1,5 +1,6 @@
 // Композиция demo-зеркала (spec 008): БД (entities/experiment) + биржа (features/execute-trade)
 // + логика прогона (features/demo-mirror). Только сервер; вызывает POST /api/cron/demo-mirror.
+
 import {
   ASSET_GROUPS,
   activeMirrors,
@@ -33,10 +34,12 @@ import {
   sweepTriggeredLegs,
 } from "@/features/execute-trade";
 import {
+  DEMO_PUBLIC_VENUE,
   fetchDemoPositionMode,
   fetchDemoSymbolRules,
   fetchDemoUsdtBalances,
 } from "@/shared/api/binance/demo.server";
+import { demoVenue } from "@/shared/api/binance/venue.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { type Db, getDb, getDbKind } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
@@ -83,24 +86,26 @@ async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
     positionMode: () => {
       const config = getDemoTradingConfig();
       if (!config) return Promise.reject(new Error("Demo не настроен"));
-      return fetchDemoPositionMode(config.credentials);
+      return fetchDemoPositionMode(demoVenue(config.credentials));
     },
     // null — символа нет на демо; сетевой сбой — исключение (кандидат подождёт). Фьючерсный
     // справочник кэшируется на 10 минут, спот — запрос на символ.
     hasSymbol: async (market, symbol) =>
-      (await fetchDemoSymbolRules(market, symbol)) !== null,
+      (await fetchDemoSymbolRules(market, symbol, DEMO_PUBLIC_VENUE)) !== null,
     freeUsd: async (market) => {
       const config = getDemoTradingConfig();
       if (!config) throw new Error("Demo не настроен");
       // Сбой — одна запись на прогон (промис общий), вход идёт без проверки резерва (fail-open в runMirror).
-      balances ??= fetchDemoUsdtBalances(config.credentials).catch((error) => {
-        log.warn(
-          "mirror.balance",
-          "Остаток демо-кошелька не прочитан — входы этого прогона без проверки резерва",
-          { error: error instanceof Error ? error.message : String(error) },
-        );
-        throw error;
-      });
+      balances ??= fetchDemoUsdtBalances(demoVenue(config.credentials)).catch(
+        (error) => {
+          log.warn(
+            "mirror.balance",
+            "Остаток демо-кошелька не прочитан — входы этого прогона без проверки резерва",
+            { error: error instanceof Error ? error.message : String(error) },
+          );
+          throw error;
+        },
+      );
       return (await balances)[market];
     },
     claim: async (tradeId) => {

@@ -3,6 +3,34 @@
 export { loadBudgetInputs } from "./api/budgetsStore";
 // Что останется без проверки при выключении «Автоторговли» (spec 0044): подсчёт (сервер), хук модалки.
 export { readEngineExposure } from "./api/exposureDb";
+// Реальное зеркало (spec 0049): кандидаты, захват, закрытия, дневной PnL, «Закрыть всё» (только сервер: вызывает
+// композиция src/app/server/liveMirror.ts по API воркера).
+export {
+  claimAllLiveOpen,
+  claimLiveMirror,
+  claimLiveToClose,
+  countLiveActive,
+  countLiveSkipsSince,
+  getLiveMirror,
+  LIVE_CLOSE_RETRY_PAUSE_S,
+  LIVE_CLOSING_STUCK_S,
+  LIVE_PENDING_STALE_S,
+  type LiveActiveRow,
+  type LiveMirrorPatch,
+  type LiveMirrorToClose,
+  listLiveCandidates,
+  listLiveToClose,
+  listOpenLiveLegs,
+  listStaleLivePending,
+  liveActiveRows,
+  liveDailyPnl,
+  liveEnabledExperiments,
+  markLiveCloseFailed,
+  recentLiveClosed,
+  setExperimentLiveMirror,
+  skipLiveMirror,
+  updateLiveMirror,
+} from "./api/liveMirrorDb";
 // Авто-зеркало (spec 0043): положение переключателя, данные для решения автомата, запись решения (только сервер).
 export {
   type MirrorAutoPatch,
@@ -91,6 +119,7 @@ export {
   useResetExperimentPaper,
   useResetGroup,
   useSetExperimentEnabled,
+  useSetExperimentLiveMirror,
   useSetExperimentMirrorMode,
   useSetNextBudget,
 } from "./api/useLabSettings";
@@ -215,6 +244,33 @@ export {
   type EngineExposure,
   engineExposureSchema,
 } from "./model/exposure";
+// Контракт API реального зеркала воркер ↔ приложение и переключателя «Реальный счёт» (spec 0049).
+export {
+  type ExperimentLiveMirror,
+  experimentLiveMirrorSchema,
+  type LiveCandidate,
+  type LiveCloseRequest,
+  type LiveLegsRequest,
+  type LiveMirrorState,
+  type LiveOpenRequest,
+  type LiveReconcileRequest,
+  type LiveToClose,
+  liveCandidateSchema,
+  liveClaimCloseReplySchema,
+  liveClaimReplySchema,
+  liveCloseAllReplySchema,
+  liveCloseAllRequestSchema,
+  liveCloseRequestSchema,
+  liveExitSchema,
+  liveLegsRequestSchema,
+  liveMirrorStateSchema,
+  liveOkSchema,
+  liveOpenRequestSchema,
+  liveReconcileRequestSchema,
+  liveSkipRequestSchema,
+  liveToCloseSchema,
+  liveTradeIdSchema,
+} from "./model/liveMirrorApi";
 export {
   ACTIVE_MIRROR_STATUSES,
   type ExperimentDemoMirror,

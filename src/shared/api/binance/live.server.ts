@@ -1,9 +1,14 @@
-// Клиент реального счёта (Live, spec 0047): торговый ключ субсчёта BINANCE_TRADE_*. Только сервер воркера
+// Клиент реального счёта (Live, spec 0047, 0049): торговый ключ субсчёта BINANCE_TRADE_*. Только сервер воркера
 // (scripts/live-worker.ts): у веб-приложения этого ключа нет. Каждый запрос сверяется с белым списком
-// liveAllowlist.ts до подписи и сети; в этой задаче список — только чтение.
+// liveAllowlist.ts до подписи и сети: чтение счёта и ордера Spot / USDⓈ-M, без переводов, выводов и займов.
 import { z } from "zod";
 import type { LiveCredentials } from "@/shared/config/env.server";
-import { assertLiveAllowed, LIVE_HOSTS, type LiveRoute } from "./liveAllowlist";
+import {
+  assertLiveAllowed,
+  LIVE_HOSTS,
+  type LiveMarket,
+  type LiveRoute,
+} from "./liveAllowlist";
 import {
   type LiveFuturesAccount,
   type LiveSpotAccount,
@@ -11,21 +16,44 @@ import {
   liveSpotAccountSchema,
 } from "./liveRestrictions";
 import { type SignedParams, signedRequest } from "./signed";
+import type { TradeVenue } from "./venue.server";
+
+export type LiveHosts = Readonly<Record<LiveMarket, string>>;
+
+/**
+ * Демо-хосты для режима воркера «площадка демо» (spec 0049): тот же код и белый список реального счёта, но
+ * Binance Demo и демо-ключ — только для локальной проверки (воркер запрещает режим в production и не на localhost).
+ */
+export const LIVE_DEMO_HOSTS: LiveHosts = {
+  spot: "demo-api.binance.com",
+  usdm: "demo-fapi.binance.com",
+};
+
+/** Ключ и хосты клиента реального счёта. По умолчанию — настоящие хосты Binance. */
+export interface LiveClient {
+  readonly creds: LiveCredentials;
+  readonly hosts: LiveHosts;
+}
+
+export const liveClient = (
+  creds: LiveCredentials,
+  hosts: LiveHosts = LIVE_HOSTS,
+): LiveClient => ({ creds, hosts });
 
 /**
  * Единственный путь подписанных запросов с ключом реального счёта: белый список → signedRequest.
  * Запрос вне списка бросает LiveRequestDeniedError, ничего не отправив.
  */
 export function liveSignedRequest<T extends z.ZodType>(
-  creds: LiveCredentials,
+  client: LiveClient,
   route: LiveRoute,
   schema: T,
   params: SignedParams = {},
 ): Promise<z.infer<T>> {
   assertLiveAllowed(route);
   return signedRequest(
-    `https://${route.host}`,
-    creds.live,
+    `https://${client.hosts[route.market]}`,
+    client.creds.live,
     route.method,
     route.path,
     schema,
@@ -34,17 +62,31 @@ export function liveSignedRequest<T extends z.ZodType>(
 }
 
 /**
+ * Площадка реального счёта для логики ордеров (features/execute-trade): каждый подписанный запрос — через
+ * liveSignedRequest и белый список; публичные справочники — те же хосты без ключа.
+ */
+export function liveVenue(client: LiveClient): TradeVenue {
+  return {
+    kind: "live",
+    publicUrl: {
+      spot: `https://${client.hosts.spot}`,
+      usdm: `https://${client.hosts.usdm}`,
+    },
+    signed: (market, method, path, schema, params = {}) =>
+      liveSignedRequest(client, { method, market, path }, schema, params),
+  };
+}
+
+/**
  * Права ключа (`GET /sapi/v1/account/apiRestrictions`, вес 1). Ответ — как есть: разбор и оценка — в
  * evaluateRestrictions, чтобы неизвестный ответ дал блокировку с причиной, а не ошибку формата.
  */
-export function fetchLiveApiRestrictions(
-  creds: LiveCredentials,
-): Promise<unknown> {
+export function fetchLiveApiRestrictions(client: LiveClient): Promise<unknown> {
   return liveSignedRequest(
-    creds,
+    client,
     {
       method: "GET",
-      host: LIVE_HOSTS.spot,
+      market: "spot",
       path: "/sapi/v1/account/apiRestrictions",
     },
     z.unknown(),
@@ -53,11 +95,11 @@ export function fetchLiveApiRestrictions(
 
 /** Аккаунт Spot субсчёта (`GET /api/v3/account`, вес 20): UID и ненулевые остатки. */
 export function fetchLiveSpotAccount(
-  creds: LiveCredentials,
+  client: LiveClient,
 ): Promise<LiveSpotAccount> {
   return liveSignedRequest(
-    creds,
-    { method: "GET", host: LIVE_HOSTS.spot, path: "/api/v3/account" },
+    client,
+    { method: "GET", market: "spot", path: "/api/v3/account" },
     liveSpotAccountSchema,
     { omitZeroBalances: "true" },
   );
@@ -65,11 +107,11 @@ export function fetchLiveSpotAccount(
 
 /** Аккаунт USDⓈ-M субсчёта (`GET /fapi/v3/account`, вес 5): итоги кошелька. */
 export function fetchLiveFuturesAccount(
-  creds: LiveCredentials,
+  client: LiveClient,
 ): Promise<LiveFuturesAccount> {
   return liveSignedRequest(
-    creds,
-    { method: "GET", host: LIVE_HOSTS.usdm, path: "/fapi/v3/account" },
+    client,
+    { method: "GET", market: "usdm", path: "/fapi/v3/account" },
     liveFuturesAccountSchema,
   );
 }

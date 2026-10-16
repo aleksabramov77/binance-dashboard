@@ -29,6 +29,7 @@ const NOW = Date.parse("2026-10-16T10:00:00Z");
 const live = (over: Partial<LiveState["heartbeat"]> = {}): LiveState => ({
   heartbeat: {
     version: "test",
+    handshake: false,
     sentAt: "2026-10-16T09:59:00.000Z",
     fixture: null,
     verdict: "ok",

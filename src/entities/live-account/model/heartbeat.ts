@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { liveKeyFlagsSchema } from "@/shared/api/binance";
+import { liveTradingSchema } from "./halt";
 
 // Контракт «пульса» воркера реального счёта (spec 0047, AC4): POST /api/live/heartbeat раз в минуту.
 // Ключа и секрета в пульсе нет — только оценка прав, UID-проверка и остатки субсчёта. Схему проверяют обе
@@ -48,8 +49,16 @@ export const liveHeartbeatSchema = z.object({
   /** Версия воркера (сборка). */
   version: z.string().min(1).max(64),
   sentAt: isoTime,
-  /** Пульс фикстуры (локальная проверка); null — настоящий. */
-  fixture: z.enum(LIVE_FIXTURES).nullable(),
+  /**
+   * Рукопожатие после старта воркера (spec 0049, nit ревью 0047): UID основного счёта ещё не получен — пульс только
+   * запрашивает его, приложение такой пульс не сохраняет. Явный признак вместо распознавания по тексту причины.
+   */
+  handshake: z.boolean(),
+  /**
+   * Пульс фикстуры (локальная проверка); demo-venue — воркер в режиме «площадка демо» (тот же код, Binance Demo,
+   * spec 0049); null — настоящий. Production такие пульсы не принимает.
+   */
+  fixture: z.enum([...LIVE_FIXTURES, "demo-venue"]).nullable(),
   verdict: liveVerdictSchema,
   /** Причины блокировки — по-русски, по каждому пункту. */
   reasons: z.array(text).max(20),
@@ -124,5 +133,13 @@ export const liveStatusResponseSchema = z.object({
   silentAfterMs: z.number(),
   /** Состояние на момент ответа (сервер считает той же deriveLiveStatus, что карточка и шапка). */
   current: liveStatusSchema,
+  /** Торговля реального счёта (spec 0049): стоп, позиции, дневные лимиты экспериментов. */
+  trading: liveTradingSchema,
 });
 export type LiveStatusResponse = z.infer<typeof liveStatusResponseSchema>;
+
+/**
+ * Заголовок запросов воркера в режиме «площадка демо» (spec 0049): production-приложение отклоняет такие запросы
+ * (пульс и маршруты зеркала) — защита не зависит от NODE_ENV на стороне воркера.
+ */
+export const DEMO_VENUE_HEADER = "x-live-venue";
