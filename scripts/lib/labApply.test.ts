@@ -26,15 +26,15 @@ describe("planApply", () => {
     expect(
       planApply({
         disable: ["ps99", "S01"],
-        enable: [" PF15 "],
-        "mirror-on": ["PC05", "F20"],
-        "mirror-off": ["PS01"],
+        enable: [" PF99 "],
+        "mirror-on": ["PC99", "F20"],
+        "mirror-off": ["PF100"],
       }),
     ).toMatchObject({
       disable: ["PS99", "S01"],
-      enable: ["PF15"],
-      mirrorOn: ["PC05", "F20"],
-      mirrorOff: ["PS01"],
+      enable: ["PF99"],
+      mirrorOn: ["PC99", "F20"],
+      mirrorOff: ["PF100"],
     });
   });
   it("отклоняет пустой набор, чужие id и противоречия", () => {
