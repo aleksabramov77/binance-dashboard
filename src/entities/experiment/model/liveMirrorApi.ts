@@ -70,8 +70,11 @@ export const liveTradeIdSchema = z.object({ tradeId: z.string().min(1) });
 
 export const liveClaimReplySchema = z.object({
   claimed: z.boolean(),
-  /** Почему не захвачено: halted — стоп входов (проверка в БД перед каждым входом). */
-  reason: z.enum(["taken", "halted", "disabled"]).nullable(),
+  /**
+   * Почему не захвачено: taken — сделку или монету уже взяли; halted — стоп входов (проверка в БД перед каждым
+   * входом); disabled — «Реальный счёт» эксперимента выключили; limit — уже 5 открытых позиций.
+   */
+  reason: z.enum(["taken", "halted", "disabled", "limit"]).nullable(),
 });
 
 export const liveSkipRequestSchema = liveTradeIdSchema.extend({

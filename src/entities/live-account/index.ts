@@ -49,10 +49,16 @@ export {
 export { liveTradingHaltTable, liveWorkerStateTable } from "./model/db";
 export {
   LIVE_HALT_ACTIONS,
+  type LiveExperimentDay,
   type LiveHalt,
   type LiveHaltActionRequest,
+  type LivePosition,
+  type LiveTrading,
+  liveExperimentDaySchema,
   liveHaltActionSchema,
   liveHaltSchema,
+  livePositionSchema,
+  liveTradingSchema,
 } from "./model/halt";
 export {
   LIVE_FIXTURES,

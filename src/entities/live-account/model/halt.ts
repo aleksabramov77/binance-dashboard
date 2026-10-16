@@ -30,3 +30,41 @@ export const liveHaltActionSchema = z.object({
   action: z.enum(LIVE_HALT_ACTIONS),
 });
 export type LiveHaltActionRequest = z.infer<typeof liveHaltActionSchema>;
+
+/** Реальная позиция для карточки и полосы на /experiments (spec 0049, AC7). */
+export const livePositionSchema = z.object({
+  tradeId: z.string(),
+  experimentId: z.string(),
+  market: z.enum(["spot", "usdm"]),
+  symbol: z.string(),
+  direction: z.enum(["long", "short"]),
+  status: z.string(),
+  quantity: z.number().nullable(),
+  entryPrice: z.number().nullable(),
+  notionalUsd: z.number().nullable(),
+  openedAt: isoTime,
+  /** Нереализованный PnL по последней цене, ≈ $; null — цены нет. */
+  pnlUsd: z.number().nullable(),
+});
+export type LivePosition = z.infer<typeof livePositionSchema>;
+
+/** Эксперимент с включённым «Реальным счётом»: дневной реализованный PnL и сработавший лимит. */
+export const liveExperimentDaySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  market: z.string(),
+  dailyPnl: z.number(),
+  /** Дневной лимит сработал: новые входы до `until` (полночь UTC). */
+  limitHit: z.boolean(),
+  until: isoTime,
+});
+export type LiveExperimentDay = z.infer<typeof liveExperimentDaySchema>;
+
+/** Торговля реального счёта (часть GET /api/live/status). */
+export const liveTradingSchema = z.object({
+  halt: liveHaltSchema,
+  positions: z.array(livePositionSchema),
+  /** Дневной PnL и лимит всех экспериментов, у которых были реальные сделки сегодня или включён «Реальный счёт». */
+  experiments: z.array(liveExperimentDaySchema),
+});
+export type LiveTrading = z.infer<typeof liveTradingSchema>;

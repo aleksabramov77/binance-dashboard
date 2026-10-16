@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { liveKeyFlagsSchema } from "@/shared/api/binance";
+import { liveTradingSchema } from "./halt";
 
 // Контракт «пульса» воркера реального счёта (spec 0047, AC4): POST /api/live/heartbeat раз в минуту.
 // Ключа и секрета в пульсе нет — только оценка прав, UID-проверка и остатки субсчёта. Схему проверяют обе
@@ -132,5 +133,7 @@ export const liveStatusResponseSchema = z.object({
   silentAfterMs: z.number(),
   /** Состояние на момент ответа (сервер считает той же deriveLiveStatus, что карточка и шапка). */
   current: liveStatusSchema,
+  /** Торговля реального счёта (spec 0049): стоп, позиции, дневные лимиты экспериментов. */
+  trading: liveTradingSchema,
 });
 export type LiveStatusResponse = z.infer<typeof liveStatusResponseSchema>;

@@ -104,6 +104,22 @@ describe("decideAccess", () => {
     expect(decide("/api/live/status", null)).toBe("unauthorized");
     expect(isPublicPath("/api/live/heartbeatx")).toBe(false);
     expect(isPublicPath("/api/live/")).toBe(false);
+    // Реальное зеркало (spec 0049): маршруты воркера — поштучно; стоп и карточка — только после входа.
+    for (const p of [
+      "state",
+      "claim",
+      "skip",
+      "open",
+      "claim-close",
+      "close",
+      "legs",
+      "close-all",
+    ])
+      expect(decide(`/api/live/mirror/${p}`, null)).toBe("allow");
+    expect(decide("/api/live/mirror/other", null)).toBe("unauthorized");
+    expect(decide("/api/live/mirror", null)).toBe("unauthorized");
+    expect(decide("/api/live/halt", null)).toBe("unauthorized");
+    expect(decide("/api/experiments/settings/live", null)).toBe("unauthorized");
     expect(decide("/api/live/heartbeat", null, "misconfigured")).toBe(
       "unavailable",
     );
