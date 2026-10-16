@@ -14,6 +14,7 @@ import { EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import {
   backtestKlines,
   backtestMarketContext,
+  backtestOpenPricing,
   backtestPeriod,
   buildBacktestReport,
   chooseExitInterval,
@@ -179,6 +180,7 @@ async function main() {
     ]),
   );
   const openAtEnd = run.trades.filter((t) => t.closedAt === null).length;
+  const openPricing = await backtestOpenPricing(run, exitInterval, end);
   const { report, md } = buildBacktestReport({
     experiments,
     trades: run.trades,
@@ -187,6 +189,7 @@ async function main() {
     end,
     market,
     klines,
+    openPricing,
     meta: {
       generatedAt: new Date().toISOString(),
       ids: own.map((e) => e.id),

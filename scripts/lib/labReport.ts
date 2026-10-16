@@ -7,6 +7,7 @@ import {
   type EntryContext,
   type EntryRule,
   type ExperimentMarket,
+  exitFill,
   FEE_RATE,
   isFuturesMarket,
   MARKETS,
@@ -15,6 +16,7 @@ import {
   type SkippedSignal,
   type SkipReason,
   SLIPPAGE,
+  settle,
   TIMEFRAME_MS,
 } from "@binance-dashboard/trading-core";
 import {
@@ -28,7 +30,7 @@ import {
   type LabSkippedCount,
   type TradeStats,
 } from "@/entities/experiment";
-import { ENGINE } from "@/features/paper-engine";
+import { ENGINE, priceKey } from "@/features/paper-engine";
 import {
   type AfterExitRow,
   afterExitStats,
@@ -160,6 +162,37 @@ export interface LabReportOptions {
   database?: string;
   /** Свечи ТФ для «после выхода» и исхода отсечённых сигналов (`--after-exit`); null — не загружались. */
   klines?: KlineSet | null;
+  /** Последние цены для оценки открытых позиций (баг 0041); null или нет — открытые не оцениваются. */
+  openPricing?: OpenPricing | null;
+}
+
+/** Последние цены для оценки открытых позиций: `lab:report` — тикер публичного API, бэктест — последний тик. */
+export interface OpenPricing {
+  /** Цена по ключу `priceKey(market, symbol)` («usdm:BTCUSDT»). */
+  prices: Record<string, number>;
+  /** Откуда цены — в шапку отчёта. */
+  source: string;
+  /** На какой момент, ISO. */
+  at: string;
+}
+
+/**
+ * Открытые позиции на конец периода, оценённые по последней цене (баг 0041): как если бы их закрыли по рынку
+ * сейчас. В метрики закрытых сделок (stats, r, returnPct…) не входят.
+ */
+export interface UnrealizedStats {
+  /** Открытых позиций на конец периода (все открытые эпохи, без учёта --since). */
+  open: number;
+  /** Из них оценено (есть цена). */
+  priced: number;
+  /** PnL оценённых при закрытии по рынку: слиппедж выхода, комиссии входа и выхода, USD; null — не оценено ни одной. */
+  pnl: number | null;
+  /** Сумма R оценённых со стопом; null — таких нет. */
+  sumR: number | null;
+  /** Оценённых со стопом (из них — sumR). */
+  withStop: number;
+  /** Дней с входа старейшей открытой позиции; null — открытых нет. */
+  maxAgeDays: number | null;
 }
 
 /** Компактная строка разреза. */
@@ -309,6 +342,8 @@ export interface ExperimentReport {
   /** «Что было через 4/12/24 свечи ТФ после выхода» (`--after-exit`); null — свечи не загружались. */
   afterExit: AfterExitRow[] | null;
   skipped: SkippedStats;
+  /** Открытые позиции на конец периода по последней цене (баг 0041); в метрики закрытых не входят. */
+  unrealized: UnrealizedStats;
   byDirection: SliceRow[];
   byExitReason: SliceRow[];
   /** Час открытия UTC, блоками по 4 часа: «00–04» … «20–24». */
@@ -376,6 +411,8 @@ export interface LabReport {
   controlBaseline: Record<ExperimentMarket, ControlBaseline>;
   /** Загружались ли свечи для «после выхода» и исхода отсечённых сигналов. */
   klinesLoaded: boolean;
+  /** Чем оценены открытые позиции (баг 0041): источник и момент цен; null — не оценивались. */
+  openPricing: { source: string; at: string } | null;
   market: MarketContext | null;
   archetypes: ArchetypeRow[];
   families: Family[];
@@ -396,7 +433,12 @@ export const LEGEND =
   "pnlBeforeFees, fees, maxDrawdown, costs.feesUsd, costs.slippageUsd. Доля (0,0001 = 0,01 %): ctx_funding. " +
   "afterExit — ход цены от цены выхода в сторону сделки через bars свечей ТФ: > 0 — цена шла дальше «за нас». " +
   "skipped — сигналы, прошедшие фильтры, но не открытые из-за лимита позиций (max-open), занятого символа " +
-  "(symbol-busy) или денег (no-budget); capped — упёрлись в лимит записи, total — нижняя оценка.";
+  "(symbol-busy) или денег (no-budget); capped — упёрлись в лимит записи, total — нижняя оценка. " +
+  "unrealized — открытые на конец периода позиции (все открытые эпохи, без учёта --since), оценённые по последней " +
+  "цене (openPricing — источник и момент; null — не оценивались): open — открыто, priced — из них с ценой, pnl — USD, " +
+  "если закрыть по рынку сейчас (слиппедж выхода, комиссии входа и выхода), sumR — сумма R оценённых со стопом " +
+  "(withStop), maxAgeDays — дней с входа старейшей. В stats, r, returnPct и другие метрики закрытых сделок не входит. " +
+  "Бэктест с --split: в частях (split.train, split.test) unrealized — позиции, открытые на конец всего периода, без оценки по цене.";
 
 type ClosedTrade = PaperTrade & { closedAt: string; pnl: number };
 
@@ -966,6 +1008,48 @@ export function buildArchetypes(
   return rows;
 }
 
+/**
+ * Открытые позиции, оценённые по последней цене (баг 0041): закрытие по рынку как при сбросе (planReset) —
+ * слиппедж выхода, комиссии входа и выхода. Нет цены — позиция считается в `open`, но не оценивается.
+ */
+export function unrealizedStats(
+  open: PaperTrade[],
+  prices: Record<string, number> | null,
+  end: number,
+): UnrealizedStats {
+  let priced = 0;
+  let pnl = 0;
+  let sumR = 0;
+  let withStop = 0;
+  for (const t of open) {
+    const raw = prices?.[priceKey(t.market, t.symbol)];
+    if (raw === undefined || !Number.isFinite(raw) || raw <= 0) continue;
+    const s = settle({
+      market: t.market,
+      direction: t.direction,
+      entryPrice: t.entryPrice,
+      exitPrice: exitFill(raw, t.direction, "manual"),
+      quantity: t.quantity,
+      initialStop: t.initialStop,
+    });
+    priced++;
+    pnl += s.pnl;
+    if (s.rMultiple !== null) {
+      withStop++;
+      sumR += s.rMultiple;
+    }
+  }
+  const oldest = Math.min(...open.map((t) => Date.parse(t.openedAt)));
+  return {
+    open: open.length,
+    priced,
+    pnl: priced ? pnl : null,
+    sumR: withStop ? sumR : null,
+    withStop,
+    maxAgeDays: open.length ? Math.max(0, (end - oldest) / DAY) : null,
+  };
+}
+
 interface ReportContext {
   /** Конец периода отчёта, мс: конец прошлой эпохи или время отчёта. */
   end: number;
@@ -977,6 +1061,8 @@ interface ReportContext {
   marketDriftPctPerDay: number | null;
   klines: KlineSet | null;
   skippedCounts: LabSkippedCount[] | null;
+  /** Последние цены для открытых позиций; null — не оцениваются. */
+  prices: Record<string, number> | null;
 }
 
 /**
@@ -993,6 +1079,7 @@ function experimentReport(
   e: LabExperiment,
   own: PaperTrade[],
   skipped: SkippedSignal[],
+  open: PaperTrade[],
   ctx: ReportContext,
 ): ExperimentReport {
   const closed = own.filter(isClosed);
@@ -1067,6 +1154,7 @@ function experimentReport(
         ? null
         : afterExitStats(closed, ctx.klines, e.config.timeframe),
     skipped: skippedStats(skipped, ctx.skippedCounts, ctx.klines, e),
+    unrealized: unrealizedStats(open, ctx.prices, ctx.end),
     sample: sampleLevel(stats.closed),
     r: meanStat(
       closed.map((t) => t.rMultiple).filter((r): r is number => r !== null),
@@ -1146,6 +1234,14 @@ export function buildLabReport(
     list.push(t);
     byExperiment.set(t.experimentId, list);
   }
+  // Открытые на конец периода — все открытые эпохи: --since режет по времени закрытия, а их ещё нет.
+  const openOf = new Map<string, PaperTrade[]>();
+  for (const t of data.trades) {
+    if (t.closedAt !== null) continue;
+    const list = openOf.get(t.experimentId);
+    if (list) list.push(t);
+    else openOf.set(t.experimentId, [t]);
+  }
   const skippedOf = new Map<string, SkippedSignal[]>();
   for (const s of data.skipped ?? []) {
     if (opts.since != null && Date.parse(s.at) < opts.since) continue;
@@ -1165,6 +1261,7 @@ export function buildLabReport(
       periodReturn === null ? null : periodReturn / periodDays,
     klines: opts.klines ?? null,
     skippedCounts: data.skippedCounts ?? null,
+    prices: opts.openPricing?.prices ?? null,
   };
 
   const experiments = data.experiments
@@ -1173,6 +1270,7 @@ export function buildLabReport(
         e,
         byExperiment.get(e.id) ?? [],
         skippedOf.get(e.id) ?? [],
+        openOf.get(e.id) ?? [],
         ctx,
       ),
     )
@@ -1193,6 +1291,9 @@ export function buildLabReport(
     controls,
     controlBaseline: baseline,
     klinesLoaded: ctx.klines !== null,
+    openPricing: opts.openPricing
+      ? { source: opts.openPricing.source, at: opts.openPricing.at }
+      : null,
     market: opts.market ?? null,
     archetypes: buildArchetypes(experiments, trades),
     families: buildFamilies(data.experiments, experiments),
@@ -1382,6 +1483,25 @@ function skippedLine(e: ExperimentReport): string {
   return `Отсечённые сигналы: ${s.total} (лимит позиций ${s.byReason["max-open"]}, символ занят ${s.byReason["symbol-busy"]}, нет денег ${s.byReason["no-budget"]})${s.capped ? " — упёрлись в лимит записи, это нижняя оценка" : ""}.${outcome}`;
 }
 
+/** Открытые на конец периода по последней цене (баг 0041) — отдельно от метрик закрытых. */
+function unrealizedLine(e: ExperimentReport): string {
+  const u = e.unrealized;
+  if (u.open === 0) return "Открытых позиций на конец периода нет.";
+  const head = `Открыто на конец периода: ${u.open}, старейшая — ${num(u.maxAgeDays, 1)} дн.`;
+  if (u.pnl === null) return `${head} По последней цене не оценены.`;
+  const r =
+    u.sumR === null ? "" : `, сумма ${num(u.sumR)}R (со стопом ${u.withStop})`;
+  const noPrice = u.priced < u.open ? `; без цены — ${u.open - u.priced}` : "";
+  return `${head} Если закрыть по рынку сейчас: ${usd(u.pnl)} $${r}${noPrice}. В метрики закрытых сделок не входит.`;
+}
+
+/** Сводка: «Нереализ. R / $» открытых по последней цене; «—» — открытых нет или не оценены. */
+function unrealizedCell(e: ExperimentReport): string {
+  const u = e.unrealized;
+  if (u.pnl === null) return "—";
+  return `${u.sumR === null ? "—" : num(u.sumR)} / ${usd(u.pnl)}`;
+}
+
 function afterExitTable(rows: AfterExitRow[] | null): string[] {
   if (!rows?.length) return [];
   return [
@@ -1423,7 +1543,9 @@ function experimentSection(e: ExperimentReport): string[] {
       "",
       `Гипотеза: ${e.hypothesis}`,
       "",
-      `Архетип: ${ARCHETYPE_LABEL[e.archetype]}. Закрытых сделок нет (открыто ${s.open}).${accounted ? ` ${accounted}` : ""}`,
+      `Архетип: ${ARCHETYPE_LABEL[e.archetype]}. Закрытых сделок нет.${accounted ? ` ${accounted}` : ""}`,
+      // Открытые — одно число на конец периода (unrealized), а не открытые после --since.
+      unrealizedLine(e),
       ...(e.skipped.total ? [skippedLine(e)] : []),
       "",
     ];
@@ -1436,7 +1558,7 @@ function experimentSection(e: ExperimentReport): string[] {
     ...e.config.map((c) => `- ${c.label}: ${c.value}`),
     "",
     ...(accounted ? [accounted] : []),
-    `Выборка: ${s.closed} закрытых (${SAMPLE_LABEL[e.sample]}), открыто ${s.open}; ${num(e.tradesPerDay, 1)} сделок/день; до 30 — ${days(e.daysTo.preliminary)}, до 100 — ${days(e.daysTo.decidable)}.`,
+    `Выборка: ${s.closed} закрытых (${SAMPLE_LABEL[e.sample]}), открыто ${e.unrealized.open}; ${num(e.tradesPerDay, 1)} сделок/день; до 30 — ${days(e.daysTo.preliminary)}, до 100 — ${days(e.daysTo.decidable)}.`,
     `Результат: PnL ${usd(s.realizedPnl)} $ (до комиссий ${usd(e.pnlBeforeFees)} $), win rate ${pct(s.winRate)}, PF ${num(s.profitFactor)}, payoff ${num(e.payoff)}, просадка ${pct(s.maxDrawdownPct, 1)}.`,
     `Ожидание: R ${num(e.r.mean)} (sd ${num(e.r.sd)}, t ${num(e.r.t)}, n ${e.r.n}); доходность ${signedPct(e.returnPct.mean)}% (t ${num(e.returnPct.t)}); к случайному входу рынка ${e.vsRandomPct === null ? "—" : `${signedPct(e.vsRandomPct)} п. п.`}`,
     costLine(e),
@@ -1448,6 +1570,7 @@ function experimentSection(e: ExperimentReport): string[] {
     dayLine(e),
     `Контекст входа: у ${pct(e.contextCoverage)} закрытых сделок (у сделок до spec 0030 его нет).`,
     skippedLine(e),
+    unrealizedLine(e),
     ...(e.hints.length ? [`Подсказки: ${e.hints.join(", ")}.`] : []),
     ...(e.flags.length ? ["", `⚠️ Подозрительно: ${e.flags.join("; ")}.`] : []),
     "",
@@ -1556,7 +1679,7 @@ export function renderLabReport(
     : report.experiments;
   const rows = report.experiments.map(
     (e) =>
-      `| ${focus.has(e.id) ? `**${e.id}**` : e.id} | ${e.name} | ${e.market} | ${ARCHETYPE_LABEL[e.archetype]} | ${e.stats.closed} | ${SAMPLE_LABEL[e.sample]} | ${usd(e.stats.realizedPnl)} | ${pct(e.stats.winRate)} | ${num(e.stats.profitFactor)} | ${num(e.r.mean)} | ${num(e.costs.grossAvgR)} | ${num(e.costs.costAvgR)} | ${num(e.r.t)} | ${signedPct(e.returnPct.mean)} | ${e.skipped.total || "—"} | ${[...(e.flags.length ? ["⚠️"] : []), ...e.hints].join(" ")} |`,
+      `| ${focus.has(e.id) ? `**${e.id}**` : e.id} | ${e.name} | ${e.market} | ${ARCHETYPE_LABEL[e.archetype]} | ${e.stats.closed} | ${SAMPLE_LABEL[e.sample]} | ${usd(e.stats.realizedPnl)} | ${pct(e.stats.winRate)} | ${num(e.stats.profitFactor)} | ${num(e.r.mean)} | ${num(e.costs.grossAvgR)} | ${num(e.costs.costAvgR)} | ${num(e.r.t)} | ${signedPct(e.returnPct.mean)} | ${e.skipped.total || "—"} | ${e.unrealized.open || "—"} | ${unrealizedCell(e)} | ${[...(e.flags.length ? ["⚠️"] : []), ...e.hints].join(" ")} |`,
   );
   const run = report.run;
   const runLine =
@@ -1576,6 +1699,9 @@ export function renderLabReport(
     report.klinesLoaded
       ? "Свечи ТФ загружены: «после выхода» и грубый исход отсечённых сигналов посчитаны."
       : "«После выхода» и исход отсечённых сигналов — с флагом `--after-exit` (догружает свечи публичным API).",
+    report.openPricing
+      ? `Открытые позиции оценены по последней цене (${report.openPricing.source}, ${report.openPricing.at}) — как если бы их закрыли по рынку сейчас; в метрики закрытых сделок не входят.`
+      : "Открытые позиции по последней цене не оценены.",
     ...(focus.size
       ? [
           `Фокус: ${report.focus.join(", ")} — подробные разделы только по ним; сводка, архетипы, семейства и контроль — по всем.`,
@@ -1586,10 +1712,10 @@ export function renderLabReport(
     ...marketSection(report.market),
     "## Сводка (по средней доходности сделки)",
     "",
-    "R до изд. и Изд. R — средний R до издержек (комиссии и слиппедж) и сами издержки: avg R = R до изд. − Изд. R. Отсеч. — сигналы, не открытые из-за лимита.",
+    "R до изд. и Изд. R — средний R до издержек (комиссии и слиппедж) и сами издержки: avg R = R до изд. − Изд. R. Отсеч. — сигналы, не открытые из-за лимита. Откр. — открытые на конец периода; Нереализ. R / $ — их сумма R и PnL, если закрыть по рынку по последней цене (в остальные столбцы не входят).",
     "",
-    "| id | Эксперимент | Рынок | Архетип | Закрыто | Выборка | PnL $ | Win | PF | avg R | R до изд. | Изд. R | t(R) | Доходн. % | Отсеч. | Подсказки |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    "| id | Эксперимент | Рынок | Архетип | Закрыто | Выборка | PnL $ | Win | PF | avg R | R до изд. | Изд. R | t(R) | Доходн. % | Отсеч. | Откр. | Нереализ. R / $ | Подсказки |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ...rows,
     "",
     ...archetypesSection(report.archetypes),

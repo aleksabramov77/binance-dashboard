@@ -12,7 +12,10 @@ export interface OpenPosition {
   /** Текущий стоп (после безубытка и трейлинга). */
   stop: number | null;
   takeProfit: number | null;
-  /** ATR при входе — шаг трейлинга. */
+  /**
+   * ATR при входе. Шаг трейлинга — его доля от цены входа (atr / entryPrice), приложенная к экстремуму:
+   * trailAtr × (atr / entryPrice) × extreme (баг 0041).
+   */
   atr: number;
   /** Лучшая цена с момента входа: high для long, low для short. */
   extreme: number;
@@ -135,8 +138,11 @@ export function walkExits(
       better(pos.entryPrice)
     )
       stop = pos.entryPrice;
-    if (policy.trailAtr !== undefined && pos.atr > 0) {
-      const level = extreme - sign * policy.trailAtr * pos.atr;
+    if (policy.trailAtr !== undefined && pos.atr > 0 && pos.entryPrice > 0) {
+      // Дистанция — trailAtr × ATR входа в долях цены входа, от экстремума (баг 0041): после сильного хода
+      // абсолютный ATR входа уже не тот процент цены. extreme / entryPrice при extreme = entry ровно 1.
+      const level =
+        extreme - sign * policy.trailAtr * pos.atr * (extreme / pos.entryPrice);
       if (better(level)) stop = level;
     }
     checkedUntil = c.openTime + MINUTE;

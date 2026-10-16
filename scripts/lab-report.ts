@@ -1,5 +1,5 @@
 // `pnpm lab:report [--run <id>] [--experiment <id>]… [--since 7d|24h|<ISO>] [--out <каталог>] [--no-market]
-// [--after-exit]` — отчёт лаборатории по эпохе из БД (.env.local: DATABASE_URL или локальный PGlite) для разбора
+// [--after-exit] [--no-prices]` — отчёт лаборатории по эпохе из БД (.env.local: DATABASE_URL или локальный PGlite) для разбора
 // экспериментов (flow lab, агент quant, скилл trading-lab). Только чтение; печатает, к какой БД подключён.
 // Эпоха — текущая, `--run <id>` — прошлая (период — до начала следующей эпохи).
 // Считает всегда по всем экспериментам (семейства, архетипы, контроль нужны целиком); --experiment — фокус:
@@ -7,12 +7,20 @@
 // skipped.csv (отсечённые сигналы); без — печатает md. Контекст рынка (BTC 4h/1d с публичного API Binance) — если
 // нет --no-market и есть сеть. `--after-exit` догружает свечи ТФ экспериментов (публичный API, по символу на
 // запрос): «что было через 4/12/24 свечи после выхода» и грубый исход отсечённых сигналов; по умолчанию выключен.
+// Открытые позиции текущей эпохи оцениваются по последней цене (`ticker/price` публичного API, баг 0041): столбцы
+// «Откр.» и «Нереализ. R / $», в report.json — `unrealized`; `--no-prices` — без этого запроса.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import type { Timeframe } from "@binance-dashboard/trading-core";
+import type {
+  ExperimentMarket,
+  PaperTrade,
+  Timeframe,
+} from "@binance-dashboard/trading-core";
 import { filterTrades, readLabDataset } from "@/entities/experiment";
+import { priceKey } from "@/features/paper-engine";
 import { fetchKlines } from "@/shared/api/binance/market";
+import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import { getDatabaseConfig } from "@/shared/config/env.server";
 import { closeDb, getDb } from "@/shared/db/client.server";
 import { describeDatabase } from "./lib/dbTarget";
@@ -20,6 +28,7 @@ import { type KlineSet, klineRequests, loadKlines } from "./lib/labKlines";
 import { loadMarketContext, type MarketContext } from "./lib/labMarket";
 import {
   buildLabReport,
+  type OpenPricing,
   parseSince,
   renderLabReport,
   renderSkippedCsv,
@@ -42,6 +51,33 @@ async function marketContext(
   }
 }
 
+/** Последние цены рынков открытых позиций (публичный `ticker/price`); рынок не ответил — его позиции без оценки. */
+async function openPricing(
+  open: PaperTrade[],
+  now: number,
+): Promise<OpenPricing | null> {
+  const markets = new Set<ExperimentMarket>(open.map((t) => t.market));
+  if (!markets.size) return null;
+  const prices: Record<string, number> = {};
+  await Promise.all(
+    [...markets].map(async (market) => {
+      try {
+        for (const [symbol, price] of await fetchTickerPrices(market))
+          prices[priceKey(market, symbol)] = price;
+      } catch (error) {
+        console.warn(
+          `[lab:report] цены ${market} не получены — открытые позиции не оценены: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }),
+  );
+  return {
+    prices,
+    source: "ticker/price публичного API Binance",
+    at: new Date(now).toISOString(),
+  };
+}
+
 /** `--run`: целое число ≥ 1. */
 function parseRun(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
@@ -60,6 +96,7 @@ async function main() {
       out: { type: "string" },
       "no-market": { type: "boolean", default: false },
       "after-exit": { type: "boolean", default: false },
+      "no-prices": { type: "boolean", default: false },
     },
   });
   const runId = parseRun(values.run);
@@ -98,6 +135,15 @@ async function main() {
     );
   }
 
+  // Прошлая эпоха закрыта сбросом — открытых в ней нет, а цены «сейчас» к ней не относятся.
+  const pricing =
+    values["no-prices"] || data.run.endedAt
+      ? null
+      : await openPricing(
+          data.trades.filter((t) => t.closedAt === null),
+          now,
+        );
+
   const report = buildLabReport(data, {
     now,
     focus: values.experiment?.map((id) => id.toUpperCase()),
@@ -105,6 +151,7 @@ async function main() {
     market,
     database,
     klines,
+    openPricing: pricing,
   });
   const md = renderLabReport(report);
   if (values.out) {
