@@ -14,13 +14,13 @@ import {
 } from "@/shared/api/binance";
 import { fetchWalletBalances } from "@/shared/api/binance/account.server";
 import { fetchDemoEquity } from "@/shared/api/binance/demo.server";
-import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import {
   getBinanceCredentials,
   getDemoTradingConfig,
 } from "@/shared/config/env.server";
 import { CooldownError } from "@/shared/lib/fetchRetry";
 import { log } from "@/shared/lib/logger.server";
+import { cachedTickerPrices } from "./tickerPrices";
 
 /** Не чаще одного похода на каждый хост Binance в минуту (AC5). */
 export const BALANCES_TTL_MS = 60_000;
@@ -73,7 +73,8 @@ async function loadDemo(): Promise<Wallets> {
     });
   let prices: Map<string, number>;
   try {
-    prices = await fetchTickerPrices("spot");
+    // Цены — из общего кэша с бюджетами лаборатории: без второго ticker/price к api.binance.com.
+    prices = await cachedTickerPrices("spot");
   } catch (error) {
     logFailure("Demo (цены)", error);
     return each({

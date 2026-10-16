@@ -8,6 +8,7 @@ import {
   clearAccountBalancesCache,
   getAccountBalances,
 } from "./accountBalances";
+import { clearTickerPricesCache } from "./tickerPrices";
 
 vi.mock("@/shared/api/binance/account.server", () => ({
   fetchWalletBalances: vi.fn(),
@@ -31,6 +32,7 @@ const withKeys = () => {
 
 beforeEach(() => {
   clearAccountBalancesCache();
+  clearTickerPricesCache();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-16T10:00:00Z"));
   vi.mocked(fetchTickerPrices).mockResolvedValue(new Map([["BTCUSDT", 1]]));
