@@ -3,6 +3,7 @@ import {
   fetchDemoOpenSymbols,
   fetchDemoUsdtBalances,
 } from "@/shared/api/binance/demo.server";
+import { demoVenue } from "@/shared/api/binance/venue.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 
@@ -19,9 +20,10 @@ export async function getTradeOverview(): Promise<TradeOverview> {
       openSymbols: null,
       error: null,
     };
+  const venue = demoVenue(config.credentials);
   const [balances, openSymbols] = await Promise.allSettled([
-    fetchDemoUsdtBalances(config.credentials),
-    fetchDemoOpenSymbols(config.credentials),
+    fetchDemoUsdtBalances(venue),
+    fetchDemoOpenSymbols(venue),
   ]);
   // Без списка открытых сделок дашборд работает, просто не помечает сетапы.
   if (openSymbols.status === "rejected")

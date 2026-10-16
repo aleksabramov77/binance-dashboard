@@ -1,10 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  MAX_RISK_PCT,
-  type TradeRequest,
-  type TradeResult,
-  type TradeStep,
-} from "@/entities/trade";
+import type { TradeRequest, TradeResult, TradeStep } from "@/entities/trade";
 import {
   type DemoProtectRefs,
   demoSpotBuyProtected,
@@ -23,8 +18,7 @@ import {
   type SymbolRules,
   unknownOutcomeDeadline,
 } from "@/shared/api/binance/demo.server";
-import type { BinanceCredentials } from "@/shared/config/env.server";
-import { getDemoTradingConfig } from "@/shared/config/env.server";
+import type { TradeVenue } from "@/shared/api/binance/venue.server";
 import { log } from "@/shared/lib/logger.server";
 import { SPOT_TAKER_FEE } from "../config/spot";
 import { TRADE_DEADLINE_MS } from "../config/trade";
@@ -62,20 +56,25 @@ import {
   recheckUntil,
   sleep,
 } from "./tradeSteps";
+import { demoTradeContext, type TradeVenueContext } from "./tradeVenue";
 
 /**
  * Исполняет сделку в Binance Demo Trading: спот — покупка и TP/SL одной заявкой OTOCO/OTO,
  * фьючерсы — вход по рынку и сразу algo TP/SL (стоп не встал — позиция закрывается по рынку).
  * Позиция без стопа не остаётся, кроме случаев, когда и откат не удался (unprotected — тревога).
- * Боевой режим здесь не поддерживается намеренно — только демо-хосты.
+ * Площадка — ctx (spec 0049): по умолчанию Binance Demo из env; реальный счёт передаёт только воркер реального
+ * счёта (его клиент пропускает лишь белый список запросов).
  */
-export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
+export async function placeTrade(
+  req: TradeRequest,
+  ctx: TradeVenueContext | null = demoTradeContext(),
+): Promise<TradeResult> {
   const steps: TradeStep[] = [];
   const tradeDeadline = Date.now() + TRADE_DEADLINE_MS;
   const base = {
     id: randomUUID(),
     at: new Date().toISOString(),
-    environment: "demo" as const,
+    environment: ctx?.venue.kind ?? ("demo" as const),
     request: req,
   };
   // Свои защитные ордера (PR 2b) — заполняются по ходу сделки; у rejected позиции нет — и ссылок нет.
@@ -126,27 +125,27 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
       o.withEntry ? (filled ?? null) : null,
     );
 
-  const config = getDemoTradingConfig();
-  if (!config)
+  if (!ctx)
     return finish(
       "rejected",
       "Ключ Demo Trading не настроен (BINANCE_DEMO_API_KEY / SECRET).",
     );
-  const creds = config.credentials;
+  const { venue } = ctx;
+  const where = venue.kind === "demo" ? "Binance Demo" : "Binance";
 
   let rules: Awaited<ReturnType<typeof fetchDemoSymbolRules>>;
   let price: number;
   let availableUsd: number;
   try {
-    rules = await fetchDemoSymbolRules(req.market, req.symbol);
+    rules = await fetchDemoSymbolRules(req.market, req.symbol, venue);
     if (!rules)
       return finish(
         "rejected",
-        `${req.symbol} нет в Binance Demo Trading (${req.market === "spot" ? "Spot" : "Futures"}).`,
+        `${req.symbol} нет в ${venue.kind === "demo" ? "Binance Demo Trading" : "Binance"} (${req.market === "spot" ? "Spot" : "Futures"}).`,
       );
     const [demoPrice, balances] = await Promise.all([
-      fetchDemoPrice(req.market, req.symbol),
-      fetchDemoUsdtBalances(creds),
+      fetchDemoPrice(req.market, req.symbol, venue),
+      fetchDemoUsdtBalances(venue),
     ]);
     price = demoPrice;
     availableUsd = balances[req.market];
@@ -154,16 +153,16 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     // Сеть, а не отсутствие символа: ничего не отправлено, можно повторить.
     return finish(
       "rejected",
-      `Не удалось получить данные Binance Demo — сделка не отправлена, попробуйте ещё раз. ${errorText(error)}`,
+      `Не удалось получить данные ${where} — сделка не отправлена, попробуйте ещё раз. ${errorText(error)}`,
     );
   }
 
   const checked = validateTrade(req, {
     price,
     rules,
-    maxNotionalUsd: config.maxNotionalUsd,
+    maxNotionalUsd: ctx.maxNotionalUsd,
     availableUsd,
-    maxRiskPct: MAX_RISK_PCT,
+    maxRiskPct: ctx.maxRiskPct,
   });
   if (!checked.ok) return finish("rejected", checked.errors.join(" "));
   const v = checked.value;
@@ -173,7 +172,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
 
   if (req.market === "spot")
     return placeSpot({
-      creds,
+      venue,
       req,
       v,
       rules,
@@ -186,7 +185,7 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     });
 
   return placeFutures({
-    creds,
+    venue,
     req,
     v,
     rules,
@@ -197,11 +196,12 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
     finish,
     done,
     tradeDeadline,
+    autoHedge: ctx.autoHedge,
   });
 }
 
 interface SpotContext {
-  creds: BinanceCredentials;
+  venue: TradeVenue;
   req: TradeRequest;
   v: ValidatedTrade;
   rules: SymbolRules;
@@ -224,7 +224,7 @@ const PENDING_CHECK_DELAYS_MS = [300, 700, 1500];
  * ордера нет и при проверке после дедлайна (заявка до движка не дошла).
  */
 const recheckSpotOrder = (
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   clientOrderId: string,
   deadline: number,
@@ -233,7 +233,7 @@ const recheckSpotOrder = (
   recheckUntil(
     deadline,
     tradeDeadline,
-    () => fetchDemoSpotOrderByClientId(creds, symbol, clientOrderId),
+    () => fetchDemoSpotOrderByClientId(venue, symbol, clientOrderId),
     (order) => order !== null,
   );
 
@@ -246,11 +246,11 @@ async function recheckSpotList(
   withTakeProfit: boolean,
   deadline: number,
 ): Promise<SpotEntryListResult | "missing" | "error"> {
-  const { creds, req, ids, steps } = c;
+  const { venue, req, ids, steps } = c;
   const label = "Проверка заявки на бирже";
   try {
     const working = await recheckSpotOrder(
-      creds,
+      venue,
       req.symbol,
       ids.working,
       deadline,
@@ -267,7 +267,7 @@ async function recheckSpotList(
     const pendingIds = withTakeProfit ? [ids.stop, ids.takeProfit] : [ids.stop];
     const pending = await Promise.all(
       pendingIds.map((id) =>
-        fetchDemoSpotOrderByClientId(creds, req.symbol, id),
+        fetchDemoSpotOrderByClientId(venue, req.symbol, id),
       ),
     );
     steps.push({
@@ -290,7 +290,7 @@ async function recheckSpotList(
  * отклоняет всю заявку, монеты не покупаются. Если составные заявки по символу запрещены — по-старому.
  */
 async function placeSpot(c: SpotContext): Promise<TradeResult> {
-  const { creds, req, v, rules, price, ids, steps, done } = c;
+  const { venue, req, v, rules, price, ids, steps, done } = c;
   const mode = chooseSpotEntry(rules, req.stopOnly === true);
   if (mode === "market") return placeSpotMarket(c);
 
@@ -303,7 +303,7 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
   let list: SpotEntryListResult;
   const sentAt = Date.now();
   try {
-    list = await demoSpotBuyProtected(creds, {
+    list = await demoSpotBuyProtected(venue, {
       symbol: req.symbol,
       quantity: v.quantity,
       limitPrice,
@@ -362,7 +362,7 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
       const statuses = await Promise.all(
         list.pending.map(async (p) => ({
           type: p.type,
-          status: await fetchDemoSpotOrderStatus(creds, req.symbol, p.orderId),
+          status: await fetchDemoSpotOrderStatus(venue, req.symbol, p.orderId),
         })),
       );
       pending = pendingOutcome(statuses);
@@ -400,7 +400,7 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
     const label = "Снять свой тейк";
     try {
       const tp = await fetchDemoSpotOrderByClientId(
-        creds,
+        venue,
         req.symbol,
         ids.takeProfit,
       );
@@ -411,7 +411,7 @@ async function placeSpot(c: SpotContext): Promise<TradeResult> {
       }
       if (next === "cancelTakeProfit") {
         const cancelled = await demoSpotCancelByClientId(
-          creds,
+          venue,
           req.symbol,
           ids.takeProfit,
         );
@@ -464,7 +464,7 @@ function spotListRefs(
 
 /** Спот без составных заявок: покупка по рынку, затем защита (при её отказе — продажа). */
 async function placeSpotMarket(c: SpotContext): Promise<TradeResult> {
-  const { creds, req, v, rules, price, ids, steps, done } = c;
+  const { venue, req, v, rules, price, ids, steps, done } = c;
   const label = "Покупка по рынку";
   let filled: number;
   let quoteQty: number;
@@ -473,7 +473,7 @@ async function placeSpotMarket(c: SpotContext): Promise<TradeResult> {
   const sentAt = Date.now();
   try {
     const order = await demoSpotMarketOrder(
-      creds,
+      venue,
       req.symbol,
       "BUY",
       v.quantity,
@@ -502,7 +502,7 @@ async function placeSpotMarket(c: SpotContext): Promise<TradeResult> {
     try {
       order =
         (await recheckSpotOrder(
-          creds,
+          venue,
           req.symbol,
           ids.market,
           unknownOutcomeDeadline(sentAt, Date.now()),
@@ -562,7 +562,7 @@ async function protectOrSell(
     filled: number;
   },
 ): Promise<TradeResult> {
-  const { creds, req, v, ids, steps, done } = c;
+  const { venue, req, v, ids, steps, done } = c;
   const { sellQty, entryPrice, filled } = bought;
   const protectLabel = req.stopOnly ? "Стоп" : "OCO: тейк + стоп";
   // Свои id отдельной защиты: даже при неизвестном исходе закрытие найдёт стоп по clientOrderId.
@@ -580,7 +580,7 @@ async function protectOrSell(
   try {
     if (req.stopOnly) {
       const stop = await demoSpotStopLossSell(
-        creds,
+        venue,
         req.symbol,
         sellQty,
         v.stopLoss,
@@ -594,7 +594,7 @@ async function protectOrSell(
       });
     } else {
       const oco = await demoSpotOcoSell(
-        creds,
+        venue,
         req.symbol,
         sellQty,
         v.takeProfit,
@@ -637,7 +637,7 @@ async function protectOrSell(
   let sold = false;
   try {
     const order = await demoSpotMarketOrder(
-      creds,
+      venue,
       req.symbol,
       "SELL",
       sellQty,

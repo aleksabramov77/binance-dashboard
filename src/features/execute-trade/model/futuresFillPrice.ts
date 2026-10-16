@@ -2,7 +2,7 @@ import {
   fetchDemoFills,
   fetchDemoFuturesOrder,
 } from "@/shared/api/binance/demo.server";
-import type { BinanceCredentials } from "@/shared/config/env.server";
+import type { TradeVenue } from "@/shared/api/binance/venue.server";
 import { log } from "@/shared/lib/logger.server";
 import { groupFills } from "../lib/groupFills";
 
@@ -15,14 +15,14 @@ const errorText = (error: unknown) =>
  * ордер по orderId, затем его исполнения (userTrades). null — узнать не удалось (берём текущую).
  */
 export async function futuresFillPrice(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   orderId: number,
 ): Promise<number | null> {
   try {
-    const order = await fetchDemoFuturesOrder(creds, symbol, { orderId });
+    const order = await fetchDemoFuturesOrder(venue, symbol, { orderId });
     if (order && order.avgPrice > 0) return order.avgPrice;
-    const fills = await fetchDemoFills(creds, "usdm", symbol, 50);
+    const fills = await fetchDemoFills(venue, "usdm", symbol, 50);
     const own = groupFills(fills).find((o) => o.orderId === orderId);
     return own && own.avgPrice > 0 ? own.avgPrice : null;
   } catch (error) {

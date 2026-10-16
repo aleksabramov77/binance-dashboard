@@ -7,7 +7,6 @@ import {
   fetchDemoSymbolOrders,
   fetchDemoTradedSymbols,
 } from "@/shared/api/binance/demo.server";
-import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { splitSymbol } from "@/shared/lib";
 import { log } from "@/shared/lib/logger.server";
 import { groupFills, type OrderAggregate, orderKey } from "../lib/groupFills";
@@ -16,6 +15,7 @@ import {
   type OrderMark,
   type SymbolState,
 } from "../lib/markTrades";
+import { demoTradeContext } from "./tradeVenue";
 
 /** Строк в таблице: десятки ордеров за несколько часов активной торговли. */
 const ORDERS_LIMIT = 150;
@@ -63,14 +63,13 @@ function symbolState(
  * Каждому ордеру — статус его сделки (TP / SL / вручную / открыта …).
  */
 export async function getTradeHistory(): Promise<TradeHistory> {
-  const config = getDemoTradingConfig();
-  if (!config) return { configured: false, error: null, orders: [] };
-  const creds = config.credentials;
+  const venue = demoTradeContext()?.venue;
+  if (!venue) return { configured: false, error: null, orders: [] };
 
   // Символы + позиции и баланс одним снимком: они же нужны для статусов открытых сделок.
   let snapshot: DemoTradeSnapshot;
   try {
-    snapshot = await fetchDemoTradedSymbols(creds);
+    snapshot = await fetchDemoTradedSymbols(venue);
   } catch (error) {
     return { configured: true, error: errorText(error), orders: [] };
   }
@@ -82,10 +81,10 @@ export async function getTradeHistory(): Promise<TradeHistory> {
     .slice(0, SYMBOLS_LIMIT);
   const [fillResults, orderResults] = await Promise.all([
     Promise.allSettled(
-      pairs.map((p) => fetchDemoFills(creds, p.market, p.symbol)),
+      pairs.map((p) => fetchDemoFills(venue, p.market, p.symbol)),
     ),
     Promise.allSettled(
-      pairs.map((p) => fetchDemoSymbolOrders(creds, p.market, p.symbol)),
+      pairs.map((p) => fetchDemoSymbolOrders(venue, p.market, p.symbol)),
     ),
   ]);
 
