@@ -118,7 +118,8 @@ describe("walkExits: безубыток и трейлинг", () => {
       p,
     );
     expect(r.exit).toBeNull();
-    expect(r.stop).toBe(103);
+    // 105 − 2 × (1 / 100) × 105: дистанция — 2 ATR входа в % цены от экстремума.
+    expect(r.stop).toBeCloseTo(102.9, 10);
     const out = walkExits(
       {
         ...pos,
@@ -129,7 +130,8 @@ describe("walkExits: безубыток и трейлинг", () => {
       [m(3, 103.5, 104, 102.5)],
       p,
     );
-    expect(out.exit).toEqual({ reason: "trail", price: 103, at: 3 * MIN });
+    expect(out.exit).toMatchObject({ reason: "trail", at: 3 * MIN });
+    expect(out.exit?.price).toBeCloseTo(102.9, 10);
   });
 
   it("short: трейлинг вниз", () => {
@@ -138,7 +140,7 @@ describe("walkExits: безубыток и трейлинг", () => {
       [m(0, 100, 100, 97)],
       policy({ trailAtr: 2 }),
     );
-    expect(r.stop).toBe(99);
+    expect(r.stop).toBeCloseTo(97 * 1.02, 10);
   });
 
   it("без стопа трейлинг создаёт стоп", () => {
@@ -147,7 +149,7 @@ describe("walkExits: безубыток и трейлинг", () => {
       [m(0, 100, 110, 100)],
       policy({ trailAtr: 3 }),
     );
-    expect(r.stop).toBe(107);
+    expect(r.stop).toBeCloseTo(110 * 0.97, 10);
   });
 });
 
@@ -252,9 +254,13 @@ describe("walkExits: трейлинг масштабируется с ценой
     expect(r.exit).toBeNull();
     expect(r.extreme).toBeCloseTo(0.2, 10);
     expect(r.stop).toBeCloseTo(0.22, 10);
-    const next = { ...coin(), stop: r.stop, extreme: r.extreme, mae: r.mae };
     const at = r.checkedUntil;
-    const from = { ...next, checkedUntil: at };
+    const from = coin({
+      stop: r.stop,
+      extreme: r.extreme,
+      mae: r.mae,
+      checkedUntil: at,
+    });
     expect(
       walkExits(from, [m(at / MIN, 0.2, 0.215, 0.2)], trail).exit,
     ).toBeNull();
