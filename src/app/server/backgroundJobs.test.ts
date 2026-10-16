@@ -6,12 +6,20 @@ import {
   type JobGate,
   type JobLog,
   runBackgroundJob,
+  scheduleJobs,
 } from "./backgroundJobs";
+import { parseCron } from "./backgroundSchedule";
+
+vi.mock("./backgroundSchedule", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./backgroundSchedule")>();
+  return { ...mod, parseCron: vi.fn(mod.parseCron) };
+});
 
 // Гейт фоновых задач VM (spec 0048) на фейках: без БД, биржи и таймеров.
 const fakeLog = (): JobLog => ({
   debug: vi.fn(),
   info: vi.fn(),
+  warn: vi.fn(),
   error: vi.fn(),
 });
 
@@ -153,22 +161,111 @@ describe("runBackgroundJob", () => {
     expect(await runBackgroundJob(j, r, gate(), log)).toBe("done");
   });
 
-  it("сбой чтения runner из БД — тоже error задачи, без броска", async () => {
+  it("сбой чтения runner из БД — пропуск «раннер неизвестен»: warn, не error, задача не идёт", async () => {
     const j = job();
     const log = fakeLog();
+    const r = running();
+    const boom = new Error("БД недоступна");
     const outcome = await runBackgroundJob(
       j,
-      running(),
+      r,
       gate({
         dbRunner: async () => {
-          throw new Error("БД недоступна");
+          throw boom;
         },
       }),
       log,
     );
-    expect(outcome).toBe("failed");
+    expect(outcome).toBe("skipped-runner-unknown");
     expect(j.run).not.toHaveBeenCalled();
-    expect(log.error).toHaveBeenCalledOnce();
+    expect(log.error).not.toHaveBeenCalled();
+    expect(log.debug).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledWith(
+      "cron.earn",
+      expect.stringContaining("раннер неизвестен"),
+      expect.objectContaining({
+        job: "earn-snapshot",
+        reason: "skipped-runner-unknown",
+        processRunner: "oracle",
+      }),
+      boom,
+    );
+    expect(r.running.size).toBe(0);
+  });
+
+  it("ms прогона считается один раз: в тексте и в данных одно значение", async () => {
+    const log = fakeLog();
+    let t = 1_000;
+    // Каждый вызов часов сдвигает время: два вызова дали бы разные числа.
+    const now = () => {
+      t += 7;
+      return t;
+    };
+    expect(await runBackgroundJob(job(), running(), gate(), log, now)).toBe(
+      "done",
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      "cron.earn",
+      "earn-snapshot: выполнено за 7 мс",
+      expect.objectContaining({ ms: 7 }),
+    );
+  });
+});
+
+describe("runBackgroundJob — раннер неизвестен", () => {
+  const failing: JobGate["dbRunner"] = async () => {
+    throw new Error("БД недоступна");
+  };
+
+  it("сбой чтения каждую минуту — одна строка warn на серию", async () => {
+    const j = job({ id: "demo-mirror", event: "cron.mirror", quiet: true });
+    const log = fakeLog();
+    const s = createJobsState();
+    const g = gate({ dbRunner: failing });
+    for (let i = 0; i < 5; i++)
+      expect(await runBackgroundJob(j, s, g, log)).toBe(
+        "skipped-runner-unknown",
+      );
+    expect(log.warn).toHaveBeenCalledOnce();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("БД вернулась — задача снова идёт (одна строка), новый сбой — снова warn", async () => {
+    const j = job({ id: "demo-mirror", event: "cron.mirror", quiet: true });
+    const log = fakeLog();
+    const s = createJobsState();
+    let down = true;
+    const g = gate({
+      dbRunner: async () => {
+        if (down) throw new Error("БД недоступна");
+        return "oracle";
+      },
+    });
+    expect(await runBackgroundJob(j, s, g, log)).toBe("skipped-runner-unknown");
+    down = false;
+    expect(await runBackgroundJob(j, s, g, log)).toBe("done");
+    expect(log.debug).toHaveBeenCalledOnce();
+    expect(log.debug).toHaveBeenLastCalledWith(
+      "cron.mirror",
+      expect.stringContaining("снова выполняется"),
+      expect.anything(),
+    );
+    down = true;
+    expect(await runBackgroundJob(j, s, g, log)).toBe("skipped-runner-unknown");
+    expect(log.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("смена «другой раннер» → «неизвестен» → «другой раннер» — по строке на каждую смену", async () => {
+    const j = job();
+    const log = fakeLog();
+    const s = createJobsState();
+    const other = gate({ dbRunner: async () => "supabase" });
+    await runBackgroundJob(j, s, other, log);
+    await runBackgroundJob(j, s, gate({ dbRunner: failing }), log);
+    await runBackgroundJob(j, s, other, log);
+    expect(log.debug).toHaveBeenCalledTimes(2);
+    expect(log.warn).toHaveBeenCalledOnce();
   });
 });
 
@@ -257,5 +354,25 @@ describe("backgroundJobs", () => {
       ["demo-mirror", "cron.mirror", "function"],
       ["mirror-auto", "cron.mirror_auto", "function"],
     ]);
+  });
+});
+
+describe("scheduleJobs", () => {
+  it("разбирает расписание каждой задачи один раз, при старте", () => {
+    const parse = vi.mocked(parseCron);
+    parse.mockClear();
+    const scheduled = scheduleJobs(backgroundJobs());
+    expect(parse).toHaveBeenCalledTimes(scheduled.length);
+    expect(scheduled.map((s) => s.job.id)).toEqual([
+      "earn-snapshot",
+      "log-monitor",
+      "demo-mirror",
+      "mirror-auto",
+    ]);
+    expect(scheduled[0].schedule.hours).toEqual(new Set([3, 15]));
+  });
+
+  it("ошибка в cron — видна при старте", () => {
+    expect(() => scheduleJobs([job({ cron: "* * 1 * *" })])).toThrow();
   });
 });
