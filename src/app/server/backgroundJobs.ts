@@ -167,16 +167,25 @@ const RUNS: Record<BackgroundJobId, BackgroundJob["run"]> = {
     await runDemoMirror();
     return undefined;
   },
-  // Следом — режимы реального счёта (spec 0053), как в роуте: сбой не отменяет итог авто-зеркала.
+  // Следом — режимы реального счёта (spec 0053), как в роуте: сбой одной проверки не отменяет другую; сбой
+  // авто-зеркала — ошибка таймера уже после проверки реального счёта.
   "mirror-auto": async () => {
-    const r = await runMirrorAuto();
+    const mirror = await runMirrorAuto().then(
+      (r) => ({ ok: true as const, r }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
     const live = await runLiveAuto().then(
       (l) => ({ checked: l.checked, changes: l.changes.length }),
       (error: unknown) => ({
         error: error instanceof Error ? error.message : String(error),
       }),
     );
-    return { checked: r.checked, changes: r.changes.length, live };
+    if (!mirror.ok) throw mirror.error;
+    return {
+      checked: mirror.r.checked,
+      changes: mirror.r.changes.length,
+      live,
+    };
   },
 };
 

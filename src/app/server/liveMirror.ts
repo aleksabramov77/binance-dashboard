@@ -631,11 +631,12 @@ export async function setLiveMode(
       thresholds: input.thresholds,
       by,
     });
+    // Порог ниже уже набранного убытка выключает сразу, а не при следующем закрытии (ревью PR #95).
     return {
       ok: true,
       id: input.id,
       mode: input.mode,
-      liveMirror: exp.liveMirror,
+      liveMirror: await applyLiveAutoNow(input.id, exp.liveMirror),
     };
   }
   if (input.mode !== "off") {
@@ -689,24 +690,34 @@ export async function setLiveMode(
     ...(thresholds && { thresholds }),
     telegram: await notifyLive(text),
   });
-  let liveMirror = row.liveMirror;
-  // Перевод в «Авто» — правило сразу, без ожидания суток (AC4). Сбой — «Авто» остаётся, решит суточная проверка.
-  if (input.mode === "auto") {
-    try {
-      const auto = await runLiveAuto({ ids: [input.id] });
-      if (auto.changes.some((c) => c.change === "enable")) liveMirror = true;
-    } catch (error) {
-      log.warn(
-        "live.auto",
-        `${input.id}: проверка «Авто» при переводе не удалась — решит суточная проверка`,
-        {
-          experimentId: input.id,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
-    }
-  }
+  // Перевод в «Авто» — правило сразу, без ожидания суток (AC4).
+  const liveMirror =
+    input.mode === "auto"
+      ? await applyLiveAutoNow(input.id, row.liveMirror)
+      : row.liveMirror;
   return { ok: true, id: input.id, mode: input.mode, liveMirror };
+}
+
+/** Правило режимов для одного эксперимента сразу; итог — флаг после проверки. Сбой — положение остаётся, решит суточная проверка. */
+async function applyLiveAutoNow(
+  id: string,
+  liveMirror: boolean,
+): Promise<boolean> {
+  try {
+    const auto = await runLiveAuto({ ids: [id] });
+    const change = auto.changes.find((c) => c.id === id)?.change;
+    return change === undefined ? liveMirror : change === "enable";
+  } catch (error) {
+    log.warn(
+      "live.auto",
+      `${id}: проверка режима реального счёта не удалась — решит суточная проверка`,
+      {
+        experimentId: id,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+    return liveMirror;
+  }
 }
 
 /** «Стоп входов» / «Возобновить» / «Закрыть всё» — состояние в БД, журнал live.halt и Telegram. */

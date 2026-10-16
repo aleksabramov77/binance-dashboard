@@ -293,6 +293,20 @@ describe("переключатель на четыре положения (AC1, 
     expect(after).toMatchObject({ liveLossLimitUsd: 20, liveLossStreak: 3 });
     expect(after.liveMirrorSince).toEqual(before.liveMirrorSince);
   });
+
+  it("порог опустили ниже набранного убытка — «Выкл» сразу, а не при следующем закрытии (ревью PR #95)", async () => {
+    await mode("S97", "on_autooff", { lossUsd: 20, streak: 5 });
+    await liveTrade("S97", -6);
+    await liveTrade("S97", -4.4);
+    expect((await experiment("S97")).liveMirror).toBe(true);
+    expect(
+      await mode("S97", "on_autooff", { lossUsd: 10, streak: 5 }),
+    ).toMatchObject({ ok: true, liveMirror: false });
+    expect(await experiment("S97")).toMatchObject({
+      liveMirrorMode: "off",
+      liveAutoOffReason: "убыток −$10,40 ≥ порога $10",
+    });
+  });
 });
 
 describe("автовыключение по порогам при закрытии (AC3)", () => {
