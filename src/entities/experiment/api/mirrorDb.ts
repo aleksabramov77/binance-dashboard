@@ -375,6 +375,34 @@ export async function markMirrorClosedByExchange(
   return rows.length > 0;
 }
 
+/**
+ * Своя нога сработала раньше, чем исполнился вход (объём 0): позиция открыта без стопа — строка
+ * unprotected. Только из открытых статусов: «Сбросить Demo» и ручное закрытие идут мимо замка прогона
+ * и могли уже перевести строку в closing/closed. false — строка уже не открыта.
+ */
+export async function markMirrorUnprotected(
+  db: Db,
+  tradeId: string,
+  patch: { message: string; steps: unknown[] },
+): Promise<boolean> {
+  const rows = await db
+    .update(demoMirrorOrdersTable)
+    .set({
+      status: "unprotected" satisfies MirrorStatus,
+      message: patch.message,
+      steps: patch.steps,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(demoMirrorOrdersTable.tradeId, tradeId),
+        inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
+      ),
+    )
+    .returning({ tradeId: demoMirrorOrdersTable.tradeId });
+  return rows.length > 0;
+}
+
 /** Статусы зеркала по сделкам — для таблицы сделок эксперимента. */
 export async function mirrorStatuses(
   db: Db,

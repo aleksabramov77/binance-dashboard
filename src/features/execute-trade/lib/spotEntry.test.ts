@@ -98,6 +98,10 @@ describe("заявка с неизвестным исходом", () => {
       // История «Демо-сделки» узнаёт сделку по любому её id (PR 2d).
       expect(clientIdGroup(id)).toBe("bd3f2a9c1e7b4d4e8f9a012345");
     }
+    // Повторный стоп (спот после отказа отложенных, фьючерсы после частичного входа) — свой id,
+    // не совпадает со снятым: перечитывание и снятие по clientAlgoId их не спутают.
+    expect(ids.protectStop).not.toBe(ids.stop);
+    expect(ids.protectStop.endsWith("-S2")).toBe(true);
   });
   it("перечитанная заявка — в виде ответа биржи, комиссия по ставке 0,1%", () => {
     // Демо 2026-10-15: OTO по BATUSDT, перечитано GET /api/v3/order по clientOrderId.

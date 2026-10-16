@@ -16,6 +16,7 @@ import {
   type MirrorCandidate,
   markDemoReset,
   markMirrorClosedByExchange,
+  markMirrorUnprotected,
   updateMirror,
   withMirrorRunLock,
 } from "@/entities/experiment";
@@ -125,14 +126,16 @@ async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
       for (const m of swept) {
         // Нога сработала раньше входа: позиция открыта без стопа — строка не закрыта, тревога.
         if (m.status === "unprotected") {
-          await updateMirror(db, m.tradeId, {
-            status: "unprotected",
-            message: m.message,
-            steps: m.steps,
-          });
-          log.error("mirror.legs", `${m.symbol}: ${m.message}`, {
-            tradeId: m.tradeId,
-          });
+          // Только из открытых статусов: сброс/ручное закрытие могли уже закрыть строку.
+          if (
+            await markMirrorUnprotected(db, m.tradeId, {
+              message: m.message,
+              steps: m.steps,
+            })
+          )
+            log.error("mirror.legs", `${m.symbol}: ${m.message}`, {
+              tradeId: m.tradeId,
+            });
           continue;
         }
         if (

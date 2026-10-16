@@ -377,7 +377,8 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   // Защита — на свой исполненный объём (без closePosition): у каждого зеркала свои TP/SL.
   const protectQty = floorToStep(filled, rules.stepSize);
   // Стоп «до входа» стоит на объём заявки, а исполнено меньше — переставить на исполненный: в Hedge
-  // стоп без reduceOnly при срабатывании закрыл бы лишнее (объём соседа).
+  // стоп без reduceOnly при срабатывании закрыл бы лишнее (объём соседа). Новый — со своим id `-S2`
+  // (не тем же, что снятый `-S`): перечитывание и снятие по clientAlgoId не спутают их.
   if (stopFirst && Number(protectQty) < Number(v.quantity)) {
     const cancel = await cancelOwnAlgo(creds, futuresRefs.stop, steps);
     const restop =
@@ -388,7 +389,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
             "STOP_MARKET",
             v.stopLoss,
             protectQty,
-            ids.stop,
+            ids.protectStop,
           );
     if (restop) futuresRefs.stop = restop.ref;
     const next = afterPartialEntryRestop(cancel, restop?.placed ?? null);
