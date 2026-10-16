@@ -176,6 +176,8 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - `reportClientError` шлёт `version`; `POST /api/logs` пишет ошибку вкладки со старой сборкой как `warn client.stale`
   (`clientVersion`, `serverVersion`) — монитор журнала считает всплески только по `level=error`, тревоги нет. Ошибки клиента
   текущей версии и без версии — `error client`, как раньше.
+- Проверять механизм — прод-сборкой (`VERCEL_DEPLOYMENT_ID=… pnpm build && pnpm start`): в `next dev` с заданной версией
+  бывают ложные перезагрузки из-за перекомпиляции.
 
 ## Данные на диске
 `data/` в `.gitignore`: `snapshots/` (снимки Earn), `logs/`, `pglite/` (локальная БД).

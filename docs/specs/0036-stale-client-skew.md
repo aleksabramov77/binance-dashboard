@@ -1,7 +1,7 @@
 # 0036 · Вкладка со старой сборкой ломается после деплоя и поднимает ложную тревогу «client»
 
 - **Тип:** bug
-- **Статус:** approved
+- **Статус:** done
 - **Серьёзность:** minor
 - **Дата:** 2026-10-16
 
@@ -68,3 +68,4 @@
 |---|---|
 | 2026-10-16 | Баг заведён по тревоге монитора, ТЗ утверждено пользователем |
 | 2026-10-16 | Developer, ветка `bug/0036-stale-client-skew`: падающий тест `POST /api/logs`, фикс — `deploymentId`, `getDeploymentVersion`, `GET /api/version`, версия в `reportClientError`, `warn client.stale`, плашка «Вышла новая версия» в шапке; `docs/ai/architecture.md` → «Рассинхрон версий клиента» |
+| 2026-10-16 | Tester PASS 5/5 (AC1–AC5), PR #76, ревью APPROVED (ai-approved) |
