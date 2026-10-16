@@ -479,7 +479,7 @@ bStocks, но публичного торгового API для них не н�
 | 16.1 | Реальный счёт, задача 3, часть 2: режимы «Авто» (≥ 30 сделок демо-зеркала, средний R > 0) и «Вкл + автовыкл» (убыток эксперимента в $ и серия убытков подряд) | допуск без ручного решения и автостоп убыточных | real-money-binance-subaccount | ⏭ после 0049 |
 | 17 | Реальный счёт, задача 4: колонки Real в `/experiments` и статистика по счетам (вместе с п. 12) | сравнение Paper / Demo / Real | real-money-binance-subaccount | ⏭ после п. 16 |
 | 18 | Фоновые задачи на своей VM таймерами вместо pg_cron (Earn, монитор и место в БД, демо- и авто-зеркало), только при `runner = oracle` | уход с Vercel, шаг 1 | lightsail-migration | ✅ 0048, #92 |
-| 19 | Переключение прода на VM apps-tokyo: `runner → oracle`, задания pg_cron выкл., webhook Telegram на VM, автовыкатка VM после CI на `main`, автодеплой Vercel выкл. | уход с Vercel | lightsail-migration | ⏭ |
+| 19 | Переключение прода на VM apps-tokyo: `runner → oracle`, задания pg_cron выкл., webhook Telegram на VM, автовыкатка VM после CI на `main`, автодеплой Vercel выкл. | уход с Vercel | lightsail-migration | 🚧 0055 |
 | 20 | Выкатка `binance-live` из CI (`pnpm live:build` → VM); сервис не запускать до секретов владельца | «Реальные деньги» на VM | lightsail-migration | ⏭ |
 | 21 | SQLite вместо Supabase Postgres + перенос данных (пауза ~5 мин) | уход с Supabase ($25) | lightsail-migration | ⏭ |
 | 22 | Ключ реального аккаунта в базе в зашифрованном виде (AES-GCM, решение 2026-10-15) | «Портфель» и Earn на VM | lightsail-migration | ⏭ |
