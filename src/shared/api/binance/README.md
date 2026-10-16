@@ -15,16 +15,30 @@
 - `*.server.ts` — сетевые функции, только сервер (логгер на `node:fs`, подпись на `node:crypto`).
   Импорт из клиентского компонента утянет `node:*` в браузерный бандл и сломает сборку.
 
-## Live: реальный счёт (spec 0047)
-- `liveAllowlist.ts` — белый список «метод + хост + путь» клиента реального счёта (`LIVE_ALLOWLIST`) и проверка
-  `assertLiveAllowed` до подписи и сети. Сейчас в списке только чтение: `GET /sapi/v1/account/apiRestrictions`,
-  `GET /api/v3/account`, `GET fapi /fapi/v3/account`. Пути со словами движения денег (`withdraw`, `transfer`, `capital`,
-  `sub-account`, `loan`, `borrow`, `repay`, `universal`) отвергаются всегда, даже если их добавят в список. Ордера
-  добавит задача «Реальное зеркало» — новыми строками списка и тестом.
-- `live.server.ts` — `liveSignedRequest` (единственный путь подписанных запросов с ключом `BINANCE_TRADE_*`: список →
-  `signedRequest`), `fetchLiveApiRestrictions` (ответ как есть), `fetchLiveSpotAccount` (`uid`, остатки,
-  `omitZeroBalances`), `fetchLiveFuturesAccount` (итоги `totalWalletBalance`, `availableBalance`,
-  `totalUnrealizedProfit`). Импортирует только воркер.
+## Live: реальный счёт (spec 0047, 0049)
+- `liveAllowlist.ts` — белый список «метод + рынок + путь» клиента реального счёта (`LIVE_ALLOWLIST`, хост берёт
+  клиент по рынку: spot — `api.binance.com`, usdm — `fapi.binance.com`) и проверка `assertLiveAllowed` до подписи и
+  сети. Явный перечень (тест сверяет его целиком):
+  - spec 0047, чтение: `GET /sapi/v1/account/apiRestrictions`, `GET /api/v3/account`, `GET usdm /fapi/v3/account`;
+  - spec 0049, Spot: `POST/GET/DELETE /api/v3/order`, `POST /api/v3/orderList/otoco|oto|oco`, `GET /api/v3/openOrders`,
+    `GET /api/v3/myTrades` (PnL по исполнениям);
+  - spec 0049, USDⓈ-M: `GET /fapi/v3/balance`, `GET/POST /fapi/v1/positionSide/dual` (One-way), `POST /fapi/v1/marginType`,
+    `POST /fapi/v1/leverage`, `GET /fapi/v3/positionRisk`, `GET /fapi/v1/openOrders`, `GET /fapi/v1/openAlgoOrders`,
+    `POST/GET/DELETE /fapi/v1/order`, `POST/GET/DELETE /fapi/v1/algoOrder`, `GET /fapi/v1/userTrades`.
+
+  Истории счёта (`allOrders`, `income`), переводов и `/sapi` кроме прав ключа в списке нет. Путь не в строгом формате
+  (`%`, `?`, `#`, `.`, `//`) и пути со словами движения денег (`withdraw`, `transfer`, `capital`, `sub-account`, `loan`,
+  `borrow`, `repay`, `universal`) отвергаются всегда, даже если их добавят в список.
+- `live.server.ts` — `liveClient(creds, hosts)` (ключ `LiveCredentials` + хосты; по умолчанию настоящие),
+  `liveSignedRequest` (единственный путь подписанных запросов с ключом `BINANCE_TRADE_*`: список → `signedRequest`),
+  `liveVenue(client)` — площадка для логики ордеров `features/execute-trade` (spec 0049), `fetchLiveApiRestrictions`
+  (ответ как есть), `fetchLiveSpotAccount` (`uid`, остатки, `omitZeroBalances`), `fetchLiveFuturesAccount` (итоги
+  `totalWalletBalance`, `availableBalance`, `totalUnrealizedProfit`). `LIVE_DEMO_HOSTS` — «площадка демо» для локальной
+  проверки: тот же клиент и белый список на демо-хостах с демо-ключом (воркер запрещает режим в production и не на
+  localhost). Импортирует только воркер.
+- `venue.server.ts` — `TradeVenue` (подписанный запрос к рынку + публичные адреса), `demoVenue(creds)`, `DEMO_URL`.
+  Функции `demoTrading.ts` (ордера, чтение позиций, исполнения) принимают площадку; `fetchDemoSymbolRules` /
+  `fetchDemoPrice` — публичную часть площадки (по умолчанию демо). `enableOnewayMode` — One-way для реальных фьючерсов.
 - `liveRestrictions.ts` (клиент-безопасно) — оценка прав ключа `evaluateRestrictions`: годится, если `ipRestrict`,
   `enableReading`, `enableSpotAndMarginTrading` включены, а `enableWithdrawals`, `enableInternalTransfer`,
   `permitsUniversalTransfer`, `enableMargin` выключены; `enableFutures = false` — только предупреждение. Причина
@@ -113,8 +127,9 @@
 - `*Schemas.ts` — Zod-схемы ответов. Числа Binance приходят строками → `z.coerce.number()`.
 
 ## Подводные камни
-- **Только демо-хосты для ордеров.** Реальный счёт (Live) пока только читает: подписанные запросы с его ключом — только
-  через `live.server.ts` и его белый список; в обход списка реальные хосты с торговым ключом не вызывать.
+- **Ордера — только через площадку.** Демо — `demoVenue`; реальный счёт — `liveVenue` (белый список), его вызывает
+  только воркер реального счёта. В обход списка реальные хосты с торговым ключом не вызывать; новый эндпоинт — строкой
+  в `LIVE_ALLOWLIST` и в тесте перечня.
 - Демо-фьючерсы иногда не присылают `avgPrice`/`executedQty` — схемы терпят это (`.catch(0)`).
 - `exchangeInfo` демо-фьючерсов ~900 КБ — кэшируется на 10 минут, при сбое используется старая копия.
 - Лимиты веса Binance: не делать запросов в цикле по сотням символов; кэшировать справочники. Лимит — 6000 веса

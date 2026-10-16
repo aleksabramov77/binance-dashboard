@@ -66,9 +66,7 @@ function StatusLine({ status }: { status: LiveStatus }) {
     case "ok":
       return (
         <div className="flex flex-col gap-1">
-          <p className="font-medium text-positive">
-            ✅ Ключ годится · торговля выключена
-          </p>
+          <p className="font-medium text-positive">✅ Ключ годится</p>
           {status.warnings.map((w) => (
             <p key={w} className="text-sm">
               ⚠️ {w}

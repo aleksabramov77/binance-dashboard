@@ -34,7 +34,7 @@ export function verdictText(
   verdict: LiveVerdict,
   reasons: readonly string[],
 ): string {
-  if (verdict === "ok") return "✅ ключ годится · торговля выключена";
+  if (verdict === "ok") return "✅ ключ годится";
   if (verdict === "no-key")
     return "⚪ у воркера не задан ключ (BINANCE_TRADE_API_KEY / SECRET)";
   return `⛔ ключ заблокирован: ${reasons.join("; ") || "причина не указана"}`;
