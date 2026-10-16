@@ -95,4 +95,32 @@ describe("detectIssues", () => {
       ),
     ).toEqual(["cron:earn-snapshot", "earn:stale"]);
   });
+
+  it("воркер реального счёта молчит дольше порога — критично, без напоминаний", () => {
+    const live = {
+      lastHeartbeatAt: NOW - 7 * 60_000,
+      silentAfterMs: 5 * 60_000,
+    };
+    const issues = detectIssues(base({ live }));
+    expect(issues).toEqual([
+      expect.objectContaining({
+        key: "live:silent",
+        severity: "critical",
+        repeat: false,
+        details: "последний пульс 7 мин назад (порог 5 мин)",
+      }),
+    ]);
+  });
+
+  it("пульса не было или он свежий — правило «молчит» не срабатывает", () => {
+    expect(keys(base({ live: null }))).toEqual([]);
+    expect(keys(base())).toEqual([]);
+    expect(
+      keys(
+        base({
+          live: { lastHeartbeatAt: NOW - 60_000, silentAfterMs: 5 * 60_000 },
+        }),
+      ),
+    ).toEqual([]);
+  });
 });

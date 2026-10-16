@@ -8,6 +8,9 @@ export const spotAccountSchema = z.object({
   ),
 });
 
+/** UID аккаунта из `/api/v3/account` (остальные поля не нужны). */
+export const accountUidSchema = z.object({ uid: z.number() }).loose();
+
 export const fundingAssetsSchema = z.array(
   z.object({
     asset: z.string(),

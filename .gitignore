@@ -19,6 +19,8 @@
 
 # production
 /build
+# бандл воркера реального счёта (pnpm live:build, spec 0047)
+/dist
 
 # приватные эксперименты и анализы — клон binance-dashboard-private (spec 0015)
 /private

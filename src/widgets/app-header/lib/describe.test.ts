@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AccountBalances } from "@/entities/account-balance";
 import type { MarketBudget } from "@/entities/experiment";
-import { balanceNotes, chipTitle, walletText } from "./describe";
+import {
+  balanceNotes,
+  chipTitle,
+  REAL_LABEL,
+  walletHint,
+  walletText,
+} from "./describe";
 
 const GROUPS = [
   { market: "spot", code: "SPOT" },
@@ -29,6 +35,17 @@ describe("walletText", () => {
   });
 });
 
+describe("walletHint", () => {
+  it("остаток из пульса — «субсчёт, пульс <время>»; без времени — только причина", () => {
+    expect(
+      walletHint({ usd: 10, hint: "субсчёт", at: "2026-10-16T10:00:00.000Z" }),
+    ).toMatch(/^субсчёт, пульс \S/);
+    expect(walletHint({ usd: null, hint: "нет ключа" })).toBe("нет ключа");
+    expect(walletHint({ usd: 1, hint: null })).toBeNull();
+    expect(walletHint(undefined)).toBeNull();
+  });
+});
+
 describe("chipTitle", () => {
   it("расшифровывает Paper, D и R и даёт причину «—»", () => {
     const title = chipTitle({
@@ -37,7 +54,7 @@ describe("chipTitle", () => {
       paper: budget,
       paperError: null,
       demo: { usd: 5_000, hint: null },
-      real: { usd: null, hint: "Read-only ключ Binance не задан" },
+      real: { usd: null, hint: "Воркер реального счёта не подключён" },
       balancesError: null,
     });
     expect(title).toContain("FT:USDM — USDⓈ-M");
@@ -45,7 +62,7 @@ describe("chipTitle", () => {
     expect(title).toContain("Открытых позиций: 2");
     expect(title).toMatch(/D — Demo-счёт Binance .*: 5\s000/);
     expect(title).toContain(
-      "R — Real-счёт Binance (только чтение), кошелёк в $: — (Read-only ключ Binance не задан)",
+      `${REAL_LABEL}: — (Воркер реального счёта не подключён)`,
     );
   });
 

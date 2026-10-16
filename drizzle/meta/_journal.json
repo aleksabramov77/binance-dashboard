@@ -64,6 +64,13 @@
       "when": 1792089833038,
       "tag": "0008_entry_context_mae_skipped",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792141339823,
+      "tag": "0009_live_worker_state",
+      "breakpoints": true
     }
   ]
 }
