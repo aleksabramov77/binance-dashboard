@@ -3,6 +3,9 @@
 // .env.local: тумблер эксперимента и положение демо-зеркала (--mirror-on / --mirror-off — ручные «Вкл» / «Выкл»,
 // --mirror-auto — «Авто»: автомат сразу решает по правилу spec 0043, запись mirror.auto — в журнал /logs, Telegram —
 // только с production-сервера). То же, что тумблеры в /settings и /experiments. Только после явного подтверждения.
+// Выключение — только с причиной (spec 0046): `--reason <id>=<категория>` для каждого --disable (+ `--note <id>=<текст>`);
+// уже выключенному --disable с причиной обновляет причину. Контрольный, у которого остаются включённые варианты, —
+// только с `--force-control`.
 // Печатает, к какой БД подключён; без DATABASE_URL (локальная PGlite) отказывается, если нет --local.
 // С --out дописывает apply.md в каталог прогона. Реальных ордеров нет: зеркало — Binance Demo.
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
@@ -12,6 +15,7 @@ import { writeLogs } from "@/app/server/logs";
 import { runMirrorAuto } from "@/app/server/mirrorAuto";
 import {
   readExperimentFlags,
+  setDisableReason,
   setExperimentEnabled,
   setExperimentMirrorMode,
 } from "@/entities/experiment";
@@ -37,6 +41,9 @@ async function main() {
       "mirror-on": { type: "string", multiple: true },
       "mirror-off": { type: "string", multiple: true },
       "mirror-auto": { type: "string", multiple: true },
+      reason: { type: "string", multiple: true },
+      note: { type: "string", multiple: true },
+      "force-control": { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       local: { type: "boolean", default: false },
       out: { type: "string" },
@@ -63,10 +70,22 @@ async function main() {
   const changes = diffApply(plan, await readExperimentFlags(db));
   const notes: string[] = [];
   if (!plan.dryRun) {
-    const apply = (c: ApplyChange) =>
-      c.field === "enabled"
-        ? setExperimentEnabled(db, c.id, c.to)
-        : setExperimentMirrorMode(db, c.id, c.to);
+    const apply = (c: ApplyChange) => {
+      switch (c.field) {
+        case "enabled":
+          if (c.to) return setExperimentEnabled(db, c.id, { enabled: true });
+          // planApply требует причину у каждого --disable; без неё не пишем.
+          if (!c.reason) throw new Error(`${c.id}: выключение без причины`);
+          return setExperimentEnabled(db, c.id, {
+            enabled: false,
+            ...c.reason,
+          });
+        case "reason":
+          return setDisableReason(db, c.id, c.to);
+        case "demoMirrorMode":
+          return setExperimentMirrorMode(db, c.id, c.to);
+      }
+    };
     for (const c of changes)
       if (!(await apply(c)))
         throw new Error(

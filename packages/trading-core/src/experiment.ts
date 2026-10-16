@@ -215,6 +215,13 @@ export const experimentSchema = z.object({
   initialBudget: z.number().positive(),
   enabled: z.boolean(),
   demoMirror: z.boolean(),
+  /**
+   * Вариант эксперимента (spec 0046): id контрольного, рядом с которым проверяется одно изменение настроек.
+   * Один уровень — у контрольного parentId нет. null/нет поля — самостоятельный эксперимент.
+   */
+  parentId: z.string().min(1).nullish(),
+  /** Что изменено в варианте относительно контрольного — коротко, для людей («цель 3R вместо 2R»). */
+  variantNote: z.string().trim().min(1).max(200).nullish(),
 });
 export type Experiment = z.infer<typeof experimentSchema>;
 

@@ -1,5 +1,10 @@
 import { marketSchema } from "@binance-dashboard/trading-core";
 import { z } from "zod";
+import {
+  disabledInfoSchema,
+  disableNoteSchema,
+  disableReasonSchema,
+} from "./disable";
 import { demoMirrorModeSchema, mirrorAutoSnapshotSchema } from "./mirrorAuto";
 import { demoSummarySchema } from "./view";
 // Контракт /settings лаборатории (spec 003, задача 3d): эпоха, стартовый бюджет, тумблеры экспериментов.
@@ -30,11 +35,26 @@ export const resetRequestSchema = z.object({
 });
 export type ResetRequest = z.infer<typeof resetRequestSchema>;
 
+/**
+ * Вкл/выкл эксперимента (spec 0046). Выключение — с категорией причины (без неё API отвечает 400) и коротким
+ * текстом; контрольный с включёнными вариантами выключается только с confirmControl: true (иначе 409 со списком).
+ * Включение очищает причину, поля причины не нужны.
+ */
 export const experimentEnabledSchema = z.object({
   id: z.string().min(1),
   enabled: z.boolean(),
+  reason: disableReasonSchema.optional(),
+  note: disableNoteSchema.optional(),
+  confirmControl: z.boolean().optional(),
 });
 export type ExperimentEnabled = z.infer<typeof experimentEnabledSchema>;
+
+/** Ответ 409: выключается контрольный, у которого идут варианты. */
+export const controlConflictSchema = z.object({
+  error: z.string(),
+  variants: z.array(z.string()),
+});
+export type ControlConflict = z.infer<typeof controlConflictSchema>;
 
 export const epochSchema = z.object({
   id: z.number().int(),
@@ -76,6 +96,10 @@ export const labSettingsSchema = z.object({
       demoMirrorMode: demoMirrorModeSchema,
       demoMirrorAuto: mirrorAutoSnapshotSchema.nullable(),
       initialBudget: z.number(),
+      /** Контрольный варианта (spec 0046); null — не вариант. */
+      parentId: z.string().nullable(),
+      /** Причина последнего выключения; null — включён. */
+      disabled: disabledInfoSchema.nullable(),
       /** Paper-счёт эксперимента в текущей эпохе (с учётом отдельного сброса). */
       paper: z.object({
         equity: z.number(),

@@ -19,12 +19,11 @@ async function getTradeStats(query: StatsQueryInput) {
   const res = await fetch(`/api/experiments/stats?${params}`, {
     cache: "no-store",
   });
-  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Разрезы не загрузились (${res.status})`);
   return tradeStatsResponseSchema.parse(await res.json());
 }
 
-/** Разрезы /stats по фильтрам; null — нет такой эпохи. Пока грузится новый разрез, виден прежний. */
+/** Разрезы /stats по фильтрам (несуществующая эпоха — текущая и missingRun). Пока грузится новый разрез, виден прежний. */
 export function useTradeStats(query: StatsQueryInput) {
   return useQuery({
     queryKey: tradeStatsQueryKey(query),

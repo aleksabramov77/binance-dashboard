@@ -2,6 +2,7 @@ import type { Experiment } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
 import { EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import {
+  checkVariantParents,
   DEFAULT_PRIVATE_FILE,
   decideLabPrivateWrite,
   describeDbTarget,
@@ -179,11 +180,16 @@ describe("planPrivateSeed", () => {
       Object.entries(a.config).reverse(),
     ) as Experiment["config"];
     expect(Object.keys(reordered)[0]).toBe("maxOpen");
+    const row = (e: Experiment) => ({
+      ...e,
+      parentId: e.parentId ?? null,
+      variantNote: e.variantNote ?? null,
+    });
     const plan = planPrivateSeed(
       [a, b, c],
       [
-        { ...a, config: reordered },
-        { ...b, config: { ...b.config, maxOpen: 2 } },
+        { ...row(a), config: reordered },
+        { ...row(b), config: { ...b.config, maxOpen: 2 } },
       ],
     );
     expect(plan.map((l) => [l.id, l.status])).toEqual([
@@ -192,6 +198,77 @@ describe("planPrivateSeed", () => {
       ["PS03", "new"],
     ]);
     expect(formatPlanLine(plan[2])).toMatch(/^PS03 +spot +новый +Тестовый$/);
+  });
+
+  it("новая связь с контрольным или «что изменено» — обновится (spec 0046)", () => {
+    const v = exp("PS99", { parentId: "F96", variantNote: "то же на spot" });
+    const stored = { ...v, parentId: null, variantNote: null };
+    expect(planPrivateSeed([v], [stored])[0].status).toBe("update");
+    expect(
+      planPrivateSeed(
+        [v],
+        [{ ...stored, parentId: "F96", variantNote: "то же на spot" }],
+      )[0].status,
+    ).toBe("unchanged");
+  });
+});
+
+describe("checkVariantParents (spec 0046)", () => {
+  const exp = (id: string, over: Partial<Experiment> = {}): Experiment => {
+    const r = parse([item({ id, ...over })]);
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    return r.experiments[0];
+  };
+  const catalog = [{ id: "F96" }, { id: "F97", parentId: "F96" }];
+
+  it("родитель из каталога, БД или файла — без ошибок", () => {
+    expect(
+      checkVariantParents(
+        [
+          exp("PS99", { parentId: "F96", variantNote: "то же на spot" }),
+          exp("PS98"),
+          exp("PS97", { parentId: "PS98" }),
+          exp("PS96", { parentId: "PS95" }),
+        ],
+        [...catalog, { id: "PS95", parentId: null }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("родителя нет, родитель — вариант, ссылка на себя, у варианта свои варианты", () => {
+    expect(
+      checkVariantParents(
+        [
+          exp("PS99", { parentId: "F95" }),
+          exp("PS98", { parentId: "F97" }),
+          exp("PS97", { parentId: "PS97" }),
+          exp("PS96", { parentId: "F96" }),
+          exp("PS95", { parentId: "PS96" }),
+        ],
+        catalog,
+      ),
+    ).toEqual([
+      "PS99: поле parentId — контрольного F95 нет ни в файле, ни в каталоге, ни в БД",
+      "PS98: поле parentId — F97 сам вариант (от F96): вариант варианта не поддерживается",
+      "PS97: поле parentId — ссылается на себя",
+      "PS96: поле parentId — у PS96 есть свои варианты (PS95): контрольный не может быть вариантом",
+      "PS95: поле parentId — PS96 сам вариант (от F96): вариант варианта не поддерживается",
+    ]);
+  });
+
+  it("файл главнее строки БД; variantNote без parentId — ошибка", () => {
+    // В БД PS98 — вариант F96, в файле — уже самостоятельный: PS97 может стать его вариантом.
+    expect(
+      checkVariantParents(
+        [exp("PS98"), exp("PS97", { parentId: "PS98" })],
+        [...catalog, { id: "PS98", parentId: "F96" }],
+      ),
+    ).toEqual([]);
+    expect(
+      checkVariantParents([exp("PS99", { variantNote: "что-то" })], catalog),
+    ).toEqual([
+      "PS99: поле variantNote — только у варианта: нужен parentId контрольного",
+    ]);
   });
 });
 

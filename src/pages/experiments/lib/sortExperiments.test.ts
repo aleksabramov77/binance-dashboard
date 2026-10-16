@@ -4,7 +4,7 @@ import {
   type DemoSummary,
   type ExperimentSummary,
 } from "@/entities/experiment";
-import { sortExperiments } from "./sortExperiments";
+import { arrangeVariants, sortExperiments } from "./sortExperiments";
 
 /** Демо-сводка: по умолчанию демо-сделок нет. */
 const demo = (d: Partial<DemoSummary> = {}): DemoSummary => ({
@@ -35,6 +35,9 @@ const summary = (
   initialBudget: 1000,
   enabled: true,
   demoMirror: false,
+  parentId: null,
+  variantNote: null,
+  disabled: null,
   demoMirrorMode: "auto",
   demoMirrorAuto: null,
   demo: demo(),
@@ -156,5 +159,56 @@ describe("sortExperiments", () => {
     expect(
       sortExperiments([a, b, c], "all", "demoPnl", "desc").map((e) => e.id),
     ).toEqual(["S03", "S02", "S01"]);
+  });
+});
+
+describe("arrangeVariants (spec 0046)", () => {
+  // Контрольный F96 и варианты F97 (usdm) и PS99 (spot) — фиктивные id.
+  const family = [
+    summary("F96", "usdm", [5]),
+    {
+      ...summary("F97", "usdm", [50]),
+      parentId: "F96",
+      variantNote: "цель 3R",
+    },
+    { ...summary("PS99", "spot", [-20]), parentId: "F96", variantNote: "spot" },
+    summary("F01", "usdm", [10]),
+    // Контрольного нет в БД — обычная строка.
+    { ...summary("F98", "usdm", [1]), parentId: "F90" },
+  ];
+  const view = (rows: ReturnType<typeof arrangeVariants>) =>
+    rows.map((r) => [r.e.id, r.variantOf, r.letter, r.variants]);
+
+  it("варианты под контрольным, группы — по строке контрольного, внутри — тем же столбцом", () => {
+    const sorted = sortExperiments(family, "all", "pnl", "desc");
+    expect(sorted.map((e) => e.id)).toEqual([
+      "F97",
+      "F01",
+      "F96",
+      "F98",
+      "PS99",
+    ]);
+    expect(view(arrangeVariants(sorted, family))).toEqual([
+      ["F01", null, null, 0],
+      ["F96", null, null, 2],
+      ["F97", "F96", "A", 0],
+      ["PS99", "F96", "B", 0],
+      ["F98", null, null, 0],
+    ]);
+    const asc = sortExperiments(family, "all", "pnl", "asc");
+    expect(view(arrangeVariants(asc, family)).map((r) => r[0])).toEqual([
+      "F98",
+      "F96",
+      "PS99",
+      "F97",
+      "F01",
+    ]);
+  });
+
+  it("контрольного нет под фильтром AG — вариант обычной строкой, буква не теряется у остальных", () => {
+    const spot = sortExperiments(family, "spot", "id", "asc");
+    expect(view(arrangeVariants(spot, family))).toEqual([
+      ["PS99", null, null, 0],
+    ]);
   });
 });

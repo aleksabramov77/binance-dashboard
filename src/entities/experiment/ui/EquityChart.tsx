@@ -6,6 +6,13 @@ import type { EquityPointView } from "../model/view";
 
 // Equity-кривая эксперимента: простой inline SVG без библиотек графиков. Шаг «ступенькой»:
 // equity меняется только в момент закрытия сделки. Одна серия — легенда не нужна, подпись в заголовке.
+// «Все эпохи» (spec 0046): кривая склеена через эпохи, начало каждой — вертикальная отметка marks.
+
+/** Вертикальная отметка на оси времени: начало эпохи. */
+export interface EquityMark {
+  at: string;
+  label: string;
+}
 
 const W = 720;
 const H = 220;
@@ -14,15 +21,21 @@ const PAD = { top: 12, right: 12, bottom: 24, left: 72 };
 export function EquityChart({
   points,
   initialBudget,
+  marks = [],
+  end = null,
   className,
 }: {
   points: EquityPointView[];
   initialBudget: number;
+  marks?: EquityMark[];
+  /** Правый край — конец прошлой эпохи; null — «сейчас». */
+  end?: string | null;
   className?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   // Правый край — «сейчас», чтобы последняя ступень тянулась до текущего момента.
   const [now] = useState(() => Date.now());
+  const right = end === null ? now : Date.parse(end);
 
   if (points.length < 2)
     return (
@@ -38,7 +51,7 @@ export function EquityChart({
 
   const times = points.map((p) => Date.parse(p.at));
   const t0 = Math.min(...times);
-  const t1 = Math.max(now, times[times.length - 1]);
+  const t1 = Math.max(right, times[times.length - 1]);
   const values = points.map((p) => p.equity);
   const min = Math.min(...values, initialBudget);
   const max = Math.max(...values, initialBudget);
@@ -123,8 +136,30 @@ export function EquityChart({
           textAnchor="end"
           className="fill-muted-foreground text-[11px]"
         >
-          сейчас
+          {end === null ? "сейчас" : formatDateTime(end)}
         </text>
+        {marks
+          .map((m) => ({ ...m, t: Date.parse(m.at) }))
+          .filter((m) => m.t > t0 && m.t <= t1)
+          .map((m) => (
+            <g key={m.at}>
+              <line
+                x1={x(m.t)}
+                x2={x(m.t)}
+                y1={PAD.top}
+                y2={H - PAD.bottom}
+                className="stroke-muted-foreground/60"
+                strokeDasharray="2 3"
+              />
+              <text
+                x={x(m.t) + 3}
+                y={PAD.top + 9}
+                className="fill-muted-foreground text-[10px]"
+              >
+                {m.label}
+              </text>
+            </g>
+          ))}
         <path
           d={d}
           fill="none"

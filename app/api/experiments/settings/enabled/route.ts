@@ -1,22 +1,48 @@
 import { toggleExperiment } from "@/app/server/experimentSettings";
-import { experimentEnabledSchema } from "@/entities/experiment";
+import {
+  type ExperimentEnabledState,
+  experimentEnabledSchema,
+} from "@/entities/experiment";
 import { withLogging } from "@/shared/lib/route.server";
 
-// Вкл/выкл отдельного эксперимента: выключенный не открывает новые сделки.
+// Вкл/выкл отдельного эксперимента: выключенный не открывает новые сделки. Выключение — с категорией причины
+// (spec 0046); контрольный с включёнными вариантами — только с confirmControl: true (иначе 409 со списком).
 export const POST = withLogging("experiments.enabled", async (request) => {
   const parsed = experimentEnabledSchema.safeParse(
     await request.json().catch(() => null),
   );
   if (!parsed.success)
     return Response.json(
-      { error: "Ожидается { id: string, enabled: boolean }" },
+      {
+        error:
+          "Ожидается { id: string, enabled: boolean, reason?, note? (до 200 символов), confirmControl? }",
+      },
       { status: 400 },
     );
-  const settings = await toggleExperiment(parsed.data.id, parsed.data.enabled);
-  if (!settings)
+  const { id, enabled, reason, note, confirmControl } = parsed.data;
+  const state: ExperimentEnabledState | null = enabled
+    ? { enabled: true }
+    : reason
+      ? { enabled: false, reason, note }
+      : null;
+  if (!state)
     return Response.json(
-      { error: `Эксперимент ${parsed.data.id} не найден` },
+      { error: "Выключение — только с причиной: укажите категорию (reason)" },
+      { status: 400 },
+    );
+  const result = await toggleExperiment(id, state, confirmControl ?? false);
+  if (!result)
+    return Response.json(
+      { error: `Эксперимент ${id} не найден` },
       { status: 404 },
     );
-  return Response.json(settings);
+  if ("variants" in result)
+    return Response.json(
+      {
+        error: `${id} — контрольный для ${result.variants.join(", ")}: без него варианты не с чем сравнивать. Выключить — только с confirmControl: true`,
+        variants: result.variants,
+      },
+      { status: 409 },
+    );
+  return Response.json(result);
 });
