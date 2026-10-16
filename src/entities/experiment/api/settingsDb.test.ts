@@ -10,6 +10,7 @@ import {
   resetExperimentRun,
   resetGroupRun,
   resetRun,
+  setDisableReason,
   setExperimentEnabled,
 } from "./settingsDb";
 
@@ -202,13 +203,56 @@ describe("эпоха и тумблеры", () => {
 
   it("setExperimentEnabled меняет флаг; неизвестный id — false", async () => {
     await seedExperiments(db, [exp("F01")]);
-    expect(await setExperimentEnabled(db, "F01", false)).toBe(true);
-    expect(await setExperimentEnabled(db, "NOPE", false)).toBe(false);
+    const off = { enabled: false, reason: "loser" } as const;
+    expect(await setExperimentEnabled(db, "F01", off)).toBe(true);
+    expect(await setExperimentEnabled(db, "NOPE", off)).toBe(false);
     const [row] = await db
       .select()
       .from(experimentsTable)
       .where(eq(experimentsTable.id, "F01"));
     expect(row.enabled).toBe(false);
+  });
+
+  it("выключение пишет причину и время, включение очищает (spec 0046)", async () => {
+    await seedExperiments(db, [exp("F96")]);
+    const row = async () =>
+      (
+        await db
+          .select()
+          .from(experimentsTable)
+          .where(eq(experimentsTable.id, "F96"))
+      )[0];
+    await setExperimentEnabled(db, "F96", {
+      enabled: false,
+      reason: "costs",
+      note: "  комиссии съели плюс  ",
+    });
+    const off = await row();
+    expect(off).toMatchObject({
+      enabled: false,
+      disabledReason: "costs",
+      disabledNote: "комиссии съели плюс",
+    });
+    expect(off.disabledAt).toBeInstanceOf(Date);
+
+    // Повторная причина — новая категория и текст, дата прежняя; у включённого — не пишется.
+    expect(
+      await setDisableReason(db, "F96", { reason: "loser", note: "" }),
+    ).toBe(true);
+    expect(await row()).toMatchObject({
+      disabledReason: "loser",
+      disabledNote: null,
+      disabledAt: off.disabledAt,
+    });
+
+    await setExperimentEnabled(db, "F96", { enabled: true });
+    expect(await row()).toMatchObject({
+      enabled: true,
+      disabledReason: null,
+      disabledNote: null,
+      disabledAt: null,
+    });
+    expect(await setDisableReason(db, "F96", { reason: "loser" })).toBe(false);
   });
 });
 

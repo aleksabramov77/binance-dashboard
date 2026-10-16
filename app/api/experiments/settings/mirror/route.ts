@@ -1,24 +1,35 @@
-import { toggleDemoMirror } from "@/app/server/experimentSettings";
-import { experimentDemoMirrorSchema } from "@/entities/experiment";
+import { setDemoMirrorMode } from "@/app/server/experimentSettings";
+import {
+  experimentDemoMirrorSchema,
+  experimentMirrorModeSchema,
+} from "@/entities/experiment";
 import { withLogging } from "@/shared/lib/route.server";
 
-// Demo-зеркало эксперимента (spec 008): новые paper-входы повторяются на Binance Demo.
+// Demo-зеркало эксперимента (spec 008, 0043): положение «Выкл · Авто · Вкл»; «Авто» сразу решает автомат.
+// Старый контракт { demoMirror } (вкладка со старой сборкой) — ручное «Вкл» / «Выкл».
 export const POST = withLogging("experiments.mirror", async (request) => {
-  const parsed = experimentDemoMirrorSchema.safeParse(
-    await request.json().catch(() => null),
-  );
-  if (!parsed.success)
+  const body: unknown = await request.json().catch(() => null);
+  const parsed = experimentMirrorModeSchema.safeParse(body);
+  const legacy = parsed.success
+    ? null
+    : experimentDemoMirrorSchema.safeParse(body);
+  const input = parsed.success
+    ? parsed.data
+    : legacy?.success
+      ? {
+          id: legacy.data.id,
+          mode: legacy.data.demoMirror ? ("on" as const) : ("off" as const),
+        }
+      : null;
+  if (!input)
     return Response.json(
-      { error: "Ожидается { id: string, demoMirror: boolean }" },
+      { error: 'Ожидается { id: string, mode: "off" | "auto" | "on" }' },
       { status: 400 },
     );
-  const settings = await toggleDemoMirror(
-    parsed.data.id,
-    parsed.data.demoMirror,
-  );
+  const settings = await setDemoMirrorMode(input.id, input.mode);
   if (!settings)
     return Response.json(
-      { error: `Эксперимент ${parsed.data.id} не найден` },
+      { error: `Эксперимент ${input.id} не найден` },
       { status: 404 },
     );
   // Группа не умеет демо-зеркало (COIN-M — позже, spec 0023).

@@ -1,6 +1,17 @@
 // Серверная подсистема движка (хранилище, блокировка тика, таблицы, схемы) — отдельный вход для Deno.
 
 export { loadBudgetInputs } from "./api/budgetsStore";
+// Что останется без проверки при выключении «Автоторговли» (spec 0044): подсчёт (сервер), хук модалки.
+export { readEngineExposure } from "./api/exposureDb";
+// Авто-зеркало (spec 0043): положение переключателя, данные для решения автомата, запись решения (только сервер).
+export {
+  type MirrorAutoPatch,
+  type MirrorAutoRow,
+  type MirrorAutoTrade,
+  readMirrorAutoRows,
+  saveMirrorAuto,
+  setExperimentMirrorMode,
+} from "./api/mirrorAutoDb";
 // Demo-зеркало (spec 008): какие сделки повторить на Binance Demo и какие закрыть (только сервер).
 export {
   type ActiveMirrorRow,
@@ -14,6 +25,7 @@ export {
   listMirrorsToClose,
   listOpenMirrorLegs,
   type MirrorCandidate,
+  type MirrorScope,
   type MirrorSummary,
   type MirrorToClose,
   markDemoReset,
@@ -38,15 +50,21 @@ export {
 } from "./api/readModel";
 // /settings лаборатории (задача 3d): атомарный сброс эпохи, тумблеры, контракт и хуки.
 export {
+  type ExperimentEnabledState,
   getEpoch,
   type ResetRunInput,
   type ResetRunOutcome,
   resetExperimentRun,
   resetGroupRun,
   resetRun,
+  setDisableReason,
   setExperimentEnabled,
 } from "./api/settingsDb";
-// Клиентские хуки и UI лаборатории (хедер, spec 003 · 3a).
+// Клиентские хуки и UI лаборатории (хедер, spec 003 · 3a; модалка «Автоторговли» — spec 0044).
+export {
+  engineExposureQueryKey,
+  useEngineExposure,
+} from "./api/useEngineExposure";
 export {
   engineStatusQueryKey,
   readEngineStatus,
@@ -59,6 +77,7 @@ export {
 export {
   EXPERIMENT_TRADES_LIMIT,
   experimentQueryKey,
+  experimentsListQueryKey,
   experimentsQueryKey,
   useExperiment,
   useExperiments,
@@ -70,17 +89,35 @@ export {
   useResetDemo,
   useResetExperimentPaper,
   useResetGroup,
-  useSetExperimentDemoMirror,
   useSetExperimentEnabled,
+  useSetExperimentMirrorMode,
   useSetNextBudget,
 } from "./api/useLabSettings";
 export { tradeStatsQueryKey, useTradeStats } from "./api/useTradeStats";
+// Авто-зеркало (spec 0043): правило — чистая функция, тексты (Telegram, журнал, подсказка у переключателя).
+export { MIN_TRADES, R_THRESHOLD } from "./config/mirrorAuto";
 export * from "./engine.ts";
 export {
   type BudgetInputs,
   computeMarketBudgets,
   type PriceLookup,
 } from "./lib/budgets";
+// Сравнение настроек контрольного и варианта (spec 0046).
+export {
+  CONFIG_SAME_TEXT,
+  type ConfigDiffLine,
+  diffExperimentConfig,
+} from "./lib/configDiff";
+export {
+  decideMirrorAuto,
+  type MirrorAutoInput,
+  type MirrorAutoPlan,
+  type MirrorAutoVerdict,
+  mirrorAutoVerdict,
+  mirrorWindowR,
+  mirrorWindowStart,
+  nextMirrorAutoSnapshot,
+} from "./lib/decideMirrorAuto";
 // Агрегаты по сделкам и конфиг человеческим текстом — для страниц и разрезов /stats.
 export {
   type ConfigLine,
@@ -90,6 +127,7 @@ export {
   describeTakeProfit,
   describeUniverse,
 } from "./lib/describeConfig";
+export { describeExposure } from "./lib/exposureText";
 export {
   formatProfitFactor,
   formatR,
@@ -97,6 +135,18 @@ export {
   formatSignedUsd,
   pnlTone,
 } from "./lib/formatStats";
+export { describeMirrorAuto, formatAvgR, tradesLabel } from "./lib/mirrorAuto";
+export {
+  mirrorAdviceMessage,
+  mirrorChangeMessage,
+} from "./lib/mirrorAutoMessages";
+// Период страниц лаборатории: «Все эпохи», прошлые эпохи (spec 0046).
+export {
+  ALL_RUNS_LABEL,
+  describeRunView,
+  runEnd,
+  toRunParam,
+} from "./lib/runView";
 export {
   blacklistCandidates,
   filterTrades,
@@ -119,6 +169,15 @@ export {
   type StatsTrade,
   type TradeStats,
 } from "./lib/stats";
+// Варианты эксперимента рядом с контрольным (spec 0046).
+export {
+  controlOf,
+  enabledVariantsOf,
+  type VariantLink,
+  variantLetter,
+  variantLetters,
+  variantsByControl,
+} from "./lib/variants";
 // Группы активов (AG) — коды и названия для таблиц, фильтров и хедера (spec 0016).
 export {
   ASSET_GROUP_DESCRIPTION,
@@ -137,6 +196,24 @@ export {
   type MarketBudget,
   marketBudgetSchema,
 } from "./model/budget";
+// Причина выключения эксперимента (spec 0046).
+export {
+  DISABLE_NOTE_MAX,
+  DISABLE_REASON_KEYS,
+  DISABLE_REASONS,
+  type DisabledInfo,
+  type DisableForm,
+  type DisableReason,
+  disabledInfoSchema,
+  disableFormSchema,
+  disableNoteSchema,
+  disableReasonSchema,
+  toDisabledInfo,
+} from "./model/disable";
+export {
+  type EngineExposure,
+  engineExposureSchema,
+} from "./model/exposure";
 export {
   ACTIVE_MIRROR_STATUSES,
   type ExperimentDemoMirror,
@@ -150,6 +227,21 @@ export {
   mirrorStatusSchema,
   OPEN_MIRROR_STATUSES,
 } from "./model/mirror";
+export {
+  DEMO_MIRROR_MODES,
+  type DemoMirrorMode,
+  demoMirrorModeSchema,
+  type ExperimentMirrorMode,
+  experimentMirrorModeSchema,
+  type MirrorAdvice,
+  type MirrorAutoDecision,
+  type MirrorAutoSnapshot,
+  type MirrorAutoStep,
+  mirrorAdviceSchema,
+  mirrorAutoDecisionSchema,
+  mirrorAutoSnapshotSchema,
+  mirrorAutoStepSchema,
+} from "./model/mirrorAuto";
 export type {
   InvalidExperimentRow,
   OnInvalidExperiment,
@@ -157,6 +249,8 @@ export type {
 export {
   type BudgetForm,
   budgetFormSchema,
+  type ControlConflict,
+  controlConflictSchema,
   DEFAULT_INITIAL_BUDGET,
   type DemoResetRequest,
   type DemoResetResult,
@@ -213,8 +307,17 @@ export {
   experimentDetailResponseSchema,
   experimentSummarySchema,
   experimentsResponseSchema,
+  type FamilyMember,
+  familyMemberSchema,
+  parseRunParam,
+  type RunParam,
+  type RunView,
+  runParamSchema,
+  runViewSchema,
   type TradeStatsView,
   tradeStatsSchema,
 } from "./model/view";
 export { DemoMisses } from "./ui/DemoMisses";
-export { EquityChart } from "./ui/EquityChart";
+export { DisabledBadge } from "./ui/DisabledBadge";
+export { EquityChart, type EquityMark } from "./ui/EquityChart";
+export { MissingRunNotice, RunSelect } from "./ui/RunSelect";

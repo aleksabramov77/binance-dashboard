@@ -4,7 +4,7 @@ import {
   marketSchema,
 } from "@binance-dashboard/trading-core";
 import { z } from "zod";
-import { runInfoSchema, tradeStatsSchema } from "./view";
+import { runParamSchema, runViewSchema, tradeStatsSchema } from "./view";
 
 // Контракт GET /api/experiments/stats — разрезы сделок лаборатории (spec 003, задача 3c).
 
@@ -15,13 +15,13 @@ export const STATS_GROUP_BY = [
   "symbol",
   "direction",
 ] as const;
-/** Период внутри эпохи: вся эпоха, последние 24 часа, последние 7 дней. */
+/** Период внутри эпохи (или всех эпох): весь, последние 24 часа, последние 7 дней. */
 export const STATS_PERIODS = ["epoch", "24h", "7d"] as const;
 
 export const statsGroupBySchema = z.enum(STATS_GROUP_BY);
 export const statsPeriodSchema = z.enum(STATS_PERIODS);
 
-/** Параметры запроса. Отсутствующий фильтр — «все»; run не задан — текущая эпоха. */
+/** Параметры запроса. Отсутствующий фильтр — «все»; run не задан — текущая эпоха, all — все эпохи (spec 0046). */
 export const statsQuerySchema = z.object({
   groupBy: statsGroupBySchema.default("experiment"),
   /** Старые ссылки ?market=futures — группа USDⓈ-M (spec 0023). */
@@ -30,7 +30,7 @@ export const statsQuerySchema = z.object({
   direction: directionSchema.optional(),
   symbol: z.string().min(1).optional(),
   period: statsPeriodSchema.default("epoch"),
-  run: z.coerce.number().int().positive().optional(),
+  run: runParamSchema.optional(),
 });
 
 export const statsGroupSchema = z.object({
@@ -40,19 +40,16 @@ export const statsGroupSchema = z.object({
   stats: tradeStatsSchema,
 });
 
-export const tradeStatsResponseSchema = z.object({
-  /** Эпоха, по которой посчитаны разрезы. */
-  run: runInfoSchema,
-  /** Все эпохи, новые сверху (первая — текущая). */
-  runs: z.array(runInfoSchema),
+/** Период — runViewSchema: эпоха разрезов (scope) или все эпохи, список эпох, несуществующая запрошенная эпоха. */
+export const tradeStatsResponseSchema = runViewSchema.extend({
   query: statsQuerySchema,
-  /** Начало периода (ISO); null — с начала эпохи. */
+  /** Начало периода (ISO); null — с начала эпохи (или первой эпохи для all). */
   since: z.string().nullable(),
   /** Итог по всем отфильтрованным сделкам. */
   total: tradeStatsSchema,
   /** Группы — по убыванию реализованного PnL. */
   groups: z.array(statsGroupSchema),
-  /** Варианты фильтров: эксперименты каталога и монеты, по которым в эпохе были сделки. */
+  /** Варианты фильтров: эксперименты каталога и монеты, по которым в периоде были сделки. */
   options: z.object({
     experiments: z.array(
       z.object({ id: z.string(), name: z.string(), market: marketSchema }),

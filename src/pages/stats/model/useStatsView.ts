@@ -2,7 +2,6 @@
 
 import {
   createParser,
-  parseAsInteger,
   parseAsString,
   parseAsStringLiteral,
   useQueryStates,
@@ -11,6 +10,8 @@ import {
   type ExperimentMarket,
   MARKETS,
   parseMarketParam,
+  parseRunParam,
+  type RunParam,
   STATS_GROUP_BY,
   STATS_PERIODS,
 } from "@/entities/experiment";
@@ -18,7 +19,7 @@ import {
 export const MARKET_FILTERS = MARKETS;
 export const DIRECTION_FILTERS = ["long", "short"] as const;
 
-// Фильтр без значения в URL — «все»; эпоха без значения — текущая.
+// Фильтр без значения в URL — «все»; эпоха без значения — текущая, all — все эпохи (spec 0046).
 const parsers = {
   groupBy: parseAsStringLiteral(STATS_GROUP_BY).withDefault("experiment"),
   // Старые ссылки ?market=futures — USDⓈ-M (spec 0023).
@@ -30,7 +31,7 @@ const parsers = {
   direction: parseAsStringLiteral(DIRECTION_FILTERS),
   symbol: parseAsString,
   period: parseAsStringLiteral(STATS_PERIODS).withDefault("epoch"),
-  run: parseAsInteger,
+  run: createParser<RunParam>({ parse: parseRunParam, serialize: String }),
 };
 
 /** Разрез и фильтры /stats — в URL; сортировка таблицы — в localStorage (spec 009). */

@@ -6,11 +6,14 @@ import { Suspense, useMemo } from "react";
 import {
   assetGroupOf,
   blacklistCandidates,
+  describeRunView,
   formatProfitFactor,
   formatR,
   formatRate,
   formatSignedUsd,
+  MissingRunNotice,
   pnlTone,
+  RunSelect,
   rankGroups,
   type StatsGroupBy,
   type StatsGroupView,
@@ -276,26 +279,15 @@ function Filters({ data }: { data: TradeStatsResponse | null | undefined }) {
           <TabsList>
             {(Object.keys(PERIOD_LABELS) as StatsPeriod[]).map((p) => (
               <TabsTrigger key={p} value={p}>
-                {PERIOD_LABELS[p]}
+                {p === "epoch" && view.run === "all"
+                  ? "Всё время"
+                  : PERIOD_LABELS[p]}
               </TabsTrigger>
             ))}
           </TabsList>
         </Tabs>
       </div>
-      {data && data.runs.length > 1 && (
-        <FilterSelect
-          label="Эпоха"
-          value={String(view.run ?? data.runs[0].id)}
-          onChange={(v) => {
-            const id = Number(v);
-            setView({ run: id === data.runs[0].id ? null : id });
-          }}
-          options={data.runs.map((r, i) => ({
-            value: String(r.id),
-            label: `№${r.id}${i === 0 ? " (текущая)" : ""} с ${formatDateTime(r.startedAt)}`,
-          }))}
-        />
-      )}
+      {data && <RunSelect view={data} onChange={(r) => setView({ run: r })} />}
       {filtered && (
         <Button
           variant="ghost"
@@ -543,7 +535,7 @@ function StatsDashboard() {
             Paper-сделки лаборатории по экспериментам, рынкам, монетам и
             направлениям.
             {data &&
-              ` Эпоха №${data.run.id} с ${formatDateTime(data.run.startedAt)}${
+              ` ${describeRunView(data)}${
                 data.since ? `, сделки с ${formatDateTime(data.since)}` : ""
               }.`}
           </p>
@@ -573,17 +565,8 @@ function StatsDashboard() {
 
       {isPending && <p className="text-muted-foreground">Загрузка…</p>}
       {error && <p className="text-destructive">{error.message}</p>}
-      {data === null && (
-        <p className="text-destructive">
-          Такой эпохи нет.{" "}
-          <button
-            type="button"
-            className="underline"
-            onClick={() => setView({ run: null })}
-          >
-            Открыть текущую
-          </button>
-        </p>
+      {data && (
+        <MissingRunNotice view={data} onReset={() => setView({ run: null })} />
       )}
 
       {data && (

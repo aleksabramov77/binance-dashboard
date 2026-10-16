@@ -15,10 +15,7 @@ export const GET = withLogging(
         { error: "Неверные параметры разреза", issues: parsed.error.issues },
         { status: 400 },
       );
-    const stats = await getTradeStats(parsed.data);
-    if (!stats)
-      return Response.json({ error: "Эпоха не найдена" }, { status: 404 });
-    return Response.json(stats);
+    return Response.json(await getTradeStats(parsed.data));
   },
   { quiet: true },
 );

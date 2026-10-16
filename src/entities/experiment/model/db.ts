@@ -28,12 +28,40 @@ export const experimentsTable = pgTable("experiments", {
   enabled: boolean("enabled").notNull().default(true),
   demoMirror: boolean("demo_mirror").notNull().default(false),
   /**
+   * Положение переключателя демо-зеркала (spec 0043): `auto` — demo_mirror ставит авто-зеркало по paper-сделкам,
+   * `on` / `off` — ручное решение пользователя, автомат его не меняет (только подсказывает).
+   */
+  demoMirrorMode: text("demo_mirror_mode")
+    .$type<"auto" | "on" | "off">()
+    .notNull()
+    .default("auto"),
+  /** Последнее изменение demo_mirror — начало окна сделок авто-зеркала; null — не менялось с миграции. */
+  demoMirrorSince: timestamp("demo_mirror_since", { withTimezone: true }),
+  /** Последняя отправленная подсказка по ручному положению: что сделал бы автомат (`on` / `off`); null — нет. */
+  demoMirrorAdvice: text("demo_mirror_advice").$type<"on" | "off">(),
+  /** Последнее решение авто-зеркала для подсказки в UI (mirrorAutoSnapshotSchema); null — ещё не решал. */
+  demoMirrorAuto: jsonb("demo_mirror_auto").$type<Json>(),
+  /**
    * Отдельный сброс paper-капитала эксперимента: в учёт эпохи идут только его сделки, открытые
    * не раньше этого момента. null — не сбрасывался (весь учёт эпохи).
    */
   resetAt: timestamp("reset_at", { withTimezone: true }),
   /** Сброс демо-статистики эксперимента: в учёт идут зеркала, созданные не раньше. */
   demoResetAt: timestamp("demo_reset_at", { withTimezone: true }),
+  /**
+   * Вариант (spec 0046): id контрольного эксперимента, один уровень. Без внешнего ключа: сид каталога и
+   * `pnpm lab:private` пишут строки в любом порядке, связь проверяет lab:private. null — не вариант.
+   */
+  parentId: text("parent_id"),
+  /** Что изменено в варианте относительно контрольного — текст для людей. */
+  variantNote: text("variant_note"),
+  /**
+   * Последнее выключение (spec 0046): категория (DISABLE_REASONS), короткий текст и когда. Включение очищает.
+   * null у выключенного — строка до spec 0046 (без причины).
+   */
+  disabledReason: text("disabled_reason"),
+  disabledNote: text("disabled_note"),
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

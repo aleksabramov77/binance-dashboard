@@ -1,5 +1,5 @@
 {
-  "id": "04a7e1ba-e655-48f8-8519-abfef03e3130",
+  "id": "3d305463-fbba-4551-99c1-194a04976e08",
   "prevId": "45178711-c511-4464-9bea-cb7228c7da83",
   "version": "7",
   "dialect": "postgresql",
@@ -265,6 +265,31 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "demo_mirror_mode": {
+          "name": "demo_mirror_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'auto'"
+        },
+        "demo_mirror_since": {
+          "name": "demo_mirror_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "demo_mirror_advice": {
+          "name": "demo_mirror_advice",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "demo_mirror_auto": {
+          "name": "demo_mirror_auto",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "reset_at": {
           "name": "reset_at",
@@ -711,55 +736,6 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.live_worker_state": {
-      "name": "live_worker_state",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "heartbeat": {
-          "name": "heartbeat",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "received_at": {
-          "name": "received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status_since": {
-          "name": "status_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "silent_since": {
-          "name": "silent_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

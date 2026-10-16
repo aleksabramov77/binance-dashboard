@@ -2,7 +2,11 @@
 //   pnpm mirror:supabase cron-install  — Vault (demo_mirror_url, monitor_cron_secret) + задание demo-mirror
 //   pnpm mirror:supabase cron-remove   — снять задание (зеркало перестанет открывать и закрывать позиции)
 //   pnpm mirror:supabase run           — прогон зеркала сейчас (на Vercel)
-//   pnpm mirror:supabase status        — последние запуски задания
+//   pnpm mirror:supabase status        — последние запуски заданий demo-mirror и mirror-auto, положения зеркал
+// Авто-зеркало (spec 0043): pg_cron раз в сутки (07:00 UTC) → POST /api/cron/mirror-auto.
+//   pnpm mirror:supabase cron-install-auto — Vault (mirror_auto_url, monitor_cron_secret) + задание mirror-auto
+//   pnpm mirror:supabase cron-remove-auto  — снять задание (автомат перестанет включать и выключать зеркала)
+//   pnpm mirror:supabase auto [--dry-run]  — проверка авто-зеркала сейчас (на Vercel); --dry-run — только план
 // Env: DATABASE_URL (.env.local), CRON_SECRET (~/.config/vercel/binance-dashboard-prod.env).
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -18,6 +22,13 @@ const CRON_SQL = path.join(
 const BASE =
   process.env.SITE_URL ?? "https://binance-dashboard-gold.vercel.app";
 const url = () => `${BASE}/api/cron/demo-mirror`;
+const AUTO_JOB = "mirror-auto";
+const AUTO_CRON_SQL = path.join(
+  "supabase",
+  "migrations",
+  "20261016120000_mirror_auto_cron.sql",
+);
+const autoUrl = () => `${BASE}/api/cron/mirror-auto`;
 
 /** Строки ИМЯ=значение; уже заданные переменные не перезаписываем. Значения не печатаем. */
 function loadEnv(file: string) {
@@ -80,19 +91,41 @@ async function cronInstall() {
   }
 }
 
-async function cronRemove() {
+async function cronInstallAuto() {
   const sql = db();
   try {
-    const rows =
-      await sql`select cron.unschedule(jobid) from cron.job where jobname = ${JOB}`;
-    console.log(rows.length ? `Задание ${JOB} снято` : `Задания ${JOB} нет`);
+    await upsertVault(
+      sql,
+      "mirror_auto_url",
+      autoUrl(),
+      "Роут авто-зеркала на Vercel",
+    );
+    await upsertVault(
+      sql,
+      "monitor_cron_secret",
+      need("CRON_SECRET"),
+      "CRON_SECRET Vercel для /api/cron/*",
+    );
+    await sql.unsafe(readFileSync(AUTO_CRON_SQL, "utf8"));
+    console.log(`pg_cron: задание ${AUTO_JOB} установлено (0 7 * * *, UTC)`);
   } finally {
     await sql.end();
   }
 }
 
-async function run() {
-  const res = await fetch(url(), {
+async function unschedule(job: string) {
+  const sql = db();
+  try {
+    const rows =
+      await sql`select cron.unschedule(jobid) from cron.job where jobname = ${job}`;
+    console.log(rows.length ? `Задание ${job} снято` : `Задания ${job} нет`);
+  } finally {
+    await sql.end();
+  }
+}
+
+async function post(target: string) {
+  const res = await fetch(target, {
     method: "POST",
     headers: { authorization: `Bearer ${need("CRON_SECRET")}` },
   });
@@ -102,11 +135,17 @@ async function run() {
 async function status() {
   const sql = db();
   try {
-    const runs = await sql`
-      select d.status, d.return_message, d.start_time
-      from cron.job_run_details d join cron.job j using (jobid)
-      where j.jobname = ${JOB} order by d.start_time desc limit 5`;
-    console.log(runs.length ? runs : `Запусков ${JOB} ещё не было`);
+    for (const job of [JOB, AUTO_JOB]) {
+      const runs = await sql`
+        select d.status, d.return_message, d.start_time
+        from cron.job_run_details d join cron.job j using (jobid)
+        where j.jobname = ${job} order by d.start_time desc limit 5`;
+      console.log(`${job}:`, runs.length ? runs : "запусков ещё не было");
+    }
+    const modes = await sql`
+      select demo_mirror_mode as mode, demo_mirror as mirror, count(*)::int as n
+      from experiments group by 1, 2 order by 1, 2`;
+    console.log("Положения демо-зеркала:", modes);
     const mirrors = await sql`
       select status, count(*)::int as n from demo_mirror_orders group by status`;
     console.log("Зеркала по статусам:", mirrors);
@@ -117,9 +156,15 @@ async function status() {
 
 const commands: Record<string, () => Promise<void>> = {
   "cron-install": cronInstall,
-  "cron-remove": cronRemove,
-  run,
+  "cron-remove": () => unschedule(JOB),
+  run: () => post(url()),
   status,
+  "cron-install-auto": cronInstallAuto,
+  "cron-remove-auto": () => unschedule(AUTO_JOB),
+  auto: () =>
+    post(
+      process.argv.includes("--dry-run") ? `${autoUrl()}?dryRun=1` : autoUrl(),
+    ),
 };
 const command = commands[process.argv[2] ?? ""];
 if (!command) {

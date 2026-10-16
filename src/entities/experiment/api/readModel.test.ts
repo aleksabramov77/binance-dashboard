@@ -2,7 +2,7 @@ import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { experimentsTable, runsTable } from "../model/db";
+import { experimentsTable, paperTradesTable, runsTable } from "../model/db";
 import { statsQuerySchema } from "../model/statsView";
 import {
   experimentDetailResponseSchema,
@@ -259,13 +259,220 @@ describe("разрезы /stats", () => {
     expect(byMarket?.groups.map((g) => [g.label, g.stats.realizedPnl])).toEqual(
       [["USDⓈ-M", 500]],
     );
+    // Несуществующая эпоха — текущая и missingRun: страница пишет «эпохи нет».
+    const missing = await readTradeStats(
+      db,
+      { groupBy: "market", period: "epoch", run: 999 },
+      NOW,
+    );
+    expect(missing).toMatchObject({ missingRun: 999, scope: missing.run.id });
+    expect(missing.run.id).toBe(missing.runs[0].id);
+  });
+
+  it("«Все эпохи»: total, группы, периоды и монеты — по сделкам всех эпох (spec 0046, AC2)", async () => {
+    const { run } = await seed();
+    await createDbExperimentStore(db).insertTrade(
+      at(trade("old2", 1, "F01", 3, 1), { symbol: "XRPUSDT" }),
+    );
+    const all = await readTradeStats(
+      db,
+      { groupBy: "experiment", period: "epoch", run: "all" },
+      NOW,
+    );
+    expect(all).toMatchObject({ scope: "all", missingRun: null });
+    expect(all.run.id).toBe(run);
+    expect(all.total).toMatchObject({ closed: 6, realizedPnl: 502 });
+    expect(all.groups.map((g) => [g.key, g.stats.realizedPnl])).toEqual([
+      ["F01", 507],
+      ["S01", -5],
+    ]);
+    expect(all.options.symbols).toEqual([
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "XRPUSDT",
+    ]);
+    const day = await readTradeStats(
+      db,
+      { groupBy: "experiment", period: "24h", run: "all" },
+      NOW,
+    );
+    expect(day.total.closed).toBe(5);
+  });
+});
+
+describe("период страниц /experiments и /experiments/[id] (spec 0046)", () => {
+  async function twoRuns() {
+    await seedExperiments(db, [exp("F01"), exp("F02")]);
+    const store = createDbExperimentStore(db);
+    const first = await ensureRun(db);
+    await store.insertTrade(trade("old", first, "F01", 1, 500));
+    await store.insertTrade(trade("old2", first, "F02", 1, 7));
+    const [second] = await db
+      .insert(runsTable)
+      .values({ note: "вторая" })
+      .returning();
+    await store.insertTrade(trade("a", second.id, "F01", 2, 10));
+    await store.insertTrade(trade("b", second.id, "F01", 4, -4));
+    return { first, second };
+  }
+
+  it("по умолчанию — текущая эпоха, прошлая — по номеру, all — все сделки без отсечения сбросами", async () => {
+    const { first, second } = await twoRuns();
+    // Отдельный сброс F01 в текущей эпохе между сделками a и b: учёт текущей эпохи — только b, история — целиком.
+    const start = second.startedAt.getTime();
+    await db
+      .update(paperTradesTable)
+      .set({ openedAt: new Date(start + 2 * 3_600_000) })
+      .where(eq(paperTradesTable.id, "b"));
+    await db
+      .update(experimentsTable)
+      .set({ resetAt: new Date(start + 3_600_000) })
+      .where(eq(experimentsTable.id, "F01"));
+
+    const current = await readExperimentsOverview(db, true);
+    expect(current).toMatchObject({
+      scope: second.id,
+      missingRun: null,
+      run: { id: second.id },
+    });
+    expect(current.runs.map((r) => r.id)).toEqual([second.id, first]);
+    expect(current.experiments[0].stats).toMatchObject({
+      closed: 1,
+      realizedPnl: -4,
+    });
+
+    // Сброс был во второй эпохе — учёт первой он не трогает.
+    const past = await readExperimentsOverview(
+      db,
+      true,
+      false,
+      undefined,
+      first,
+    );
+    expect(past.scope).toBe(first);
+    expect(past.experiments.map((e) => e.stats.realizedPnl)).toEqual([500, 7]);
+
+    const all = await readExperimentsOverview(
+      db,
+      true,
+      false,
+      undefined,
+      "all",
+    );
+    expect(experimentsResponseSchema.parse(all).scope).toBe("all");
+    expect(all.run.id).toBe(second.id);
+    expect(all.experiments[0].stats).toMatchObject({
+      closed: 3,
+      realizedPnl: 506,
+      equity: 1506,
+    });
+
+    const missing = await readExperimentsOverview(
+      db,
+      true,
+      false,
+      undefined,
+      999,
+    );
+    expect(missing).toMatchObject({ missingRun: 999, scope: second.id });
+  });
+
+  it("детали «Все эпохи»: склеенная кривая от начала первой эпохи и сделки всех эпох; без сделок — нули", async () => {
+    const { first } = await twoRuns();
+    const detail = await readExperimentDetail(
+      db,
+      "F01",
+      false,
+      10,
+      undefined,
+      "all",
+    );
+    expect(detail?.trades.map((t) => [t.id, t.runId])).toEqual([
+      ["b", first + 1],
+      ["a", first + 1],
+      ["old", first],
+    ]);
+    expect(detail?.equity.map((p) => p.equity)).toEqual([
+      1000, 1500, 1510, 1506,
+    ]);
+    expect(detail?.equity[0].at).toBe(detail?.runs.at(-1)?.startedAt);
+    expect(experimentDetailResponseSchema.parse(detail).scope).toBe("all");
+
+    await seedExperiments(db, [exp("F03")]);
+    const empty = await readExperimentDetail(
+      db,
+      "F03",
+      false,
+      10,
+      undefined,
+      "all",
+    );
+    expect(empty?.stats).toMatchObject({ trades: 0, realizedPnl: 0 });
+    expect(empty?.family).toBeNull();
+  });
+
+  it("варианты: поля в обзоре, группа на странице варианта и контрольного, причина выключения", async () => {
+    await seedExperiments(db, [
+      exp("F96"),
+      { ...exp("F97"), parentId: "F96", variantNote: "цель 3R вместо 2R" },
+      {
+        ...exp("PS99"),
+        market: "spot",
+        parentId: "F96",
+        variantNote: "то же на spot",
+      },
+    ]);
+    const run = await ensureRun(db);
+    const store = createDbExperimentStore(db);
+    await store.insertTrade(trade("c1", run, "F96", 1, 10));
+    await store.insertTrade(trade("v1", run, "F97", 2, -3));
+    await db
+      .update(experimentsTable)
+      .set({
+        enabled: false,
+        disabledReason: "worse-than-control",
+        disabledNote: "хуже на 2 эпохах",
+        disabledAt: new Date("2026-10-16T10:00:00.000Z"),
+      })
+      .where(eq(experimentsTable.id, "PS99"));
+
+    const overview = await readExperimentsOverview(db, true);
     expect(
-      await readTradeStats(
-        db,
-        { groupBy: "market", period: "epoch", run: 999 },
-        NOW,
-      ),
-    ).toBeNull();
+      overview.experiments.map((e) => [e.id, e.parentId, e.disabled?.reason]),
+    ).toEqual([
+      ["F96", null, undefined],
+      ["F97", "F96", undefined],
+      ["PS99", "F96", "worse-than-control"],
+    ]);
+
+    const variant = await readExperimentDetail(db, "F97", true, 10);
+    expect(variant?.family?.control).toMatchObject({
+      id: "F96",
+      letter: null,
+      stats: { realizedPnl: 10 },
+    });
+    expect(
+      variant?.family?.variants.map((v) => [v.id, v.letter, v.variantNote]),
+    ).toEqual([
+      ["F97", "A", "цель 3R вместо 2R"],
+      ["PS99", "B", "то же на spot"],
+    ]);
+    expect(variant?.family?.variants[0].stats.realizedPnl).toBe(-3);
+
+    const control = await readExperimentDetail(db, "F96", true, 10);
+    expect(control?.family?.variants.map((v) => v.id)).toEqual(["F97", "PS99"]);
+    expect(control?.disabled).toBeNull();
+
+    const off = await readExperimentDetail(db, "PS99", true, 10);
+    expect(off?.disabled).toEqual({
+      reason: "worse-than-control",
+      note: "хуже на 2 эпохах",
+      at: "2026-10-16T10:00:00.000Z",
+    });
+    expect(off?.family?.variants[1].disabled?.reason).toBe(
+      "worse-than-control",
+    );
   });
 });
 
@@ -354,7 +561,7 @@ describe("данные для отчёта лаборатории (pnpm lab:repo
     await seedExperiments(db, [exp("F01"), exp("F02")]);
     await db
       .update(experimentsTable)
-      .set({ enabled: false, demoMirror: true })
+      .set({ enabled: false, demoMirror: true, demoMirrorMode: "on" })
       .where(eq(experimentsTable.id, "F02"));
     expect(await readExperimentFlags(db)).toEqual([
       {
@@ -363,6 +570,10 @@ describe("данные для отчёта лаборатории (pnpm lab:repo
         market: "usdm",
         enabled: true,
         demoMirror: false,
+        demoMirrorMode: "auto",
+        parentId: null,
+        disabledReason: null,
+        disabledNote: null,
       },
       {
         id: "F02",
@@ -370,6 +581,10 @@ describe("данные для отчёта лаборатории (pnpm lab:repo
         market: "usdm",
         enabled: false,
         demoMirror: true,
+        demoMirrorMode: "on",
+        parentId: null,
+        disabledReason: null,
+        disabledNote: null,
       },
     ]);
   });

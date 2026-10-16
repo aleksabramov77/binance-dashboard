@@ -7,6 +7,7 @@ import {
   paperTradesTable,
   runsTable,
 } from "../model/db";
+import type { DisableReason } from "../model/disable";
 import type { Epoch } from "../model/settings";
 
 // Запросы /settings лаборатории (spec 003, задача 3d): эпоха, тумблеры экспериментов, атомарный
@@ -41,16 +42,66 @@ export async function getEpoch(db: Db, runId: number): Promise<Epoch> {
   };
 }
 
-/** Вкл/выкл эксперимента. false — неизвестный id. */
+/** Новое состояние тумблера: выключение — только с категорией причины (spec 0046). */
+export type ExperimentEnabledState =
+  | { enabled: true }
+  | { enabled: false; reason: DisableReason; note?: string | null };
+
+const cleanNote = (note: string | null | undefined) => note?.trim() || null;
+
+/**
+ * Вкл/выкл эксперимента. Включение очищает причину; выключение записывает категорию, текст и время. false —
+ * неизвестный id.
+ */
 export async function setExperimentEnabled(
   db: Db,
   id: string,
-  enabled: boolean,
+  state: ExperimentEnabledState,
 ): Promise<boolean> {
   const rows = await db
     .update(experimentsTable)
-    .set({ enabled, updatedAt: sql`now()` })
+    .set(
+      state.enabled
+        ? {
+            enabled: true,
+            disabledReason: null,
+            disabledNote: null,
+            disabledAt: null,
+            updatedAt: sql`now()`,
+          }
+        : {
+            enabled: false,
+            disabledReason: state.reason,
+            disabledNote: cleanNote(state.note),
+            disabledAt: sql`now()`,
+            updatedAt: sql`now()`,
+          },
+    )
     .where(eq(experimentsTable.id, id))
+    .returning({ id: experimentsTable.id });
+  return rows.length > 0;
+}
+
+/**
+ * Причина уже выключенного эксперимента (`pnpm lab:apply` повторно, backfill): категория и текст заменяются, дата
+ * выключения сохраняется (нет — сейчас). false — нет такого id или эксперимент включён.
+ */
+export async function setDisableReason(
+  db: Db,
+  id: string,
+  reason: { reason: DisableReason; note?: string | null },
+): Promise<boolean> {
+  const rows = await db
+    .update(experimentsTable)
+    .set({
+      disabledReason: reason.reason,
+      disabledNote: cleanNote(reason.note),
+      disabledAt: sql`coalesce(${experimentsTable.disabledAt}, now())`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(eq(experimentsTable.id, id), eq(experimentsTable.enabled, false)),
+    )
     .returning({ id: experimentsTable.id });
   return rows.length > 0;
 }

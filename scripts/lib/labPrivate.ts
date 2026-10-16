@@ -136,6 +136,62 @@ export function parsePrivateExperiments(
   return errors.length ? { ok: false, errors } : { ok: true, experiments };
 }
 
+/** Связь эксперимента с контрольным: из файла, каталога или строки БД. */
+export interface ParentLink {
+  id: string;
+  parentId?: string | null;
+}
+
+/**
+ * Проверка вариантов (spec 0046): родитель есть в файле, каталоге или БД и сам не вариант; у варианта нет своих
+ * вариантов (один уровень); variantNote — только у варианта. known — каталог и строки БД; файл главнее строки БД с
+ * тем же id. Ошибки — по одной на эксперимент, в формате parsePrivateExperiments.
+ */
+export function checkVariantParents(
+  experiments: readonly Experiment[],
+  known: readonly ParentLink[],
+): string[] {
+  const links = new Map<string, string | null>();
+  for (const k of known) links.set(k.id, k.parentId ?? null);
+  for (const e of experiments) links.set(e.id, e.parentId ?? null);
+  const errors: string[] = [];
+  for (const e of experiments) {
+    const parentId = e.parentId ?? null;
+    if (parentId === null) {
+      if (e.variantNote)
+        errors.push(
+          `${e.id}: поле variantNote — только у варианта: нужен parentId контрольного`,
+        );
+      continue;
+    }
+    if (parentId === e.id) {
+      errors.push(`${e.id}: поле parentId — ссылается на себя`);
+      continue;
+    }
+    if (!links.has(parentId)) {
+      errors.push(
+        `${e.id}: поле parentId — контрольного ${parentId} нет ни в файле, ни в каталоге, ни в БД`,
+      );
+      continue;
+    }
+    const grand = links.get(parentId);
+    if (grand) {
+      errors.push(
+        `${e.id}: поле parentId — ${parentId} сам вариант (от ${grand}): вариант варианта не поддерживается`,
+      );
+      continue;
+    }
+    const own = [...links]
+      .filter(([, parent]) => parent === e.id)
+      .map(([id]) => id);
+    if (own.length)
+      errors.push(
+        `${e.id}: поле parentId — у ${e.id} есть свои варианты (${own.join(", ")}): контрольный не может быть вариантом`,
+      );
+  }
+  return errors;
+}
+
 /** Поля строки experiments, которые сид обновляет (остальное — настройки пользователя). */
 export interface ExistingRow {
   id: string;
@@ -143,6 +199,8 @@ export interface ExistingRow {
   name: string;
   hypothesis: string;
   config: unknown;
+  parentId: string | null;
+  variantNote: string | null;
 }
 
 export type PlanStatus = "new" | "update" | "unchanged";
@@ -154,7 +212,7 @@ export interface PlanLine {
   status: PlanStatus;
 }
 
-/** Что сделает запись: новая строка, обновление описания/конфига или ничего. */
+/** Что сделает запись: новая строка, обновление описания/конфига/связи с контрольным или ничего. */
 export function planPrivateSeed(
   experiments: readonly Experiment[],
   existing: readonly ExistingRow[],
@@ -167,7 +225,9 @@ export function planPrivateSeed(
       : row.market === e.market &&
           row.name === e.name &&
           row.hypothesis === e.hypothesis &&
-          isDeepStrictEqual(row.config, e.config)
+          isDeepStrictEqual(row.config, e.config) &&
+          row.parentId === (e.parentId ?? null) &&
+          row.variantNote === (e.variantNote ?? null)
         ? "unchanged"
         : "update";
     return { id: e.id, market: e.market, name: e.name, status };

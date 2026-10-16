@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useMemo } from "react";
 import {
@@ -7,11 +8,15 @@ import {
   ASSET_GROUPS,
   assetGroupOf,
   DemoMisses,
+  DisabledBadge,
+  describeRunView,
   type ExperimentSummary,
   formatProfitFactor,
   formatRate,
   formatSignedUsd,
+  MissingRunNotice,
   pnlTone,
+  RunSelect,
   useExperiments,
 } from "@/entities/experiment";
 import { mirrorLogsHref } from "@/entities/log-entry";
@@ -19,7 +24,6 @@ import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
 import {
   cn,
   defineSortTable,
-  formatDateTime,
   formatUsd,
   type SavedSort,
   type SortHeadProps,
@@ -37,10 +41,13 @@ import {
 } from "@/shared/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import {
+  arrangeVariants,
+  type ExperimentRowView,
   SORT_KEYS,
   type SortKey,
   sortExperiments,
 } from "../lib/sortExperiments";
+import { useCollapsedControls } from "../model/useCollapsedControls";
 import {
   MARKET_FILTERS,
   type MarketFilter,
@@ -69,7 +76,7 @@ const COLUMNS: {
     label: "Эксперимент",
     numeric: false,
     description:
-      "Код, название и гипотеза эксперимента. Клик по строке — подробности, конфиг и сделки.",
+      "Код, название и гипотеза эксперимента. Клик по строке — подробности, конфиг и сделки. Варианты (↳) стоят под своим контрольным: «вариант A · что изменено»; шеврон у контрольного сворачивает их.",
   },
   {
     key: "ag",
@@ -81,7 +88,8 @@ const COLUMNS: {
     key: "trades",
     label: "Сделки",
     numeric: true,
-    description: "Закрытые сделки текущей эпохи (+ открытые сейчас).",
+    description:
+      "Закрытые сделки выбранного периода — эпохи или всех эпох (+ открытые сейчас).",
   },
   {
     key: "winRate",
@@ -120,7 +128,7 @@ const COLUMNS: {
     label: "Демо: торговля",
     numeric: false,
     description:
-      "Галочка — эксперимент торгует и на демо-счёте Binance (demo.binance.com, виртуальные деньги): каждый новый вход повторяется на бирже с тем же объёмом, стопом и тейком. Включение и выключение — с подтверждением.",
+      "Переключатель «Выкл · Авто · Вкл» — торгует ли эксперимент и на демо-счёте Binance (demo.binance.com, виртуальные деньги): каждый новый вход повторяется на бирже с тем же объёмом, стопом и тейком. «Авто» — раз в сутки решает автомат по paper-сделкам (≥ 30 сделок со средним R > 0 — включить; средний R последних 30 < 0 или эксперимент выключен — выключить), «Авто · вкл» — сейчас торгует. «Вкл» / «Выкл» — вручную, автомат их не меняет; «Вкл» — с подтверждением.",
   },
   {
     key: "demoTrades",
@@ -251,35 +259,84 @@ function DemoCells({
   );
 }
 
-function ExperimentRow({
-  e,
-  demoConfigured,
+function ExperimentCell({
+  row,
+  collapsed,
+  onToggle,
 }: {
-  e: ExperimentSummary;
-  demoConfigured: boolean;
+  row: ExperimentRowView;
+  collapsed: boolean;
+  onToggle: (id: string) => void;
 }) {
-  const s = e.stats;
+  const { e, variantOf, letter, variants } = row;
+  const href = `/experiments/${encodeURIComponent(e.id)}`;
   return (
-    <TableRow className={cn(!e.enabled && "opacity-50")}>
-      <TableCell className="whitespace-normal">
-        <Link
-          href={`/experiments/${encodeURIComponent(e.id)}`}
-          className="group flex flex-col gap-0.5"
-        >
-          {/* Код, название и бейджи — всегда в одну строку (spec 0022, решение 4). */}
-          <span className="flex items-center gap-2 whitespace-nowrap">
+    <TableCell className={cn("whitespace-normal", variantOf && "pl-8")}>
+      <div className="flex flex-col gap-0.5">
+        {/* Код, название и бейджи — всегда в одну строку (spec 0022, решение 4). */}
+        <span className="flex items-center gap-2 whitespace-nowrap">
+          {variants > 0 && (
+            <button
+              type="button"
+              className="-ml-1 rounded text-muted-foreground hover:text-foreground"
+              aria-expanded={!collapsed}
+              aria-label={`${collapsed ? "Показать" : "Скрыть"} варианты ${e.id} (${variants})`}
+              title={`Варианты: ${variants}`}
+              onClick={() => onToggle(e.id)}
+            >
+              {collapsed ? (
+                <ChevronRight className="size-4" aria-hidden />
+              ) : (
+                <ChevronDown className="size-4" aria-hidden />
+              )}
+            </button>
+          )}
+          <Link href={href} className="group flex items-center gap-2">
+            {variantOf && (
+              <span className="text-muted-foreground" aria-hidden>
+                ↳
+              </span>
+            )}
             <span className="font-mono text-xs text-muted-foreground">
               {e.id}
             </span>
             <span className="font-medium group-hover:underline">{e.name}</span>
-            {!e.enabled && <Badge variant="outline">выключен</Badge>}
-          </span>
-          {/* contain-inline-size: гипотеза не участвует в ширине колонки, только обрезается многоточием. */}
-          <span className="line-clamp-1 text-xs text-muted-foreground contain-inline-size">
-            {e.hypothesis}
-          </span>
+          </Link>
+          {!e.enabled && <DisabledBadge disabled={e.disabled} />}
+        </span>
+        {/* contain-inline-size: гипотеза не участвует в ширине колонки, только обрезается многоточием. */}
+        <Link
+          href={href}
+          tabIndex={-1}
+          className="line-clamp-1 text-xs text-muted-foreground contain-inline-size"
+        >
+          {variantOf
+            ? `вариант ${letter ?? ""}${e.variantNote ? ` · ${e.variantNote}` : ""}`
+            : e.hypothesis}
         </Link>
-      </TableCell>
+      </div>
+    </TableCell>
+  );
+}
+
+function ExperimentRow({
+  row,
+  demoConfigured,
+  collapsed,
+  onToggle,
+}: {
+  row: ExperimentRowView;
+  demoConfigured: boolean;
+  collapsed: boolean;
+  onToggle: (id: string) => void;
+}) {
+  const { e } = row;
+  const s = e.stats;
+  return (
+    <TableRow
+      className={cn(!e.enabled && "opacity-50", row.variantOf && "bg-muted/30")}
+    >
+      <ExperimentCell row={row} collapsed={collapsed} onToggle={onToggle} />
       <TableCell>
         <Badge
           variant="outline"
@@ -321,14 +378,22 @@ function ExperimentRow({
 }
 
 function ExperimentsDashboard() {
-  const { data, isPending, error } = useExperiments();
-  const [{ market }, setView] = useExperimentsView();
+  const [{ market, run }, setView] = useExperimentsView();
+  const { data, isPending, error, isPlaceholderData } = useExperiments(run);
   const { sort, head } = useTableSort(SORT_TABLE, DEFAULT_SORT);
-  const rows = useMemo(
-    () => sortExperiments(data?.experiments ?? [], market, sort.key, sort.dir),
-    [data, market, sort],
+  const { collapsed, toggle } = useCollapsedControls();
+  const rows = useMemo(() => {
+    const all = data?.experiments ?? [];
+    return arrangeVariants(
+      sortExperiments(all, market, sort.key, sort.dir),
+      all,
+    );
+  }, [data, market, sort]);
+  const shown = rows.filter(
+    (r) => r.variantOf === null || !collapsed.has(r.variantOf),
   );
   const total = data?.experiments.reduce((n, e) => n + e.stats.trades, 0) ?? 0;
+  const current = !!data && data.scope === data.runs[0]?.id;
 
   return (
     <div className="flex flex-col gap-6">
@@ -340,17 +405,19 @@ function ExperimentsDashboard() {
           <p className="text-sm text-muted-foreground">
             {data?.experiments.length ?? 40} paper-стратегий на реальных свечах
             Binance, без настоящих ордеров.
-            {data &&
-              ` Эпоха №${data.run.id} с ${formatDateTime(data.run.startedAt)}.`}
+            {data && ` ${describeRunView(data)}.`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-end gap-3">
           <Link
             href="/stats"
             className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
           >
             Разрезы по монетам и направлениям →
           </Link>
+          {data && (
+            <RunSelect view={data} onChange={(r) => setView({ run: r })} />
+          )}
           <Tabs
             value={market}
             onValueChange={(v) =>
@@ -372,17 +439,27 @@ function ExperimentsDashboard() {
 
       {isPending && <p className="text-muted-foreground">Загрузка…</p>}
       {error && <p className="text-destructive">{error.message}</p>}
+      {data && (
+        <MissingRunNotice view={data} onReset={() => setView({ run: null })} />
+      )}
 
       {data && total === 0 && (
         <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-          {data.engineEnabled
-            ? "Движок включён, сделок пока нет: стратегии ждут закрытия свечи и сигнала."
-            : "Движок выключен — сделок нет. Включите «Автоторговлю» в шапке, чтобы эксперименты начали торговать на бумаге."}
+          {!current
+            ? "За выбранный период сделок нет."
+            : data.engineEnabled
+              ? "Движок включён, сделок пока нет: стратегии ждут закрытия свечи и сигнала."
+              : "Движок выключен — сделок нет. Включите «Автоторговлю» в шапке или в /settings, чтобы эксперименты начали торговать на бумаге."}
         </p>
       )}
 
       {data && (
-        <TableFrame>
+        <TableFrame
+          className={cn(
+            "transition-opacity",
+            isPlaceholderData && "opacity-60",
+          )}
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -392,11 +469,13 @@ function ExperimentsDashboard() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((e) => (
+              {shown.map((r) => (
                 <ExperimentRow
-                  key={e.id}
-                  e={e}
+                  key={r.e.id}
+                  row={r}
                   demoConfigured={data.demoConfigured}
+                  collapsed={collapsed.has(r.e.id)}
+                  onToggle={toggle}
                 />
               ))}
             </TableBody>
@@ -406,9 +485,15 @@ function ExperimentsDashboard() {
 
       {data && (
         <p className="text-xs text-muted-foreground">
+          Показано: {describeRunView(data)}.{" "}
+          {data.scope === "all"
+            ? "Paper-колонки — все сделки эксперимента с первой эпохи (отдельные сбросы эксперимента и группы историю не отсекают), демо-колонки — все демо-зеркала. "
+            : current
+              ? "Демо-колонки — с последнего демо-сброса. "
+              : "Paper и демо — сделки этой эпохи. "}
           Сделки — закрытые (+ открытые). PnL — реализованный, за вычетом
-          комиссий. Equity = стартовый капитал + PnL. Max DD — наибольшая
-          просадка equity от пика.
+          комиссий. Equity = стартовый капитал (текущий бюджет эксперимента) +
+          PnL. Max DD — наибольшая просадка equity от пика.
         </p>
       )}
     </div>

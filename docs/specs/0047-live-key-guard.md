@@ -134,4 +134,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-16 | ТЗ утверждено пользователем |
-| 2026-10-16 | Реализация в ветке `feature/0047-live-key-guard`: клиент Live с белым списком (`liveAllowlist.ts`, `live.server.ts`), оценка прав и UID (`liveRestrictions.ts`), `entities/live-account` + таблица `live_worker_state` (миграция 0009), `POST /api/live/heartbeat` и `GET /api/live/status`, воркер `pnpm live:worker` и бандл `pnpm live:build`, карточка «Реальный счёт» на `/settings`, R в шапке из пульса, правило монитора `live:silent`, env, глоссарий, README |
+| 2026-10-16 | Реализация в ветке `feature/0047-live-key-guard`: клиент Live с белым списком (`liveAllowlist.ts`, `live.server.ts`), оценка прав и UID (`liveRestrictions.ts`), `entities/live-account` + таблица `live_worker_state` (миграция 0011), `POST /api/live/heartbeat` и `GET /api/live/status`, воркер `pnpm live:worker` и бандл `pnpm live:build`, карточка «Реальный счёт» на `/settings`, R в шапке из пульса, правило монитора `live:silent`, env, глоссарий, README |
