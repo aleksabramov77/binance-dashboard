@@ -80,10 +80,10 @@
     "vitest": "^5.0.3"
   },
   "imports": {
-    "#*": [
-      "./*",
-      "./*.ts",
-      "./*.tsx"
+    "#.storybook/*": [
+      "./.storybook/*",
+      "./.storybook/*.ts",
+      "./.storybook/*.tsx"
     ]
   },
   "packageManager": "pnpm@10.34.5"

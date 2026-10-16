@@ -1,4 +1,5 @@
-import { flag, select, text } from "#.storybook/controls";
+import { fn } from "storybook/test";
+import { callback, flag, select, text } from "#.storybook/controls";
 import preview from "#.storybook/preview";
 import { axis, StateGrid } from "#.storybook/StateGrid";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
@@ -15,6 +16,7 @@ interface Parts {
   variant?: (typeof VARIANTS)[number];
   /** Управляемая активная вкладка; не задано — помнит сама, с первой. */
   value?: Tab;
+  onValueChange?: (value: string) => void;
   /** Недоступная вкладка COIN-M. */
   disabledTab?: boolean;
   activationMode?: "automatic" | "manual";
@@ -56,6 +58,7 @@ const meta = preview.meta({
     orientation: select(ORIENTATIONS),
     variant: select(VARIANTS),
     value: select(KEYS),
+    onValueChange: callback(fn().mockName("onValueChange")),
     disabledTab: flag(),
     activationMode: select(["automatic", "manual"]),
     className: text,

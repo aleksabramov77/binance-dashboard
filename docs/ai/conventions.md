@@ -34,6 +34,9 @@
   Составной компонент (Card, Dialog, Select…) — пример-сборка `XxxExample`, её пропсы и есть контролы.
 - Данные в историях — моки MSW (`msw.use`/`resetHandlers` в `beforeEach` или декораторе), без сервера и базы.
   Запуск — `pnpm storybook` (порт 5000+), сборка — `pnpm build-storybook`.
+- `patches/@storybook__nextjs-vite@10.6.2.patch` — `parentRenderTree` в контексте макета для Next ≥ 16.4
+  (иначе `useRouter` падает в каждой истории). При обновлении `@storybook/nextjs-vite` проверить, есть ли поле
+  в его `AppRouterProvider`; есть — удалить патч и строку `patchedDependencies` в `pnpm-workspace.yaml`.
 
 ## Тесты
 - Vitest, файлы `*.test.ts` рядом с модулем. Тестируем чистые функции `lib/` и схемы — без сети.

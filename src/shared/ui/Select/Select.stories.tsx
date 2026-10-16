@@ -1,4 +1,11 @@
-import { flag, orUndefined, select, text } from "#.storybook/controls";
+import { fn } from "storybook/test";
+import {
+  callback,
+  flag,
+  orUndefined,
+  select,
+  text,
+} from "#.storybook/controls";
 import preview from "#.storybook/preview";
 import { axis, StateGrid } from "#.storybook/StateGrid";
 import {
@@ -21,6 +28,8 @@ interface Parts {
   open?: boolean;
   /** Выбранное значение; не задано — плейсхолдер. */
   value?: Group;
+  onValueChange?: (value: string) => void;
+  onOpenChange?: (open: boolean) => void;
   placeholder?: string;
   disabled?: boolean;
   required?: boolean;
@@ -39,6 +48,8 @@ interface Parts {
 function SelectExample({
   open,
   value,
+  onValueChange,
+  onOpenChange,
   placeholder,
   disabled,
   required,
@@ -55,12 +66,19 @@ function SelectExample({
     </SelectItem>
   ));
   return (
-    <Select open={open} value={value} disabled={disabled} required={required}>
+    <Select
+      open={open}
+      value={value}
+      onValueChange={onValueChange}
+      onOpenChange={onOpenChange}
+      disabled={disabled}
+      required={required}
+    >
       <SelectTrigger
         size={size}
         aria-invalid={invalid || undefined}
         aria-label="Группа активов"
-        className={className ?? "w-44"}
+        className={orUndefined(className) ?? "w-44"}
       >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
@@ -92,6 +110,8 @@ const meta = preview.meta({
   argTypes: {
     open: flag(),
     value: select(VALUES),
+    onValueChange: callback(fn().mockName("onValueChange")),
+    onOpenChange: callback(fn().mockName("onOpenChange")),
     placeholder: text,
     disabled: flag(),
     required: flag(),

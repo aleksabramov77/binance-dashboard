@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { flag, orUndefined, text } from "#.storybook/controls";
+import { fn } from "storybook/test";
+import { callback, flag, orUndefined, text } from "#.storybook/controls";
 import preview from "#.storybook/preview";
 import { axis, StateGrid } from "#.storybook/StateGrid";
 import { Button } from "../Button";
@@ -18,6 +19,7 @@ import {
 interface Parts {
   /** Управляемое открытие; не задано — открывается кнопкой. */
   open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   modal?: boolean;
   title?: string;
   description?: string;
@@ -36,6 +38,7 @@ interface Parts {
 /** Модалка из частей: пропсы — контролы Playground. */
 function DialogExample({
   open,
+  onOpenChange,
   modal,
   title,
   description,
@@ -48,7 +51,7 @@ function DialogExample({
   withTrigger = true,
 }: Parts) {
   return (
-    <Dialog open={open} modal={modal}>
+    <Dialog open={open} onOpenChange={onOpenChange} modal={modal}>
       {withTrigger && (
         <DialogTrigger asChild>
           <Button variant="outline">Открыть модалку</Button>
@@ -89,6 +92,7 @@ const meta = preview.meta({
   },
   argTypes: {
     open: flag(),
+    onOpenChange: callback(fn().mockName("onOpenChange")),
     modal: flag(),
     title: { ...text, description: "DialogTitle; пусто — нет" },
     description: { ...text, description: "DialogDescription; пусто — нет" },

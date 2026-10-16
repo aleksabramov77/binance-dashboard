@@ -213,6 +213,15 @@ const SCENARIO = {
     "вход отключён локально": ok(API.session, { authDisabled: true }),
     загрузка: pending(API.session),
   },
+  exposure: {
+    "5 сделок и 2 позиции": ok(API.exposure, exposure),
+    "нет открытых": ok(API.exposure, {
+      openPaper: 0,
+      openDemo: 0,
+    } satisfies EngineExposure),
+    загрузка: pending(API.exposure),
+    ошибка: fail(API.exposure, "Не удалось посчитать сделки"),
+  },
   toggle: {
     успех: toggleOk,
     ошибка: http.post(API.engine, () =>
@@ -256,6 +265,7 @@ const meta = preview.meta({
     balances: "обычные",
     ai: "обычный",
     session: "вошли",
+    exposure: "5 сделок и 2 позиции",
     toggle: "успех",
     newVersion: false,
     pathname: "/portfolio",
@@ -275,6 +285,10 @@ const meta = preview.meta({
       ...optionsOf("session"),
       description: "Вход (меню пользователя)",
     },
+    exposure: {
+      ...optionsOf("exposure"),
+      description: "Подсчёт открытых сделок в модалке выключения",
+    },
     toggle: {
       ...optionsOf("toggle"),
       description: "Ответ на подтверждение в модалке тумблера",
@@ -290,7 +304,6 @@ const meta = preview.meta({
           (part) =>
             (SCENARIO[part] as Record<string, RequestHandler>)[args[part]],
         ),
-        ok(API.exposure, exposure),
         ok(API.version, { version: args.newVersion ? "build-new" : null }),
       );
       if (args.newVersion) document.documentElement.dataset.dplId = "build-old";
@@ -313,8 +326,6 @@ const phone = { viewport: { value: "phone", isRotated: false } };
 const tablet = { viewport: { value: "tablet", isRotated: false } };
 
 export const Playground = meta.story({ name: "Playground" });
-
-export const Default = meta.story({ name: "Обычное" });
 
 export const Loading = meta.story({
   name: "Загрузка",
@@ -447,6 +458,36 @@ export const DisableEngineDialog = meta.story({
       await within(dialog).findByText(/перестанут проверяться/, {}, WAIT),
     );
   },
+});
+
+export const DisableEngineDialogCounting = meta.story({
+  name: "Модалка: считаю открытые сделки…",
+  args: { exposure: "загрузка" },
+  play: async (context) => {
+    const dialog = await openEngineDialog(context);
+    await visible(await within(dialog).findByText("Считаю открытые сделки…"));
+  },
+});
+
+export const DisableEngineDialogCountError = meta.story({
+  name: "Модалка: сделки не посчитались",
+  args: { exposure: "ошибка" },
+  play: async (context) => {
+    const dialog = await openEngineDialog(context);
+    await visible(
+      await within(dialog).findByText(
+        /перестанут проверяться до включения/,
+        {},
+        WAIT,
+      ),
+    );
+  },
+});
+
+export const DisableEngineDialogNothingOpen = meta.story({
+  name: "Модалка: открытых сделок нет",
+  args: { exposure: "нет открытых" },
+  play: DisableEngineDialog.input.play,
 });
 
 export const EnableEngineDialog = meta.story({
