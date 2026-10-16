@@ -85,6 +85,8 @@ $WEB_ENV
 $NODE_OPTS
 ExecStart=/usr/bin/node $APP/$EXEC
 Restart=always
+# Node на SIGTERM выходит с кодом 143 — это штатная остановка, а не сбой.
+SuccessExitStatus=143
 RestartSec=10
 $STOP_OPTS
 MemoryMax=$MEMORY
