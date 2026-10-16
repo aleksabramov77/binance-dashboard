@@ -14,8 +14,10 @@ const flags = (
 ): ApplyFlags => ({
   id,
   name,
+  market: "usdm",
   enabled,
   demoMirror: false,
+  demoMirrorMode: "auto",
   parentId: null,
   disabledReason: null,
   disabledNote: null,
@@ -25,7 +27,11 @@ const flags = (
 const current = [
   flags("F17", "Скальп", true),
   flags("F11", "MACD", true),
-  flags("S05", "EMA трейлинг", false),
+  flags("S05", "EMA трейлинг", false, {
+    demoMirror: true,
+    demoMirrorMode: "on",
+  }),
+  flags("PC99", "COIN-M", true, { market: "coinm" }),
 ];
 
 // Контрольный F96 и его варианты F97 (usdm) и PS99 (spot) — фиктивные id (spec 0015).
@@ -49,6 +55,7 @@ describe("planApply", () => {
       enable: [],
       mirrorOn: ["F11"],
       mirrorOff: [],
+      mirrorAuto: [],
       reasons: { F17: "loser", S05: "duplicate" },
       notes: { F17: "минус за эпоху" },
       forceControl: false,
@@ -86,6 +93,9 @@ describe("planApply", () => {
     expect(() =>
       planApply({ disable: ["F17"], reason: ["F17=loser"], enable: ["F17"] }),
     ).toThrow(/противоречие/);
+    expect(() =>
+      planApply({ "mirror-auto": ["F17"], "mirror-off": ["f17"] }),
+    ).toThrow(/два положения демо-зеркала/);
   });
   it("выключение без причины — ошибка до записи (spec 0046)", () => {
     expect(() =>
@@ -141,8 +151,48 @@ describe("diffApply", () => {
         to: false,
         reason: { reason: "loser", note: null },
       },
-      { id: "F11", name: "MACD", field: "demoMirror", from: false, to: true },
+      {
+        id: "F11",
+        name: "MACD",
+        field: "demoMirrorMode",
+        from: "auto",
+        to: "on",
+        demoMirror: false,
+      },
     ]);
+  });
+  it("положение зеркала (spec 0043): ручное «Выкл», «Авто»; то же положение — пропуск", () => {
+    const plan = planApply({
+      "mirror-off": ["F17"],
+      "mirror-auto": ["S05", "F11"],
+    });
+    expect(diffApply(plan, current)).toEqual([
+      {
+        id: "F17",
+        name: "Скальп",
+        field: "demoMirrorMode",
+        from: "auto",
+        to: "off",
+        demoMirror: false,
+      },
+      {
+        id: "S05",
+        name: "EMA трейлинг",
+        field: "demoMirrorMode",
+        from: "on",
+        to: "auto",
+        demoMirror: true,
+      },
+    ]);
+  });
+  it("«Вкл» и «Авто» для COIN-M — ошибка с причиной из UI; «Выкл» можно", () => {
+    for (const flag of ["mirror-on", "mirror-auto"] as const)
+      expect(() => diffApply(planApply({ [flag]: ["PC99"] }), current)).toThrow(
+        /PC99: Демо-зеркало COIN-M — позже/,
+      );
+    expect(
+      diffApply(planApply({ "mirror-off": ["PC99"] }), current),
+    ).toMatchObject([{ id: "PC99", to: "off" }]);
   });
   it("неизвестный id — ошибка до записи", () => {
     expect(() =>
@@ -256,6 +306,27 @@ describe("renderApplyMarkdown", () => {
       false,
     );
     expect(md).toContain("| S05 | EMA трейлинг | причина | — | дубль |");
+  });
+  it("положение зеркала и решение автомата после перевода в «Авто»", () => {
+    const md = renderApplyMarkdown(
+      "t",
+      "x",
+      diffApply(
+        planApply({ "mirror-off": ["F17"], "mirror-auto": ["S05"] }),
+        current,
+      ),
+      false,
+      ["S05 → демо-зеркало выключено: эксперимент выключен"],
+    );
+    expect(md).toContain(
+      "| F17 | Скальп | демо-зеркало | Авто · выкл | Выкл (вручную) |",
+    );
+    expect(md).toContain(
+      "| S05 | EMA трейлинг | демо-зеркало | Вкл (вручную) | Авто (решит автомат) |",
+    );
+    expect(md).toContain(
+      "- S05 → демо-зеркало выключено: эксперимент выключен",
+    );
   });
   it("без изменений — так и пишет", () => {
     expect(renderApplyMarkdown("t", "x", [], false)).toContain("Изменений нет");

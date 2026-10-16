@@ -1,5 +1,5 @@
 {
-  "id": "3cb7926a-c3e5-41c6-a343-02cfaa5c407d",
+  "id": "3d305463-fbba-4551-99c1-194a04976e08",
   "prevId": "45178711-c511-4464-9bea-cb7228c7da83",
   "version": "7",
   "dialect": "postgresql",
@@ -266,6 +266,31 @@
           "notNull": true,
           "default": false
         },
+        "demo_mirror_mode": {
+          "name": "demo_mirror_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'auto'"
+        },
+        "demo_mirror_since": {
+          "name": "demo_mirror_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "demo_mirror_advice": {
+          "name": "demo_mirror_advice",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "demo_mirror_auto": {
+          "name": "demo_mirror_auto",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "reset_at": {
           "name": "reset_at",
           "type": "timestamp with time zone",
@@ -274,36 +299,6 @@
         },
         "demo_reset_at": {
           "name": "demo_reset_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "parent_id": {
-          "name": "parent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "variant_note": {
-          "name": "variant_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "disabled_reason": {
-          "name": "disabled_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "disabled_note": {
-          "name": "disabled_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "disabled_at": {
-          "name": "disabled_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

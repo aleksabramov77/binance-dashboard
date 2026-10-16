@@ -67,7 +67,7 @@ export async function ensureRun(db: Db): Promise<number> {
 /**
  * Сид каталога: upsert по id. Обновляет описание, конфиг и связь варианта с контрольным (parentId, variantNote —
  * spec 0046) из кода; включённость, demo-зеркало и стартовый бюджет — настройки пользователя — пишутся только при
- * первой вставке.
+ * первой вставке. Положение зеркала (spec 0043): `demoMirror: true` — ручное «Вкл», иначе «Авто».
  */
 export async function seedExperiments(
   db: Db,
@@ -87,6 +87,7 @@ export async function seedExperiments(
         demoMirror: e.demoMirror,
         parentId: e.parentId ?? null,
         variantNote: e.variantNote ?? null,
+        demoMirrorMode: e.demoMirror ? "on" : "auto",
       })
       .onConflictDoUpdate({
         target: experimentsTable.id,

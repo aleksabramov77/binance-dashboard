@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 import { disabledInfoSchema } from "./disable";
 import { mirrorViewSchema } from "./mirror";
+import { demoMirrorModeSchema, mirrorAutoSnapshotSchema } from "./mirrorAuto";
 
 // Контракт API страниц лаборатории: GET /api/experiments и GET /api/experiments/[id] (spec 003, 3b).
 
@@ -98,6 +99,9 @@ export const experimentSummarySchema = experimentSchema
     demoMirror: true,
   })
   .extend({
+    /** Положение переключателя «Выкл · Авто · Вкл» и последнее решение авто-зеркала (spec 0043). */
+    demoMirrorMode: demoMirrorModeSchema,
+    demoMirrorAuto: mirrorAutoSnapshotSchema.nullable(),
     stats: tradeStatsSchema,
     demo: demoSummarySchema,
     /** Контрольный эксперимент варианта (spec 0046); null — не вариант. */

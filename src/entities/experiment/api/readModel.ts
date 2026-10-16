@@ -20,6 +20,10 @@ import {
 } from "../model/db";
 import { toDisabledInfo } from "../model/disable";
 import {
+  type DemoMirrorMode,
+  mirrorAutoSnapshotSchema,
+} from "../model/mirrorAuto";
+import {
   type OnInvalidExperiment,
   parseExperimentRow,
   parseExperimentRows,
@@ -192,23 +196,28 @@ export async function readExperimentsOverview(
     engineEnabled,
     demoConfigured,
     experiments: parseExperimentRows(rows, onInvalid).map(
-      ({ experiment: e, row }) => ({
-        id: e.id,
-        market: e.market,
-        name: e.name,
-        hypothesis: e.hypothesis,
-        initialBudget: e.initialBudget,
-        enabled: e.enabled,
-        demoMirror: e.demoMirror,
-        parentId: e.parentId ?? null,
-        variantNote: e.variantNote ?? null,
-        disabled: toDisabledInfo(row),
-        stats: computeStats(tradesOf.get(e.id) ?? [], e.initialBudget),
-        demo: toDemoSummary(
-          demo.get(e.id) ?? emptyMirrorSummary(),
-          e.initialBudget,
-        ),
-      }),
+      ({ experiment: e, row }) => {
+        const auto = mirrorAutoSnapshotSchema.safeParse(row.demoMirrorAuto);
+        return {
+          id: e.id,
+          market: e.market,
+          name: e.name,
+          hypothesis: e.hypothesis,
+          initialBudget: e.initialBudget,
+          enabled: e.enabled,
+          demoMirror: e.demoMirror,
+          demoMirrorMode: row.demoMirrorMode,
+          demoMirrorAuto: auto.success ? auto.data : null,
+          parentId: e.parentId ?? null,
+          variantNote: e.variantNote ?? null,
+          disabled: toDisabledInfo(row),
+          stats: computeStats(tradesOf.get(e.id) ?? [], e.initialBudget),
+          demo: toDemoSummary(
+            demo.get(e.id) ?? emptyMirrorSummary(),
+            e.initialBudget,
+          ),
+        };
+      },
     ),
   };
 }
@@ -438,11 +447,12 @@ export async function readLabDataset(
 }
 
 /**
- * Тумблеры всех экспериментов — для `pnpm lab:apply` (сравнить «было → стало» перед записью): связь варианта с
- * контрольным и причина выключения — для проверки контрольного и смены причины (spec 0046).
+ * Тумблеры всех экспериментов — для `pnpm lab:apply` (сравнить «было → стало» перед записью): положение демо-зеркала
+ * (spec 0043), связь варианта с контрольным и причина выключения — для проверки контрольного и смены причины (spec 0046).
  */
 export async function readExperimentFlags(db: Db): Promise<
   (Pick<Experiment, "id" | "name" | "market" | "enabled" | "demoMirror"> & {
+    demoMirrorMode: DemoMirrorMode;
     parentId: string | null;
     disabledReason: string | null;
     disabledNote: string | null;
@@ -455,6 +465,7 @@ export async function readExperimentFlags(db: Db): Promise<
       market: experimentsTable.market,
       enabled: experimentsTable.enabled,
       demoMirror: experimentsTable.demoMirror,
+      demoMirrorMode: experimentsTable.demoMirrorMode,
       parentId: experimentsTable.parentId,
       disabledReason: experimentsTable.disabledReason,
       disabledNote: experimentsTable.disabledNote,

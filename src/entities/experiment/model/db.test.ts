@@ -172,11 +172,11 @@ describe("миграция 0008 (spec 0030): контекст входа, MAE, �
   });
 });
 
-describe("миграция 0009 (spec 0046): варианты и причина выключения", () => {
+describe("миграция 0010 (spec 0046): варианты и причина выключения", () => {
   const migration = readFileSync(
     path.join(
       process.cwd(),
-      "drizzle/0009_experiment_variants_disable_reason.sql",
+      "drizzle/0010_experiment_variants_disable_reason.sql",
     ),
     "utf8",
   )

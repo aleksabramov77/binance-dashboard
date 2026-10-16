@@ -38,6 +38,8 @@ const summary = (
   parentId: null,
   variantNote: null,
   disabled: null,
+  demoMirrorMode: "auto",
+  demoMirrorAuto: null,
   demo: demo(),
   stats: computeStats(
     pnls.map((pnl, i) => ({

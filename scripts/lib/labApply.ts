@@ -1,20 +1,25 @@
 // План применения решений лаборатории (`pnpm lab:apply`): разбор аргументов и проверка, что изменения не
 // противоречат друг другу. Сами записи в БД — scripts/lab-apply.ts через public API entities/experiment.
 import {
+  ASSET_GROUPS,
+  type DemoMirrorMode,
   DISABLE_NOTE_MAX,
   DISABLE_REASON_KEYS,
   DISABLE_REASONS,
   type DisableReason,
   disableReasonSchema,
   enabledVariantsOf,
+  type Market,
 } from "@/entities/experiment";
 import { PRIVATE_ID_PATTERN } from "./labPrivate";
 
 export interface ApplyPlan {
   disable: string[];
   enable: string[];
+  /** Положение демо-зеркала (spec 0043): ручные «Вкл» / «Выкл» и «Авто». */
   mirrorOn: string[];
   mirrorOff: string[];
+  mirrorAuto: string[];
   /** Причина выключения по id (spec 0046): у каждого из disable — обязательно. */
   reasons: Record<string, DisableReason>;
   /** Короткий текст причины по id (необязательно). */
@@ -31,8 +36,10 @@ export interface ApplyPlan {
 export interface ApplyFlags {
   id: string;
   name: string;
+  market: Market;
   enabled: boolean;
   demoMirror: boolean;
+  demoMirrorMode: DemoMirrorMode;
   /** Контрольный варианта; null — не вариант. */
   parentId: string | null;
   /** Причина последнего выключения как в БД; null — нет. */
@@ -59,9 +66,11 @@ export type ApplyChange =
   | {
       id: string;
       name: string;
-      field: "demoMirror";
-      from: boolean;
-      to: boolean;
+      field: "demoMirrorMode";
+      from: DemoMirrorMode;
+      to: DemoMirrorMode;
+      /** Зеркало сейчас — для «Было» у «Авто» (вкл / выкл). */
+      demoMirror: boolean;
     }
   | {
       /** Уже выключенный: новая причина (backfill, повторный разбор). */
@@ -120,6 +129,7 @@ export function planApply(values: {
   enable?: string[];
   "mirror-on"?: string[];
   "mirror-off"?: string[];
+  "mirror-auto"?: string[];
   reason?: string[];
   note?: string[];
   "force-control"?: boolean;
@@ -162,6 +172,7 @@ export function planApply(values: {
     enable: normalize(values.enable, "--enable"),
     mirrorOn: normalize(values["mirror-on"], "--mirror-on"),
     mirrorOff: normalize(values["mirror-off"], "--mirror-off"),
+    mirrorAuto: normalize(values["mirror-auto"], "--mirror-auto"),
     reasons,
     notes,
     forceControl: values["force-control"] ?? false,
@@ -175,14 +186,23 @@ export function planApply(values: {
   ];
   if (both.length)
     throw new Error(`противоречие: ${both.join(", ")} и включить, и выключить`);
+  const twoModes = [
+    ...overlap(plan.mirrorAuto, plan.mirrorOn),
+    ...overlap(plan.mirrorAuto, plan.mirrorOff),
+  ];
+  if (twoModes.length)
+    throw new Error(
+      `противоречие: ${twoModes.join(", ")} — два положения демо-зеркала сразу`,
+    );
   if (
     !plan.disable.length &&
     !plan.enable.length &&
     !plan.mirrorOn.length &&
-    !plan.mirrorOff.length
+    !plan.mirrorOff.length &&
+    !plan.mirrorAuto.length
   )
     throw new Error(
-      "нечего применять: --disable, --enable, --mirror-on или --mirror-off <id>",
+      "нечего применять: --disable, --enable, --mirror-on, --mirror-off или --mirror-auto <id>",
     );
   return plan;
 }
@@ -243,21 +263,26 @@ export function diffApply(
         reason: null,
       });
   }
-  const mirror = (ids: string[], to: boolean) => {
+  // «Вкл» и «Авто» для группы без демо-зеркала (COIN-M) — ошибка с той же причиной, что в UI и API (spec 0043).
+  const mode = (ids: string[], to: DemoMirrorMode) => {
     for (const id of ids) {
       const e = get(id);
-      if (e.demoMirror !== to)
+      const blocked = ASSET_GROUPS[e.market].demoMirrorBlocked;
+      if (to !== "off" && blocked) throw new Error(`${id}: ${blocked}`);
+      if (e.demoMirrorMode !== to)
         changes.push({
           id,
           name: e.name,
-          field: "demoMirror",
-          from: e.demoMirror,
+          field: "demoMirrorMode",
+          from: e.demoMirrorMode,
           to,
+          demoMirror: e.demoMirror,
         });
     }
   };
-  mirror(plan.mirrorOff, false);
-  mirror(plan.mirrorOn, true);
+  mode(plan.mirrorOff, "off");
+  mode(plan.mirrorOn, "on");
+  mode(plan.mirrorAuto, "auto");
 
   // Варианты, которые после плана останутся включёнными, — без контрольного их не с чем сравнивать.
   if (!plan.forceControl) {
@@ -281,20 +306,13 @@ export function diffApply(
   return changes;
 }
 
-const FIELD_LABEL: Record<ApplyChange["field"], string> = {
-  enabled: "эксперимент",
-  demoMirror: "демо-зеркало",
-  reason: "причина",
+const MODE_LABEL: Record<DemoMirrorMode, string> = {
+  off: "Выкл (вручную)",
+  auto: "Авто",
+  on: "Вкл (вручную)",
 };
 
-const state = (field: "enabled" | "demoMirror", v: boolean) =>
-  field === "enabled"
-    ? v
-      ? "включён"
-      : "выключен"
-    : v
-      ? "включено"
-      : "выключено";
+const enabledState = (v: boolean) => (v ? "включён" : "выключен");
 
 const reasonText = (r: { reason: string | null; note: string | null }) => {
   if (r.reason === null) return "—";
@@ -310,36 +328,33 @@ const row = (c: ApplyChange, what: string, from: string, to: string) =>
 function rows(c: ApplyChange): string[] {
   switch (c.field) {
     case "reason":
-      return [row(c, FIELD_LABEL.reason, reasonText(c.from), reasonText(c.to))];
-    case "demoMirror":
+      return [row(c, "причина", reasonText(c.from), reasonText(c.to))];
+    case "demoMirrorMode":
       return [
         row(
           c,
-          FIELD_LABEL.demoMirror,
-          state(c.field, c.from),
-          state(c.field, c.to),
+          "демо-зеркало",
+          c.from === "auto"
+            ? `Авто · ${c.demoMirror ? "вкл" : "выкл"}`
+            : MODE_LABEL[c.from],
+          c.to === "auto" ? "Авто (решит автомат)" : MODE_LABEL[c.to],
         ),
       ];
     case "enabled":
       return [
-        row(
-          c,
-          FIELD_LABEL.enabled,
-          state(c.field, c.from),
-          state(c.field, c.to),
-        ),
-        ...(c.reason
-          ? [row(c, FIELD_LABEL.reason, "—", reasonText(c.reason))]
-          : []),
+        row(c, "эксперимент", enabledState(c.from), enabledState(c.to)),
+        ...(c.reason ? [row(c, "причина", "—", reasonText(c.reason))] : []),
       ];
   }
 }
 
+/** notes — что сразу решил автомат для переведённых в «Авто» (строки как в журнале, spec 0043). */
 export function renderApplyMarkdown(
   at: string,
   database: string,
   changes: ApplyChange[],
   dryRun: boolean,
+  notes: string[] = [],
 ): string {
   const title = `## ${at}${dryRun ? " (dry-run, не применено)" : ""}`;
   const head = [title, "", `БД: ${database}.`, ""];
@@ -353,5 +368,13 @@ export function renderApplyMarkdown(
     "|---|---|---|---|---|",
     ...changes.flatMap(rows),
     "",
+    ...(notes.length
+      ? [
+          "Авто-зеркало сразу после перевода в «Авто»:",
+          "",
+          ...notes.map((n) => `- ${n}`),
+          "",
+        ]
+      : []),
   ].join("\n");
 }

@@ -7,6 +7,7 @@ import {
   budgetFormSchema,
   createDbExperimentStore,
   DEFAULT_INITIAL_BUDGET,
+  type DemoMirrorMode,
   DISABLE_REASONS,
   type ExperimentEnabledState,
   type ExperimentMarket,
@@ -23,8 +24,8 @@ import {
   resetExperimentRun,
   resetGroupRun,
   resetRun,
-  setExperimentDemoMirror,
   setExperimentEnabled,
+  setExperimentMirrorMode,
   withEngineTickLock,
 } from "@/entities/experiment";
 import { ENGINE_KEYS, planReset, priceKey } from "@/features/paper-engine";
@@ -38,6 +39,7 @@ import {
   warnInvalidExperiment,
   withTickLock,
 } from "./experimentEngine";
+import { runMirrorAuto } from "./mirrorAuto";
 
 /** Бюджет следующей эпохи из engine_state; нет или мусор — по умолчанию. */
 async function readNextBudget(
@@ -103,6 +105,8 @@ export async function getLabSettings(): Promise<LabSettings> {
           hypothesis: e.hypothesis,
           enabled: e.enabled,
           demoMirror: e.demoMirror,
+          demoMirrorMode: e.demoMirrorMode,
+          demoMirrorAuto: e.demoMirrorAuto,
           initialBudget: e.initialBudget,
           parentId: e.parentId,
           disabled: e.disabled,
@@ -172,13 +176,24 @@ export async function toggleExperiment(
   return getLabSettings();
 }
 
+const DEMO_KEY_MISSING =
+  "На сервере не задан ключ Binance Demo (BINANCE_DEMO_API_KEY / SECRET) — включить торговлю на демо-счёте нельзя.";
+
+const MODE_LABEL: Record<DemoMirrorMode, string> = {
+  off: "Выкл (вручную)",
+  auto: "Авто",
+  on: "Вкл (вручную)",
+};
+
 /**
- * Demo-зеркало эксперимента (spec 008); null — эксперимента нет, { blocked } — группа не умеет зеркало
- * (COIN-M, spec 0023: «Демо-зеркало COIN-M — позже»). Открытые зеркала не трогаем.
+ * Положение демо-зеркала эксперимента «Выкл · Авто · Вкл» (spec 008, 0043); null — эксперимента нет, { blocked } —
+ * группа не умеет зеркало (COIN-M, spec 0023: «Демо-зеркало COIN-M — позже») или «Вкл» без ключа Binance Demo.
+ * Открытые зеркала не трогаем.
+ * «Авто» сразу применяет правило автомата к эксперименту (AC7) — без ожидания суточной проверки.
  */
-export async function toggleDemoMirror(
+export async function setDemoMirrorMode(
   id: string,
-  demoMirror: boolean,
+  mode: DemoMirrorMode,
 ): Promise<LabSettings | null | { blocked: string }> {
   await ensureEngineReady();
   const db = getDb();
@@ -188,13 +203,17 @@ export async function toggleDemoMirror(
     .where(eq(experimentsTable.id, id));
   if (!row) return null;
   const group = ASSET_GROUPS[row.market as ExperimentMarket];
-  if (demoMirror && group?.demoMirrorBlocked)
+  if (mode !== "off" && group?.demoMirrorBlocked)
     return { blocked: group.demoMirrorBlocked };
-  if (!(await setExperimentDemoMirror(db, id, demoMirror))) return null;
-  log.info(
-    "experiments.mirror",
-    `${id}: demo-зеркало ${demoMirror ? "включено" : "выключено"}`,
-  );
+  // Как в UI и lab:apply: без ключа Binance Demo ручное «Вкл» бессмысленно — зеркало не сможет торговать.
+  if (mode === "on" && getDemoTradingConfig() === null)
+    return { blocked: DEMO_KEY_MISSING };
+  if (!(await setExperimentMirrorMode(db, id, mode))) return null;
+  log.info("experiments.mirror", `${id}: демо-зеркало — ${MODE_LABEL[mode]}`, {
+    experimentId: id,
+    mode,
+  });
+  if (mode === "auto") await runMirrorAuto({ ids: [id] });
   return getLabSettings();
 }
 
