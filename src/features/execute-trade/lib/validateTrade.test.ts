@@ -383,3 +383,74 @@ describe("спот: деньги на LIMIT FOK и минимум стопа (р
     if (result.ok) expect(result.value.quantity).toBe("33");
   });
 });
+
+describe("validateTrade: COIN-M (spec 0056)", () => {
+  // demo-dapi 2026-10-17: количество — целые контракты (шаг 1), ETHUSD_PERP — $10 за контракт, маржа в ETH.
+  const coinmRules = {
+    tickSize: "0.01",
+    stepSize: "1",
+    minQty: 1,
+    minNotional: 0,
+    priceBand: null,
+    otoAllowed: false,
+    ocoAllowed: false,
+    contract: { size: 10, marginAsset: "ETH" },
+  };
+  const ethPerp: TradeRequest = {
+    symbol: "ETHUSD_PERP",
+    market: "coinm",
+    direction: "long",
+    // 5 контрактов по $10 при входе paper 2000: 5 × 10 / 2000 ETH.
+    quantity: 0.025,
+    stopLoss: 1900,
+    takeProfit: 2200,
+    leverage: 1,
+    referencePrice: 2000,
+  };
+  const coinmCtx = (patch: Partial<TradeContext> = {}) =>
+    ctx({ price: 2010, rules: coinmRules, availableUsd: 1000, ...patch });
+
+  it("количество — контракты как у paper-сделки: монетный эквивалент × цена paper / размер", () => {
+    const r = validateTrade(ethPerp, coinmCtx());
+    expect(r).toMatchObject({
+      ok: true,
+      value: { quantity: "5", notionalUsd: 50 },
+    });
+  });
+
+  it("без цены paper — по текущей; меньше одного контракта — 1", () => {
+    const { referencePrice: _, ...noRef } = ethPerp;
+    const r = validateTrade({ ...noRef, quantity: 0.001 }, coinmCtx());
+    expect(r).toMatchObject({ ok: true, value: { quantity: "1" } });
+  });
+
+  it("шорт на COIN-M разрешён (это фьючерсы)", () => {
+    const r = validateTrade(
+      { ...ethPerp, direction: "short", stopLoss: 2100, takeProfit: 1800 },
+      coinmCtx(),
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("маржа — в $ по монете контракта: мало ETH — понятная ошибка с кошельком", () => {
+    const r = validateTrade(ethPerp, coinmCtx({ availableUsd: 30 }));
+    expect(r.ok).toBe(false);
+    if (!r.ok)
+      expect(r.errors.join(" ")).toMatch(
+        /Нужно \$50\.00 маржи, а на COIN-M Futures \(ETH\) свободно \$30\.00/,
+      );
+  });
+
+  it("потеря на стопе — по объёму в монете: 50 / 2010 ETH × (2010 − 1900)", () => {
+    // ≈ $2,74 > 2% от $100.
+    const r = validateTrade(ethPerp, coinmCtx({ availableUsd: 100 }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join(" ")).toMatch(/Потеря на стопе \$2\.74/);
+  });
+
+  it("нет размера контракта — отказ, а не заявка в монетах", () => {
+    const { contract: _, ...plain } = coinmRules;
+    const r = validateTrade(ethPerp, coinmCtx({ rules: plain }));
+    expect(r.ok).toBe(false);
+  });
+});

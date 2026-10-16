@@ -21,7 +21,10 @@ import {
   fetchDemoSpotOrderByClientId,
   fetchDemoSymbolRules,
 } from "@/shared/api/binance/demo.server";
-import type { TradeVenue } from "@/shared/api/binance/venue.server";
+import type {
+  TradeVenue,
+  VenueFuturesMarket,
+} from "@/shared/api/binance/venue.server";
 import { log } from "@/shared/lib/logger.server";
 import {
   algoLeg,
@@ -32,6 +35,7 @@ import {
   closeVerdict,
   ownCloseQuantity,
   planOwnClose,
+  protectMarketOf,
   spotLeg,
   spotNetQuantity,
 } from "../lib/closePlan";
@@ -45,12 +49,14 @@ import { futuresFillPrice } from "./futuresFillPrice";
 import { demoTradeContext } from "./tradeVenue";
 
 export interface CloseDemoRequest {
-  market: "spot" | "usdm";
+  /** COIN-M (demo-dapi, spec 0056) — только у демо-зеркала. */
+  market: "spot" | "usdm" | "coinm";
   symbol: string;
   direction: "long" | "short";
   /**
    * Свой объём: спот — сколько куплено (сверх этого не продаём — монеты могли лежать раньше);
-   * фьючерсы — с protectRefs закрываем не больше него.
+   * фьючерсы — с protectRefs закрываем не больше него. COIN-M — в монете (как paper); свой объём на бирже —
+   * контракты из protectRefs.
    */
   quantity: number;
   /**
@@ -117,20 +123,37 @@ export async function closeDemoPosition(
 
   // Старые строки без protect_refs: снимаем только защитные ордера своей стороны (lib/futuresMode),
   // а не все ордера символа — чужие (ручные, другие зеркала в Hedge) остаются.
-  let futures: { side: FuturesSide; amount: number } | null = null;
+  let futures: {
+    side: FuturesSide;
+    amount: number;
+    market: VenueFuturesMarket;
+  } | null = null;
   try {
-    if (req.market === "usdm") {
+    if (req.market !== "spot") {
+      const market = req.market;
       const side: FuturesSide = {
-        mode: await fetchDemoPositionMode(venue),
+        mode: await fetchDemoPositionMode(venue, market),
         direction: req.direction,
       };
-      const state = await fetchDemoFuturesSymbolState(venue, req.symbol);
+      const state = await fetchDemoFuturesSymbolState(
+        venue,
+        req.symbol,
+        market,
+      );
       const toCancel = protectiveToCancel(state, side);
       for (const algoId of toCancel.algoIds)
-        await demoCancelAlgoOrder(venue, { algoId });
+        await demoCancelAlgoOrder(
+          venue,
+          { algoId },
+          protectMarketOf(market, req.symbol),
+        );
       for (const orderId of toCancel.orderIds)
-        await demoFuturesCancelOrder(venue, req.symbol, orderId);
-      futures = { side, amount: ownPosition(state.positions, side).amount };
+        await demoFuturesCancelOrder(venue, req.symbol, orderId, market);
+      futures = {
+        side,
+        amount: ownPosition(state.positions, side).amount,
+        market,
+      };
       steps.push({
         label: "Снять ордера своей стороны",
         ok: true,
@@ -158,7 +181,11 @@ export async function closeDemoPosition(
 
   try {
     if (futures) {
-      const rules = await fetchDemoSymbolRules("usdm", req.symbol, venue);
+      const rules = await fetchDemoSymbolRules(
+        futures.market,
+        req.symbol,
+        venue,
+      );
       const qty = rules
         ? floorToStep(futures.amount, rules.stepSize)
         : String(futures.amount);
@@ -176,10 +203,17 @@ export async function closeDemoPosition(
         req.direction === "long" ? "SELL" : "BUY",
         qty,
         futures.side,
+        undefined,
+        futures.market,
       );
       const exitPrice =
         order.avgPrice ||
-        (await futuresFillPrice(venue, req.symbol, order.orderId));
+        (await futuresFillPrice(
+          venue,
+          req.symbol,
+          order.orderId,
+          futures.market,
+        ));
       steps.push({
         label: "Закрыть по рынку",
         ok: true,
@@ -244,14 +278,19 @@ async function readOwnLegs(
   symbol: string,
   refs: DemoProtectRefs,
 ): Promise<ClosePlan> {
-  if (refs.market === "usdm") {
+  if (refs.market !== "spot") {
+    const market = refs.market;
     const [stop, takeProfit] = await Promise.all(
       [refs.stop, refs.takeProfit].map(async (r) => {
         const lookup = r && algoLookup(r);
         if (!lookup) return null;
-        const q = await fetchDemoAlgoOrder(venue, lookup);
+        const q = await fetchDemoAlgoOrder(
+          venue,
+          lookup,
+          protectMarketOf(market, symbol),
+        );
         if (!q || !algoTriggered(q)) return algoLeg(q);
-        return algoLeg(q, await triggeredQty(venue, symbol, q));
+        return algoLeg(q, await triggeredQty(venue, symbol, q, market));
       }),
     );
     return planOwnClose({ stop: stop ?? null, takeProfit: takeProfit ?? null });
@@ -277,12 +316,16 @@ async function triggeredQty(
   venue: TradeVenue,
   symbol: string,
   q: AlgoOrderQuery,
+  market: VenueFuturesMarket,
 ): Promise<number | null> {
   if (q.actualQty > 0) return q.actualQty;
   if (q.actualOrderId === null) return null;
-  const order = await fetchDemoFuturesOrder(venue, symbol, {
-    orderId: q.actualOrderId,
-  });
+  const order = await fetchDemoFuturesOrder(
+    venue,
+    symbol,
+    { orderId: q.actualOrderId },
+    market,
+  );
   return order && order.executedQty > 0 ? order.executedQty : null;
 }
 
@@ -293,10 +336,12 @@ async function cancelOwn(
   refs: DemoProtectRefs,
   leg: "stop" | "takeProfit",
 ): Promise<boolean> {
-  if (refs.market === "usdm") {
+  if (refs.market !== "spot") {
     const ref = refs[leg];
     const lookup = ref && algoLookup(ref);
-    return lookup ? demoCancelAlgoOrder(venue, lookup) : false;
+    return lookup
+      ? demoCancelAlgoOrder(venue, lookup, protectMarketOf(refs.market, symbol))
+      : false;
   }
   const ref = refs[leg];
   return ref
@@ -309,9 +354,9 @@ const LEG_LABEL = { stop: "стоп", takeProfit: "тейк" } as const;
 /** clientOrderId своего закрытия: группа сделки из своего стопа/тейка + `-C`; нет — без id. */
 function ownCloseId(refs: DemoProtectRefs): string | undefined {
   const ids =
-    refs.market === "usdm"
-      ? [refs.stop?.clientAlgoId, refs.takeProfit?.clientAlgoId]
-      : [refs.stop?.clientOrderId, refs.takeProfit?.clientOrderId];
+    refs.market === "spot"
+      ? [refs.stop?.clientOrderId, refs.takeProfit?.clientOrderId]
+      : [refs.stop?.clientAlgoId, refs.takeProfit?.clientAlgoId];
   const group = ids.map(clientIdGroup).find((g) => g !== null);
   return group ? `${group}-C` : undefined;
 }
@@ -412,19 +457,22 @@ async function closeOwn(
         "failed",
         `${req.symbol} нет на ${venue.kind === "demo" ? "демо-рынке" : "рынке"} ${req.market}.`,
       );
-    if (req.market === "usdm") {
+    if (req.market !== "spot") {
+      const market = req.market;
       // Своя сторона: в Hedge — строка LONG/SHORT, в One-way — общая позиция в сторону сделки.
       const side: FuturesSide = {
-        mode: await fetchDemoPositionMode(venue),
+        mode: await fetchDemoPositionMode(venue, market),
         direction: req.direction,
       };
       const position = ownPosition(
-        await demoFuturesPositions(venue, req.symbol),
+        await demoFuturesPositions(venue, req.symbol, market),
         side,
       );
+      // COIN-M: свой объём на бирже — контракты из ссылок (в строке зеркала — монетный эквивалент, spec 0056).
+      const own = refs.market === "coinm" ? refs.contracts : req.quantity;
       const qty = floorToStep(
         // Минус закрытое своей сработавшей ногой: остальное на стороне — чужое.
-        ownCloseQuantity(req.quantity, plan.soldByLegs, position.amount),
+        ownCloseQuantity(own, plan.soldByLegs, position.amount),
         rules.stepSize,
       );
       if (closeVerdict(plan, Number(qty)) !== "close")
@@ -438,10 +486,11 @@ async function closeOwn(
         qty,
         side,
         closeId,
+        market,
       );
       const exitPrice =
         order.avgPrice ||
-        (await futuresFillPrice(venue, req.symbol, order.orderId));
+        (await futuresFillPrice(venue, req.symbol, order.orderId, market));
       steps.push({
         label: "Закрыть свой объём по рынку",
         ok: true,

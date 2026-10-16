@@ -75,6 +75,10 @@ describe("liveSignedRequest", () => {
     expect(String((fetchSpy.mock.calls[0] as unknown as [string])[0])).toMatch(
       /^https:\/\/fapi\.binance\.com\/fapi\/v1\/order\?/,
     );
+    // COIN-M на реальном счёте не торгуется (spec 0056): отказ до сети.
+    expect(() =>
+      venue.signed("coinm", "POST", "/dapi/v1/order", z.unknown()),
+    ).toThrow(/COIN-M на реальном счёте не торгуется/);
     // Вне списка (история ордеров, перевод) — отказ до сети.
     expect(() =>
       venue.signed("usdm", "GET", "/fapi/v1/allOrders", z.unknown()),

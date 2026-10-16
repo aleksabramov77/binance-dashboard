@@ -1,3 +1,4 @@
+import type { ProtectMarket } from "@/shared/api/binance/demo.server";
 import { SPOT_TAKER_FEE } from "../config/spot";
 
 // Закрытие зеркала по своим защитным ордерам (spec 0012, PR 2b): чистый выбор действий,
@@ -215,3 +216,13 @@ export function orphanLegCandidate(
 export const afterTriggeredLeg = (
   executedQty: number,
 ): "closed" | "unprotected" => (executedQty > 0 ? "closed" : "unprotected");
+
+/**
+ * Где свои стоп и тейк фьючерсной сделки: USDⓈ-M — algo-ордера счёта, COIN-M — условные ордера символа
+ * (`/dapi/v1/order`, spec 0056).
+ */
+export const protectMarketOf = (
+  market: "usdm" | "coinm",
+  symbol: string,
+): ProtectMarket =>
+  market === "coinm" ? { market: "coinm", symbol } : { market: "usdm" };

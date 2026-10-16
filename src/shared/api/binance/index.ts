@@ -38,7 +38,11 @@ export type {
   Perpetuals,
 } from "./market";
 export type { Ticker24h } from "./marketSchemas";
-export { TRADE_MARKETS, tradeMarketSchema } from "./markets";
+export {
+  binanceMarketSchema,
+  TRADE_MARKETS,
+  tradeMarketSchema,
+} from "./markets";
 export { resolveUsdPrice } from "./prices";
 export { type DemoProtectRefs, demoProtectRefsSchema } from "./protectRefs";
 export type {

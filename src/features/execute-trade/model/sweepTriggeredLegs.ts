@@ -13,6 +13,7 @@ import {
   algoLeg,
   algoLookup,
   orphanLegCandidate,
+  protectMarketOf,
 } from "../lib/closePlan";
 import { errorText } from "./tradeSteps";
 import { demoTradeContext } from "./tradeVenue";
@@ -46,28 +47,46 @@ const LEG = { stop: "стоп", takeProfit: "тейк" } as const;
 /**
  * Сверка своих ног открытых фьючерсных зеркал (spec 0012, PR 2d): своя нога сработала, вторая
  * висит — снять её сразу (иначе reduceOnly-ордер закрыл бы объём соседнего зеркала монеты). Одна
- * выборка открытых algo-ордеров счёта + статус только «пропавших» своих ног. Возвращает зеркала,
- * чью позицию уже закрыла биржа (вторая нога снята). Сбой сети — пусто, повтор на следующем прогоне.
+ * выборка открытых algo-ордеров счёта на рынок (COIN-M — открытых ордеров dapi, spec 0056) + статус только
+ * «пропавших» своих ног. Возвращает зеркала, чью позицию уже закрыла биржа (вторая нога снята). Сбой сети —
+ * без этого рынка, повтор на следующем прогоне.
  */
 export async function sweepTriggeredLegs(
   mirrors: OpenMirrorLegs[],
   overBudget: () => boolean = () => false,
   venue: TradeVenue | null = demoTradeContext()?.venue ?? null,
 ): Promise<SweptMirror[]> {
+  if (!venue) return [];
+  const swept: SweptMirror[] = [];
+  for (const market of FUTURES_MARKETS) {
+    if (overBudget()) break;
+    swept.push(...(await sweepMarket(venue, market, mirrors, overBudget)));
+  }
+  return swept;
+}
+
+const FUTURES_MARKETS = ["usdm", "coinm"] as const;
+
+async function sweepMarket(
+  venue: TradeVenue,
+  market: (typeof FUTURES_MARKETS)[number],
+  mirrors: OpenMirrorLegs[],
+  overBudget: () => boolean,
+): Promise<SweptMirror[]> {
   // Зеркала с хотя бы одной своей ногой; одна нога (stopOnly) — сработала: строка закрыта, снимать нечего.
   const futures = mirrors.filter(
     (m) =>
-      m.protectRefs.market === "usdm" &&
+      m.protectRefs.market === market &&
       (m.protectRefs.stop || m.protectRefs.takeProfit),
   );
-  if (!venue || futures.length === 0) return [];
+  if (futures.length === 0) return [];
   let openAlgos: Awaited<ReturnType<typeof fetchDemoOpenAlgoOrders>>;
   try {
-    openAlgos = await fetchDemoOpenAlgoOrders(venue);
+    openAlgos = await fetchDemoOpenAlgoOrders(venue, market);
   } catch (error) {
     log.warn(
       "mirror.legs",
-      `Открытые algo-ордера не загрузились: ${errorText(error)}`,
+      `Открытые ${market === "coinm" ? "ордера COIN-M" : "algo-ордера"} не загрузились: ${errorText(error)}`,
     );
     return [];
   }
@@ -76,7 +95,8 @@ export async function sweepTriggeredLegs(
     // Бюджет прогона: остальные зеркала сверим на следующей минуте.
     if (overBudget()) break;
     const refs = m.protectRefs;
-    if (refs.market !== "usdm") continue;
+    if (refs.market === "spot") continue;
+    const at = protectMarketOf(market, m.symbol);
     const candidate = orphanLegCandidate(refs, openAlgos);
     if (!candidate) continue;
     const remaining = candidate.remaining;
@@ -87,7 +107,7 @@ export async function sweepTriggeredLegs(
     if (!missingLookup || (remaining && !remainingLookup)) continue;
     const steps: TradeStep[] = [];
     try {
-      const q = await fetchDemoAlgoOrder(venue, missingLookup);
+      const q = await fetchDemoAlgoOrder(venue, missingLookup, at);
       // Нога снята не срабатыванием (вручную, истекла) — не наше дело: закроется по paper-сделке.
       if (!q || !algoLeg(q).triggered) continue;
       // Сколько исполнила нога: 0 — сработала раньше входа (стоп до входа), позиция без стопа.
@@ -96,9 +116,12 @@ export async function sweepTriggeredLegs(
           ? q.actualQty
           : q.actualOrderId !== null
             ? ((
-                await fetchDemoFuturesOrder(venue, m.symbol, {
-                  orderId: q.actualOrderId,
-                })
+                await fetchDemoFuturesOrder(
+                  venue,
+                  m.symbol,
+                  { orderId: q.actualOrderId },
+                  market,
+                )
               )?.executedQty ?? 0)
             : 0;
       if (afterTriggeredLeg(executed) === "unprotected") {
@@ -126,7 +149,7 @@ export async function sweepTriggeredLegs(
         detail: `${q?.algoStatus}, ордер #${q?.actualOrderId}, ~${q?.actualPrice || "—"}`,
       });
       if (remaining && remainingLookup) {
-        const cancelled = await demoCancelAlgoOrder(venue, remainingLookup);
+        const cancelled = await demoCancelAlgoOrder(venue, remainingLookup, at);
         steps.push({
           label: `Снять свой ${LEG[remaining]}`,
           ok: true,

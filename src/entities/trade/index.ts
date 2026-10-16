@@ -11,6 +11,7 @@ export {
   executedOrderSchema,
   MAX_LEVERAGE,
   MAX_RISK_PCT,
+  manualTradeRequestSchema,
   TRADE_STATUSES,
   type TradeHistory,
   type TradeMark,
