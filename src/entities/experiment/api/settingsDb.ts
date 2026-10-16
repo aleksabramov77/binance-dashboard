@@ -1,5 +1,5 @@
 import type { PaperTrade } from "@binance-dashboard/trading-core";
-import { and, count, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import {
   engineStateTable,
@@ -76,11 +76,15 @@ export interface ResetRunInput {
 
 type Closes = ResetRunInput["closes"];
 
-/** Закрыть открытые сделки эпохи runId по плану (manual); уже закрытые пропускаются. */
+/**
+ * Закрыть открытые сделки эпохи runId по плану (manual); уже закрытые пропускаются. experimentIds — закрывать только
+ * сделки этих экспериментов (сброс группы: чужое закрытие в плане не применяется).
+ */
 async function applyCloses(
   tx: Db,
   runId: number,
   closes: Closes,
+  experimentIds?: string[],
 ): Promise<{ closed: number; closedWithoutPrice: number }> {
   let closed = 0;
   let closedWithoutPrice = 0;
@@ -101,6 +105,9 @@ async function applyCloses(
           eq(paperTradesTable.id, id),
           eq(paperTradesTable.runId, runId),
           isNull(paperTradesTable.closedAt),
+          experimentIds === undefined
+            ? undefined
+            : inArray(paperTradesTable.experimentId, experimentIds),
         ),
       )
       .returning({ id: paperTradesTable.id });
@@ -222,8 +229,8 @@ export async function resetGroupRun(
       .returning({ id: experimentsTable.id });
     if (rows.length === 0)
       return { experiments: 0, closed: 0, closedWithoutPrice: 0 };
-    const result = await applyCloses(tx, input.runId, input.closes);
     const ids = new Set(rows.map((r) => r.id));
+    const result = await applyCloses(tx, input.runId, input.closes, [...ids]);
     await mergeBars(
       tx,
       input.barsKey,

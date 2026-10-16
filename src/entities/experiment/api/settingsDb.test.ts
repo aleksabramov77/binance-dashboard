@@ -338,11 +338,23 @@ describe("сброс Paper группы активов (spec 0038)", () => {
 
   it("метки свечей и закрытия чужой группы не применяются", async () => {
     const { runId, store } = await groups();
-    await resetGroupRun(db, {
+    const r = await resetGroupRun(db, {
       ...groupInput(runId),
+      closes: [
+        { id: "F01-open", close: manual(5, 105), noPrice: false },
+        { id: "S01-open", close: manual(-7, 90), noPrice: false },
+      ],
       bars: { F01: 500, S01: 999 },
     });
+    expect(r).toEqual({ experiments: 2, closed: 1, closedWithoutPrice: 0 });
     expect(await store.getState("bars")).toEqual({ F01: 500, F02: 2, S01: 3 });
+    // Сделка спота осталась открытой: закрытие чужой группы в плане не применено.
+    const [s01] = await db
+      .select()
+      .from(paperTradesTable)
+      .where(eq(paperTradesTable.id, "S01-open"));
+    expect(s01.closedAt).toBeNull();
+    expect(s01.exitReason).toBeNull();
   });
 
   it("регрессия AC9: «Сбросить все Paper» после сброса группы — новая эпоха для всех, защита fromRunId", async () => {
