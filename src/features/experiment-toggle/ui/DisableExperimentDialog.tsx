@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import {
   DISABLE_NOTE_MAX,
@@ -54,9 +54,9 @@ export function DisableExperimentDialog({
 }) {
   const ids = { reason: useId(), note: useId(), confirm: useId() };
   const toggle = useSetExperimentEnabled();
-  // Данные страницы устарели и вариант включили в другом месте — сервер ответил 409 со списком.
-  const conflict =
-    toggle.error instanceof LabSettingsError ? toggle.error.variants : [];
+  // Данные страницы устарели и вариант включили в другом месте — сервер ответил 409 со списком. Храним отдельно от
+  // toggle.error: повторная отправка сбрасывает ошибку, а предупреждение с галочкой и confirmControl должны остаться.
+  const [conflict, setConflict] = useState<string[]>([]);
   const variants = variantsToConfirm(known, conflict);
   const form = useForm<DisableForm>({
     resolver: zodResolver(disableFormSchema),
@@ -77,6 +77,10 @@ export function DisableExperimentDialog({
         confirmControl: variants.length > 0 ? values.confirmControl : undefined,
       },
       {
+        onError: (error) => {
+          if (error instanceof LabSettingsError && error.variants.length > 0)
+            setConflict(error.variants);
+        },
         onSuccess: () => {
           onDisabled?.();
           onClose();
@@ -164,9 +168,13 @@ export function DisableExperimentDialog({
           )}
 
           {/* Ответ 409 уже показан предупреждением с галочкой выше. */}
-          {toggle.error && conflict.length === 0 && (
-            <p className="text-sm text-destructive">{toggle.error.message}</p>
-          )}
+          {toggle.error &&
+            !(
+              toggle.error instanceof LabSettingsError &&
+              toggle.error.variants.length > 0
+            ) && (
+              <p className="text-sm text-destructive">{toggle.error.message}</p>
+            )}
 
           <DialogFooter>
             <Button

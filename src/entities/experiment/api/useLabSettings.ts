@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { z } from "zod";
+import type { z } from "zod";
 import type { ExperimentMirrorMode } from "../model/mirrorAuto";
 import {
   type BudgetForm,
+  controlConflictSchema,
   type DemoResetRequest,
   type DemoResetResult,
   demoResetResultSchema,
@@ -26,11 +27,8 @@ import {
 
 export const labSettingsQueryKey = ["experiments", "settings"] as const;
 
-/** Тело ошибки API настроек; variants — ответ 409 «контрольный с включёнными вариантами» (spec 0046). */
-const errorBodySchema = z.object({
-  error: z.string().optional(),
-  variants: z.array(z.string()).optional(),
-});
+/** Тело ошибки API настроек: { error }, у ответа 409 «контрольный с включёнными вариантами» — ещё variants (spec 0046). */
+const errorBodySchema = controlConflictSchema.partial();
 
 /**
  * Ошибка запроса настроек лаборатории. variants — включённые варианты контрольного из ответа 409: окно выключения
