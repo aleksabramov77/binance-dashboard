@@ -16,6 +16,7 @@ import {
   BACKGROUND_JOBS,
   type BackgroundJobConfig,
   type BackgroundJobId,
+  type CronSchedule,
   nextRunAt,
   parseCron,
 } from "./backgroundSchedule";
@@ -45,6 +46,7 @@ type Writer = (
 export interface JobLog {
   debug: Writer;
   info: Writer;
+  warn: Writer;
   error: Writer;
 }
 
@@ -53,12 +55,15 @@ export type JobOutcome =
   | "failed"
   | "skipped-serverless"
   | "skipped-running"
-  | "skipped-runner";
+  | "skipped-runner"
+  | "skipped-runner-unknown";
 
 const SKIP_TEXT = {
   "skipped-serverless": "процесс на Vercel — задачи запускает pg_cron",
   "skipped-running": "прошлый запуск ещё идёт",
   "skipped-runner": "задачи выполняет другой раннер",
+  "skipped-runner-unknown":
+    "раннер неизвестен — engine_state.runner не прочитан",
 } as const;
 type SkipOutcome = keyof typeof SKIP_TEXT;
 
@@ -75,8 +80,10 @@ export const createJobsState = (): JobsState => ({
 
 /**
  * Один запуск задачи. Пропуск — запись debug (в БД не пишется) только при смене состояния: первый пропуск после
- * старта или запуска, смена причины; снова запустилась после пропусков — одна строка. Сбой — запись error с событием
- * роута, наружу не бросает: процесс и другие задачи продолжают работу.
+ * старта или запуска, смена причины; снова запустилась после пропусков — одна строка. Не прочитан
+ * engine_state.runner (БД недоступна) — отдельный пропуск «раннер неизвестен»: одна запись warn при смене состояния,
+ * не error задачи на каждый запуск (монитор не шлёт тревогу каждую минуту). Сбой самой задачи — запись error с
+ * событием роута, наружу не бросает: процесс и другие задачи продолжают работу.
  */
 export async function runBackgroundJob(
   job: BackgroundJob,
@@ -85,13 +92,18 @@ export async function runBackgroundJob(
   logger: JobLog,
   now: () => number = Date.now,
 ): Promise<JobOutcome> {
-  const skip = (outcome: SkipOutcome, data?: Record<string, unknown>) => {
-    if (state.skipped.get(job.id) !== outcome)
-      logger.debug(
-        job.event,
-        `${job.id}: пропуск — ${SKIP_TEXT[outcome]} (дальше без повторов, до смены состояния)`,
-        { job: job.id, reason: outcome, ...data },
-      );
+  const skip = (
+    outcome: SkipOutcome,
+    data?: Record<string, unknown>,
+    error?: unknown,
+  ) => {
+    if (state.skipped.get(job.id) !== outcome) {
+      const message = `${job.id}: пропуск — ${SKIP_TEXT[outcome]} (дальше без повторов, до смены состояния)`;
+      const fields = { job: job.id, reason: outcome, ...data };
+      if (outcome === "skipped-runner-unknown")
+        logger.warn(job.event, message, fields, error);
+      else logger.debug(job.event, message, fields);
+    }
     state.skipped.set(job.id, outcome);
     return outcome;
   };
@@ -107,17 +119,24 @@ export async function runBackgroundJob(
   const started = now();
   try {
     const processRunner = gate.processRunner();
-    const dbRunner = await gate.dbRunner();
+    let dbRunner: RunnerRole;
+    try {
+      dbRunner = await gate.dbRunner();
+    } catch (error) {
+      return skip("skipped-runner-unknown", { processRunner }, error);
+    }
     if (dbRunner !== processRunner)
       return skip("skipped-runner", { processRunner, dbRunner });
     resumed();
     const summary = await job.run();
-    if (!job.quiet)
-      logger.info(job.event, `${job.id}: выполнено за ${now() - started} мс`, {
+    if (!job.quiet) {
+      const ms = now() - started;
+      logger.info(job.event, `${job.id}: выполнено за ${ms} мс`, {
         job: job.id,
-        ms: now() - started,
+        ms,
         ...summary,
       });
+    }
     return "done";
   } catch (error) {
     logger.error(
@@ -170,6 +189,7 @@ const realLog: JobLog = {
     console.log(`[log] · ${event}: ${message}`);
   },
   info: (event, message, data) => log.info(event, message, data),
+  warn: (event, message, data, error) => log.warn(event, message, data, error),
   error: (event, message, data, error) =>
     log.error(event, message, data, error),
 };
@@ -188,13 +208,24 @@ function jobsProcess(): JobsProcess {
   return g[key];
 }
 
+/** Задача с расписанием, разобранным один раз при старте (колбэк таймера cron не разбирает). */
+export interface ScheduledJob {
+  job: BackgroundJob;
+  schedule: CronSchedule;
+}
+
+/** Разбор расписаний всех задач — один раз; ошибка в cron видна сразу при старте. */
+export const scheduleJobs = (jobs: BackgroundJob[]): ScheduledJob[] =>
+  jobs.map((job) => ({ job, schedule: parseCron(job.cron) }));
+
 /** Таймер следующего запуска; новый ставится до запуска — долгая задача не сдвигает расписание. */
-function schedule(p: JobsProcess, job: BackgroundJob, after: number) {
-  const target = nextRunAt(parseCron(job.cron), after, job.offsetMs);
+function schedule(p: JobsProcess, item: ScheduledJob, after: number) {
+  const { job } = item;
+  const target = nextRunAt(item.schedule, after, job.offsetMs);
   const timer = setTimeout(
     () => {
       // Таймер мог сработать чуть раньше цели — следующий считаем от неё, чтобы не повторить тот же слот.
-      schedule(p, job, Math.max(Date.now(), target));
+      schedule(p, item, Math.max(Date.now(), target));
       void runBackgroundJob(job, p.state, realGate, realLog);
     },
     Math.max(0, target - Date.now()),
@@ -213,10 +244,10 @@ export function startBackgroundJobs(): void {
   if (getAppHost() !== "vm") return;
   const p = jobsProcess();
   if (p.timers.size > 0) return;
-  const jobs = backgroundJobs();
-  for (const job of jobs) schedule(p, job, Date.now());
+  const jobs = scheduleJobs(backgroundJobs());
+  for (const item of jobs) schedule(p, item, Date.now());
   log.info("jobs.start", "Таймеры фоновых задач запущены", {
     runner: getRunnerRole().role,
-    jobs: jobs.map((j) => `${j.id} ${j.cron}`),
+    jobs: jobs.map(({ job }) => `${job.id} ${job.cron}`),
   });
 }
