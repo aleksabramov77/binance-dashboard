@@ -1512,21 +1512,44 @@ function familiesSection(families: Family[]): string[] {
   ];
 }
 
-const controlLine = (c: Controls): string => {
+const controlLine = (
+  c: Controls,
+  markets: readonly ExperimentMarket[] = MARKETS,
+): string => {
   const one = (market: ExperimentMarket) =>
     `${market} — ${c[market].random ?? "нет"} (случайный вход), ${c[market].hold ?? "нет"} (hold BTC)`;
-  return `Контроль: ${MARKETS.map(one).join("; ")}.`;
+  return `Контроль: ${markets.map(one).join("; ")}.`;
 };
 
-const baselineLine = (b: LabReport["controlBaseline"]): string => {
+const baselineLine = (
+  b: LabReport["controlBaseline"],
+  markets: readonly ExperimentMarket[] = MARKETS,
+): string => {
   const one = (market: ExperimentMarket) =>
     b[market].experiments.length
       ? `${market} — ${b[market].experiments.join(", ")}: ${b[market].closed} сделок, среднее ${signedPct(b[market].meanPct)}%, медиана ${signedPct(b[market].medianPct)}%`
       : `${market} — нет`;
-  return `Случайный вход (все такие эксперименты вместе — база «к случайному входу»): ${MARKETS.map(one).join("; ")}.`;
+  return `Случайный вход (все такие эксперименты вместе — база «к случайному входу»): ${markets.map(one).join("; ")}.`;
 };
 
-export function renderLabReport(report: LabReport): string {
+/** Оформление отчёта для других источников данных (бэктест, spec 0032): свой заголовок, шапка и разделы. */
+export interface LabReportView {
+  /** Заголовок вместо «Отчёт лаборатории». */
+  title?: string;
+  /** Строки шапки вместо строки «Сформирован … БД … эпоха». */
+  intro?: string[];
+  /** Строка «что в отчёте» вместо «Только закрытые сделки учёта эпохи…». */
+  scope?: string;
+  /** Группы в строках контроля (по умолчанию все); группы без экспериментов в прогоне можно не показывать. */
+  markets?: readonly ExperimentMarket[];
+  /** Разделы перед блоком «Рынок». */
+  sections?: string[];
+}
+
+export function renderLabReport(
+  report: LabReport,
+  view: LabReportView = {},
+): string {
   const focus = new Set(report.focus);
   const detailed = focus.size
     ? report.experiments.filter((e) => focus.has(e.id))
@@ -1541,12 +1564,15 @@ export function renderLabReport(report: LabReport): string {
       ? `Эпоха #${run.id} с ${run.startedAt}`
       : `Эпоха #${run.id} с ${run.startedAt} по ${run.endedAt} (прошлая эпоха; конфиг экспериментов — текущий)`;
   return [
-    "# Отчёт лаборатории",
+    `# ${view.title ?? "Отчёт лаборатории"}`,
     "",
-    `Сформирован ${report.generatedAt}. БД: ${report.database ?? "не указана"}. ${runLine}; период с ${report.periodStart} (${num(report.periodDays, 1)} дн.).`,
-    "Только закрытые сделки учёта эпохи; PnL — за вычетом комиссий и слиппеджа. Как читать — скилл trading-lab; подсказки — references/failure-modes.md.",
-    controlLine(report.controls),
-    baselineLine(report.controlBaseline),
+    ...(view.intro ?? [
+      `Сформирован ${report.generatedAt}. БД: ${report.database ?? "не указана"}. ${runLine}; период с ${report.periodStart} (${num(report.periodDays, 1)} дн.).`,
+    ]),
+    view.scope ??
+      "Только закрытые сделки учёта эпохи; PnL — за вычетом комиссий и слиппеджа. Как читать — скилл trading-lab; подсказки — references/failure-modes.md.",
+    controlLine(report.controls, view.markets),
+    baselineLine(report.controlBaseline, view.markets),
     report.klinesLoaded
       ? "Свечи ТФ загружены: «после выхода» и грубый исход отсечённых сигналов посчитаны."
       : "«После выхода» и исход отсечённых сигналов — с флагом `--after-exit` (догружает свечи публичным API).",
@@ -1556,6 +1582,7 @@ export function renderLabReport(report: LabReport): string {
         ]
       : []),
     "",
+    ...(view.sections ?? []),
     ...marketSection(report.market),
     "## Сводка (по средней доходности сделки)",
     "",

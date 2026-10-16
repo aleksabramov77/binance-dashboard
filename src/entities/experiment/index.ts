@@ -21,6 +21,8 @@ export {
   toDemoSummary,
   updateMirror,
 } from "./api/mirrorDb";
+// Блокировка прогона demo-зеркала (spec 0012, PR 2e): два прогона крона не идут одновременно.
+export { MIRROR_RUN_LOCK_KEY, withMirrorRunLock } from "./api/mirrorLock";
 // Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
 export {
   type LabExperiment,

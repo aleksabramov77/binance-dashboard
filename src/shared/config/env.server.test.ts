@@ -3,6 +3,7 @@ import {
   getDatabaseConfig,
   getDbSizeLimit,
   getDeploymentVersion,
+  getGithubAlertsConfig,
   getTelegramConfig,
   isServerless,
 } from "./env.server";
@@ -107,5 +108,43 @@ describe("getTelegramConfig", () => {
       }),
     ).toEqual({ token: "t", chatId: "42", webhookSecret: "s" });
     expect(getTelegramConfig({ TELEGRAM_WEBHOOK_SECRET: "s" })).toBeNull();
+  });
+});
+
+describe("getGithubAlertsConfig", () => {
+  it("без GITHUB_ALERTS_TOKEN — null: монитор только с Telegram", () => {
+    expect(getGithubAlertsConfig({})).toBeNull();
+    expect(getGithubAlertsConfig({ GITHUB_ALERTS_TOKEN: " " })).toBeNull();
+  });
+
+  it("по умолчанию — приватный репозиторий и 3 автозапуска в сутки", () => {
+    expect(getGithubAlertsConfig({ GITHUB_ALERTS_TOKEN: "t" })).toEqual({
+      token: "t",
+      owner: "aleksabramov77",
+      repo: "binance-dashboard-private",
+      autofixPerDay: 3,
+      invalid: [],
+    });
+  });
+
+  it("берёт GITHUB_ALERTS_REPO и ALERT_AUTOFIX_PER_DAY; мусор — по умолчанию и в invalid", () => {
+    expect(
+      getGithubAlertsConfig({
+        GITHUB_ALERTS_TOKEN: "t",
+        GITHUB_ALERTS_REPO: "me/alerts",
+        ALERT_AUTOFIX_PER_DAY: "0",
+      }),
+    ).toMatchObject({ owner: "me", repo: "alerts", autofixPerDay: 0 });
+    expect(
+      getGithubAlertsConfig({
+        GITHUB_ALERTS_TOKEN: "t",
+        GITHUB_ALERTS_REPO: "no-slash",
+        ALERT_AUTOFIX_PER_DAY: "-1",
+      }),
+    ).toMatchObject({
+      repo: "binance-dashboard-private",
+      autofixPerDay: 3,
+      invalid: ["GITHUB_ALERTS_REPO", "ALERT_AUTOFIX_PER_DAY"],
+    });
   });
 });
