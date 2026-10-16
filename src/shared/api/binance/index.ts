@@ -8,6 +8,28 @@ export type {
   StableYieldQuota,
   StakingQuota,
 } from "./earnAccountSchemas";
+// Реальный счёт (spec 0047): права торгового ключа — схемы и чистая оценка (сеть — live.server.ts).
+export {
+  checkAccountUid,
+  evaluateRestrictions,
+  isKeyRejected,
+  isUidBlocking,
+  KEY_REJECTED_REASON,
+  LIVE_FLAG_RULES,
+  LIVE_KEY_FLAGS,
+  type LiveFuturesAccount,
+  type LiveKeyFlag,
+  type LiveKeyFlags,
+  type LiveSpotAccount,
+  liveKeyFlagsSchema,
+  MAIN_ACCOUNT_REASON,
+  MAIN_UID_PENDING_REASON,
+  type MainAccountUid,
+  mainUidUnreadReason,
+  mergeMainAccount,
+  type RestrictionsVerdict,
+  type UidCheckStatus,
+} from "./liveRestrictions";
 export type {
   BinanceMarket,
   Candle,

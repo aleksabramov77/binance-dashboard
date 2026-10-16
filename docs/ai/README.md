@@ -16,7 +16,7 @@
 | [`../lab/`](../lab/) | Указатель: память лаборатории (журнал, гипотезы, прогоны) — в приватном репозитории `private/lab/` |
 
 README внутри сложных модулей (читать перед правкой модуля):
-- `src/shared/api/binance/README.md` — клиенты Binance: публичный, read-only, Demo Trading.
+- `src/shared/api/binance/README.md` — клиенты Binance: публичный, read-only, Demo Trading, реальный счёт (Live).
 - `src/features/execute-trade/README.md` — исполнение демо-сделок.
 - `src/features/scan-market/README.md` — сканер рынка и правила сетапов.
 
@@ -36,6 +36,8 @@ README внутри сложных модулей (читать перед пр�
 | `pnpm lab:report` | read-only отчёт лаборатории по эпохе из БД: метрики, t, R до издержек и издержки, MFE и MAE, разрезы по контексту входа, отсечённые сигналы, контроль, контекст рынка BTC, семейства, подсказки (`--run 1` — прошлая эпоха, `--experiment F06`, `--since 7d`, `--out <каталог>`, `--no-market`, `--after-exit` — догрузить свечи: что было после выхода и исход отсечённых сигналов; открытые позиции — по последней цене `ticker/price`, «Откр.» и «Нереализ. R / $», `--no-prices` — без запроса) — вход для `/flow lab` |
 | `pnpm lab:apply` | применить решения разбора: `--disable`/`--enable` эксперимент, `--mirror-on`/`--mirror-off` демо-зеркало вручную, `--mirror-auto` — положение «Авто» (автомат сразу решает, spec 0043) (id каталога `S01`/`F20` и приватные `PS01`/`PF01`/`PC01`), `--dry-run`, `--out <каталог>` (пишет apply.md) — те же тумблеры, что в /settings; выключение — только с причиной `--reason <id>=<категория>` (+ `--note <id>=<текст>`), повтор для уже выключенного обновляет причину, контрольный с включёнными вариантами — только с `--force-control` (spec 0046); печатает, к какой БД подключён, без `DATABASE_URL` отказывается (нужен `--local`); только по подтверждению пользователя |
 | `pnpm lab:backtest` | бэктест экспериментов по истории свечей Binance (spec 0032): тот же `runTick` движка по шагу закрытия свечи, без заглядывания вперёд; `--ids F10,PF99` (+ `--file private/experiments.json`), `--days 120`, `--split 0.66` (обучающая и проверочная части), `--exit-tf auto\|1m\|5m\|15m`, `--no-download` (только кэш `~/.cache/binance-dashboard`); отчёт как у `lab:report` в `--out` (по умолчанию `private/lab/backtests/<дата>-<хэш>/`), открытые на конец периода — по close последней свечи; ордеров и БД нет |
+| `pnpm live:worker [--once] [--fixture ok\|blocked\|main-account]` | воркер реального счёта (spec 0047): проверка торгового ключа субсчёта и пульс в `${LIVE_APP_URL}/api/live/heartbeat` раз в минуту; `--once` — один пульс; фикстура — готовый пульс без биржи (только без ключа и на localhost) |
+| `pnpm live:build` | бандл воркера для VM: `dist/live-worker.mjs` (запуск `node dist/live-worker.mjs` без `node_modules`) |
 | `pnpm telegram:setup [--delete]` | webhook бота Telegram на прод (`${SITE_URL}/api/telegram/webhook`, секрет `TELEGRAM_WEBHOOK_SECRET`) и меню команд; `--delete` — снять webhook |
 | `pnpm hooks:install` | включить pre-push хук (запрет push в main + `pnpm check`) |
 | `pnpm lab:private [--dry-run] [--prod] [--file <path>]` | записать приватные эксперименты из `private/experiments.json` в БД: в прод (Postgres) — только с `--prod`; для локального сервера worktree — `DATABASE_URL= pnpm lab:private` при остановленном сервере (`architecture.md` → «Приватные эксперименты») |

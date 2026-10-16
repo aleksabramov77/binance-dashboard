@@ -30,6 +30,7 @@ import {
 import { getDb, rowsOf } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { loadAlertState, saveAlertState } from "./alertState";
+import { checkLiveSilence } from "./liveAccount";
 import { pruneLogs } from "./logs";
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -115,6 +116,19 @@ async function collect(now: number): Promise<MonitorSnapshot> {
     .select({ at: sql<string | null>`max(${earnSnapshotsTable.fetchedAt})` })
     .from(earnSnapshotsTable);
 
+  // Воркер реального счёта (spec 0047): «молчит» — запись live.status один раз; сбой не ломает монитор.
+  let live: MonitorSnapshot["live"] = null;
+  try {
+    live = await checkLiveSilence(now);
+  } catch (error) {
+    log.warn(
+      "monitor.live",
+      "Пульс воркера реального счёта не прочитан",
+      undefined,
+      error,
+    );
+  }
+
   return {
     now,
     errorsByEvent,
@@ -126,6 +140,7 @@ async function collect(now: number): Promise<MonitorSnapshot> {
     },
     cronFailures,
     earnLastAt: earn?.at ? Date.parse(earn.at) : null,
+    live,
   };
 }
 

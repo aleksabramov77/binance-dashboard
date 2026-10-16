@@ -1,6 +1,7 @@
 // Подписанные запросы к аккаунту: только для сервера (node:crypto, секрет API).
 export {
   type FlexibleRewardsType,
+  fetchAccountUid,
   fetchFlexiblePositions,
   fetchFlexibleRewards,
   fetchFundingAssets,

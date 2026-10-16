@@ -33,6 +33,18 @@ describe("planAlerts", () => {
     expect(later.rows[0].firstSeen).toBe(at(T0));
   });
 
+  it("repeat: false — одно уведомление, пока держится, без напоминаний; «восстановлено» — как обычно", () => {
+    const once: Issue = { ...issue, key: "live:silent", repeat: false };
+    const first = planAlerts([once], [], T0, 2 * H);
+    expect(first.notify).toEqual([once]);
+    expect(planAlerts([once], first.rows, T0 + 5 * H, 2 * H).notify).toEqual(
+      [],
+    );
+    expect(
+      planAlerts([], first.rows, T0 + 5 * H, 2 * H).resolved.map((r) => r.key),
+    ).toEqual(["live:silent"]);
+  });
+
   it("пропала — один раз «восстановлено»", () => {
     const prev = planAlerts([issue], [], T0, 2 * H).rows;
     const plan = planAlerts([], prev, T0 + 15 * 60_000, 2 * H);

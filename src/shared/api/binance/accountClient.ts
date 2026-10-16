@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import {
+  accountUidSchema,
   type FlexiblePosition,
   type FlexibleReward,
   type FundingAsset,
@@ -38,6 +39,23 @@ export async function fetchSpotAccount(
   return signedRequest(creds, "GET", "/api/v3/account", spotAccountSchema, {
     omitZeroBalances: "true",
   });
+}
+
+/**
+ * UID основного счёта (read-only ключ, `/api/v3/account`, вес 20): с ним воркер реального счёта сверяет UID
+ * субсчёта (spec 0047, AC3).
+ */
+export async function fetchAccountUid(
+  creds: BinanceCredentials,
+): Promise<number> {
+  const account = await signedRequest(
+    creds,
+    "GET",
+    "/api/v3/account",
+    accountUidSchema,
+    { omitZeroBalances: "true" },
+  );
+  return account.uid;
 }
 
 export async function fetchFundingAssets(

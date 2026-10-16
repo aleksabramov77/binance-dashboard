@@ -78,16 +78,26 @@ interface SinkState {
   sink: LogSink | null;
   buffer: LogEntry[];
   timer: ReturnType<typeof setTimeout> | null;
+  /** Писать ли локальный файл data/logs; false — только консоль (воркер реального счёта, spec 0047). */
+  files: boolean;
 }
 const sinkKey = Symbol.for("binance-dashboard.logSink");
 const g = globalThis as typeof globalThis & { [sinkKey]?: SinkState };
 const state = (): SinkState => {
-  g[sinkKey] ??= { sink: null, buffer: [], timer: null };
+  g[sinkKey] ??= { sink: null, buffer: [], timer: null, files: true };
   return g[sinkKey];
 };
 
 export function setLogSink(next: LogSink | null): void {
   state().sink = next;
+}
+
+/**
+ * Журнал только в консоль, без файлов data/logs. Воркер реального счёта (scripts/live-worker.ts) пишет журнал
+ * в stdout/stderr (journald на VM) и не трогает диск; приёмник БД у него не подключён.
+ */
+export function disableLogFiles(): void {
+  state().files = false;
 }
 
 /** Отправить накопленное в приёмник. На serverless вызывается после ответа (route.server.ts). */
@@ -129,7 +139,7 @@ function write(entry: LogEntry): void {
 
   toSink(entry);
   // На Vercel файловый журнал бесполезен (временный каталог экземпляра) — только БД.
-  if (process.env.VERCEL === "1") return;
+  if (process.env.VERCEL === "1" || !state().files) return;
   dirReady ??= mkdir(LOG_DIR, { recursive: true });
   // Журнал никогда не должен ронять запрос.
   void dirReady

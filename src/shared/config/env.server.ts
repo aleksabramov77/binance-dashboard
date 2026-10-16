@@ -43,6 +43,62 @@ export function getDemoTradingConfig(): DemoTradingConfig | null {
   };
 }
 
+const liveTradeEnvSchema = z.object({
+  BINANCE_TRADE_API_KEY: z.string().trim().min(1),
+  BINANCE_TRADE_API_SECRET: z.string().trim().min(1),
+});
+
+/**
+ * Торговый ключ реального счёта — другой формы, чем BinanceCredentials: его нельзя по ошибке передать в
+ * read-only или демо-функции (типы не сойдутся). Принимают его только функции `shared/api/binance/live.server.ts`.
+ */
+export interface LiveCredentials {
+  readonly live: BinanceCredentials;
+}
+
+/**
+ * Торговый ключ субсчёта реального счёта (spec 0047). Задаётся только в env воркера на VM; у веб-приложения
+ * его нет. null — не задан (воркер шлёт пульс «ключ не задан»).
+ */
+export function getLiveTradeCredentials(
+  env: Record<string, string | undefined> = process.env,
+): LiveCredentials | null {
+  const parsed = liveTradeEnvSchema.safeParse(env);
+  if (!parsed.success) return null;
+  return {
+    live: {
+      apiKey: parsed.data.BINANCE_TRADE_API_KEY,
+      apiSecret: parsed.data.BINANCE_TRADE_API_SECRET,
+    },
+  };
+}
+
+/** Секрет пульса воркера реального счёта (Bearer для POST /api/live/heartbeat). null — не задан. */
+export const getLiveWorkerSecret = (
+  env: Record<string, string | undefined> = process.env,
+): string | null => env.LIVE_WORKER_SECRET?.trim() || null;
+
+/** Адрес приложения для пульса воркера (LIVE_APP_URL) без «/» в конце. null — не задан. */
+export const getLiveAppUrl = (
+  env: Record<string, string | undefined> = process.env,
+): string | null => env.LIVE_APP_URL?.trim().replace(/\/+$/, "") || null;
+
+/** Через сколько без пульса воркер «молчит», по умолчанию 5 мин (spec 0047, AC5). */
+export const DEFAULT_LIVE_SILENT_AFTER_MS = 5 * 60_000;
+
+/**
+ * Порог «воркер молчит»: LIVE_SILENT_AFTER_SEC (для локальной проверки — меньше), по умолчанию 5 мин.
+ * Нераспознанное значение — порог по умолчанию.
+ */
+export function getLiveSilentAfterMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env.LIVE_SILENT_AFTER_SEC?.trim();
+  if (!raw) return DEFAULT_LIVE_SILENT_AFTER_MS;
+  const parsed = z.coerce.number().int().positive().safeParse(raw);
+  return parsed.success ? parsed.data * 1000 : DEFAULT_LIVE_SILENT_AFTER_MS;
+}
+
 const llmEnvSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1),
   ANALYSIS_MODEL: z.string().min(1).default("anthropic/claude-haiku-5.5"),

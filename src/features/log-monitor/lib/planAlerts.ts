@@ -21,8 +21,8 @@ export interface AlertPlan {
 }
 
 /**
- * Без спама: о новой проблеме — сразу, о незакрытой — не чаще repeatMs, о пропавшей — один раз
- * «восстановлено». Чистая функция.
+ * Без спама: о новой проблеме — сразу, о незакрытой — не чаще repeatMs (у `repeat: false` — без напоминаний),
+ * о пропавшей — один раз «восстановлено». Чистая функция.
  */
 export function planAlerts(
   issues: Issue[],
@@ -43,7 +43,7 @@ export function planAlerts(
     const due =
       isNew ||
       prev.lastSent === null ||
-      now - Date.parse(prev.lastSent) >= repeatMs;
+      (issue.repeat !== false && now - Date.parse(prev.lastSent) >= repeatMs);
     if (due) notify.push(issue);
     if (isNew) fresh.push(issue.key);
     rows.push({
