@@ -14,6 +14,7 @@ import {
   type TickDeps,
 } from "@/features/paper-engine";
 import {
+  backtestOpenPricing,
   backtestPeriod,
   backtestStore,
   buildBacktestReport,
@@ -607,6 +608,99 @@ describe("отчёт и --split (AC5)", () => {
     expect(md).not.toContain("учёта эпохи");
     expect(md).toContain("закрытые за период бэктеста");
     expect(md).not.toMatch(/coinm — нет/);
+  });
+});
+
+describe("открытые на конец периода по последней цене (баг 0041)", () => {
+  const position = (symbol: string, closedAt: string | null = null) =>
+    ({
+      experimentId: "PF99",
+      market: "usdm",
+      symbol,
+      openedAt: new Date(START).toISOString(),
+      closedAt,
+    }) as PaperTrade;
+
+  it("close последней свечи выходов, закрытой к концу периода; без свечей — без цены; закрытые не нужны", async () => {
+    const s = synth({
+      // Минута END ещё не закрыта к концу периода — её цену брать нельзя.
+      minute: flat({ [END - MIN]: { close: 120 }, [END]: { close: 999 } }),
+      listedFrom: { LATEUSDT: END + DAY },
+    });
+    const series = createSeriesStore(synthHistory(s), END);
+    const pricing = await backtestOpenPricing(
+      {
+        trades: [
+          position("ALFUSDT"),
+          position("LATEUSDT"),
+          position("BETUSDT", new Date(END).toISOString()),
+        ],
+        series,
+      },
+      "5m",
+      END,
+    );
+    expect(pricing?.prices).toEqual({ "usdm:ALFUSDT": 120 });
+    expect(pricing?.at).toBe(new Date(END).toISOString());
+    expect(pricing?.source).toContain("5m");
+    expect(
+      await backtestOpenPricing(
+        { trades: [position("ALFUSDT", "2026-09-04T00:00:00Z")], series },
+        "5m",
+        END,
+      ),
+    ).toBeNull();
+  });
+
+  it("отчёт: открытые оценены в полном периоде, части --split — без цен", async () => {
+    const run = await runBacktest({
+      experiments: EXPERIMENTS,
+      start: START,
+      end: END,
+      exitInterval: "1m",
+      history: synthHistory(synth()),
+    });
+    const open = run.trades.filter((t) => t.closedAt === null);
+    expect(open.length).toBeGreaterThan(0);
+    const openPricing = await backtestOpenPricing(run, "1m", END);
+    const at = splitPoint(START, END, 0.5, "1h");
+    const { report, md } = buildBacktestReport({
+      experiments: EXPERIMENTS,
+      trades: run.trades,
+      skipped: run.skipped,
+      start: START,
+      end: END,
+      market: { full: null },
+      klines: null,
+      openPricing,
+      meta: {
+        generatedAt: new Date(END).toISOString(),
+        ids: ["PS99", "PF99"],
+        controlsAdded: [],
+        periodStart: new Date(START).toISOString(),
+        periodEnd: new Date(END).toISOString(),
+        days: 2,
+        step: "1h",
+        ticks: run.ticks,
+        exitInterval: "1m",
+        exitAuto: true,
+        split: { fraction: 0.5, at: new Date(at).toISOString() },
+        symbols: {},
+        fundingMissing: [],
+        openAtEnd: open.length,
+        errors: [],
+        download: null,
+        cache: null,
+        limitations: [],
+      },
+    });
+    const unrealized = report.experiments.map((e) => e.unrealized);
+    expect(unrealized.reduce((n, u) => n + u.open, 0)).toBe(open.length);
+    expect(unrealized.reduce((n, u) => n + u.priced, 0)).toBe(open.length);
+    expect(report.openPricing?.source).toContain("1m");
+    expect(report.split?.train.openPricing).toBeNull();
+    expect(report.split?.test.openPricing).toBeNull();
+    expect(md).toContain("Открытые позиции оценены по последней цене");
   });
 });
 

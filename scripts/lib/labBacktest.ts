@@ -25,6 +25,7 @@ import {
   type Interval,
   type MarketTicker,
   pickUniverse,
+  priceKey,
   runTick,
   type TickDeps,
 } from "@/features/paper-engine";
@@ -43,6 +44,7 @@ import {
   type ExperimentReport,
   type LabDataset,
   type LabReport,
+  type OpenPricing,
   renderLabReport,
 } from "./labReport";
 
@@ -611,6 +613,42 @@ export async function backtestKlines(
   return set;
 }
 
+/**
+ * Цены открытых на конец периода позиций (баг 0041): close последней свечи выходов, закрытой к концу периода, —
+ * ряд уже загружен проверкой выходов. Нет свечей — позиция остаётся без оценки.
+ */
+export async function backtestOpenPricing(
+  run: Pick<BacktestRun, "trades" | "series">,
+  exitInterval: ExitInterval,
+  end: number,
+): Promise<OpenPricing | null> {
+  const open = run.trades.filter((t) => t.closedAt === null);
+  if (!open.length) return null;
+  const ms = INTERVAL_MS[exitInterval];
+  const prices: Record<string, number> = {};
+  for (const t of open) {
+    const key = priceKey(t.market, t.symbol);
+    if (key in prices) continue;
+    try {
+      const s = await run.series.get(
+        t.market,
+        t.symbol,
+        exitInterval,
+        Date.parse(t.openedAt),
+      );
+      const i = lastClosedIndex(s, ms, end);
+      if (i >= 0) prices[key] = s.close[i];
+    } catch {
+      // Нет свечей — позиция в «Откр.», но без оценки.
+    }
+  }
+  return {
+    prices,
+    source: `close последней ${exitInterval}-свечи периода`,
+    at: new Date(end).toISOString(),
+  };
+}
+
 /** Контекст рынка (BTC spot 4h/1d) на отрезок [from, to] — из истории, как `pnpm lab:report` с публичного API. */
 export async function backtestMarketContext(
   series: SeriesStore,
@@ -663,7 +701,7 @@ export interface BacktestMeta {
     Record<ExperimentMarket, { count: number; snapshotAt: string }>
   >;
   fundingMissing: string[];
-  /** Сделок, открытых на конец периода (в метрики не входят). */
+  /** Сделок, открытых на конец периода (в метрики закрытых не входят; оценка по последней цене — `unrealized`). */
   openAtEnd: number;
   errors: { message: string; count: number }[];
   download: HistoryStats | null;
@@ -715,7 +753,7 @@ export function limitationsOf(input: {
   );
   if (input.openAtEnd)
     out.push(
-      `Открыто на конец периода: ${input.openAtEnd} сделок — не закрыты и в метрики не входят.`,
+      `Открыто на конец периода: ${input.openAtEnd} сделок — не закрыты и в метрики закрытых не входят; их результат по последней цене периода — столбцы «Откр.» и «Нереализ. R / $».`,
     );
   return out;
 }
@@ -875,6 +913,8 @@ export interface BacktestReportInput {
     test?: MarketContext | null;
   };
   klines: KlineSet | null;
+  /** Цены открытых на конец периода (backtestOpenPricing); только для полного периода, не для частей --split. */
+  openPricing?: OpenPricing | null;
 }
 
 export type BacktestReport = LabReport & {
@@ -904,6 +944,7 @@ export function buildBacktestReport(input: BacktestReportInput): {
     trades: PaperTrade[],
     skipped: SkippedSignal[],
     market: MarketContext | null,
+    openPricing: OpenPricing | null = null,
   ) => {
     const data: LabDataset = {
       run: {
@@ -920,6 +961,7 @@ export function buildBacktestReport(input: BacktestReportInput): {
       database: "бэктест — история Binance",
       market,
       klines: input.klines,
+      openPricing,
     });
   };
   const full = part(
@@ -928,6 +970,7 @@ export function buildBacktestReport(input: BacktestReportInput): {
     input.trades,
     input.skipped,
     input.market.full,
+    input.openPricing ?? null,
   );
   let split: BacktestReport["split"] = null;
   if (meta.split) {
