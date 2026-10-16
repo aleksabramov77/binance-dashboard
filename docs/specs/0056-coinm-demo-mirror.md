@@ -98,8 +98,38 @@ Binance (`demo-dapi.binance.com`) так же, как Spot и USDⓈ-M, чтоб
 - Риски: inverse-контракты (PnL биржи в монете) — для демо-статистики берём цены входа и выхода, как paper; тестов на
   `placeFutures` сейчас нет — добавить на ветку COIN-M.
 
+### Проба demo-dapi (Developer, 2026-10-17, только демо-счёт, всё открытое закрыто)
+- Счёт COIN-M уже в Hedge (`GET /dapi/v1/positionSide/dual` → `dualSidePosition: true`). `POST /dapi/v1/marginType`
+  ISOLATED → `{code: 200}`, повтор → `-4046`; `POST /dapi/v1/leverage` 1 — ок.
+- Стоп и тейк — **обычные условные ордера** `POST /dapi/v1/order` (`STOP_MARKET` / `TAKE_PROFIT_MARKET`, `stopPrice`,
+  `workingType=MARK_PRICE`, `priceProtect`, `quantity`, `positionSide`, свой `newClientOrderId`), algo-эндпоинт не нужен.
+  В Hedge стоп принимается **до входа** (позиции нет); `reduceOnly` в Hedge → `-1106` (биржа ставит его сама).
+- Сработавший тейк — тот же `orderId`: `status` FILLED, `type` MARKET, `origType` TAKE_PROFIT_MARKET, `executedQty`,
+  `avgPrice`; соседний стоп той же стороны остаётся NEW — нужна сверка ног, как у USDⓈ-M.
+- POST входа и закрытия (даже с `newOrderRespType=RESULT`) не присылает `avgPrice` — цена из `GET /dapi/v1/order`.
+- `GET /dapi/v1/positionRisk` параметр `symbol` игнорирует — берём `pair` и фильтруем по символу. `availableBalance`
+  монеты уменьшается на изолированную маржу входа. `userTrades`: `quoteQty` 0, комиссия в монете.
+- Сквозная проверка кода ветки на демо: `placeTrade` + `closeDemoPosition` — BTCUSD_PERP лонг 1 контракт и ETHUSD_PERP
+  шорт 5 контрактов: Hedge, изолированная ×1, стоп до входа, вход, тейк, `protected`; закрытие сняло свои стоп и тейк и
+  закрыло свой объём по рынку. `sweepTriggeredLegs`: сработавший тейк шорта → стоп снят, «закрыта биржей» с ценой.
+  Тейк у самой цены биржа отклоняет `-2021` → `protected` «стоп стоит, тейк не выставился», как у USDⓈ-M.
+
+### Как сделано (Developer)
+- Площадка демо знает рынок `coinm` (`venue.server.ts`); у реального счёта адреса COIN-M нет, `liveVenue` отклоняет
+  запрос к coinm до сети. Фьючерсные функции `demoTrading.ts` — с параметром рынка; условные ордера dapi приводятся к виду
+  algo-ордера (`coinmOrders.ts`), поэтому логика своих ног (`closePlan`, `placeFutures`, сверка) одна для обоих рынков.
+- Объём: `TradeRequest.quantity` COIN-M — монетный эквивалент paper, `referencePrice` — вход paper; `validateTrade`
+  переводит в контракты (`round`, ≥ 1). `filledQuantity` и `demo_mirror_orders.quantity` — в монете, `protect_refs` —
+  `contracts`, `contractSize`. Миграций нет.
+- Резерв COIN-M — `MIRROR.coinmMinFreeUsd` ($50) по монете маржи (ключ кошелька `coinm:<монета>`), причина пропуска —
+  «мало свободной маржи ADA на демо: $0,30 < резерв $50 + вход ~$50,00».
+- Реальный счёт: `LIVE_MIRROR_MARKETS` (spot, usdm) в `liveMirrorDb.ts`; в воркере COIN-M-вход — пропуск
+  «COIN-M на реальном счёте не торгуется» (страховка, кандидатов COIN-M у него нет).
+- Ручная сделка `/api/trade` — `manualTradeRequestSchema` (Spot / USDⓈ-M к USDT), COIN-M вручную не принимается.
+
 ## Журнал
 | Дата | Событие |
 |---|---|
 | 2026-10-17 | ТЗ составлено: worktree `binance-dashboard_0056-coinm-demo-mirror`, ветка `feature/0056-coinm-demo-mirror`; решения пользователя 1–3 |
 | 2026-10-17 | ТЗ утверждено пользователем |
+| 2026-10-17 | Developer: проба demo-dapi (условные ордера, Hedge, стоп до входа), торговый клиент и сделка COIN-M, зеркало (план, резерв по монете, сверка ног, закрытие, «Сбросить Demo»), отдельный список рынков реального счёта, подпись причины под переключателем, «Свободно COIN-M»; сквозная проверка на демо-счёте; `pnpm check`, `pnpm build`, `pnpm check:edge` — зелёные |
