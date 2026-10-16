@@ -2,13 +2,15 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  type EngineStatus,
   engineStatusQueryKey,
   experimentBudgetsQueryKey,
   readEngineStatus,
 } from "@/entities/experiment";
 
-/** Тумблер «Автоторговля» лаборатории: оптимистично переключаем, при ошибке откатываем. */
+/**
+ * Тумблер «Автоторговля» лаборатории. Без оптимистичного переключения: значение меняется только после
+ * подтверждения в модалке и ответа сервера (spec 0044), ошибка остаётся в модалке.
+ */
 export function useToggleEngine() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -18,22 +20,8 @@ export function useToggleEngine() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enabled }),
       }).then(readEngineStatus),
-    onMutate: async (enabled) => {
-      await queryClient.cancelQueries({ queryKey: engineStatusQueryKey });
-      const previous =
-        queryClient.getQueryData<EngineStatus>(engineStatusQueryKey);
-      if (previous)
-        queryClient.setQueryData<EngineStatus>(engineStatusQueryKey, {
-          ...previous,
-          enabled,
-        });
-      return { previous };
-    },
-    onError: (_error, _enabled, context) => {
-      if (context?.previous)
-        queryClient.setQueryData(engineStatusQueryKey, context.previous);
-    },
     onSuccess: (status) => {
+      // Общий ключ статуса: тумблер в шапке и в /settings обновляются вместе.
       queryClient.setQueryData(engineStatusQueryKey, status);
     },
     onSettled: () => {
