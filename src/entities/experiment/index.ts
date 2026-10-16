@@ -6,6 +6,21 @@ export { readEngineExposure } from "./api/exposureDb";
 // Реальное зеркало (spec 0049): кандидаты, захват, закрытия, дневной PnL, «Закрыть всё» (только сервер: вызывает
 // композиция src/app/server/liveMirror.ts по API воркера).
 export {
+  closeLiveWithAuto,
+  LIVE_AUTO_BY,
+  type LiveAutoPatch,
+  type LiveAutoRow,
+  type LiveCloseAuto,
+  type LiveDemoTrade,
+  liveClosedSince,
+  liveDemoTrades,
+  parseLiveAutoSnapshot,
+  readLiveAutoRows,
+  saveLiveAuto,
+  setExperimentLiveMode,
+  setExperimentLiveThresholds,
+} from "./api/liveAutoDb";
+export {
   claimAllLiveOpen,
   claimLiveMirror,
   claimLiveToClose,
@@ -27,7 +42,6 @@ export {
   liveEnabledExperiments,
   markLiveCloseFailed,
   recentLiveClosed,
-  setExperimentLiveMirror,
   skipLiveMirror,
   updateLiveMirror,
 } from "./api/liveMirrorDb";
@@ -119,7 +133,7 @@ export {
   useResetExperimentPaper,
   useResetGroup,
   useSetExperimentEnabled,
-  useSetExperimentLiveMirror,
+  useSetExperimentLiveMode,
   useSetExperimentMirrorMode,
   useSetNextBudget,
 } from "./api/useLabSettings";
@@ -279,8 +293,6 @@ export {
 } from "./model/liveAuto";
 // Контракт API реального зеркала воркер ↔ приложение и переключателя «Реальный счёт» (spec 0049).
 export {
-  type ExperimentLiveMirror,
-  experimentLiveMirrorSchema,
   type LiveCandidate,
   type LiveCloseRequest,
   type LiveLegsRequest,

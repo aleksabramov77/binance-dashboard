@@ -17,6 +17,21 @@ export { useLiveHalt } from "./api/useLiveHalt";
 // функции без сети и БД: прогон собирает воркер (scripts/lib/liveMirrorRun.ts), хранилище — src/app/server/liveMirror.ts.
 export { LIVE, LIVE_SKIP } from "./config/liveMirror";
 export { type FillLike, type FillsPnl, fillsPnl } from "./lib/fillsPnl";
+export {
+  demoTradesText,
+  LIVE_MODE_LABEL,
+  type LiveAutoReason,
+  type LiveBlock,
+  type LiveModeKey,
+  liveAdviceText,
+  liveAutoDisableText,
+  liveAutoEnableText,
+  liveAutoReasonText,
+  liveAvgR,
+  liveModeText,
+  lossStreakText,
+  thresholdUsd,
+} from "./lib/liveAutoMessages";
 export { nextUtcMidnight, utcDayStart } from "./lib/liveDay";
 export {
   createLiveGate,
@@ -35,7 +50,6 @@ export {
   liveExitText,
   liveHaltText,
   liveLeftoverText,
-  liveToggleText,
   liveUnprotectedText,
 } from "./lib/liveMessages";
 export { liveUsd } from "./lib/money";

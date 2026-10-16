@@ -1,41 +1,39 @@
 "use client";
 
-import Link from "next/link";
-import { useId, useState } from "react";
+import { useState } from "react";
 import {
   type DemoSummary,
   type ExperimentMarket,
-  formatProfitFactor,
-  formatRate,
-  formatSignedUsd,
-  type MirrorAutoSnapshot,
-  useSetExperimentLiveMirror,
+  LIVE_MIRROR_MODES,
+  type LiveAutoOff,
+  type LiveAutoSnapshot,
+  type LiveMirrorMode,
+  type LiveThresholds,
+  useSetExperimentLiveMode,
 } from "@/entities/experiment";
 import {
   deriveLiveStatus,
-  LIVE,
+  LIVE_MODE_LABEL,
   useLiveAccount,
 } from "@/entities/live-account";
 import { cn, formatDateTime } from "@/shared/lib";
-import { Button } from "@/shared/ui/Button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/Dialog";
-import { Input } from "@/shared/ui/Input";
-import { dailyLimitNote, keyBlockReason, LIMIT_LINES } from "../lib/describe";
-import { LIVE_STOP_HREF } from "./LiveTradingStrip";
+  dailyLimitNote,
+  keyBlockReason,
+  LIVE_MODE_MEANING,
+  liveModeHint,
+  liveModeNote,
+} from "../lib/describe";
+import { LiveModeDialog, type LiveOnMode } from "./LiveModeDialog";
 
 const COINM_REASON = "COIN-M на реальном счёте не торгуется";
 
 /**
- * Переключатель «Реальный счёт» эксперимента «Выкл / Вкл» (spec 0049, AC1). «Вкл» — модалка с лимитами,
- * демо-статистикой и словом «РЕАЛ»; «Выкл» — сразу (открытые позиции доживают). COIN-M — недоступно; ключ не
- * «✅ годится» — недоступно «Вкл» с причиной. Рядом — пометка сработавшего дневного лимита.
+ * Переключатель «Реальный счёт» эксперимента «Выкл · Авто · Вкл · Вкл + автовыкл» (spec 0049, 0053, AC1). Всё, кроме
+ * «Выкл», — модалка с описанием режима, порогами (для «Авто» и «Вкл + автовыкл») и словом «РЕАЛ»; «Выкл» — сразу
+ * (открытые позиции доживают). Активные «Авто» и «Вкл + автовыкл» — модалка порогов. Под переключателем — решение
+ * «Авто», пороги или пометка автовыключения; при наведении — смысл положения и последнее решение автомата.
+ * COIN-M — недоступно; ключ не «✅ годится» — недоступно включение с причиной.
  */
 export function LiveMirrorToggle({
   experiment,
@@ -45,16 +43,17 @@ export function LiveMirrorToggle({
     name: string;
     market: ExperimentMarket;
     liveMirror: boolean;
+    liveMirrorMode: LiveMirrorMode;
+    liveThresholds: LiveThresholds;
+    liveAuto: LiveAutoSnapshot | null;
+    liveAutoOff: LiveAutoOff | null;
     demo: DemoSummary;
-    demoMirrorAuto: MirrorAutoSnapshot | null;
   };
 }) {
-  const [confirmOn, setConfirmOn] = useState(false);
-  const [word, setWord] = useState("");
-  const wordId = useId();
-  const mutation = useSetExperimentLiveMirror();
+  const [dialog, setDialog] = useState<LiveOnMode | null>(null);
+  const mutation = useSetExperimentLiveMode();
   const live = useLiveAccount();
-  const { id, liveMirror } = experiment;
+  const { id, liveMirror, liveMirrorMode: mode } = experiment;
   const coinm = experiment.market === "coinm";
   const status = live.data
     ? deriveLiveStatus(live.data.state, Date.now(), live.data.silentAfterMs)
@@ -64,83 +63,86 @@ export function LiveMirrorToggle({
     live.data?.trading.experiments.find((e) => e.id === id),
     formatDateTime,
   );
-  const wordOk = word.trim().toUpperCase() === LIVE.confirmWord;
+  const view = { ...experiment, mode };
+  const note = liveModeNote(view, formatDateTime);
 
-  const turnOn = () => {
+  const choose = (next: LiveMirrorMode) => {
     mutation.reset();
-    setWord("");
-    setConfirmOn(true);
+    if (next === "off") {
+      if (mode !== "off") mutation.mutate({ id, mode: "off" });
+      return;
+    }
+    // Активные «Авто» и «Вкл + автовыкл» — поменять пороги; активное «Вкл» — ничего.
+    if (next === mode && next === "on") return;
+    setDialog(next);
   };
-  const turnOff = () => {
-    mutation.reset();
-    mutation.mutate({ id, liveMirror: false });
-  };
-  const confirm = () =>
-    mutation.mutate(
-      { id, liveMirror: true, confirm: word },
-      { onSuccess: () => setConfirmOn(false) },
-    );
 
-  const d = experiment.demo;
-  const avgR = experiment.demoMirrorAuto?.check.avgR ?? null;
+  const segmentTitle = (m: LiveMirrorMode) => {
+    if (coinm) return COINM_REASON;
+    if (m === mode) return liveModeHint(view, formatDateTime);
+    if (m !== "off" && keyReason) return keyReason;
+    return LIVE_MODE_MEANING[m];
+  };
 
   return (
     <div
       className="inline-flex flex-col items-center gap-0.5"
-      title={coinm ? COINM_REASON : undefined}
+      title={coinm ? COINM_REASON : liveModeHint(view, formatDateTime)}
     >
       <fieldset
         aria-label={`Реальный счёт ${id}`}
         className="inline-flex rounded-md border p-0.5 text-xs"
       >
-        <button
-          type="button"
-          aria-pressed={!liveMirror}
-          disabled={coinm || mutation.isPending}
-          title={
-            coinm
-              ? COINM_REASON
-              : "Выключить: новых реальных входов нет, открытые позиции доживают"
-          }
-          onClick={() => liveMirror && turnOff()}
-          className={cn(
-            "rounded px-1.5 py-0.5 whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-            liveMirror
-              ? "text-muted-foreground hover:bg-accent"
-              : "bg-muted font-medium text-foreground",
-          )}
-        >
-          Выкл
-        </button>
-        <button
-          type="button"
-          aria-pressed={liveMirror}
-          disabled={
-            coinm || mutation.isPending || (!liveMirror && keyReason !== null)
-          }
-          title={
-            coinm
-              ? COINM_REASON
-              : (keyReason ??
-                "Включить: свежие входы эксперимента повторяются на реальном субсчёте")
-          }
-          onClick={() => !liveMirror && turnOn()}
-          className={cn(
-            "rounded px-1.5 py-0.5 whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-            liveMirror
-              ? "bg-amber-600 font-medium text-white dark:bg-amber-500"
-              : "text-muted-foreground hover:bg-accent",
-          )}
-        >
-          Вкл
-        </button>
+        {LIVE_MIRROR_MODES.map((m) => {
+          const active = m === mode;
+          return (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={active}
+              title={segmentTitle(m)}
+              disabled={
+                coinm ||
+                mutation.isPending ||
+                (m !== "off" && !active && keyReason !== null)
+              }
+              onClick={() => choose(m)}
+              className={cn(
+                "rounded px-1.5 py-0.5 whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                !active && "text-muted-foreground hover:bg-accent",
+                active && m === "off" && "bg-muted font-medium text-foreground",
+                active &&
+                  m !== "off" &&
+                  (liveMirror
+                    ? "bg-amber-600 font-medium text-white dark:bg-amber-500"
+                    : "bg-amber-500/20 font-medium text-amber-800 dark:text-amber-300"),
+              )}
+            >
+              {active && m === "auto"
+                ? liveMirror
+                  ? "Авто · вкл"
+                  : "Авто"
+                : LIVE_MODE_LABEL[m]}
+            </button>
+          );
+        })}
       </fieldset>
       {coinm && (
         <span className="max-w-32 text-center text-[10px] leading-tight text-muted-foreground">
           {COINM_REASON}
         </span>
       )}
-      {!coinm && !liveMirror && keyReason && live.data && (
+      {!coinm && note && !(mode === "auto" && liveMirror) && (
+        <span
+          className={cn(
+            "max-w-44 text-center text-[10px] leading-tight",
+            mode === "off" ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {note}
+        </span>
+      )}
+      {!coinm && mode === "off" && keyReason && live.data && (
         <span className="max-w-40 text-center text-[10px] leading-tight text-muted-foreground">
           {keyReason}
         </span>
@@ -150,69 +152,21 @@ export function LiveMirrorToggle({
           дневной лимит: {limit}
         </span>
       )}
-      {mutation.error && !confirmOn && (
+      {mutation.error && dialog === null && (
         <span className="max-w-40 text-[10px] leading-tight text-destructive">
           {mutation.error.message}
         </span>
       )}
-      <Dialog open={confirmOn} onOpenChange={setConfirmOn}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Торговать реальными деньгами: {id}?</DialogTitle>
-            <DialogDescription>{experiment.name}</DialogDescription>
-          </DialogHeader>
-          <p className="text-sm">
-            Каждый новый вход эксперимента воркер повторит на торговом субсчёте
-            Binance в течение 1–2 минут: те же стоп и тейк, плечо 1.
-          </p>
-          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            {LIMIT_LINES.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
-          <p className="text-sm">
-            <span className="font-medium">Демо-зеркало эксперимента: </span>
-            {d.closed
-              ? `${d.closed} закрытых сделок, win rate ${formatRate(d.wins / d.closed)}, PnL ${formatSignedUsd(d.pnl)}, profit factor ${formatProfitFactor(d.profitFactor, d.grossProfit)}`
-              : "закрытых сделок на демо ещё нет"}
-            {avgR !== null &&
-              ` · средний R paper (проверка авто-зеркала): ${avgR.toFixed(2)}`}
-          </p>
-          <Link
-            href={LIVE_STOP_HREF}
-            className="text-sm font-medium underline-offset-4 hover:underline"
-          >
-            Аварийный стоп в настройках →
-          </Link>
-          <div className="flex flex-col gap-1 text-sm">
-            <label htmlFor={wordId}>
-              Чтобы включить, введите слово «{LIVE.confirmWord}»
-            </label>
-            <Input
-              id={wordId}
-              value={word}
-              onChange={(e) => setWord(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-          {keyReason && <p className="text-sm text-destructive">{keyReason}</p>}
-          {mutation.error && (
-            <p className="text-sm text-destructive">{mutation.error.message}</p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOn(false)}>
-              Отмена
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={!wordOk || keyReason !== null || mutation.isPending}
-              onClick={confirm}
-            >
-              {mutation.isPending ? "Включаю…" : "Включить реальный счёт"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {dialog && (
+        <LiveModeDialog
+          experiment={experiment}
+          mode={dialog}
+          edit={dialog === mode}
+          keyReason={dialog === mode ? null : keyReason}
+          mutation={mutation}
+          onClose={() => setDialog(null)}
+        />
+      )}
     </div>
   );
 }

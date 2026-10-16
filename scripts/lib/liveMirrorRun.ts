@@ -178,6 +178,8 @@ export interface LiveExchange {
     status: string;
     executedQty: number;
     cummulativeQuoteQty: number;
+    /** Цена срабатывания стопа; нет — 0. */
+    stopPrice?: number;
   } | null>;
   /** Свой ордер фьючерсов по clientOrderId; null — такого нет. */
   futuresOrder: (
@@ -194,6 +196,8 @@ export interface LiveExchange {
     algoId: number;
     algoStatus: string;
     actualOrderId: number | null;
+    /** Цена срабатывания; нет — 0. */
+    triggerPrice?: number;
   } | null>;
   closePosition: (req: CloseDemoRequest) => Promise<{
     status: "closed" | "failed";
@@ -509,6 +513,9 @@ export async function ensureOneway(
   }
 }
 
+/** Цена своего стопа с биржи для порогов (spec 0053); 0 или нет — null (приложение возьмёт стоп paper-сделки). */
+const positive = (v: number | undefined) => (v !== undefined && v > 0 ? v : null);
+
 /** Ордер спота с этими статусами — стоит (стоп защищает позицию). */
 const SPOT_ACTIVE = ["NEW", "PENDING_NEW", "PARTIALLY_FILLED"];
 
@@ -534,6 +541,7 @@ export async function reconcileEntry(
           entryPrice: null,
           quantity: null,
           protectRefs: null,
+          stopLoss: null,
         };
       const [stop, take] = [
         await ex.algoOrder(ids.stop),
@@ -552,6 +560,7 @@ export async function reconcileEntry(
             : "Вход найден на бирже, своего стопа нет — позиция без защиты, закрытие повторяется каждый прогон.",
         entryPrice: entry.avgPrice > 0 ? entry.avgPrice : null,
         quantity: entry.executedQty,
+        stopLoss: positive(stop?.triggerPrice),
         protectRefs: {
           market: "usdm",
           entryOrderId: entry.orderId,
@@ -579,6 +588,7 @@ export async function reconcileEntry(
         entryPrice: null,
         quantity: null,
         protectRefs: null,
+        stopLoss: null,
       };
     const stopId = (await ex.spotOrder(item.symbol, ids.stop))
       ? ids.stop
@@ -602,6 +612,7 @@ export async function reconcileEntry(
           : "Вход найден на бирже, свой стоп не стоит — позиция без защиты, закрытие повторяется каждый прогон.",
       entryPrice: bought.cummulativeQuoteQty / bought.executedQty,
       quantity: bought.executedQty,
+      stopLoss: positive(stop?.stopPrice),
       protectRefs: {
         market: "spot",
         orderListId: stop && stop.orderListId >= 0 ? stop.orderListId : null,

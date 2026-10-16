@@ -6,6 +6,12 @@ import {
 } from "@binance-dashboard/trading-core";
 import { z } from "zod";
 import { disabledInfoSchema } from "./disable";
+import {
+  liveAutoOffSchema,
+  liveAutoSnapshotSchema,
+  liveMirrorModeSchema,
+  liveThresholdsSchema,
+} from "./liveAuto";
 import { mirrorViewSchema } from "./mirror";
 import { demoMirrorModeSchema, mirrorAutoSnapshotSchema } from "./mirrorAuto";
 
@@ -104,6 +110,11 @@ export const experimentSummarySchema = experimentSchema
     demoMirrorAuto: mirrorAutoSnapshotSchema.nullable(),
     /** «Реальный счёт» включён (spec 0049): свежие входы повторяются на торговом субсчёте. */
     liveMirror: z.boolean(),
+    /** Положение «Выкл · Авто · Вкл · Вкл + автовыкл», пороги, последняя проверка «Авто» и автовыключение (spec 0053). */
+    liveMirrorMode: liveMirrorModeSchema,
+    liveThresholds: liveThresholdsSchema,
+    liveAuto: liveAutoSnapshotSchema.nullable(),
+    liveAutoOff: liveAutoOffSchema.nullable(),
     stats: tradeStatsSchema,
     demo: demoSummarySchema,
     /** Контрольный эксперимент варианта (spec 0046); null — не вариант. */

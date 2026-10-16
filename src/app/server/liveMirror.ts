@@ -6,12 +6,15 @@ import {
   claimAllLiveOpen,
   claimLiveMirror,
   claimLiveToClose,
+  closeLiveWithAuto,
   countLiveActive,
   countLiveSkipsSince,
+  type ExperimentLiveMode,
   experimentsTable,
   getLiveMirror,
   type LiveCloseRequest,
   type LiveLegsRequest,
+  type LiveMirrorMode,
   type LiveMirrorState,
   type LiveOpenRequest,
   type LiveReconcileRequest,
@@ -23,33 +26,40 @@ import {
   liveActiveRows,
   liveDailyPnl,
   liveEnabledExperiments,
+  type MirrorStatus,
   markLiveCloseFailed,
   paperTradesTable,
   recentLiveClosed,
-  setExperimentLiveMirror,
+  setExperimentLiveMode,
+  setExperimentLiveThresholds,
   skipLiveMirror,
   updateLiveMirror,
 } from "@/entities/experiment";
 import {
   deriveLiveStatus,
   LIVE,
+  LIVE_MODE_LABEL,
   LIVE_SKIP,
   type LiveHaltAction,
   type LiveTradeSubject,
   type LiveTrading,
+  liveAdviceText,
+  liveAutoDisableText,
   liveCloseAllDoneText,
   liveCloseFailedText,
   liveDailyLimitText,
   liveEntryText,
   liveExitText,
   liveHaltText,
-  liveToggleText,
+  liveModeText,
   liveUnprotectedText,
   loadLiveHalt,
+  lossStreakText,
   nextUtcMidnight,
   requestLiveCloseAll,
   saveLiveCloseAllRun,
   setLiveStopped,
+  thresholdUsd,
   utcDayStart,
 } from "@/entities/live-account";
 import { getLiveSilentAfterMs } from "@/shared/config/env.server";
@@ -57,6 +67,12 @@ import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { actorLabel, type EngineToggleActor } from "./engineToggleNotice";
 import { loadLastLiveState, notifyLive } from "./liveAccount";
+import {
+  liveAutoLogData,
+  liveAutoOffReason,
+  liveAutoReasonOf,
+  runLiveAuto,
+} from "./liveAuto";
 import { cachedTickerPrices } from "./tickerPrices";
 
 /** Свежие paper-входы за этот срок — кандидаты (окно свежести проверяет сам прогон: 10 минут, как у демо). */
@@ -324,6 +340,66 @@ const closedPatch = (e: LiveCloseRequest["exit"]) => ({
 });
 
 /**
+ * Закрытие строки и пороги эксперимента одной транзакцией (spec 0053, AC3): «Авто» / «Вкл + автовыкл» — выключить
+ * (положение «Выкл» с причиной), ручное «Вкл» — подсказка. Потом — Telegram о закрытии, о выключении и подсказка.
+ * Повтор того же итога (строка уже не в from) ничего не пишет и не шлёт.
+ */
+async function closeAndCheck(
+  tradeId: string,
+  e: LiveCloseRequest["exit"],
+  from: readonly MirrorStatus[],
+): Promise<void> {
+  const db = getDb();
+  const before = await getLiveMirror(db, tradeId);
+  const r = await closeLiveWithAuto(
+    db,
+    tradeId,
+    closedPatch(e),
+    from,
+    liveAutoOffReason,
+  );
+  if (!r.closed) return;
+  await announceExit(tradeId, e, (before?.closeAttempts ?? 0) + 1);
+  if (e.realizedPnl === null && before)
+    log.warn(
+      "live.advice",
+      `${before.experimentId} ${before.symbol}: PnL неизвестен — в порогах автовыключения сделка считается убыточной (сумма — по своему стопу${before.stopLoss === null ? ", стоп неизвестен — 0" : ""})`,
+      { experimentId: before.experimentId, tradeId },
+    );
+  const auto = r.auto;
+  if (!auto) return;
+  if (auto.disabledReason !== null) {
+    const text = liveAutoDisableText(
+      auto.experimentId,
+      auto.mode,
+      auto.disabledReason,
+    );
+    log.info("live.auto", text, {
+      ...liveAutoLogData(
+        auto.experimentId,
+        auto.mode,
+        auto.plan,
+        auto.disabledReason,
+      ),
+      tradeId,
+      telegram: await notifyLive(text),
+    });
+    return;
+  }
+  const reason = auto.advised
+    ? liveAutoReasonOf(auto.plan, auto.thresholds)
+    : null;
+  if (reason) {
+    const text = liveAdviceText(auto.experimentId, reason);
+    log.info("live.advice", text, {
+      ...liveAutoLogData(auto.experimentId, auto.mode, auto.plan, null),
+      tradeId,
+      telegram: await notifyLive(text),
+    });
+  }
+}
+
+/**
  * Итог попытки закрытия. closed — строка закрыта с PnL по исполнениям, Telegram (после неудачных попыток — «закрыто
  * после N попыток»). failed — строка снова в очереди и повторяется каждый прогон: close_failed, или «без защиты», если
  * свои TP/SL уже сняты. Telegram о неудаче — один раз на позицию (первая неудача или снятие защиты), журнал — каждый раз.
@@ -332,9 +408,7 @@ export async function saveLiveClose(body: LiveCloseRequest): Promise<void> {
   const db = getDb();
   const e = body.exit;
   if (body.status === "closed") {
-    const before = await getLiveMirror(db, body.tradeId);
-    if (await updateLiveMirror(db, body.tradeId, closedPatch(e), ["closing"]))
-      await announceExit(body.tradeId, e, (before?.closeAttempts ?? 0) + 1);
+    await closeAndCheck(body.tradeId, e, ["closing"]);
     return;
   }
   const failed = await markLiveCloseFailed(db, body.tradeId, {
@@ -373,11 +447,7 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
   for (const item of body.items) {
     const e = item.exit;
     if (item.outcome === "closed") {
-      const before = await getLiveMirror(db, item.tradeId);
-      if (
-        await updateLiveMirror(db, item.tradeId, closedPatch(e), OPEN_STATUSES)
-      )
-        await announceExit(item.tradeId, e, (before?.closeAttempts ?? 0) + 1);
+      await closeAndCheck(item.tradeId, e, OPEN_STATUSES);
       continue;
     }
     if (
@@ -405,6 +475,19 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
   }
 }
 
+/** Исходный стоп paper-сделки (стоп реального входа ставится по нему). */
+async function paperInitialStop(tradeId: string): Promise<number | null> {
+  const [t] = await getDb()
+    .select({
+      initialStop: paperTradesTable.initialStop,
+      stop: paperTradesTable.stop,
+    })
+    .from(paperTradesTable)
+    .where(eq(paperTradesTable.id, tradeId));
+  const stop = t?.initialStop ?? t?.stop ?? null;
+  return stop !== null && stop > 0 ? stop : null;
+}
+
 /**
  * Итог сверки «потерянного» входа (pending дольше LIVE_PENDING_STALE_S) с биржей: вход нашёлся — строка открыта
  * (стоп стоит) или «без защиты» (⚠️, очередь закрытия); входа нет — пропуск с причиной. Только из pending.
@@ -430,6 +513,8 @@ export async function saveLiveReconcile(
               ? body.entryPrice * body.quantity
               : null,
           protectRefs: body.protectRefs,
+          // Свой стоп — для оценки PnL и порогов (spec 0053): с биржи, иначе исходный стоп paper-сделки.
+          stopLoss: body.stopLoss ?? (await paperInitialStop(body.tradeId)),
         },
     ["pending"],
   );
@@ -497,26 +582,63 @@ export async function liveCloseAll(
 // ——— Пользователь: переключатель и аварийный стоп ———
 
 export type LiveToggleResult =
-  | { ok: true; id: string; liveMirror: boolean }
+  | { ok: true; id: string; mode: LiveMirrorMode; liveMirror: boolean }
   | { ok: false; status: number; error: string };
 
 /**
- * Переключатель «Реальный счёт» эксперимента. Включение — только со словом подтверждения, при ключе «✅ годится» и не
- * для COIN-M. Выключение не закрывает открытые реальные позиции: они доживают со своими TP/SL.
+ * Переключатель «Реальный счёт» эксперимента: «Выкл · Авто · Вкл · Вкл + автовыкл» (spec 0049, 0053). Всё, кроме «Выкл», —
+ * только со словом подтверждения, при ключе «✅ годится» и не для COIN-M; пороги — для «Авто» и «Вкл + автовыкл».
+ * «Выкл» не закрывает открытые реальные позиции: они доживают со своими TP/SL. «Авто» сразу проверяется автоматом.
  */
-export async function setLiveMirror(
-  input: { id: string; liveMirror: boolean; confirm?: string },
+export async function setLiveMode(
+  input: ExperimentLiveMode,
   actor: EngineToggleActor,
   now = Date.now(),
 ): Promise<LiveToggleResult> {
   const db = getDb();
   const [exp] = await db
-    .select({ id: experimentsTable.id, market: experimentsTable.market })
+    .select({
+      id: experimentsTable.id,
+      market: experimentsTable.market,
+      lossUsd: experimentsTable.liveLossLimitUsd,
+      streak: experimentsTable.liveLossStreak,
+      mode: experimentsTable.liveMirrorMode,
+      liveMirror: experimentsTable.liveMirror,
+    })
     .from(experimentsTable)
     .where(eq(experimentsTable.id, input.id));
   if (!exp)
     return { ok: false, status: 404, error: `Эксперимента ${input.id} нет` };
-  if (input.liveMirror) {
+  const by = actorLabel(actor);
+  // То же «Авто» / «Вкл + автовыкл» — только новые пороги: флаг, окно и решение автомата не трогаем.
+  if (
+    input.mode === exp.mode &&
+    (input.mode === "auto" || input.mode === "on_autooff")
+  ) {
+    if (input.confirm?.trim().toUpperCase() !== LIVE.confirmWord)
+      return {
+        ok: false,
+        status: 400,
+        error: `Чтобы сохранить, введите слово «${LIVE.confirmWord}»`,
+      };
+    if (!input.thresholds)
+      return { ok: false, status: 400, error: "Пороги не заданы" };
+    await setExperimentLiveThresholds(db, input.id, input.thresholds);
+    const text = `${input.id}: пороги реального счёта (${LIVE_MODE_LABEL[input.mode]}) — ${thresholdUsd(input.thresholds.lossUsd)} или ${lossStreakText(input.thresholds.streak)} (${by})`;
+    log.info("live.toggle", text, {
+      experimentId: input.id,
+      mode: input.mode,
+      thresholds: input.thresholds,
+      by,
+    });
+    return {
+      ok: true,
+      id: input.id,
+      mode: input.mode,
+      liveMirror: exp.liveMirror,
+    };
+  }
+  if (input.mode !== "off") {
     if (exp.market === "coinm")
       return {
         ok: false,
@@ -541,17 +663,50 @@ export async function setLiveMirror(
         error: `Ключ реального счёта не годится (${status.kind === "blocked" ? status.reasons.join("; ") : status.kind === "silent" ? "воркер молчит" : status.kind === "no-key" ? "ключ не задан" : "воркер не подключён"}) — включить нельзя`,
       };
   }
-  const by = actorLabel(actor);
-  const row = await setExperimentLiveMirror(db, input.id, input.liveMirror, by);
+  const thresholds =
+    input.mode === "auto" || input.mode === "on_autooff"
+      ? input.thresholds
+      : undefined;
+  const row = await setExperimentLiveMode(
+    db,
+    input.id,
+    input.mode,
+    thresholds,
+    by,
+  );
   if (!row) return { ok: false, status: 400, error: "Не удалось переключить" };
-  const text = liveToggleText(input.id, input.liveMirror, by);
+  const text = liveModeText(
+    input.id,
+    input.mode,
+    by,
+    thresholds ?? { lossUsd: exp.lossUsd, streak: exp.streak },
+  );
   log.info("live.toggle", text, {
     experimentId: input.id,
-    liveMirror: input.liveMirror,
+    mode: input.mode,
+    liveMirror: row.liveMirror,
     by,
+    ...(thresholds && { thresholds }),
     telegram: await notifyLive(text),
   });
-  return { ok: true, id: input.id, liveMirror: input.liveMirror };
+  let liveMirror = row.liveMirror;
+  // Перевод в «Авто» — правило сразу, без ожидания суток (AC4). Сбой — «Авто» остаётся, решит суточная проверка.
+  if (input.mode === "auto") {
+    try {
+      const auto = await runLiveAuto({ ids: [input.id] });
+      if (auto.changes.some((c) => c.change === "enable")) liveMirror = true;
+    } catch (error) {
+      log.warn(
+        "live.auto",
+        `${input.id}: проверка «Авто» при переводе не удалась — решит суточная проверка`,
+        {
+          experimentId: input.id,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
+  return { ok: true, id: input.id, mode: input.mode, liveMirror };
 }
 
 /** «Стоп входов» / «Возобновить» / «Закрыть всё» — состояние в БД, журнал live.halt и Telegram. */
