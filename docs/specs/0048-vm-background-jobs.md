@@ -58,3 +58,4 @@
 |---|---|
 | 2026-10-16 | ТЗ заведено (задача 1 плана ухода с Vercel) |
 | 2026-10-16 | ТЗ утверждено владельцем |
+| 2026-10-16 | Ветка `feature/0048-vm-background-jobs`: `src/app/server/backgroundSchedule.ts` (разбор cron и следующий запуск, расписания сверены тестом с pg_cron), `backgroundJobs.ts` (гейт, таймеры, старт из `instrumentation.ts`), `checkDbSpaceSafe` общий с роутом монитора, документация. Решение разработчика: таймеры стартуют только при `APP_HOST=vm` — на Mac runner локальной PGlite по умолчанию oracle, и монитор слал бы Telegram и задачи GitHub ключами из `.env.local`; пропуски печатаются в консоль (journalctl), т.к. debug логгера в консоль не попадает, а `data/logs` на VM недоступен для записи |
