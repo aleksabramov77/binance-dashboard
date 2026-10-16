@@ -45,7 +45,7 @@ describe("logFiltersSearch / mirrorLogsHref", () => {
   });
   it("ссылка на отказы и пропуски реального счёта", () => {
     expect(liveLogsHref("S98")).toBe(
-      "/logs?event=live.rejected%2Clive.skipped&experiment=S98&days=14",
+      "/logs?event=live.rejected%2Clive.skipped%2Clive.reconcile&experiment=S98&days=14",
     );
   });
 });

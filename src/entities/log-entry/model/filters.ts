@@ -5,8 +5,15 @@ import { LOG_LEVELS, type LogLevel } from "./schema";
 export const LOG_DAYS_DEFAULT = 2;
 export const LOG_DAYS_MAX = 14;
 export const MIRROR_LOG_EVENTS = ["mirror.rejected", "mirror.skipped"] as const;
-/** Отказы и пропуски реального счёта (spec 0049) — ссылка из Real-колонок /experiments (spec 0054). */
-export const LIVE_LOG_EVENTS = ["live.rejected", "live.skipped"] as const;
+/**
+ * Отказы и пропуски реального счёта (spec 0049) — ссылка из Real-колонок /experiments (spec 0054). Пропуск ставит и
+ * сверка «потерянного» входа — она пишет live.reconcile.
+ */
+export const LIVE_LOG_EVENTS = [
+  "live.rejected",
+  "live.skipped",
+  "live.reconcile",
+] as const;
 
 export interface LogFilters {
   level: LogLevel;
