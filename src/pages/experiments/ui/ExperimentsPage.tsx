@@ -2,7 +2,7 @@
 
 import { ChevronDown, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { Suspense, useMemo } from "react";
+import { type ReactNode, Suspense, useMemo } from "react";
 import {
   ASSET_GROUP_DESCRIPTION,
   ASSET_GROUPS,
@@ -15,12 +15,13 @@ import {
   formatProfitFactor,
   formatRate,
   formatSignedUsd,
+  liveEstimateHint,
   MissingRunNotice,
   pnlTone,
   RunSelect,
   useExperiments,
 } from "@/entities/experiment";
-import { mirrorLogsHref } from "@/entities/log-entry";
+import { liveLogsHref, mirrorLogsHref } from "@/entities/log-entry";
 import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
 import { ExperimentEnabledSwitch } from "@/features/experiment-toggle";
 import {
@@ -49,6 +50,7 @@ import {
   type ExperimentRowView,
   hideCollapsed,
   isGroupedSort,
+  liveKnown,
   SORT_KEYS,
   type SortKey,
   sortExperiments,
@@ -137,13 +139,6 @@ const COLUMNS: {
     description: "Капитал эксперимента: стартовый бюджет + реализованный PnL.",
   },
   {
-    key: "live",
-    label: "Реальный счёт",
-    numeric: false,
-    description:
-      "Переключатель «Выкл · Авто · Вкл · Вкл + автовыкл» — повторяет ли эксперимент свежие входы на торговом субсчёте Binance реальными деньгами. «Авто» — решает автомат: ≥ 30 закрытых демо-сделок со средним R > 0 — включить; средний R последних 30 демо-сделок < 0 или сработал порог — выключить; «Авто · вкл» — сейчас торгует. «Вкл + автовыкл» — включено вручную, приложение выключит по порогам: убыток с момента включения (по умолчанию $15) или серия убыточных сделок (по умолчанию 5). «Вкл» и «Выкл» — вручную, автомат их не меняет. После автовыключения — «Выкл» с причиной и датой, снова включить — только вручную. Лимиты: $10 на сделку (минимум биржи — до $50), не больше 5 позиций на субсчёт, −$15 за сутки у эксперимента → его входы до 00:00 UTC. Всё, кроме «Выкл», — с подтверждением словом «РЕАЛ» и только при годном ключе (карточка «Реальный счёт» в /settings). COIN-M — недоступно.",
-  },
-  {
     key: "demo",
     label: "Демо: торговля",
     numeric: false,
@@ -190,6 +185,55 @@ const COLUMNS: {
     description:
       "Стартовый бюджет эксперимента + PnL демо-сделок с последнего демо-сброса (отдельного демо-капитала у эксперимента нет, демо-счёт общий).",
   },
+  {
+    key: "live",
+    label: "Real: торговля",
+    numeric: false,
+    description:
+      "Переключатель «Реальный счёт» «Выкл · Авто · Вкл · Вкл + автовыкл» — повторяет ли эксперимент свежие входы на торговом субсчёте Binance реальными деньгами. «Авто» — решает автомат: ≥ 30 закрытых демо-сделок со средним R > 0 — включить; средний R последних 30 демо-сделок < 0 или сработал порог — выключить; «Авто · вкл» — сейчас торгует. «Вкл + автовыкл» — включено вручную, приложение выключит по порогам: убыток с момента включения (по умолчанию $15) или серия убыточных сделок (по умолчанию 5). «Вкл» и «Выкл» — вручную, автомат их не меняет. После автовыключения — «Выкл» с причиной и датой, снова включить — только вручную. Лимиты: $10 на сделку (минимум биржи — до $50), не больше 5 позиций на субсчёт, −$15 за сутки у эксперимента → его входы до 00:00 UTC. Всё, кроме «Выкл», — с подтверждением словом «РЕАЛ» и только при годном ключе (карточка «Реальный счёт» в /settings). COIN-M — недоступно.",
+  },
+  {
+    key: "liveTrades",
+    label: "Real: сделки",
+    numeric: true,
+    description:
+      "Сделки эксперимента на реальном счёте за всё время (сбросов у реального счёта нет): закрытые (+ открытые сейчас). «отказ» — биржа не приняла вход; «пропуск» — вход не отправлялся: стоп входов, лимит 5 позиций, дневной лимит убытка, мало средств на субсчёте, по монете уже есть реальная позиция, вход не свежий. Значок журнала — причины в /logs. COIN-M на реальном счёте не торгуется.",
+  },
+  {
+    key: "liveWinRate",
+    label: "Real: win rate",
+    numeric: true,
+    description:
+      "Доля прибыльных среди закрытых реальных сделок за всё время (сделки без PnL не считаются).",
+  },
+  {
+    key: "livePnl",
+    label: "Real: PnL",
+    numeric: true,
+    description:
+      "Реализованный плюс или минус на реальном счёте по эксперименту за всё время, $: по фактическим исполнениям биржи, после комиссий (у демо — без комиссий). «≈» — среди сделок есть оценки по ценам входа и выхода (исполнения не прочитаны) или сделки без PnL; сколько — в подсказке.",
+  },
+  {
+    key: "liveProfitFactor",
+    label: "Real: Profit factor",
+    numeric: true,
+    description:
+      "Σ прибылей / Σ убытков закрытых реальных сделок за всё время; ∞ — убытков не было.",
+  },
+  {
+    key: "liveMaxDrawdown",
+    label: "Real: Max DD",
+    numeric: true,
+    description:
+      "Наибольшая просадка накопленного реального PnL от пика за всё время, в $ (не в %: капитала на эксперимент у реального счёта нет — деньги общие, $10 на сделку). Сделки — в порядке закрытия, старт — $0.",
+  },
+  {
+    key: "liveEquity",
+    label: "Real: Equity",
+    numeric: true,
+    description:
+      "Накопленный реальный PnL эксперимента за всё время, $: бюджета на реальном счёте у эксперимента нет, поэтому старт — $0, а не бюджет paper.",
+  },
 ];
 
 /** Оттенок всех колонок «Демо: …» — ячейки (AC6; пользователь выбрал sky 2026-10-15). */
@@ -200,6 +244,11 @@ const DEMO_TONE = "bg-sky-500/[0.06]";
  */
 const DEMO_HEAD_TONE = "bg-linear-to-b from-sky-500/[0.06] to-sky-500/[0.06]";
 const isDemoColumn = (key: SortKey) => key.startsWith("demo");
+/** Оттенок колонок «Real: …» (spec 0054, AC2: amber) — так же, как у демо: ячейки и шапка фоновым изображением. */
+const LIVE_TONE = "bg-amber-500/[0.07]";
+const LIVE_HEAD_TONE =
+  "bg-linear-to-b from-amber-500/[0.07] to-amber-500/[0.07]";
+const isLiveColumn = (key: SortKey) => key.startsWith("live");
 
 function ColumnHead({
   column,
@@ -217,6 +266,7 @@ function ColumnHead({
           column.key === "enabled") &&
           "text-center",
         isDemoColumn(column.key) && DEMO_HEAD_TONE,
+        isLiveColumn(column.key) && LIVE_HEAD_TONE,
       )}
       {...head}
       description={column.description}
@@ -278,6 +328,91 @@ function DemoCells({
       <TableCell className={cn("text-right font-mono tabular-nums", DEMO_TONE)}>
         {d.closed ? formatUsd(d.equity) : "—"}
       </TableCell>
+    </>
+  );
+}
+
+const COINM_LIVE = "COIN-M на реальном счёте не торгуется";
+const LIVE_MISSES_HINT =
+  "Отказ — биржа не приняла вход (позиция не открыта). Пропуск — вход на реальном счёте не отправлялся: стоп входов, лимит позиций субсчёта, дневной лимит убытка эксперимента, мало средств на субсчёте, по монете уже есть реальная позиция, минимум биржи или вход не свежий.";
+
+/** Числовая ячейка Real: «—» без закрытых реальных сделок с PnL (у COIN-M — с подсказкой). */
+function LiveNumberCell({
+  e,
+  className,
+  title,
+  children,
+}: {
+  e: ExperimentSummary;
+  className?: string;
+  title?: string;
+  children: ReactNode;
+}) {
+  const known = liveKnown(e);
+  return (
+    <TableCell
+      className={cn(
+        "text-right font-mono tabular-nums",
+        known ? className : "text-muted-foreground",
+        LIVE_TONE,
+      )}
+      title={e.market === "coinm" ? COINM_LIVE : known ? title : undefined}
+    >
+      {known ? children : "—"}
+    </TableCell>
+  );
+}
+
+/** Раздел Real (spec 0054): переключатель «Реальный счёт» и метрики реальных сделок за всё время. */
+function LiveCells({ e }: { e: ExperimentSummary }) {
+  const l = e.live;
+  const coinm = e.market === "coinm";
+  const hint = liveEstimateHint(l) ?? undefined;
+  const approx = hint ? "≈ " : "";
+  return (
+    <>
+      <TableCell className={cn("text-center", LIVE_TONE)}>
+        <LiveMirrorToggle experiment={e} />
+      </TableCell>
+      <TableCell
+        className={cn("text-right font-mono tabular-nums", LIVE_TONE)}
+        title={coinm ? COINM_LIVE : undefined}
+      >
+        {!coinm && (l.trades || l.rejected || l.skipped) ? (
+          <>
+            {l.closed}
+            {l.open > 0 && (
+              <span className="text-muted-foreground"> +{l.open}</span>
+            )}
+            <DemoMisses
+              d={l}
+              logsHref={liveLogsHref(e.id)}
+              title={LIVE_MISSES_HINT}
+            />
+          </>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </TableCell>
+      <LiveNumberCell e={e}>{formatRate(l.winRate)}</LiveNumberCell>
+      <LiveNumberCell
+        e={e}
+        className={cn("font-semibold", pnlTone(l.pnl))}
+        title={hint}
+      >
+        {approx}
+        {formatSignedUsd(l.pnl)}
+      </LiveNumberCell>
+      <LiveNumberCell e={e}>
+        {formatProfitFactor(l.profitFactor, l.grossProfit)}
+      </LiveNumberCell>
+      <LiveNumberCell e={e} className="text-muted-foreground">
+        {formatUsd(l.maxDrawdown > 0 ? -l.maxDrawdown : 0)}
+      </LiveNumberCell>
+      <LiveNumberCell e={e} title={hint}>
+        {approx}
+        {formatSignedUsd(l.pnl)}
+      </LiveNumberCell>
     </>
   );
 }
@@ -448,10 +583,8 @@ function ExperimentRow({
       <TableCell className="text-right font-mono tabular-nums">
         {formatUsd(s.equity)}
       </TableCell>
-      <TableCell className="text-center">
-        <LiveMirrorToggle experiment={e} />
-      </TableCell>
       <DemoCells e={e} demoConfigured={demoConfigured} />
+      <LiveCells e={e} />
     </TableRow>
   );
 }
@@ -602,9 +735,11 @@ function ExperimentsDashboard() {
             : current
               ? "Демо-колонки — с последнего демо-сброса. "
               : "Paper и демо — сделки этой эпохи. "}
-          Сделки — закрытые (+ открытые). PnL — реализованный, за вычетом
-          комиссий. Equity = стартовый капитал (текущий бюджет эксперимента) +
-          PnL. Max DD — наибольшая просадка equity от пика.
+          Real-колонки — все сделки на реальном счёте (за всё время, PnL по
+          исполнениям с комиссиями, Max DD и Equity — в $). Сделки — закрытые (+
+          открытые). PnL — реализованный, за вычетом комиссий. Equity =
+          стартовый капитал (текущий бюджет эксперимента) + PnL. Max DD —
+          наибольшая просадка equity от пика.
         </p>
       )}
     </div>

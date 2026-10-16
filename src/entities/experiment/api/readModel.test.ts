@@ -2,7 +2,12 @@ import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { experimentsTable, paperTradesTable, runsTable } from "../model/db";
+import {
+  experimentsTable,
+  liveMirrorOrdersTable,
+  paperTradesTable,
+  runsTable,
+} from "../model/db";
 import { statsQuerySchema } from "../model/statsView";
 import {
   experimentDetailResponseSchema,
@@ -105,6 +110,72 @@ describe("чтение для страниц лаборатории", () => {
       equity: 1006,
     });
     expect(overview.experiments[1].stats.trades).toBe(0);
+  });
+
+  it("обзор: Real-колонки — реальные сделки за всё время при любом периоде (spec 0054)", async () => {
+    await seedExperiments(db, [exp("F01"), exp("F02")]);
+    const store = createDbExperimentStore(db);
+    const old = await ensureRun(db);
+    await store.insertTrade(trade("old", old, "F01", 1, 5));
+    const [{ id: run }] = await db
+      .insert(runsTable)
+      .values({ note: "вторая" })
+      .returning({ id: runsTable.id });
+    for (const [id, hour] of [
+      ["a", 2],
+      ["b", 4],
+      ["c", 6],
+      ["d", 8],
+    ] as const)
+      await store.insertTrade(trade(id, run, "F01", hour, null));
+    const live = {
+      experimentId: "F01",
+      market: "usdm",
+      symbol: "BTCUSDT",
+      direction: "long",
+    };
+    await db.insert(liveMirrorOrdersTable).values([
+      // Прошлая эпоха: закрыта по исполнениям.
+      {
+        ...live,
+        tradeId: "old",
+        status: "closed",
+        realizedPnl: 1.5,
+        closedAt: new Date("2026-10-10T02:00:00Z"),
+      },
+      {
+        ...live,
+        tradeId: "a",
+        status: "closed",
+        realizedPnl: -0.5,
+        pnlEstimated: true,
+        closedAt: new Date("2026-10-10T03:00:00Z"),
+      },
+      { ...live, symbol: "ETHUSDT", tradeId: "b", status: "protected" },
+      { ...live, tradeId: "c", status: "rejected" },
+      { ...live, tradeId: "d", status: "skipped" },
+    ]);
+
+    const current = await readExperimentsOverview(db, true);
+    const past = await readExperimentsOverview(db, true, false, undefined, old);
+    for (const overview of [current, past]) {
+      expect(experimentsResponseSchema.parse(overview)).toBeTruthy();
+      expect(overview.experiments[0].live).toMatchObject({
+        trades: 3,
+        closed: 2,
+        open: 1,
+        rejected: 1,
+        skipped: 1,
+        wins: 1,
+        losses: 1,
+        winRate: 0.5,
+        pnl: 1,
+        estimated: 1,
+        profitFactor: 3,
+        maxDrawdown: 0.5,
+      });
+      expect(overview.experiments[1].live.trades).toBe(0);
+    }
   });
 
   it("детали: equity-кривая от старта эпохи и последние N сделок новыми сверху", async () => {

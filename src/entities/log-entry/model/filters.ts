@@ -5,6 +5,8 @@ import { LOG_LEVELS, type LogLevel } from "./schema";
 export const LOG_DAYS_DEFAULT = 2;
 export const LOG_DAYS_MAX = 14;
 export const MIRROR_LOG_EVENTS = ["mirror.rejected", "mirror.skipped"] as const;
+/** Отказы и пропуски реального счёта (spec 0049) — ссылка из Real-колонок /experiments (spec 0054). */
+export const LIVE_LOG_EVENTS = ["live.rejected", "live.skipped"] as const;
 
 export interface LogFilters {
   level: LogLevel;
@@ -50,3 +52,7 @@ export function logFiltersSearch(f: Partial<LogFilters>): string {
 /** Ссылка из «N отказ · M пропуск»: отказы и пропуски зеркала одного эксперимента за всё время хранения. */
 export const mirrorLogsHref = (experimentId: string) =>
   `/logs${logFiltersSearch({ events: [...MIRROR_LOG_EVENTS], experiment: experimentId, days: LOG_DAYS_MAX })}`;
+
+/** То же для реального счёта (spec 0054): отказы и пропуски входов эксперимента на торговом субсчёте. */
+export const liveLogsHref = (experimentId: string) =>
+  `/logs${logFiltersSearch({ events: [...LIVE_LOG_EVENTS], experiment: experimentId, days: LOG_DAYS_MAX })}`;
