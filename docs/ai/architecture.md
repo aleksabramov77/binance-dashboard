@@ -364,6 +364,18 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   процесса, публичные свечи/тикеры/funding (`premiumIndex`) без ключей. Роль раннера процесса —
   `ENGINE_RUNNER` (`oracle` по умолчанию); тумблер — `engine_state.enabled` (по умолчанию выкл),
   `GET/POST /api/experiments/engine {enabled}`.
+- Фоновые задачи (spec 0048) — кто и когда их запускает. Пока `engine_state.runner = supabase`: pg_cron в Supabase
+  вызывает роуты Vercel `/api/cron/{earn-snapshot,log-monitor,demo-mirror,mirror-auto}` (и тик — Edge Function).
+  При `runner = oracle` (переключение, задача 0049) их же запускает своя VM таймерами процесса:
+  `src/app/server/backgroundJobs.ts` из `instrumentation.ts`, только при `APP_HOST=vm` (на Mac и Vercel таймеров нет).
+  Расписание UTC то же, что у pg_cron (`src/app/server/backgroundSchedule.ts`, тест сверяет с
+  `supabase/migrations/*_cron.sql`): снимок Earn `0 3,15 * * *`, монитор журнала и места в базе `*/15 * * * *`,
+  демо-зеркало `* * * * *` на 20-й секунде (после тика на 5-й), авто-зеркало `0 7 * * *`. Перед каждым запуском:
+  не Vercel, `ENGINE_RUNNER` процесса = `engine_state.runner`, прошлый запуск этой задачи закончился — иначе
+  пропуск без записей в БД; строка debug в консоли (journalctl) с причиной — только при смене состояния задачи
+  (первый пропуск после старта или запуска, смена причины, «снова выполняется»). Сбой — `log.error` с событием роута (`cron.earn`,
+  `cron.monitor`, `cron.mirror`, `cron.mirror_auto`), процесс и другие задачи работают дальше. Логика общая с роутами;
+  роуты остаются для pg_cron и ручного запуска.
 - Миграции — `drizzle/`: `pnpm db:generate` собирает схемы из `src/entities/*/model/db.ts` (коммитятся).
   Применяются `pnpm db:migrate` и автоматически при старте сервера (`instrumentation.ts`); сбой БД
   пишется в журнал и не роняет дашборд.

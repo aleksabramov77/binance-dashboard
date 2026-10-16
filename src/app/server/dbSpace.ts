@@ -129,3 +129,23 @@ export async function checkDbSpace(now = Date.now()): Promise<DbSpaceResult> {
     );
   return result;
 }
+
+/**
+ * Проверка места для монитора журнала (роут /api/cron/log-monitor и таймер VM, spec 0048): сбой замера не ломает
+ * монитор — ошибка в журнале и в результате.
+ */
+export async function checkDbSpaceSafe(): Promise<
+  DbSpaceResult | { error: string }
+> {
+  try {
+    return await checkDbSpace();
+  } catch (error) {
+    log.error(
+      "monitor.db_space",
+      "Проверка свободного места в базе не удалась",
+      undefined,
+      error,
+    );
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
