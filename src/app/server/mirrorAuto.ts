@@ -98,7 +98,9 @@ export async function runMirrorAuto(
             true,
             at,
           ),
-          ...(plan.adviceState !== undefined && { advice: plan.adviceState }),
+          ...(plan.adviceState !== undefined && {
+            advice: { from: row.advice, to: plan.adviceState },
+          }),
         });
         // Переключатель сменили, пока шла проверка, — решение устарело.
         if (!applied) continue;
@@ -118,6 +120,7 @@ export async function runMirrorAuto(
 
     if (!dryRun) {
       // «Авто» — снимок решения для подсказки в UI каждый прогон; ручные — только смена последней подсказки.
+      // Не записалось (положение переключили или подсказку уже записала параллельная проверка) — не сообщаем.
       const patch: MirrorAutoPatch = {};
       if (row.mode === "auto")
         patch.snapshot = nextMirrorAutoSnapshot(
@@ -127,9 +130,13 @@ export async function runMirrorAuto(
           false,
           at,
         );
-      if (plan.adviceState !== undefined) patch.advice = plan.adviceState;
-      if (patch.snapshot || patch.advice !== undefined)
-        await saveMirrorAuto(db, row.id, row.mode, patch);
+      if (plan.adviceState !== undefined)
+        patch.advice = { from: row.advice, to: plan.adviceState };
+      if (
+        (patch.snapshot || patch.advice) &&
+        !(await saveMirrorAuto(db, row.id, row.mode, patch))
+      )
+        continue;
     }
     if (plan.sendAdvice) {
       const message = mirrorAdviceMessage(plan);

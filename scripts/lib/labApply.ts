@@ -1,6 +1,10 @@
 // План применения решений лаборатории (`pnpm lab:apply`): разбор аргументов и проверка, что изменения не
 // противоречат друг другу. Сами записи в БД — scripts/lab-apply.ts через public API entities/experiment.
-import type { DemoMirrorMode } from "@/entities/experiment";
+import {
+  ASSET_GROUPS,
+  type DemoMirrorMode,
+  type Market,
+} from "@/entities/experiment";
 import { PRIVATE_ID_PATTERN } from "./labPrivate";
 
 export interface ApplyPlan {
@@ -20,6 +24,7 @@ export interface ApplyPlan {
 export interface ApplyFlags {
   id: string;
   name: string;
+  market: Market;
   enabled: boolean;
   demoMirror: boolean;
   demoMirrorMode: DemoMirrorMode;
@@ -102,7 +107,10 @@ export function planApply(values: {
   return plan;
 }
 
-/** Что реально поменяется: неизвестный id — ошибка, уже в нужном состоянии — пропуск. */
+/**
+ * Что реально поменяется: неизвестный id — ошибка, уже в нужном состоянии — пропуск. «Вкл» и «Авто» для группы без
+ * демо-зеркала (COIN-M) — ошибка с той же причиной, что в UI и API.
+ */
 export function diffApply(
   plan: ApplyPlan,
   current: ApplyFlags[],
@@ -130,6 +138,8 @@ export function diffApply(
   const mode = (ids: string[], to: DemoMirrorMode) => {
     for (const id of ids) {
       const e = find(id);
+      const blocked = ASSET_GROUPS[e.market].demoMirrorBlocked;
+      if (to !== "off" && blocked) throw new Error(`${id}: ${blocked}`);
       if (e.demoMirrorMode !== to)
         changes.push({
           id,

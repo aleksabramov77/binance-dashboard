@@ -163,6 +163,8 @@ export async function runMirror<
   let futuresMode: "oneway" | "hedge" | null = null;
   if (candidates.some((c) => c.market === "usdm"))
     futuresMode = await deps.positionMode().catch(() => null);
+  // Расход входа на резерв — оценка по paper-объёму (~$50): на USDⓈ-M уходит маржа (плечо 1 — тот же объём), а
+  // fitMinNotional может поднять заявку до минимума символа (до 3×). Для резерва в $500 такой точности хватает.
   const notional = new Map(
     candidates.map((c) => [c.tradeId, c.quantity * c.entryPrice]),
   );
@@ -232,7 +234,8 @@ function freeFunds(deps: Pick<MirrorDeps, "freeUsd">) {
       return {
         tradeId: d.tradeId,
         kind: "skip",
-        reason: `мало свободных средств на демо: $${Math.round(free - cost)} < резерв $${MIRROR.minFreeUsd}`,
+        // Остаток после входа; свободных меньше объёма входа — $0, а не отрицательная сумма.
+        reason: `мало свободных средств на демо: $${Math.max(0, Math.round(free - cost))} < резерв $${MIRROR.minFreeUsd}`,
       };
     },
     spend(market: "spot" | "usdm", cost: number) {

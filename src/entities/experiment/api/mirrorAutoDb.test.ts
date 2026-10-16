@@ -149,6 +149,22 @@ describe("авто-зеркало в БД (spec 0043)", () => {
     );
   });
 
+  it("подсказка пишется, только если в БД всё ещё прочитанная: параллельная проверка её не повторит", async () => {
+    await seedExperiments(db, [exp("S98")]);
+    await setExperimentMirrorMode(db, "S98", "off");
+    const advise = () =>
+      saveMirrorAuto(db, "S98", "off", { advice: { from: null, to: "on" } });
+    expect(await advise()).toBe(true);
+    expect(await advise()).toBe(false);
+    expect((await row("S98")).demoMirrorAdvice).toBe("on");
+    expect(
+      await saveMirrorAuto(db, "S98", "off", {
+        advice: { from: "on", to: null },
+      }),
+    ).toBe(true);
+    expect((await row("S98")).demoMirrorAdvice).toBeNull();
+  });
+
   it("данные для решения: группы с демо-зеркалом, закрытые сделки текущей эпохи с R по порядку закрытия", async () => {
     await seedExperiments(db, [exp("S98"), exp("PC99", { market: "coinm" })]);
     const runId = await ensureRun(db);

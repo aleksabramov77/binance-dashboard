@@ -355,6 +355,18 @@ describe("runMirror: резерв демо-кошелька (spec 0043)", () => 
     );
   });
 
+  it("свободных меньше объёма входа — в причине $0, а не отрицательная сумма", async () => {
+    const d = deps({
+      freeUsd: async () => 30,
+      listCandidates: async () => [trade({ tradeId: "a" })],
+    });
+    await runMirror(d);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "a",
+      "мало свободных средств на демо: $0 < резерв $500",
+    );
+  });
+
   it("остаток не прочитался — вход идёт как раньше", async () => {
     const open = vi.fn(async () => ({
       id: "r",

@@ -5,6 +5,7 @@ import {
   createDbExperimentStore,
   ensureRun,
   experimentsTable,
+  readMirrorAutoRows,
   runsTable,
   seedExperiments,
 } from "@/entities/experiment";
@@ -22,6 +23,11 @@ vi.mock("@/shared/db/client.server", async (importOriginal) => ({
   getDb: () => db,
 }));
 vi.mock("@/shared/api/telegram", () => ({ sendTelegramMessage: vi.fn() }));
+// Чтение данных для решения — настоящее; тесты гонок вклиниваются между чтением и записью.
+vi.mock("@/entities/experiment", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/entities/experiment")>();
+  return { ...actual, readMirrorAutoRows: vi.fn(actual.readMirrorAutoRows) };
+});
 vi.mock("@/shared/lib/logger.server", () => ({
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -217,5 +223,45 @@ describe("runMirrorAuto", () => {
     expect(r.reason).toMatch(/ключ Binance Demo/);
     expect(r.changes).toEqual([]);
     expect((await flags()).S98.demoMirror).toBe(false);
+  });
+
+  it("положение переключили между чтением и записью — подсказки нет ни в журнале, ни в Telegram", async () => {
+    await setup();
+    const read = vi.mocked(readMirrorAutoRows);
+    const actual = read.getMockImplementation();
+    read.mockImplementationOnce(async (...args) => {
+      const data = await actual?.(...args);
+      await db
+        .update(experimentsTable)
+        .set({ demoMirrorMode: "on", demoMirror: true })
+        .where(eq(experimentsTable.id, "PS99"));
+      return data ?? null;
+    });
+    const r = await runMirrorAuto({ ids: ["PS99"] });
+    expect(r.advice).toEqual([]);
+    expect(log.info).not.toHaveBeenCalledWith(
+      "mirror.advice",
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect((await flags()).PS99.advice).toBeNull();
+  });
+
+  it("две проверки параллельно — подсказка уходит один раз", async () => {
+    await setup();
+    const read = vi.mocked(readMirrorAutoRows);
+    const actual = read.getMockImplementation();
+    let second: Awaited<ReturnType<typeof runMirrorAuto>> | null = null;
+    // Первая прочитала данные, вторая успела пройти целиком, потом первая пишет.
+    read.mockImplementationOnce(async (...args) => {
+      const data = await actual?.(...args);
+      second = await runMirrorAuto({ ids: ["PS99"] });
+      return data ?? null;
+    });
+    const first = await runMirrorAuto({ ids: ["PS99"] });
+    expect(second).toMatchObject({ advice: [{ id: "PS99", advice: "on" }] });
+    expect(first.advice).toEqual([]);
+    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
   });
 });

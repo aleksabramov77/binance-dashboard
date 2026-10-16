@@ -23,7 +23,17 @@ const current = [
     demoMirror: true,
     demoMirrorMode: "on" as const,
   },
-];
+  {
+    id: "PC99",
+    name: "COIN-M",
+    enabled: true,
+    demoMirror: false,
+    demoMirrorMode: "auto" as const,
+  },
+].map((e) => ({
+  ...e,
+  market: e.id === "PC99" ? ("coinm" as const) : ("usdm" as const),
+}));
 
 describe("planApply", () => {
   it("нормализует id и собирает план", () => {
@@ -110,6 +120,15 @@ describe("diffApply", () => {
         demoMirror: true,
       },
     ]);
+  });
+  it("«Вкл» и «Авто» для COIN-M — ошибка с причиной из UI; «Выкл» можно", () => {
+    for (const flag of ["mirror-on", "mirror-auto"] as const)
+      expect(() => diffApply(planApply({ [flag]: ["PC99"] }), current)).toThrow(
+        /PC99: Демо-зеркало COIN-M — позже/,
+      );
+    expect(
+      diffApply(planApply({ "mirror-off": ["PC99"] }), current),
+    ).toMatchObject([{ id: "PC99", to: "off" }]);
   });
   it("неизвестный id — ошибка до записи", () => {
     expect(() => diffApply(planApply({ disable: ["F99"] }), current)).toThrow(

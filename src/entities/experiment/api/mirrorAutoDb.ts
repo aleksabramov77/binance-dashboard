@@ -1,5 +1,14 @@
 import { marketSchema } from "@binance-dashboard/trading-core";
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+} from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { DEMO_MIRROR_MARKETS, type Market } from "../model/assetGroup";
 import { experimentsTable, paperTradesTable, runsTable } from "../model/db";
@@ -147,12 +156,14 @@ export async function setExperimentMirrorMode(
 export interface MirrorAutoPatch {
   demoMirror?: boolean;
   snapshot?: MirrorAutoSnapshot;
-  advice?: MirrorAdvice | null;
+  /** Новая подсказка; пишется, только если в БД всё ещё прочитанная `from` (параллельная проверка её не повторит). */
+  advice?: { from: MirrorAdvice | null; to: MirrorAdvice | null };
 }
 
 /**
  * Запись решения автомата. Пишется, только если положение всё ещё `mode` (переключатель могли сменить, пока шла
- * проверка); смена флага — ещё и только если он другой (начало окна — сейчас). false — ничего не записано.
+ * проверка); смена флага — ещё и только если он другой (начало окна — сейчас); подсказка — только если её не сменила
+ * параллельная проверка. false — ничего не записано: решение устарело, сообщать о нём нельзя.
  */
 export async function saveMirrorAuto(
   db: Db,
@@ -169,7 +180,7 @@ export async function saveMirrorAuto(
         updatedAt: sql`now()`,
       }),
       ...(patch.snapshot && { demoMirrorAuto: { ...patch.snapshot } }),
-      ...(patch.advice !== undefined && { demoMirrorAdvice: patch.advice }),
+      ...(patch.advice && { demoMirrorAdvice: patch.advice.to }),
     })
     .where(
       and(
@@ -177,6 +188,11 @@ export async function saveMirrorAuto(
         eq(experimentsTable.demoMirrorMode, mode),
         patch.demoMirror !== undefined
           ? sql`${experimentsTable.demoMirror} <> ${patch.demoMirror}`
+          : undefined,
+        patch.advice
+          ? patch.advice.from === null
+            ? isNull(experimentsTable.demoMirrorAdvice)
+            : eq(experimentsTable.demoMirrorAdvice, patch.advice.from)
           : undefined,
       ),
     )

@@ -38,35 +38,16 @@ export const mirrorAutoStepSchema = z.object({
 });
 export type MirrorAutoStep = z.infer<typeof mirrorAutoStepSchema>;
 
-/** Снимок первой версии ({ at, …решение }) — до разделения на проверку и изменение. */
-const legacySnapshot = (raw: unknown): unknown => {
-  if (!raw || typeof raw !== "object" || "checkedAt" in raw || !("at" in raw))
-    return raw;
-  const { at, ...step } = raw as { at: unknown; decision?: unknown };
-  const changed =
-    step.decision === "enable" ||
-    step.decision === "disable_loss" ||
-    step.decision === "disable_off";
-  return {
-    checkedAt: at,
-    check: step,
-    change: changed ? { at, ...step } : null,
-  };
-};
-
 /**
  * Авто-зеркало эксперимента (experiments.demo_mirror_auto) — подсказка у переключателя «Авто»: последняя проверка
  * (каждый прогон) и последнее изменение зеркала автоматом — «оставил» его не затирает.
  */
-export const mirrorAutoSnapshotSchema = z.preprocess(
-  legacySnapshot,
-  z.object({
-    checkedAt: z.string(),
-    check: mirrorAutoStepSchema,
-    /** null — автомат ещё не менял зеркало. */
-    change: mirrorAutoStepSchema.extend({ at: z.string() }).nullable(),
-  }),
-);
+export const mirrorAutoSnapshotSchema = z.object({
+  checkedAt: z.string(),
+  check: mirrorAutoStepSchema,
+  /** null — автомат ещё не менял зеркало. */
+  change: mirrorAutoStepSchema.extend({ at: z.string() }).nullable(),
+});
 export type MirrorAutoSnapshot = z.infer<typeof mirrorAutoSnapshotSchema>;
 
 /** POST /api/experiments/settings/mirror: положение переключателя. */

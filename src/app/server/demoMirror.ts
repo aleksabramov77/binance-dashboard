@@ -92,7 +92,15 @@ async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
     freeUsd: async (market) => {
       const config = getDemoTradingConfig();
       if (!config) throw new Error("Demo не настроен");
-      balances ??= fetchDemoUsdtBalances(config.credentials);
+      // Сбой — одна запись на прогон (промис общий), вход идёт без проверки резерва (fail-open в runMirror).
+      balances ??= fetchDemoUsdtBalances(config.credentials).catch((error) => {
+        log.warn(
+          "mirror.balance",
+          "Остаток демо-кошелька не прочитан — входы этого прогона без проверки резерва",
+          { error: error instanceof Error ? error.message : String(error) },
+        );
+        throw error;
+      });
       return (await balances)[market];
     },
     claim: async (tradeId) => {

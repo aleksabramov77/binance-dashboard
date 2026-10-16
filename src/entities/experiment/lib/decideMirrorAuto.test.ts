@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { mirrorAutoSnapshotSchema } from "../model/mirrorAuto";
 import {
   decideMirrorAuto,
   type MirrorAutoInput,
@@ -297,30 +296,6 @@ describe("снимок авто-зеркала для подсказки в UI",
   it("без изменений с самого начала — change null", () => {
     expect(
       nextMirrorAutoSnapshot(null, keep, false, false, "d1").change,
-    ).toBeNull();
-  });
-
-  it("снимок первой версии читается: решение-изменение становится последним изменением", () => {
-    const legacy = {
-      at: "d1",
-      decision: "enable",
-      demoMirror: true,
-      trades: 32,
-      avgR: 0.2,
-    };
-    expect(mirrorAutoSnapshotSchema.parse(legacy)).toEqual({
-      checkedAt: "d1",
-      check: { decision: "enable", demoMirror: true, trades: 32, avgR: 0.2 },
-      change: {
-        at: "d1",
-        decision: "enable",
-        demoMirror: true,
-        trades: 32,
-        avgR: 0.2,
-      },
-    });
-    expect(
-      mirrorAutoSnapshotSchema.parse({ ...legacy, decision: "keep" }).change,
     ).toBeNull();
   });
 });

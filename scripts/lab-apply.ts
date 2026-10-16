@@ -67,7 +67,11 @@ async function main() {
       c.field === "enabled"
         ? setExperimentEnabled(db, c.id, c.to)
         : setExperimentMirrorMode(db, c.id, c.to);
-    for (const c of changes) await apply(c);
+    for (const c of changes)
+      if (!(await apply(c)))
+        throw new Error(
+          `${c.id}: изменение не записано (эксперимента нет или группа не умеет демо-зеркало) — остальные изменения до него применены`,
+        );
     // «Авто» сразу решает по правилу (AC7) — после всех тумблеров: выключенный эксперимент снимается с зеркала.
     const toAuto = changes
       .filter((c) => c.field === "demoMirrorMode" && c.to === "auto")
