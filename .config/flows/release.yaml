@@ -1,8 +1,8 @@
-# /flow release — выкатить то, что влито в main: миграции БД, Edge Function движка, кроны, переменные Vercel,
-# деплой Vercel и смоук-проверки. Этап выкатки flow feature и bug (за ним — cleanup и close); запускается и сам —
+# /flow release — выкатить то, что влито в main: миграции БД, переменные VM, автовыкатка VM из Actions и смоук-проверки.
+# С 2026-10-16 прод на своей VM apps-tokyo (spec 0055); Edge Function и pg_cron — только после отката на Supabase. Этап выкатки flow feature и bug (за ним — cleanup и close); запускается и сам —
 # тогда сессия тоже заканчивается блоком «сессию можно закрывать» (CLAUDE.md → «Конец сессии»).
 # Этап выполняется, только если выполнено условие из его note; иначе пропускается с причиной.
-description: Выкатка влитого в main — миграции Supabase, Edge Function, кроны, env Vercel, деплой Vercel, смоук-проверки.
+description: Выкатка влитого в main — миграции БД, env на VM, автовыкатка VM из Actions, смоук-проверки.
 inputs: [merge]
 stages:
   - id: sync
@@ -28,10 +28,11 @@ stages:
   - id: edge
     uses: [changes]
     note: >
-      Только если менялся код, который грузит Edge Function engine-tick (import map
-      supabase/functions/engine-tick/deno.json): supabase/functions/, packages/trading-core/, src/features/paper-engine/,
-      src/entities/experiment/engine.ts и его импорты (api/dbStore.ts, api/accounting.ts, api/tickLock.ts, model/),
-      src/app/server/engineTick.ts, src/shared/api/binance/marketApi.ts.
+      С 2026-10-16 прод на своей VM (spec 0055): тик движка идёт таймером на VM, Edge Function engine-tick — no-op,
+      её задание pg_cron снято. Этап нужен только после отката на Supabase (`engine_state.runner = supabase`,
+      docs/ai/deploy-lightsail.md → «Откат») и только если менялся код из import map
+      supabase/functions/engine-tick/deno.json: supabase/functions/, packages/trading-core/, src/features/paper-engine/,
+      src/entities/experiment/engine.ts и его импорты, src/app/server/engineTick.ts, src/shared/api/binance/marketApi.ts.
     run: >-
       pnpm check:edge && set -a && . ./.env.local && set +a &&
       pnpm dlx supabase@2.120.0 functions deploy engine-tick --project-ref "$SUPABASE_PROJECT_REF" --use-api
@@ -39,31 +40,37 @@ stages:
   - id: cron
     uses: [changes]
     note: >
-      Только для нового supabase/migrations/*_cron.sql: cron-install соответствующего скрипта —
-      pnpm engine:supabase | earn:supabase | monitor:supabase | mirror:supabase.
+      Задания pg_cron сняты при переключении на VM (spec 0055): фоновые задачи — таймеры VM
+      (src/app/server/backgroundJobs.ts). Новая фоновая задача добавляется туда, а не в supabase/migrations/*_cron.sql.
+      cron-install — только при откате на Supabase.
 
   - id: env
     uses: [changes]
     note: >
-      Только если в .env.example появилась переменная, нужная в проде. Значения не выводить. На Vercel их загружает
-      пользователь командой `! …` (агенту это блокирует классификатор), после неё — передеплой Vercel.
+      Только если в .env.example появилась переменная, нужная в проде. Прод — VM: Claude дописывает значение в
+      /etc/binance/app.env по ssh (claude@<ip>, файл 640 root:binance, значения не выводить, не через аргументы
+      командной строки) и перезапускает сервис (`sudo systemctl restart binance`, на 25–50-й секунде минуты) —
+      docs/ai/deploy-lightsail.md. Значение секрета, которого нет у Claude, кладёт пользователь.
     gate: user-approval
 
-  - id: vercel
-    note: Дождаться статуса Vercel у HEAD main (GitHub commit status, context «Vercel»); failure или error — стоп и разбор.
+  - id: vm
+    note: >
+      После мержа в main VM выкатывается сама: Actions → Deploy (workflow_run после зелёного CI, проверка ответа
+      сервиса внутри). Дождаться этого запуска для HEAD main; failure — стоп и разбор (журнал сервиса в логе запуска).
     run: >-
-      sha=$(git rev-parse HEAD); for i in $(seq 1 60); do
-      s=$(GH_CONFIG_DIR="$HOME/.config/gh-personal" gh api "repos/aleksabramov77/binance-dashboard/commits/$sha/status"
-      -q '.statuses[] | select(.context=="Vercel") | .state' | head -1);
-      case "$s" in success) echo "Vercel: success"; exit 0;; failure|error) echo "Vercel: $s"; exit 1;; esac;
-      perl -e 'select(undef,undef,undef,10)'; done; echo "Vercel: нет итогового статуса за 10 минут"; exit 1
+      sha=$(git rev-parse HEAD); for i in $(seq 1 90); do
+      r=$(GH_CONFIG_DIR="$HOME/.config/gh-personal" gh run list --workflow deploy.yml --limit 10
+      --json event,headSha,status,conclusion
+      -q ".[] | select(.event==\"workflow_run\" and .headSha==\"$sha\") | \"\\(.status) \\(.conclusion)\"" | head -1);
+      case "$r" in "completed success") echo "VM: success"; exit 0;; completed*) echo "VM: $r"; exit 1;; esac;
+      perl -e 'select(undef,undef,undef,10)'; done; echo "VM: нет итога выкатки за 15 минут"; exit 1
 
   - id: smoke
     note: >
-      Тик движка без ошибок (ручной вызов всегда завершается с кодом 0 — проверяем ответ), зеркало отвечает 200,
-      сайт открывается.
+      Тик идёт с VM: последний тик свежий (не старше 2 минут), раннер oracle, без ошибок. Сайт отвечает — проверяет
+      сама выкатка (шаг vm). Ручной прогон зеркала — не через Vercel: смотри журнал VM
+      (`ssh claude@<ip> 'sudo journalctl -u binance --since "-5 min"'`), ошибок cron.* нет.
     run: >-
-      pnpm -s engine:supabase invoke | grep -Eq '"status":"(ok|disabled)"' &&
-      pnpm -s mirror:supabase run | grep -q '^200' &&
-      curl -sf -o /dev/null https://binance-dashboard-gold.vercel.app/login
+      pnpm -s engine:supabase status | grep -Eq "runner: 'oracle'" &&
+      pnpm -s engine:supabase status | grep -Eq "status: 'ok'"
     produces: отчёт о выкатке
