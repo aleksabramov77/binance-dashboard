@@ -21,6 +21,7 @@ import {
   fillsPnl,
   LIVE,
   LIVE_SKIP,
+  liveUsd,
 } from "@/entities/live-account";
 import type { TradeRequest, TradeResult } from "@/entities/trade";
 import {
@@ -127,6 +128,9 @@ export interface LiveExchange {
   spotSlippage: number;
 }
 
+/** «0.00000986» — количество монет без экспоненты и лишних нулей. */
+const formatQty = (q: number) => q.toFixed(8).replace(/\.?0+$/, "");
+
 /** Исполнения ищем с запасом до создания строки: вход отправляется сразу после захвата. */
 const FILLS_SLACK_MS = 60_000;
 
@@ -157,13 +161,19 @@ async function exitByFills(
       since: Date.parse(item.openedAt) - FILLS_SLACK_MS,
       baseAsset: item.symbol.replace(/USDT$/, ""),
     });
+    const notes = [
+      pnl.leftoverQty > 0
+        ? `Остаток ${formatQty(pnl.leftoverQty)} ${item.symbol.replace(/USDT$/, "")} ≈ ${liveUsd(pnl.leftoverUsd)} остался на субсчёте — в PnL не входит.`
+        : null,
+      pnl.unpricedFees.length
+        ? `Комиссии в ${pnl.unpricedFees.join(", ")} в $ не пересчитаны.`
+        : null,
+    ].filter(Boolean);
     return {
       exitPrice: pnl.exitPrice ?? fallbackExit,
       feesUsd: pnl.feesUsd,
       realizedPnl: pnl.realizedPnl,
-      note: pnl.unpricedFees.length
-        ? `Комиссии в ${pnl.unpricedFees.join(", ")} в $ не пересчитаны.`
-        : null,
+      note: notes.join(" ") || null,
     };
   } catch (error) {
     return {
@@ -379,7 +389,7 @@ export async function runLiveMirror(
               : size?.ok
                 ? size.notionalUsd
                 : 0,
-          raised: size?.ok ? size.raised : false,
+          raised: size?.ok ? size.raised : null,
         },
       });
     },

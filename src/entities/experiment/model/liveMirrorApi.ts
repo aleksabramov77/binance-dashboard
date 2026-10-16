@@ -96,7 +96,8 @@ export const liveOpenRequestSchema = liveTradeIdSchema.extend({
     stopLoss: z.number(),
     takeProfit: z.number().nullable(),
     notionalUsd: z.number(),
-    raised: z.boolean(),
+    /** Почему объём выше $10 (sizeEntry); null — не поднят. */
+    raised: z.enum(["minNotional", "minQty", "spotStop"]).nullable(),
   }),
 });
 export type LiveOpenRequest = z.infer<typeof liveOpenRequestSchema>;

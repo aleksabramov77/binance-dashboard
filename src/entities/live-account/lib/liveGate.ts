@@ -28,7 +28,12 @@ export interface LiveSkipDecision {
 
 /** Объём входа (sizeEntry из features/execute-trade). */
 export type LiveEntrySize =
-  | { ok: true; quantity: number; notionalUsd: number; raised: boolean }
+  | {
+      ok: true;
+      quantity: number;
+      notionalUsd: number;
+      raised: "minNotional" | "minQty" | "spotStop" | null;
+    }
   | { ok: false; minUsd: number };
 
 export interface LiveGateDeps {

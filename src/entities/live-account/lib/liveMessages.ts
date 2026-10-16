@@ -6,6 +6,13 @@ import { liveUsd } from "./money";
 
 const DIRECTION = { long: "long", short: "short" } as const;
 
+/** Почему объём выше $10 — по причине из sizeEntry: «минимум биржи» — только когда сработал minNotional. */
+const RAISED = {
+  minNotional: "минимум биржи",
+  minQty: "минимальное количество монеты на бирже",
+  spotStop: "стоп после комиссии должен пройти минимум ордера",
+} as const;
+
 export interface LiveTradeSubject {
   experimentId: string;
   symbol: string;
@@ -21,12 +28,12 @@ export function liveEntryText(
   s: LiveTradeSubject,
   o: {
     notionalUsd: number;
-    raised: boolean;
+    raised: "minNotional" | "minQty" | "spotStop" | null;
     stopLoss: number;
     takeProfit: number | null;
   },
 ): string {
-  return `🟢 Реальная сделка: ${subject(s)} ${liveUsd(o.notionalUsd)}${o.raised ? " (минимум биржи)" : ""}, SL ${o.stopLoss}${o.takeProfit === null ? "" : `, TP ${o.takeProfit}`}`;
+  return `🟢 Реальная сделка: ${subject(s)} ${liveUsd(o.notionalUsd)}${o.raised ? ` (${RAISED[o.raised]})` : ""}, SL ${o.stopLoss}${o.takeProfit === null ? "" : `, TP ${o.takeProfit}`}`;
 }
 
 export function liveUnprotectedText(s: LiveTradeSubject, message: string) {

@@ -37,7 +37,7 @@ describe("fillsPnl", () => {
     expect(r.realizedPnl).toBeCloseTo(-4 - 0.102);
   });
 
-  it("спот: комиссия покупки в монете уже в обороте выхода, в $ — по цене исполнения", () => {
+  it("спот: PnL по проданной части, комиссия в монете — в $; остаток (пыль) — отдельно", () => {
     const r = fillsPnl(
       [
         fill(1000, "BUY", 10, 1, 0.01, "ADA"),
@@ -46,7 +46,28 @@ describe("fillsPnl", () => {
       { direction: "long", since: 1000, baseAsset: "ADA" },
     );
     expect(r.feesUsd).toBeCloseTo(0.01 + 0.01089);
-    expect(r.realizedPnl).toBeCloseTo(9.9 * 1.1 - 10 - 0.01089);
+    expect(r.realizedPnl).toBeCloseTo(9.9 * 1.1 - 9.9 * 1 - 0.01 - 0.01089);
+    expect(r.leftoverQty).toBeCloseTo(0.09);
+    expect(r.leftoverUsd).toBeCloseTo(0.09 * 1.1);
+  });
+
+  it("спот BTC с пылью (приёмка 0049): выход выше входа — PnL не уходит в минус на остаток", () => {
+    // Куплено 0,00014 BTC по 81 932,01 (комиссия 0,1% в BTC), продано 0,00013 по 82 060 (комиссия 0,1% в USDT).
+    const r = fillsPnl(
+      [
+        fill(1000, "BUY", 0.00014, 81_932.01, 0.00000014, "BTC"),
+        fill(2000, "SELL", 0.00013, 82_060, 0.00013 * 82_060 * 0.001, "USDT"),
+      ],
+      { direction: "long", since: 1000, baseAsset: "BTC" },
+    );
+    const fees = 0.00000014 * 81_932.01 + 0.00013 * 82_060 * 0.001;
+    expect(r.feesUsd).toBeCloseTo(fees, 6);
+    // Прибыль проданной части 0,00013 × (82 060 − 81 932,01) ≈ $0,0166 минус комиссии ≈ $0,022.
+    expect(r.realizedPnl).toBeCloseTo(0.00013 * (82_060 - 81_932.01) - fees, 6);
+    expect(r.realizedPnl ?? 0).toBeGreaterThan(-0.01);
+    // Остаток 0,00000986 BTC ≈ $0,81 — на субсчёте, не убыток.
+    expect(r.leftoverQty).toBeCloseTo(0.00000986, 10);
+    expect(r.leftoverUsd).toBeCloseTo(0.00000986 * 82_060, 4);
   });
 
   it("выхода нет — PnL null; комиссии в BNB — отдельно, не пересчитаны", () => {

@@ -18,7 +18,7 @@ describe("тексты реального зеркала", () => {
     expect(
       liveEntryText(s, {
         notionalUsd: 50,
-        raised: true,
+        raised: "minNotional",
         stopLoss: 95000,
         takeProfit: 110000,
       }),
@@ -26,6 +26,14 @@ describe("тексты реального зеркала", () => {
       "🟢 Реальная сделка: S98 BTCUSDT (USDⓈ-M) long $50,00 (минимум биржи), SL 95000, TP 110000",
     );
   });
+  it("причина объёма: «минимум биржи» — только для minNotional", () => {
+    const o = { notionalUsd: 11.47, stopLoss: 40966, takeProfit: null };
+    expect(liveEntryText(s, { ...o, raised: "spotStop" })).toMatch(
+      /\$11,47 \(стоп после комиссии должен пройти минимум ордера\)/,
+    );
+    expect(liveEntryText(s, { ...o, raised: null })).not.toMatch(/минимум/);
+  });
+
   it("выход с PnL и причиной", () => {
     expect(liveExitText(s, { realizedPnl: 0.84, closedBy: "tp" })).toBe(
       "🔴 Закрыта: S98 BTCUSDT (USDⓈ-M) long +$0,84 (TP)",

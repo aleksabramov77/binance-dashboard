@@ -20,7 +20,7 @@ describe("sizeEntry: объём реального входа", () => {
       ok: true,
       quantity: 3.3,
       notionalUsd: 3.3 * 3,
-      raised: false,
+      raised: null,
     });
   });
 
@@ -32,7 +32,11 @@ describe("sizeEntry: объём реального входа", () => {
       maxUsd: 50,
       spotStop: null,
     });
-    expect(r).toMatchObject({ ok: true, quantity: 0.011, raised: true });
+    expect(r).toMatchObject({
+      ok: true,
+      quantity: 0.011,
+      raised: "minNotional",
+    });
     if (r.ok) expect(r.notionalUsd).toBeCloseTo(22, 5);
   });
 
@@ -44,7 +48,11 @@ describe("sizeEntry: объём реального входа", () => {
       maxUsd: 50,
       spotStop: null,
     });
-    expect(r).toMatchObject({ ok: true, quantity: 0.0005, raised: true });
+    expect(r).toMatchObject({
+      ok: true,
+      quantity: 0.0005,
+      raised: "minNotional",
+    });
     if (r.ok) expect(r.notionalUsd).toBeLessThanOrEqual(50);
   });
 
@@ -79,8 +87,30 @@ describe("sizeEntry: объём реального входа", () => {
       spotStop: 0.4,
     });
     // Стоп продаст (q × 0,999 → вниз к шагу) × 0,4 ≥ $5 → q ≥ 13.
-    expect(r).toMatchObject({ ok: true, raised: true });
+    expect(r).toMatchObject({ ok: true, raised: "spotStop" });
     if (r.ok)
       expect(Math.floor(r.quantity * 0.999) * 0.4).toBeGreaterThanOrEqual(5);
+  });
+
+  it("спот BTC (приёмка 0049): $11,47 — из-за стопа после комиссии, а не минимума биржи $5", () => {
+    const r = sizeEntry({
+      price: 81_932.01,
+      rules: rules(5, "0.00001", 0.00001),
+      targetUsd: 10,
+      maxUsd: 50,
+      spotStop: 40_966,
+    });
+    expect(r).toMatchObject({ ok: true, raised: "spotStop" });
+  });
+
+  it("минимальное количество монеты выше $10 — причина minQty", () => {
+    const r = sizeEntry({
+      price: 30,
+      rules: rules(5, "0.1", 1),
+      targetUsd: 10,
+      maxUsd: 50,
+      spotStop: null,
+    });
+    expect(r).toMatchObject({ ok: true, raised: "minQty" });
   });
 });

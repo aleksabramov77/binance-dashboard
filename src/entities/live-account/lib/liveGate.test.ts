@@ -30,7 +30,7 @@ function deps(over: Partial<LiveGateDeps> = {}): LiveGateDeps {
       ok: true,
       quantity: 20,
       notionalUsd: 10,
-      raised: false,
+      raised: null,
     }),
     freeUsd: async () => 100,
     spotSlippage: 0.005,

@@ -5,6 +5,12 @@ import { spotStopNotional, stepDecimals } from "./validateTrade";
 // Объём входа на заданную сумму (spec 0049, реальное зеркало): $10 после округления по шагу символа; минимум биржи
 // выше — объём поднимается до минимума (с запасом 1%), но минимум не выше maxUsd ($50), иначе вход пропускается.
 
+/**
+ * Почему объём выше $10: minNotional — минимум ордера биржи; minQty — минимальное количество монеты; spotStop — стоп
+ * спота продаёт купленное минус комиссия по цене стопа, и этот объём тоже должен пройти минимум ордера.
+ */
+export type EntryRaise = "minNotional" | "minQty" | "spotStop";
+
 export type EntrySize =
   | {
       ok: true;
@@ -12,8 +18,8 @@ export type EntrySize =
       quantity: number;
       /** Объём по текущей цене, $. */
       notionalUsd: number;
-      /** Объём поднят до минимума биржи. */
-      raised: boolean;
+      /** Почему объём поднят выше цели; null — не поднят. */
+      raised: EntryRaise | null;
     }
   | {
       ok: false;
@@ -31,13 +37,19 @@ function minQuantity(
   price: number,
   rules: Pick<SymbolRules, "minQty" | "minNotional">,
   spotStop: number | null,
-): number {
-  const byNotional = rules.minNotional / price;
-  const byStop =
-    spotStop && spotStop > 0
-      ? rules.minNotional / spotStop / (1 - SPOT_TAKER_FEE)
-      : 0;
-  return Math.max(rules.minQty, byNotional, byStop);
+): { qty: number; by: EntryRaise } {
+  const options: [number, EntryRaise][] = [
+    [rules.minNotional / price, "minNotional"],
+    [rules.minQty, "minQty"],
+    [
+      spotStop && spotStop > 0
+        ? rules.minNotional / spotStop / (1 - SPOT_TAKER_FEE)
+        : 0,
+      "spotStop",
+    ],
+  ];
+  const [qty, by] = options.reduce((a, b) => (b[0] > a[0] ? b : a));
+  return { qty, by };
 }
 
 export function sizeEntry(input: {
@@ -53,7 +65,7 @@ export function sizeEntry(input: {
   // k × шаг в двоичной арифметике даёт 0,30000000000000004 — фиксируем знаки шага.
   const steps = (k: number) =>
     Number((k * step).toFixed(stepDecimals(rules.stepSize)));
-  const qMin = minQuantity(price, rules, spotStop);
+  const { qty: qMin, by } = minQuantity(price, rules, spotStop);
   const minUsd = qMin * price;
   if (price <= 0 || step <= 0 || minUsd > maxUsd) return { ok: false, minUsd };
 
@@ -63,7 +75,7 @@ export function sizeEntry(input: {
       ok: true,
       quantity: atTarget,
       notionalUsd: atTarget * price,
-      raised: false,
+      raised: null,
     };
   let k = Math.ceil((qMin * MIN_MARGIN) / step - 1e-9);
   // Запас 1% не должен выводить за maxUsd: минимум BTC-фьючерсов $50 при шаге $10 — ровно минимум, а не $60.
@@ -82,6 +94,6 @@ export function sizeEntry(input: {
     ok: true,
     quantity,
     notionalUsd: quantity * price,
-    raised: true,
+    raised: by,
   };
 }

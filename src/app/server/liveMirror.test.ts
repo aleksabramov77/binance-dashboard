@@ -267,7 +267,7 @@ describe("вход, выход и дневной PnL", () => {
         steps: [],
         protectRefs: null,
       },
-      order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: false },
+      order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: null },
     });
     expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toMatch(
       /🟢 Реальная сделка: S98 LINKUSDT \(USDⓈ-M\) long \$10,00, SL 95, TP 110/,
@@ -320,7 +320,7 @@ describe("вход, выход и дневной PnL", () => {
         steps: [],
         protectRefs: null,
       },
-      order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: false },
+      order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: null },
     });
     await liveHaltAction("close_all", actor);
     const state = await liveMirrorState();

@@ -156,7 +156,7 @@ describe("runLiveMirror: вход", () => {
           stopLoss: 1900,
           takeProfit: 2200,
           notionalUsd: 10,
-          raised: false,
+          raised: null,
         },
       }),
     );
