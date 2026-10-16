@@ -49,17 +49,27 @@ const liveTradeEnvSchema = z.object({
 });
 
 /**
+ * Торговый ключ реального счёта — другой формы, чем BinanceCredentials: его нельзя по ошибке передать в
+ * read-only или демо-функции (типы не сойдутся). Принимают его только функции `shared/api/binance/live.server.ts`.
+ */
+export interface LiveCredentials {
+  readonly live: BinanceCredentials;
+}
+
+/**
  * Торговый ключ субсчёта реального счёта (spec 0047). Задаётся только в env воркера на VM; у веб-приложения
  * его нет. null — не задан (воркер шлёт пульс «ключ не задан»).
  */
 export function getLiveTradeCredentials(
   env: Record<string, string | undefined> = process.env,
-): BinanceCredentials | null {
+): LiveCredentials | null {
   const parsed = liveTradeEnvSchema.safeParse(env);
   if (!parsed.success) return null;
   return {
-    apiKey: parsed.data.BINANCE_TRADE_API_KEY,
-    apiSecret: parsed.data.BINANCE_TRADE_API_SECRET,
+    live: {
+      apiKey: parsed.data.BINANCE_TRADE_API_KEY,
+      apiSecret: parsed.data.BINANCE_TRADE_API_SECRET,
+    },
   };
 }
 

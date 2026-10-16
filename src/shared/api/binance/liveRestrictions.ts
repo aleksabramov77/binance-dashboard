@@ -151,33 +151,64 @@ export function isKeyRejected(error: {
 export const KEY_REJECTED_REASON =
   "Binance не принял ключ: проверьте ключ и IP-whitelist";
 
-export type UidCheckStatus = "different" | "same" | "skipped" | "pending";
+export type UidCheckStatus =
+  | "different"
+  | "same"
+  | "skipped"
+  | "pending"
+  | "unread";
 
-/** UID основного счёта от приложения (read-only ключ): число, или null с причиной, или ещё не известен. */
+/**
+ * UID основного счёта от приложения (read-only ключ): число; null с transient false — read-only ключа нет;
+ * null с transient true — сейчас не прочитан; undefined — ещё не известен (до первого ответа после старта).
+ */
 export type MainAccountUid =
   | { uid: number }
-  | { uid: null; reason: string }
+  | { uid: null; reason: string; transient: boolean }
   | undefined;
 
 export const MAIN_ACCOUNT_REASON =
   "Это ключ основного счёта — нужен ключ субсчёта";
+export const MAIN_UID_PENDING_REASON =
+  "ждём UID основного счёта от приложения — проверка «не основной счёт» ещё не сделана";
+export const mainUidUnreadReason = (reason: string) =>
+  `UID основного счёта не прочитан (${reason}) — проверка «не основной счёт» невозможна`;
 
-/** AC3: UID субсчёта ≠ UID основного счёта. Совпали — блокировка; основного UID нет — проверка пропущена. */
+/**
+ * Новый ответ приложения поверх известного UID: временная ошибка чтения не затирает уже известный UID основного
+ * счёта (fail-closed без ложных блокировок из-за сети); «ключа нет» и число — заменяют.
+ */
+export function mergeMainAccount(
+  known: MainAccountUid,
+  reply: MainAccountUid,
+): MainAccountUid {
+  if (reply === undefined) return known;
+  if (reply.uid === null && reply.transient && known?.uid != null) return known;
+  return reply;
+}
+
+/**
+ * AC3 (fail-closed): UID субсчёта ≠ UID основного счёта. Совпали — блокировка; UID основного ещё не получен или
+ * не прочитан — тоже блокировка (pending / unread); у приложения нет read-only ключа — проверка пропущена (ТЗ).
+ */
 export function checkAccountUid(
   accountUid: number,
   main: MainAccountUid,
 ): { status: UidCheckStatus; note: string | null } {
   if (main === undefined)
-    return {
-      status: "pending",
-      note: "ждём UID основного счёта от приложения",
-    };
+    return { status: "pending", note: MAIN_UID_PENDING_REASON };
   if (main.uid === null)
-    return { status: "skipped", note: `проверка пропущена: ${main.reason}` };
+    return main.transient
+      ? { status: "unread", note: mainUidUnreadReason(main.reason) }
+      : { status: "skipped", note: `проверка пропущена: ${main.reason}` };
   return main.uid === accountUid
     ? { status: "same", note: MAIN_ACCOUNT_REASON }
     : { status: "different", note: null };
 }
+
+/** UID-проверка не пройдена: блокировка, без остатков. */
+export const isUidBlocking = (status: UidCheckStatus): boolean =>
+  status === "same" || status === "pending" || status === "unread";
 
 /** Аккаунт Spot (`/api/v3/account`): UID и остатки. */
 export const liveSpotAccountSchema = z

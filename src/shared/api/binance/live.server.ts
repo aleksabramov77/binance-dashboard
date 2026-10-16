@@ -2,7 +2,7 @@
 // (scripts/live-worker.ts): у веб-приложения этого ключа нет. Каждый запрос сверяется с белым списком
 // liveAllowlist.ts до подписи и сети; в этой задаче список — только чтение.
 import { z } from "zod";
-import type { BinanceCredentials } from "@/shared/config/env.server";
+import type { LiveCredentials } from "@/shared/config/env.server";
 import { assertLiveAllowed, LIVE_HOSTS, type LiveRoute } from "./liveAllowlist";
 import {
   type LiveFuturesAccount,
@@ -17,7 +17,7 @@ import { type SignedParams, signedRequest } from "./signed";
  * Запрос вне списка бросает LiveRequestDeniedError, ничего не отправив.
  */
 export function liveSignedRequest<T extends z.ZodType>(
-  creds: BinanceCredentials,
+  creds: LiveCredentials,
   route: LiveRoute,
   schema: T,
   params: SignedParams = {},
@@ -25,7 +25,7 @@ export function liveSignedRequest<T extends z.ZodType>(
   assertLiveAllowed(route);
   return signedRequest(
     `https://${route.host}`,
-    creds,
+    creds.live,
     route.method,
     route.path,
     schema,
@@ -38,7 +38,7 @@ export function liveSignedRequest<T extends z.ZodType>(
  * evaluateRestrictions, чтобы неизвестный ответ дал блокировку с причиной, а не ошибку формата.
  */
 export function fetchLiveApiRestrictions(
-  creds: BinanceCredentials,
+  creds: LiveCredentials,
 ): Promise<unknown> {
   return liveSignedRequest(
     creds,
@@ -53,7 +53,7 @@ export function fetchLiveApiRestrictions(
 
 /** Аккаунт Spot субсчёта (`GET /api/v3/account`, вес 20): UID и ненулевые остатки. */
 export function fetchLiveSpotAccount(
-  creds: BinanceCredentials,
+  creds: LiveCredentials,
 ): Promise<LiveSpotAccount> {
   return liveSignedRequest(
     creds,
@@ -65,7 +65,7 @@ export function fetchLiveSpotAccount(
 
 /** Аккаунт USDⓈ-M субсчёта (`GET /fapi/v3/account`, вес 5): итоги кошелька. */
 export function fetchLiveFuturesAccount(
-  creds: BinanceCredentials,
+  creds: LiveCredentials,
 ): Promise<LiveFuturesAccount> {
   return liveSignedRequest(
     creds,

@@ -73,7 +73,7 @@ describe("deriveLiveStatus", () => {
 describe("planHeartbeat", () => {
   it("первый пульс — одна запись и одно сообщение", () => {
     const { next, events } = planHeartbeat(null, pulse(), T0, SILENT);
-    expect(next.status).toBe("ok");
+    expect(next?.status).toBe("ok");
     expect(events).toEqual([
       expect.objectContaining({ level: "info", notify: true }),
     ]);
@@ -84,8 +84,8 @@ describe("planHeartbeat", () => {
     const prev = state({ statusSince: new Date(T0 - 10 * MIN).toISOString() });
     const { next, events } = planHeartbeat(prev, pulse(), T0 + MIN, SILENT);
     expect(events).toEqual([]);
-    expect(next.statusSince).toBe(prev.statusSince);
-    expect(next.receivedAt).toBe(new Date(T0 + MIN).toISOString());
+    expect(next?.statusSince).toBe(prev.statusSince);
+    expect(next?.receivedAt).toBe(new Date(T0 + MIN).toISOString());
   });
 
   it("годится → заблокирован → годится: по одному сообщению на смену", () => {
@@ -114,7 +114,7 @@ describe("planHeartbeat", () => {
       T0 + 20 * MIN,
       SILENT,
     );
-    expect(next.silentSince).toBeNull();
+    expect(next?.silentSince).toBeNull();
     expect(events).toEqual([
       {
         level: "info",
@@ -122,6 +122,22 @@ describe("planHeartbeat", () => {
         notify: false,
       },
     ]);
+  });
+
+  it("рукопожатие после старта (UID pending) — ничего не сохраняется, событий нет", () => {
+    const handshake = pulse({
+      verdict: "blocked",
+      reasons: ["ждём UID"],
+      uid: { status: "pending", note: "ждём UID" },
+    });
+    expect(planHeartbeat(state(), handshake, T0 + MIN, SILENT)).toEqual({
+      next: null,
+      events: [],
+    });
+    expect(planHeartbeat(null, handshake, T0, SILENT)).toEqual({
+      next: null,
+      events: [],
+    });
   });
 
   it("пульс фикстуры помечается в тексте", () => {

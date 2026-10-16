@@ -50,16 +50,26 @@ export interface LiveEvent {
 }
 
 /**
+ * Рукопожатие после старта воркера: UID основного счёта ещё не получен (uid pending). Такой пульс — только запрос
+ * UID: он не сохраняется и не считается сменой состояния, иначе каждый перезапуск давал бы пару сообщений
+ * «заблокирован» → «годится». Воркер получает UID в ответе и сразу шлёт полный пульс.
+ */
+export const isHandshake = (heartbeat: LiveHeartbeat): boolean =>
+  heartbeat.uid?.status === "pending";
+
+/**
  * Приём пульса: новое состояние и события. Смена оценки (годится ↔ заблокирован ↔ ключ не задан) или первый
  * пульс — одна запись live.status и одно сообщение; та же оценка — ничего (без повторов). Пульс после
- * молчания — запись «снова на связи» без Telegram: «Восстановлено» присылает монитор.
+ * молчания — запись «снова на связи» без Telegram: «Восстановлено» присылает монитор. Рукопожатие (isHandshake) —
+ * null: ничего не сохраняется.
  */
 export function planHeartbeat(
   prev: LiveState | null,
   heartbeat: LiveHeartbeat,
   now: number,
   silentAfterMs: number,
-): { next: LiveState; events: LiveEvent[] } {
+): { next: LiveState | null; events: LiveEvent[] } {
+  if (isHandshake(heartbeat)) return { next: null, events: [] };
   const at = new Date(now).toISOString();
   const events: LiveEvent[] = [];
   const fixture = heartbeat.fixture ? ` (фикстура ${heartbeat.fixture})` : "";

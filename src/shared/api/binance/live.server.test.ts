@@ -3,7 +3,7 @@ import { z } from "zod";
 import { liveSignedRequest } from "./live.server";
 import { LiveRequestDeniedError } from "./liveAllowlist";
 
-const creds = { apiKey: "k", apiSecret: "s" };
+const creds = { live: { apiKey: "k", apiSecret: "s" } };
 
 afterEach(() => {
   vi.unstubAllGlobals();

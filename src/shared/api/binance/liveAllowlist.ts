@@ -48,17 +48,32 @@ export class LiveRequestDeniedError extends Error {
   override name = "LiveRequestDeniedError";
 }
 
+/**
+ * Строгий формат пути: только латиница, цифры, «_», «-» и одиночные «/». Без «%» (URL-кодирование вроде
+ * `tr%61nsfer` обошло бы поиск слов), «?», «#», «.» и «//». Путь не в этом формате отвергается — и в запросе, и
+ * значит ни одна такая строка белого списка не сработает.
+ */
+export const LIVE_PATH_FORMAT = /^\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/;
+
+export const isStrictLivePath = (path: string): boolean =>
+  LIVE_PATH_FORMAT.test(path);
+
 /** Слово движения денег в пути (без учёта регистра); null — нет. */
 export function forbiddenPathWord(path: string): string | null {
   const lower = path.toLowerCase();
   return LIVE_FORBIDDEN_PATH_WORDS.find((w) => lower.includes(w)) ?? null;
 }
 
-/** Причина отказа; null — запрос разрешён. Сначала запрет движения денег, потом сверка со списком. */
+/**
+ * Причина отказа; null — запрос разрешён. Сначала строгий формат пути, затем запрет движения денег, потом сверка
+ * со списком.
+ */
 export function liveDenyReason(
   route: LiveRoute,
   allowlist: readonly LiveRoute[] = LIVE_ALLOWLIST,
 ): string | null {
+  if (!isStrictLivePath(route.path))
+    return `путь ${route.path} не в строгом формате (только латиница, цифры, «_», «-», «/»): клиенту реального счёта запрещено`;
   const word = forbiddenPathWord(route.path);
   if (word)
     return `путь ${route.path} — движение денег («${word}»): клиенту реального счёта запрещено`;

@@ -127,7 +127,40 @@ describe("ingestHeartbeat", () => {
     expect(reply.mainAccount).toEqual({
       uid: null,
       reason: expect.stringMatching(/read-only ключ/),
+      transient: false,
     });
+  });
+
+  it("ошибка чтения UID: известный — отдаётся он, неизвестный — transient (воркер блокирует)", async () => {
+    vi.mocked(fetchAccountUid).mockRejectedValueOnce(new Error("429"));
+    expect((await ingestHeartbeat(pulse(), T0)).mainAccount).toEqual({
+      uid: null,
+      reason: "429",
+      transient: true,
+    });
+    await ingestHeartbeat(pulse(), T0 + MIN);
+    vi.mocked(fetchAccountUid).mockRejectedValueOnce(new Error("сеть"));
+    expect(
+      (await ingestHeartbeat(pulse(), T0 + 2 * 60 * MIN)).mainAccount,
+    ).toEqual({ uid: 777 });
+  });
+
+  it("рукопожатие после старта (UID pending) не сохраняется и не даёт сообщений", async () => {
+    await ingestHeartbeat(pulse(), T0);
+    vi.clearAllMocks();
+    vi.mocked(fetchAccountUid).mockResolvedValue(777);
+    const handshake = pulse({
+      verdict: "blocked",
+      reasons: ["ждём UID основного счёта"],
+      uid: { status: "pending", note: "ждём UID основного счёта" },
+    });
+    const reply = await ingestHeartbeat(handshake, T0 + MIN);
+    expect(reply.mainAccount).toEqual({ uid: 777 });
+    expect(statusLogs()).toEqual([]);
+    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    const view = await getLiveStatusView(T0 + MIN);
+    expect(view.state?.status).toBe("ok");
+    expect(view.state?.receivedAt).toBe(new Date(T0).toISOString());
   });
 
   it("фикстура и ключ не задан — UID не запрашивается; фикстура в Telegram не пишет", async () => {

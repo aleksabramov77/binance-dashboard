@@ -13,6 +13,7 @@ export {
   checkAccountUid,
   evaluateRestrictions,
   isKeyRejected,
+  isUidBlocking,
   KEY_REJECTED_REASON,
   LIVE_FLAG_RULES,
   LIVE_KEY_FLAGS,
@@ -22,7 +23,10 @@ export {
   type LiveSpotAccount,
   liveKeyFlagsSchema,
   MAIN_ACCOUNT_REASON,
+  MAIN_UID_PENDING_REASON,
   type MainAccountUid,
+  mainUidUnreadReason,
+  mergeMainAccount,
   type RestrictionsVerdict,
   type UidCheckStatus,
 } from "./liveRestrictions";

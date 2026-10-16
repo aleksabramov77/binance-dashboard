@@ -3,10 +3,13 @@ import { liveHeartbeatSchema } from "@/entities/live-account";
 import { BinanceApiError } from "@/shared/api/binance/signed";
 import { CooldownError, NetworkError } from "@/shared/lib/fetchRetry";
 import {
+  applyReply,
+  appUrlRefusal,
   emptyMemory,
   fixtureHeartbeat,
   fixtureRefusal,
   hasAnyTradeKey,
+  MAX_RESTRICTIONS_AGE_MS,
   noKeyHeartbeat,
   RESTRICTIONS_EVERY_MS,
   runCheck,
@@ -119,21 +122,99 @@ describe("runCheck", () => {
     expect(d.fetchFuturesAccount).not.toHaveBeenCalled();
   });
 
-  it("UID основного ещё не известен — ожидание; без read-only ключа — пропуск с пометкой", async () => {
+  it("UID основного ещё не известен (первый цикл после старта) — блокировка без остатков", async () => {
     const { d } = deps();
-    expect((await runCheck(d, emptyMemory(), base)).uid?.status).toBe(
-      "pending",
-    );
-    const h = await runCheck(
-      d,
-      { ...emptyMemory(), mainAccount: { uid: null, reason: "нет ключа" } },
-      base,
-    );
+    const h = await runCheck(d, emptyMemory(), base);
+    expect(h.verdict).toBe("blocked");
+    expect(h.uid?.status).toBe("pending");
+    expect(h.reasons).toEqual([expect.stringMatching(/ждём UID основного/)]);
+    expect(h.spot).toBeNull();
+    expect(h.usdm).toBeNull();
+    expect(d.fetchFuturesAccount).not.toHaveBeenCalled();
+  });
+
+  it("без read-only ключа у приложения — проверка пропущена с пометкой, ключ годится", async () => {
+    const { d } = deps();
+    const memory = emptyMemory();
+    applyReply(memory, { uid: null, reason: "нет ключа", transient: false });
+    const h = await runCheck(d, memory, base);
     expect(h.verdict).toBe("ok");
     expect(h.uid).toEqual({
       status: "skipped",
       note: "проверка пропущена: нет ключа",
     });
+  });
+
+  it("ошибка чтения UID основного при известном UID — держим известный, ключ годится", async () => {
+    const { d } = deps();
+    const memory = emptyMemory();
+    applyReply(memory, { uid: 999 });
+    applyReply(memory, { uid: null, reason: "429", transient: true });
+    expect(memory.mainAccount).toEqual({ uid: 999 });
+    expect((await runCheck(d, memory, base)).verdict).toBe("ok");
+  });
+
+  it("ошибка чтения UID основного без известного UID — блокировка «не прочитан», без остатков", async () => {
+    const { d } = deps();
+    const memory = emptyMemory();
+    applyReply(memory, { uid: null, reason: "сеть", transient: true });
+    const h = await runCheck(d, memory, base);
+    expect(h.verdict).toBe("blocked");
+    expect(h.uid?.status).toBe("unread");
+    expect(h.reasons[0]).toMatch(/UID основного счёта не прочитан \(сеть\)/);
+    expect(h.spot).toBeNull();
+  });
+
+  it("ключ основного счёта: перезапуск воркера не даёт «годится» — рукопожатие, затем снова блокировка", async () => {
+    const { d } = deps();
+    const before = emptyMemory();
+    applyReply(before, { uid: 111 });
+    expect((await runCheck(d, before, base)).verdict).toBe("blocked");
+    // Перезапуск: память пустая.
+    const after = emptyMemory();
+    const handshake = await runCheck(d, after, base);
+    expect(handshake.verdict).toBe("blocked");
+    expect(handshake.uid?.status).toBe("pending");
+    applyReply(after, { uid: 111 });
+    const full = await runCheck(d, after, base);
+    expect(full.verdict).toBe("blocked");
+    expect(full.uid?.status).toBe("same");
+    expect(full.spot).toBeNull();
+  });
+
+  it("аккаунт Spot ни разу не прочитан — UID субсчёта неизвестен, блокировка", async () => {
+    const { d } = deps({
+      fetchSpotAccount: vi.fn(async () => {
+        throw new NetworkError("fetch failed");
+      }),
+    });
+    const memory = emptyMemory();
+    applyReply(memory, { uid: 999 });
+    const h = await runCheck(d, memory, base);
+    expect(h.verdict).toBe("blocked");
+    expect(h.reasons[0]).toMatch(/UID субсчёта не прочитан/);
+  });
+
+  it("права не перепроверены дольше предела — «годится» снимается", async () => {
+    const { d, advance } = deps({
+      fetchRestrictions: vi
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValueOnce(GOOD)
+        .mockRejectedValue(new CooldownError("Binance на паузе", 429)),
+    });
+    const memory = { ...emptyMemory(), mainAccount: { uid: 999 } };
+    expect((await runCheck(d, memory, base)).verdict).toBe("ok");
+    advance(RESTRICTIONS_EVERY_MS);
+    const stillOk = await runCheck(d, memory, base);
+    expect(stillOk.verdict).toBe("ok");
+    expect(stillOk.error).toMatch(/Права ключа не прочитаны/);
+    advance(MAX_RESTRICTIONS_AGE_MS - RESTRICTIONS_EVERY_MS + 60_000);
+    const stale = await runCheck(d, memory, base);
+    expect(stale.verdict).toBe("blocked");
+    expect(stale.reasons[0]).toMatch(
+      /права ключа не перепроверены 21 мин: Binance на паузе/,
+    );
+    expect(stale.spot).toBeNull();
   });
 
   it("-2015 (ключ или IP) — блокировка «Binance не принял ключ»", async () => {
@@ -252,6 +333,34 @@ describe("пульс без ключа, фикстуры и отправка", (
     expect(fixtureRefusal({ hasTradeKey: false, appUrl: "мусор" })).toMatch(
       /не распознан/,
     );
+  });
+
+  it.each([
+    "http://localhost.evil.com",
+    "http://127.0.0.1@evil.com",
+    "http://localhost@evil.com",
+    "http://evil.com#@localhost",
+    "http://evil.com/?localhost",
+  ])("фикстура: враждебный адрес %s — отказ", (appUrl) => {
+    expect(fixtureRefusal({ hasTradeKey: false, appUrl })).toMatch(
+      /не localhost/,
+    );
+  });
+
+  it("адрес приложения: https или http только на localhost/127.0.0.1", () => {
+    expect(
+      appUrlRefusal("https://binance-dashboard-gold.vercel.app"),
+    ).toBeNull();
+    expect(appUrlRefusal("http://localhost:5003")).toBeNull();
+    expect(appUrlRefusal("http://127.0.0.1:5003")).toBeNull();
+    for (const url of [
+      "http://binance-dashboard-gold.vercel.app",
+      "http://localhost.evil.com",
+      "http://127.0.0.1@evil.com",
+      "ftp://localhost",
+    ])
+      expect(appUrlRefusal(url)).toMatch(/должен быть https/);
+    expect(appUrlRefusal("мусор")).toMatch(/не распознан/);
   });
 
   it("фикстура запрещена при любом из BINANCE_TRADE_API_KEY / SECRET, даже без пары", () => {

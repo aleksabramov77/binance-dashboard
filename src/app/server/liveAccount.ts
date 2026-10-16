@@ -39,7 +39,11 @@ type UidCache = {
 const uidKey = Symbol.for("binance-dashboard.liveMainUid");
 const g = globalThis as typeof globalThis & { [uidKey]?: UidCache };
 
-/** UID основного счёта по read-only ключу (AC3). Ключа нет или Binance не ответил — проверка пропускается. */
+/**
+ * UID основного счёта по read-only ключу (AC3). Ключа нет — проверка пропускается (transient false). Binance не
+ * ответил — последний известный UID процесса, а без него transient true: воркер держит свой известный UID или
+ * блокирует (fail-closed).
+ */
 export async function getMainAccountUid(
   now = Date.now(),
 ): Promise<NonNullable<MainAccountUid>> {
@@ -48,6 +52,7 @@ export async function getMainAccountUid(
     return {
       uid: null,
       reason: "у приложения не задан read-only ключ (BINANCE_API_KEY)",
+      transient: false,
     };
   g[uidKey] ??= { at: 0, uid: null, pending: null };
   const cache = g[uidKey];
@@ -64,11 +69,11 @@ export async function getMainAccountUid(
   } catch (error) {
     log.warn("live.uid", "UID основного счёта не получен", {
       error: message(error),
+      cached: cache.uid !== null,
     });
-    return {
-      uid: null,
-      reason: `UID основного счёта не получен: ${message(error)}`,
-    };
+    // Устаревший, но известный UID лучше «не знаю»: UID счёта не меняется.
+    if (cache.uid !== null) return { uid: cache.uid };
+    return { uid: null, reason: message(error), transient: true };
   }
 }
 
@@ -139,7 +144,8 @@ export async function ingestHeartbeat(
     now,
     getLiveSilentAfterMs(),
   );
-  await saveLiveState(db, next);
+  // Рукопожатие после старта воркера (UID основного ещё не известен) не сохраняется: следующий пульс — сразу.
+  if (next) await saveLiveState(db, next);
   await emit(events, heartbeat);
   const reply: LiveHeartbeatReply = { ok: true, verdict: heartbeat.verdict };
   if (heartbeat.fixture === null && heartbeat.verdict !== "no-key")

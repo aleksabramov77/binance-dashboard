@@ -162,7 +162,7 @@ describe("реальный счёт (spec 0047)", () => {
         BINANCE_TRADE_API_KEY: " k ",
         BINANCE_TRADE_API_SECRET: "s",
       }),
-    ).toEqual({ apiKey: "k", apiSecret: "s" });
+    ).toEqual({ live: { apiKey: "k", apiSecret: "s" } });
   });
 
   it("секрет пульса и адрес приложения: пусто — null, «/» в конце убирается", () => {

@@ -30,6 +30,8 @@ import {
 import { describeNetworkError } from "@/shared/lib/fetchRetry";
 import { disableLogFiles, log } from "@/shared/lib/logger.server";
 import {
+  applyReply,
+  appUrlRefusal,
   emptyMemory,
   fixtureHeartbeat,
   fixtureRefusal,
@@ -99,6 +101,8 @@ if (!appUrl)
   fail(
     "LIVE_APP_URL не задан: куда слать пульс (например, http://localhost:5001)",
   );
+const urlRefusal = appUrlRefusal(appUrl);
+if (urlRefusal) fail(urlRefusal);
 const secret = getLiveWorkerSecret();
 const creds = getLiveTradeCredentials();
 if (args.fixture) {
@@ -165,7 +169,7 @@ async function cycle(): Promise<void> {
       ? await runCheck(deps, memory, base)
       : noKeyHeartbeat(base);
   const reply = await send(heartbeat);
-  if (reply.mainAccount !== undefined) memory.mainAccount = reply.mainAccount;
+  applyReply(memory, reply.mainAccount);
 
   const summary = [
     heartbeat.verdict,

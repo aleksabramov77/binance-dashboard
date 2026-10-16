@@ -10,11 +10,13 @@ import {
   checkAccountUid,
   evaluateRestrictions,
   isKeyRejected,
+  isUidBlocking,
   KEY_REJECTED_REASON,
   type LiveFuturesAccount,
   type LiveSpotAccount,
   MAIN_ACCOUNT_REASON,
   type MainAccountUid,
+  mergeMainAccount,
   type RestrictionsVerdict,
   resolveUsdPrice,
   sumUsd,
@@ -22,6 +24,11 @@ import {
 
 /** Права ключа перечитываются при старте и каждые 10 минут (AC2); пока ключ заблокирован — каждый цикл. */
 export const RESTRICTIONS_EVERY_MS = 10 * 60_000;
+/**
+ * Предельный возраст последней успешной проверки прав: перепроверка падает (сеть, 429/418) дольше — оценка «годится»
+ * больше не держится, блокировка «права не перепроверены» до удачной проверки.
+ */
+export const MAX_RESTRICTIONS_AGE_MS = 2 * RESTRICTIONS_EVERY_MS;
 /** Пульс — раз в минуту (AC4). */
 export const HEARTBEAT_EVERY_MS = 60_000;
 
@@ -118,6 +125,19 @@ async function refreshRestrictions(
       return null;
     }
     // Биржа недоступна, 429/418: прежняя оценка остаётся; первой проверки не было — блокировка до неё.
+    const last = memory.restrictions;
+    if (
+      last?.verdict.ok &&
+      last.checkedAt !== null &&
+      now - last.checkedAt > MAX_RESTRICTIONS_AGE_MS
+    )
+      // «Годится» без перепроверки дольше предела не держим: за это время у ключа могли включить вывод.
+      memory.restrictions = {
+        verdict: blockedVerdict(
+          `права ключа не перепроверены ${Math.round((now - last.checkedAt) / 60_000)} мин: ${message(error)}`,
+        ),
+        checkedAt: null,
+      };
     memory.restrictions ??= {
       verdict: blockedVerdict(
         "права ключа ещё не проверены: Binance не ответил",
@@ -206,7 +226,8 @@ export async function runCheck(
   try {
     const account = await deps.fetchSpotAccount();
     memory.uid = checkAccountUid(account.uid, memory.mainAccount);
-    if (memory.uid.status !== "same") spot = await spotBalance(deps, account);
+    if (!isUidBlocking(memory.uid.status))
+      spot = await spotBalance(deps, account);
   } catch (error) {
     if (isRejected(error)) {
       memory.restrictions = {
@@ -222,12 +243,30 @@ export async function runCheck(
     errors.push(`Аккаунт Spot не прочитан: ${message(error)}`);
     notes.push("Spot не прочитан");
   }
-  if (memory.uid?.status === "same")
+  // AC3 fail-closed: UID субсчёта ещё ни разу не прочитан — проверку «не основной счёт» не сделать.
+  if (!memory.uid)
     return pulse({
       verdict: "blocked",
-      reasons: [MAIN_ACCOUNT_REASON],
+      reasons: [
+        "UID субсчёта не прочитан (аккаунт Spot недоступен) — проверка «не основной счёт» невозможна",
+      ],
+      balancesNote: "проверка UID не пройдена — остатки не показываются",
+    });
+  // Ключ основного счёта, UID основного ещё не получен (рукопожатие после старта) или не прочитан — блокировка
+  // без остатков: остатки основного счёта не должны попасть в шапку.
+  if (isUidBlocking(memory.uid.status))
+    return pulse({
+      verdict: "blocked",
+      reasons: [
+        memory.uid.status === "same"
+          ? MAIN_ACCOUNT_REASON
+          : (memory.uid.note ?? "проверка UID не пройдена"),
+      ],
       uid: memory.uid,
-      balancesNote: "ключ основного счёта — остатки не показываются",
+      balancesNote:
+        memory.uid.status === "same"
+          ? "ключ основного счёта — остатки не показываются"
+          : "проверка UID не пройдена — остатки не показываются",
     });
 
   let usdm: LiveHeartbeat["usdm"] = null;
@@ -324,6 +363,33 @@ export const hasAnyTradeKey = (
     env.BINANCE_TRADE_API_KEY?.trim() || env.BINANCE_TRADE_API_SECRET?.trim(),
   );
 
+/** Ответ приложения: UID основного счёта — поверх известного (ошибка чтения не затирает известный UID). */
+export function applyReply(
+  memory: WorkerMemory,
+  mainAccount: MainAccountUid,
+): void {
+  memory.mainAccount = mergeMainAccount(memory.mainAccount, mainAccount);
+}
+
+const LOCAL_HOSTS = ["localhost", "127.0.0.1"];
+
+/**
+ * Куда можно слать пульс с секретом: https на любой хост или http только на localhost/127.0.0.1. Иначе секрет
+ * ушёл бы открытым текстом. null — можно.
+ */
+export function appUrlRefusal(appUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(appUrl);
+  } catch {
+    return `LIVE_APP_URL не распознан (${appUrl})`;
+  }
+  if (url.protocol === "https:") return null;
+  if (url.protocol === "http:" && LOCAL_HOSTS.includes(url.hostname))
+    return null;
+  return `LIVE_APP_URL должен быть https (http — только localhost/127.0.0.1): ${url.protocol}//${url.hostname}`;
+}
+
 export const isLiveFixture = (value: string): value is LiveFixture =>
   (LIVE_FIXTURES as readonly string[]).includes(value);
 
@@ -343,7 +409,7 @@ export function fixtureRefusal(input: {
   } catch {
     return `фикстура запрещена: LIVE_APP_URL не распознан (${input.appUrl})`;
   }
-  return host === "localhost" || host === "127.0.0.1"
+  return LOCAL_HOSTS.includes(host)
     ? null
     : `фикстура запрещена: LIVE_APP_URL не localhost/127.0.0.1 (${host})`;
 }

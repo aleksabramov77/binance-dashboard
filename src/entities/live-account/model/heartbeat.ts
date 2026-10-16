@@ -33,10 +33,17 @@ export const liveUsdmBalanceSchema = z.object({
 });
 
 export const liveUidCheckSchema = z.object({
-  status: z.enum(["different", "same", "skipped", "pending"]),
+  /**
+   * different — субсчёт; same — ключ основного счёта; skipped — у приложения нет read-only ключа (проверка
+   * пропущена, ТЗ); pending — UID основного ещё не получен (рукопожатие после старта); unread — UID основного
+   * не прочитан и не известен (блокировка, fail-closed).
+   */
+  status: z.enum(["different", "same", "skipped", "pending", "unread"]),
   note: text.nullable(),
 });
 
+// Не strictObject намеренно: лишние поля отрезаются, а не дают 400. Воркер (VM) и приложение (Vercel) выкатываются
+// отдельно, и новый воркер с новым полем не должен получать отказ от старого приложения. В БД лишнее не попадает.
 export const liveHeartbeatSchema = z.object({
   /** Версия воркера (сборка). */
   version: z.string().min(1).max(64),
@@ -64,10 +71,14 @@ export const liveHeartbeatSchema = z.object({
 });
 export type LiveHeartbeat = z.infer<typeof liveHeartbeatSchema>;
 
-/** UID основного счёта для проверки AC3 — ответ приложения воркеру. */
+/**
+ * UID основного счёта для проверки AC3 — ответ приложения воркеру. uid null: transient false — read-only ключа нет
+ * (проверка пропускается), transient true — UID не прочитан сейчас (воркер держит последний известный, без него —
+ * блокировка).
+ */
 export const liveMainAccountSchema = z.union([
   z.object({ uid: z.number() }),
-  z.object({ uid: z.null(), reason: text }),
+  z.object({ uid: z.null(), reason: text, transient: z.boolean() }),
 ]);
 
 /** Ответ на пульс. mainAccount нет — приложение не проверяло (фикстура, нет ключа). */

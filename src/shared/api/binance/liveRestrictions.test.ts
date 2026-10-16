@@ -3,10 +3,12 @@ import {
   checkAccountUid,
   evaluateRestrictions,
   isKeyRejected,
+  isUidBlocking,
   LIVE_KEY_FLAGS,
   type LiveKeyFlags,
   liveFuturesAccountSchema,
   liveSpotAccountSchema,
+  mergeMainAccount,
 } from "./liveRestrictions";
 
 // Ответ apiRestrictions по документации Binance + ключ, который годится.
@@ -112,16 +114,46 @@ describe("checkAccountUid", () => {
       note: null,
     });
   });
-  it("нет read-only ключа — проверка пропущена с причиной", () => {
-    expect(
-      checkAccountUid(42, { uid: null, reason: "read-only ключ не задан" }),
-    ).toEqual({
+  it("нет read-only ключа — проверка пропущена с причиной (не блокирует)", () => {
+    const r = checkAccountUid(42, {
+      uid: null,
+      reason: "read-only ключ не задан",
+      transient: false,
+    });
+    expect(r).toEqual({
       status: "skipped",
       note: "проверка пропущена: read-only ключ не задан",
     });
+    expect(isUidBlocking(r.status)).toBe(false);
   });
-  it("UID основного ещё не известен — ожидание", () => {
+  it("UID основного ещё не известен или не прочитан — блокировка (fail-closed)", () => {
     expect(checkAccountUid(42, undefined).status).toBe("pending");
+    const unread = checkAccountUid(42, {
+      uid: null,
+      reason: "429",
+      transient: true,
+    });
+    expect(unread.status).toBe("unread");
+    expect(unread.note).toMatch(/UID основного счёта не прочитан \(429\)/);
+    for (const s of ["pending", "unread", "same"] as const)
+      expect(isUidBlocking(s)).toBe(true);
+    expect(isUidBlocking("different")).toBe(false);
+  });
+});
+
+describe("mergeMainAccount", () => {
+  const error = { uid: null, reason: "сеть", transient: true } as const;
+  it("ошибка чтения не затирает известный UID", () => {
+    expect(mergeMainAccount({ uid: 7 }, error)).toEqual({ uid: 7 });
+  });
+  it("ошибка без известного UID — остаётся ошибкой (блокировка)", () => {
+    expect(mergeMainAccount(undefined, error)).toEqual(error);
+  });
+  it("новый UID и «ключа нет» заменяют известное; нет ответа — без изменений", () => {
+    expect(mergeMainAccount({ uid: 7 }, { uid: 8 })).toEqual({ uid: 8 });
+    const noKey = { uid: null, reason: "нет ключа", transient: false };
+    expect(mergeMainAccount({ uid: 7 }, noKey)).toEqual(noKey);
+    expect(mergeMainAccount({ uid: 7 }, undefined)).toEqual({ uid: 7 });
   });
 });
 

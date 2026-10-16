@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertLiveAllowed,
   forbiddenPathWord,
+  isStrictLivePath,
   LIVE_ALLOWLIST,
   LIVE_FORBIDDEN_PATH_WORDS,
   LIVE_HOSTS,
@@ -80,6 +81,28 @@ describe("белый список клиента реального счёта",
       ]),
     );
     expect(forbiddenPathWord("/sapi/v1/Sub-Account/list")).toBe("sub-account");
+  });
+
+  it.each([
+    "/sapi/v1/asset/tr%61nsfer",
+    "/sapi/v1/capital/withdr%61w/apply",
+    "/api/v3//account",
+    "/api/v3/account?x=1",
+    "/api/v3/account#frag",
+    "/api/v3/../account",
+    "/api/v3/account.json",
+    "api/v3/account",
+    "/api/v3/account/",
+    "",
+  ])("путь не в строгом формате «%s» — отказ, даже если он в списке", (path) => {
+    const route = { method: "GET" as const, host: LIVE_HOSTS.spot, path };
+    expect(liveDenyReason(route, [...LIVE_ALLOWLIST, route])).toMatch(
+      /не в строгом формате/,
+    );
+  });
+
+  it("пути белого списка — в строгом формате", () => {
+    for (const r of LIVE_ALLOWLIST) expect(isStrictLivePath(r.path)).toBe(true);
   });
 
   it("отвергает запросы вне списка: ордер, другой метод, другой хост", () => {

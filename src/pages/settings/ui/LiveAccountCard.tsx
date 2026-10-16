@@ -104,7 +104,8 @@ const UID_TEXT = {
   different: "✅ субсчёт (UID не совпадает с основным счётом)",
   same: "⛔ ключ основного счёта",
   skipped: "⚪ не проверено",
-  pending: "… ждём UID основного счёта",
+  pending: "⛔ ждём UID основного счёта",
+  unread: "⛔ UID основного счёта не прочитан",
 } as const;
 
 function Balances({ heartbeat }: { heartbeat: LiveHeartbeat }) {
@@ -233,7 +234,7 @@ export function LiveAccountCard() {
                 <span className="text-muted-foreground">UID-проверка: </span>
                 {heartbeat.uid ? UID_TEXT[heartbeat.uid.status] : "—"}
                 {heartbeat.uid?.note &&
-                  heartbeat.uid.status !== "same" &&
+                  heartbeat.uid.status === "skipped" &&
                   ` (${heartbeat.uid.note})`}
               </p>
             </div>
