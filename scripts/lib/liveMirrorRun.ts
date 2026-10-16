@@ -514,7 +514,8 @@ export async function ensureOneway(
 }
 
 /** Цена своего стопа с биржи для порогов (spec 0053); 0 или нет — null (приложение возьмёт стоп paper-сделки). */
-const positive = (v: number | undefined) => (v !== undefined && v > 0 ? v : null);
+const positive = (v: number | undefined) =>
+  v !== undefined && v > 0 ? v : null;
 
 /** Ордер спота с этими статусами — стоит (стоп защищает позицию). */
 const SPOT_ACTIVE = ["NEW", "PENDING_NEW", "PARTIALLY_FILLED"];

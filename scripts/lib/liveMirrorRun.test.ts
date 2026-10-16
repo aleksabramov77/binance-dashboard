@@ -646,7 +646,12 @@ describe("сверка «потерянного» входа (pending дольш
     const ex = fakeExchange({
       algoOrder: vi.fn(async (cid: string) =>
         cid.endsWith("-S")
-          ? { algoId: 7, algoStatus: "NEW", actualOrderId: null }
+          ? {
+              algoId: 7,
+              algoStatus: "NEW",
+              actualOrderId: null,
+              triggerPrice: 1900,
+            }
           : { algoId: 8, algoStatus: "NEW", actualOrderId: null },
       ),
     });
@@ -660,6 +665,8 @@ describe("сверка «потерянного» входа (pending дольш
       outcome: "open",
       entryPrice: 2000,
       quantity: 0.005,
+      // Стоп с биржи — для оценки PnL и порогов (spec 0053).
+      stopLoss: 1900,
       protectRefs: {
         market: "usdm",
         entryOrderId: 101,
@@ -671,7 +678,11 @@ describe("сверка «потерянного» входа (pending дольш
 
   it("фьючерсы: вход есть, стопа нет — unprotected", async () => {
     const r = await reconcileEntry(fakeExchange(), stale());
-    expect(r).toMatchObject({ outcome: "unprotected", quantity: 0.005 });
+    expect(r).toMatchObject({
+      outcome: "unprotected",
+      quantity: 0.005,
+      stopLoss: null,
+    });
     expect(r?.message).toMatch(/без защиты/);
   });
 
