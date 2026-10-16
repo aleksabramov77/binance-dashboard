@@ -35,6 +35,7 @@ function fakeGithub(
   const issues = [...(opts.issues ?? [])];
   const labels = new Set(opts.labels ?? []);
   const comments: { number: number; body: string }[] = [];
+  const created: FakeIssue[] = [];
   const calls: { method: string; url: string }[] = [];
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
@@ -47,12 +48,16 @@ function fakeGithub(
     if (method === "GET" && path === "/issues") {
       const state = u.searchParams.get("state");
       const label = u.searchParams.get("labels");
+      const perPage = Number(u.searchParams.get("per_page") ?? 30);
+      const page = Number(u.searchParams.get("page") ?? 1);
       return Response.json(
-        issues.filter(
-          (i) =>
-            (state === "all" || i.state === state) &&
-            (!label || i.labels.some((l) => l.name === label)),
-        ),
+        issues
+          .filter(
+            (i) =>
+              (state === "all" || i.state === state) &&
+              (!label || i.labels.some((l) => l.name === label)),
+          )
+          .slice((page - 1) * perPage, page * perPage),
       );
     }
     if (method === "GET" && path === "/labels")
@@ -62,8 +67,8 @@ function fakeGithub(
       return Response.json(body, { status: 201 });
     }
     if (method === "POST" && path === "/issues") {
-      const number = 100 + issues.length;
-      issues.push({
+      const number = 1000 + created.length;
+      const fresh: FakeIssue = {
         number,
         html_url: `${REPO}/issues/${number}`,
         title: body.title,
@@ -71,7 +76,9 @@ function fakeGithub(
         created_at: new Date(NOW).toISOString(),
         labels: body.labels.map((name: string) => ({ name })),
         state: "open",
-      });
+      };
+      issues.push(fresh);
+      created.push(fresh);
       return Response.json(
         { number, html_url: `${REPO}/issues/${number}` },
         { status: 201 },
@@ -90,7 +97,7 @@ function fakeGithub(
     labels,
     comments,
     calls,
-    created: () => issues.filter((i) => i.number >= 100),
+    created: () => created,
   };
 }
 
@@ -141,7 +148,7 @@ describe("trackAlertIssues", () => {
     const r = await trackAlertIssues(CFG, input());
     expect(r).toEqual({
       tracked: [
-        { key: issue.key, action: "created", url: `${REPO}/issues/100` },
+        { key: issue.key, action: "created", url: `${REPO}/issues/1000` },
       ],
       errors: [],
     });
@@ -179,9 +186,39 @@ describe("trackAlertIssues", () => {
     ]);
     expect(gh.created()).toEqual([]);
     expect(gh.comments).toEqual([
-      { number: 7, body: expect.stringContaining("Повтор") },
+      {
+        number: 7,
+        body: "повтор: 5 ответов 5xx за 15 мин\n2026-10-16T12:00:00.000Z",
+      },
     ]);
-    expect(gh.comments[0].body).toContain("5 ответов 5xx за 15 мин");
+  });
+
+  it("открытых задач больше страницы — своя на второй странице находится, дубликата нет", async () => {
+    const many = Array.from({ length: 150 }, (_, k) =>
+      alertIssue(k + 1, { state: "open", body: `<!-- alert:other:${k} -->` }),
+    );
+    many[120].body = "<!-- alert:http5xx:/api/x -->";
+    const gh = fakeGithub({ issues: many });
+    const r = await trackAlertIssues(CFG, input());
+    expect(r.tracked).toEqual([
+      { key: issue.key, action: "commented", url: `${REPO}/issues/121` },
+    ]);
+    expect(gh.created()).toEqual([]);
+  });
+
+  it("задача из очереди (alert-queued) тоже находится по маркеру", async () => {
+    const gh = fakeGithub({
+      issues: [
+        alertIssue(9, {
+          state: "open",
+          labels: [{ name: "alert-queued" }],
+          body: "<!-- alert:http5xx:/api/x -->",
+        }),
+      ],
+    });
+    const r = await trackAlertIssues(CFG, input({ fresh: [] }));
+    expect(r.tracked[0]).toMatchObject({ action: "commented" });
+    expect(gh.comments[0].number).toBe(9);
   });
 
   it("напоминание, а задачу уже закрыли — ничего не заводим", async () => {
@@ -264,12 +301,12 @@ describe("runMonitor + задачи в GitHub", () => {
     const m = deps();
     const r = await runMonitor(m.d, NOW);
     expect(r.tracked).toHaveLength(1);
-    expect(m.sent[0]).toContain(`🤖 Claude разбирает: ${REPO}/issues/100`);
+    expect(m.sent[0]).toContain(`🤖 Claude разбирает: ${REPO}/issues/1000`);
 
     await runMonitor(m.d, NOW + 2 * H);
     expect(gh.created()).toHaveLength(1);
     expect(gh.comments).toHaveLength(1);
-    expect(m.sent[1]).toContain(`📎 Задача: ${REPO}/issues/100`);
+    expect(m.sent[1]).toContain(`📎 Задача: ${REPO}/issues/1000`);
   });
 
   it("сверх лимита — в Telegram указано «лимит автозапусков на сутки»", async () => {
@@ -279,7 +316,7 @@ describe("runMonitor + задачи в GitHub", () => {
     });
     await runMonitor(m.d, NOW);
     expect(m.sent[0]).toContain(
-      `📝 Задача: ${REPO}/issues/100 (лимит автозапусков на сутки)`,
+      `📝 Задача: ${REPO}/issues/1000 (лимит автозапусков на сутки)`,
     );
   });
 

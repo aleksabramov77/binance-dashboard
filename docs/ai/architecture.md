@@ -150,9 +150,11 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   приватный `aleksabramov77/binance-dashboard-private`) с маркером `<!-- alert:<ключ> -->`, деталями, ИИ-разбором и
   записями журнала; метка `alert` запускает облачную routine Claude (`.claude/routines/alert-triage.md`: разбор без кода
   или draft PR). Сверх `ALERT_AUTOFIX_PER_DAY` (3) issue с `alert` за 24 ч — метка `alert-queued`, без автозапуска.
-  Напоминание о той же тревоге — комментарий в открытый issue с маркером; закрытый issue заново не заводится. Метки
+  Напоминание о той же тревоге — комментарий «повтор: …» в открытый issue с маркером (ищется среди открытых issue с
+  `alert` или `alert-queued`, все страницы, до 1000); закрытый issue заново не заводится. Метки
   `alert`, `alert-queued`, `alert-no-code`, `alert-pr` код создаёт при первом issue. Ссылка на issue — строкой под
-  тревогой в Telegram. Сбой GitHub не мешает уведомлению и `alert_state` — `warn monitor.github`; без токена
+  тревогой в Telegram. Сбой GitHub не мешает уведомлению и `alert_state` — `warn monitor.github` (текст записи —
+  `githubWarnings`); без токена
   монитор работает как раньше.
 - Свободное место в базе (spec 0021, `features/db-space`, `src/app/server/dbSpace.ts`): тот же cron замеряет размер
   базы (`getDbUsage`: `pg_database_size` и топ таблиц по `pg_total_relation_size`; на этапе 3 миграции меняется только

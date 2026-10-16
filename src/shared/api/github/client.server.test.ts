@@ -62,3 +62,33 @@ describe("github client", () => {
     ).toBe(1);
   });
 });
+
+describe("github client: страницы", () => {
+  it("обходит страницы, пока страница полная; метка — в запросе", async () => {
+    const page = (from: number, n: number) =>
+      Array.from({ length: n }, (_, k) =>
+        raw(from + k, "2026-10-16T10:00:00Z"),
+      );
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      const p = Number(new URL(url).searchParams.get("page"));
+      return Response.json(p === 1 ? page(1, 100) : page(101, 20));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const list = await listOpenIssues(CFG, { label: "alert" });
+    expect(list).toHaveLength(120);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const first = new URL(fetchMock.mock.calls[0][0]);
+    expect(first.searchParams.get("labels")).toBe("alert");
+    expect(first.searchParams.get("per_page")).toBe("100");
+  });
+
+  it("не больше 10 страниц", async () => {
+    const full = Array.from({ length: 100 }, (_, k) =>
+      raw(k, "2026-10-16T10:00:00Z"),
+    );
+    const fetchMock = vi.fn(async () => Response.json(full));
+    vi.stubGlobal("fetch", fetchMock);
+    await listOpenIssues(CFG);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
+});

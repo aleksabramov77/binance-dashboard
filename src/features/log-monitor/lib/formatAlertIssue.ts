@@ -65,6 +65,9 @@ export function formatAlertIssue(
   return { title: issue.title, body: lines.join("\n") };
 }
 
-/** Комментарий в открытую задачу, когда та же тревога пришла снова. */
+/**
+ * Комментарий в открытую задачу, когда та же тревога пришла снова (spec 0037, сценарий 3):
+ * «повтор: 5 ответов 5xx за 15 мин», второй строкой — время.
+ */
 export const formatAlertRepeat = (issue: Issue, now: number): string =>
-  `Повтор ${new Date(now).toISOString()}: ${issue.details}`;
+  `повтор: ${issue.details}\n${new Date(now).toISOString()}`;

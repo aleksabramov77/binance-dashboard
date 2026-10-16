@@ -9,6 +9,7 @@ export {
 } from "./lib/detectIssues";
 export { formatAlert } from "./lib/formatAlert";
 export type { SampleLog, TrackedIssue } from "./lib/formatAlertIssue";
+export { type GithubWarning, githubWarnings } from "./lib/githubWarnings";
 export { type AlertRow, planAlerts } from "./lib/planAlerts";
 export {
   type MonitorDeps,

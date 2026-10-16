@@ -38,6 +38,19 @@ export interface AlertIssuesConfig extends GithubRepoConfig {
 }
 
 const LABELS = Object.values(ALERT_ISSUES.labels);
+
+/**
+ * Открытые задачи тревог: с меткой alert или alert-queued (labels у GitHub — «И», поэтому два запроса).
+ * Routine метку alert не снимает, очередь запускают сменой alert-queued на alert — задача найдётся.
+ */
+async function openAlertIssues(cfg: GithubRepoConfig) {
+  const [autofix, queued] = await Promise.all([
+    listOpenIssues(cfg, { label: ALERT_ISSUES.labels.autofix.name }),
+    listOpenIssues(cfg, { label: ALERT_ISSUES.labels.queued.name }),
+  ]);
+  const seen = new Set(autofix.map((i) => i.number));
+  return [...autofix, ...queued.filter((i) => !seen.has(i.number))];
+}
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
@@ -53,7 +66,7 @@ export async function trackAlertIssues(
   const errors: string[] = [];
   if (!input.notify.length) return { tracked, errors };
 
-  const open = await listOpenIssues(cfg);
+  const open = await openAlertIssues(cfg);
   let createdToday: number | null = null;
   let labelsReady = false;
 

@@ -3,8 +3,10 @@
 import { z } from "zod";
 
 const API = "https://api.github.com";
-/** Одна страница списка: для репозитория задач уведомлений этого хватает. */
+/** Максимум GitHub на страницу списка. */
 const PER_PAGE = 100;
+/** Потолок страниц одного списка (до 1000 задач) — защита от бесконечного обхода. */
+const MAX_PAGES = 10;
 
 export interface GithubRepoConfig {
   /** Fine-grained PAT с правом Issues: Read and write на этот репозиторий. */
@@ -90,21 +92,42 @@ function toIssue(raw: z.infer<typeof issueSchema>): GithubIssue {
   };
 }
 
-const onlyIssues = (list: z.infer<typeof issueListSchema>) =>
-  list.filter((i) => i.pull_request === undefined).map(toIssue);
-
-/** Открытые задачи репозитория, свежие первыми (до 100, без pull request). */
-export async function listOpenIssues(
+/** Все страницы списка задач (без pull request), не больше MAX_PAGES. */
+async function listIssues(
   cfg: GithubRepoConfig,
+  query: Record<string, string>,
 ): Promise<GithubIssue[]> {
-  return onlyIssues(
-    await request(
+  const out: GithubIssue[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const params = new URLSearchParams({
+      ...query,
+      per_page: String(PER_PAGE),
+      page: String(page),
+    });
+    const list = await request(
       cfg,
       "GET",
-      `${repoPath(cfg)}/issues?state=open&sort=created&direction=desc&per_page=${PER_PAGE}`,
+      `${repoPath(cfg)}/issues?${params}`,
       issueListSchema,
-    ),
-  );
+    );
+    for (const raw of list)
+      if (raw.pull_request === undefined) out.push(toIssue(raw));
+    if (list.length < PER_PAGE) break;
+  }
+  return out;
+}
+
+/** Открытые задачи репозитория, свежие первыми, все страницы; с label — только с этой меткой. */
+export function listOpenIssues(
+  cfg: GithubRepoConfig,
+  opts: { label?: string } = {},
+): Promise<GithubIssue[]> {
+  return listIssues(cfg, {
+    state: "open",
+    sort: "created",
+    direction: "desc",
+    ...(opts.label ? { labels: opts.label } : {}),
+  });
 }
 
 /** Сколько задач с меткой создано не раньше since (открытых и закрытых). */
@@ -114,14 +137,11 @@ export async function countIssuesCreatedSince(
   since: Date,
 ): Promise<number> {
   // since у GitHub — по времени изменения: созданные позже точно попадут, остальное отсеиваем сами.
-  const list = onlyIssues(
-    await request(
-      cfg,
-      "GET",
-      `${repoPath(cfg)}/issues?state=all&labels=${encodeURIComponent(label)}&since=${encodeURIComponent(since.toISOString())}&per_page=${PER_PAGE}`,
-      issueListSchema,
-    ),
-  );
+  const list = await listIssues(cfg, {
+    state: "all",
+    labels: label,
+    since: since.toISOString(),
+  });
   return list.filter((i) => Date.parse(i.createdAt) >= since.getTime()).length;
 }
 

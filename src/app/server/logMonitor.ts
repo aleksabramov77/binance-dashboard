@@ -8,6 +8,7 @@ import { engineStateTable } from "@/entities/experiment";
 import { appLogsTable } from "@/entities/log-entry";
 import {
   type AlertRow,
+  githubWarnings,
   type Issue,
   MONITOR,
   type MonitorResult,
@@ -200,11 +201,6 @@ export async function runLogMonitor(): Promise<MonitorResult> {
   const telegram = getTelegramConfig();
   const chatId = telegram?.chatId;
   const github = getGithubAlertsConfig();
-  if (github?.invalid.length)
-    log.warn(
-      "monitor.github",
-      `Не распознаны ${github.invalid.join(", ")} — взяты значения по умолчанию`,
-    );
   const result = await runMonitor({
     collect,
     samples,
@@ -228,12 +224,12 @@ export async function runLogMonitor(): Promise<MonitorResult> {
     );
   if (result.analysisError)
     log.warn("monitor.ai", `Разбор ИИ не удался: ${result.analysisError}`);
-  if (result.githubErrors.length)
-    log.warn(
-      "monitor.github",
-      `Сбой GitHub, задачи по тревогам: ${result.githubErrors.join("; ")}`,
-      { repo: github ? `${github.owner}/${github.repo}` : null },
-    );
+  for (const w of githubWarnings({
+    invalid: github?.invalid ?? [],
+    errors: result.githubErrors,
+    repo: github ? `${github.owner}/${github.repo}` : null,
+  }))
+    log.warn(w.event, w.message, w.data);
   if (result.issues.length || result.resolved)
     log.info(
       "monitor.run",
