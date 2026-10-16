@@ -56,6 +56,14 @@ else
   echo "  уже есть"
 fi
 
+# --- 3a. TCP BBR: быстрее на длинном маршруте с потерями (сайт из сети владельца, решение 2026-10-17) ------
+step "TCP BBR"
+echo tcp_bbr >/etc/modules-load.d/bbr.conf
+modprobe tcp_bbr
+printf 'net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\n' >/etc/sysctl.d/90-bbr.conf
+sysctl -q -p /etc/sysctl.d/90-bbr.conf
+echo "  $(sysctl -n net.ipv4.tcp_congestion_control), qdisc $(sysctl -n net.core.default_qdisc)"
+
 # --- 4. Node.js -----------------------------------------------------------------
 step "Node.js ${NODE_MAJOR}"
 if ! node --version 2>/dev/null | grep -q "^v${NODE_MAJOR}\."; then

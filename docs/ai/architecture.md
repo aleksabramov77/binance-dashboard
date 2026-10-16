@@ -386,7 +386,7 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   `experiments`, `runs` — эпохи сброса, `paper_trades`, `engine_state`, `skipped_signals`) и экспортируются через public API
   сущности. Внешние ключи и джойны — только внутри домена.
 - Подключение: файл из `DATABASE_PATH` (на VM `/var/lib/binance/app.db`, локально по умолчанию `data/app.db`), одно на
-  процесс; `journal_mode = WAL` (читатели не ждут писателя, `.backup` без остановки), `synchronous = NORMAL`,
+  процесс; `journal_mode = WAL` (читатели не ждут писателя, `.backup` без остановки), `synchronous = FULL`,
   `busy_timeout = 5000`, `foreign_keys = ON`. На serverless (Vercel) приложение не стартует — файлу базы там негде жить.
   `DATABASE_URL` (Supabase) приложение не читает: он нужен только `pnpm db:import-pg` и `pnpm *:supabase`.
 - Типы: время — целые миллисекунды UTC (`integer` `mode: "timestamp_ms"`, в коде `Date`; у журнала, снимков Earn и
