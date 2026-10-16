@@ -6,7 +6,7 @@
 |---|---|---|---|
 | Публичное API (рынок, Earn) | `api.binance.com`, `fapi.binance.com`, `dapi.binance.com` (COIN-M), `www.binance.com/bapi` | не нужен | `public.server.ts` |
 | Аккаунт (read-only) | `api.binance.com` (`/sapi`, `/api/v3/account`) | `BINANCE_API_KEY/SECRET` | `account.server.ts` |
-| Demo Trading (сделки) | `demo-api.binance.com`, `demo-fapi.binance.com` | `BINANCE_DEMO_API_KEY/SECRET` | `demo.server.ts` |
+| Demo Trading (сделки) | `demo-api.binance.com`, `demo-fapi.binance.com`; `demo-dapi.binance.com` (COIN-M) — только чтение баланса | `BINANCE_DEMO_API_KEY/SECRET` | `demo.server.ts` |
 
 ## Публичный API модуля
 - `index.ts` — **клиент-безопасный**: только типы и чистые функции (`resolveUsdPrice`). Его можно
@@ -46,6 +46,14 @@
   (`toFuturesSymbolOrders` / `toSpotSymbolOrders`: чем исполнился выход — algo TP/SL у futures по
   `actualOrderId`, ликвидация по `clientOrderId` `autoclose-…`, тип ордера OCO у spot; активные стопы
   со стороной). Тесты разбора — `demoOrders.test.ts`.
+- `walletEquity.ts` — оценка кошельков в $ (spec 0038, клиент-безопасно): `sumUsd(rows, price)` — сумма остатков × цена,
+  активы без цены — в `unpriced`; `walletsByMarket(wallets)` — кошельки `/sapi/v1/asset/wallet/balance` по рынкам
+  (`WALLET_MARKET`: «Spot», «USDⓈ-M Futures», «COIN-M Futures» — имена сверены пробой 2026-10-16). Сеть —
+  `fetchDemoEquity(creds, price)` в `demoTrading.ts`: equity демо-счёта по кошелькам, как на demo.binance.com — Spot
+  `/api/v3/account` (free + locked), USDⓈ-M `/fapi/v3/account` (walletBalance + unrealizedProfit: у `/fapi/v3/balance`
+  PnL только кросс-позиций, а зеркало открывает изолированные), COIN-M `demo-dapi` `/dapi/v1/balance` (balance +
+  crossUnPnl); кошельки независимы — ошибка одного не мешает другим (`WalletEquityResult`). Кэш 60 с — у вызывающего
+  (`src/app/server/accountBalances.ts`).
 - `demoRules.ts` — чистый разбор фильтров exchangeInfo в `SymbolRules`: шаги, минимумы, коридор цены
   `priceBand` (спот: `PERCENT_PRICE_BY_SIDE` или `PERCENT_PRICE`; у фьючерсов null — algo-триггеры фильтр не
   ограничивает), `otoAllowed`/`ocoAllowed`. Тесты — `demoRules.test.ts`.
