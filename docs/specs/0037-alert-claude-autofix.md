@@ -82,3 +82,4 @@
 |---|---|
 | 2026-10-16 | Заведено по тревоге «Всплеск ошибок client» (разбор — задача 0036); решения пользователя: issue в приватном репо, Claude до draft PR |
 | 2026-10-16 | ТЗ утверждено пользователем |
+| 2026-10-16 | Реализация AC1–AC8 в ветке `feature/0037-alert-claude-autofix`: клиент `shared/api/github`, `getGithubAlertsConfig`, `trackAlertIssues` (создать / комментарий / `alert-queued`) до отправки в Telegram, ссылки в тексте, `warn monitor.github`, `.claude/routines/alert-triage.md`, env, `architecture.md`; тесты с моком `fetch`. AC9 — на выкатке |
