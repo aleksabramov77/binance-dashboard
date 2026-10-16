@@ -8,7 +8,6 @@ export {
   deriveLiveStatus,
   isSilent,
   type LiveEvent,
-  type LiveStatus,
   planHeartbeat,
   planSilence,
   verdictText,
@@ -22,6 +21,7 @@ export {
   type LiveHeartbeat,
   type LiveHeartbeatReply,
   type LiveState,
+  type LiveStatus,
   type LiveStatusResponse,
   type LiveVerdict,
   liveHeartbeatReplySchema,
@@ -29,4 +29,5 @@ export {
   liveMainAccountSchema,
   liveStateSchema,
   liveStatusResponseSchema,
+  liveStatusSchema,
 } from "./model/heartbeat";

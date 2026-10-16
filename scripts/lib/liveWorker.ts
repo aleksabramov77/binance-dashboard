@@ -313,6 +313,17 @@ export function fixtureHeartbeat(
   };
 }
 
+/**
+ * Задан ли торговый ключ хоть частично: для запрета фикстуры достаточно любого из BINANCE_TRADE_API_KEY /
+ * BINANCE_TRADE_API_SECRET (неполная пара — тоже признак окружения с настоящим ключом).
+ */
+export const hasAnyTradeKey = (
+  env: Record<string, string | undefined>,
+): boolean =>
+  Boolean(
+    env.BINANCE_TRADE_API_KEY?.trim() || env.BINANCE_TRADE_API_SECRET?.trim(),
+  );
+
 export const isLiveFixture = (value: string): value is LiveFixture =>
   (LIVE_FIXTURES as readonly string[]).includes(value);
 
@@ -325,7 +336,7 @@ export function fixtureRefusal(input: {
   appUrl: string;
 }): string | null {
   if (input.hasTradeKey)
-    return "фикстура запрещена: задан BINANCE_TRADE_API_KEY — фикстура только для проверки без ключа";
+    return "фикстура запрещена: задан BINANCE_TRADE_API_KEY или BINANCE_TRADE_API_SECRET — фикстура только для проверки без ключа";
   let host: string;
   try {
     host = new URL(input.appUrl).hostname;

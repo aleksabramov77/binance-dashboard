@@ -82,7 +82,10 @@ export type LiveHeartbeatReply = z.infer<typeof liveHeartbeatReplySchema>;
 export const liveStateSchema = z.object({
   heartbeat: liveHeartbeatSchema,
   receivedAt: isoTime,
-  /** Оценка, о которой уже сообщили (журнал + Telegram). */
+  /**
+   * Оценка последнего пульса, о которой уже сообщили (журнал + Telegram) — не «что сейчас»: молчание в ней не
+   * отражается, его даёт deriveLiveStatus / поле current ответа.
+   */
   status: liveVerdictSchema,
   statusSince: isoTime,
   /** Когда монитор записал «воркер молчит»; null — не молчит или ещё не замечено. */
@@ -90,9 +93,25 @@ export const liveStateSchema = z.object({
 });
 export type LiveState = z.infer<typeof liveStateSchema>;
 
+/**
+ * Что показывать сейчас (deriveLiveStatus): «молчит» важнее оценки последнего пульса. В отличие от state.status —
+ * оценки, о которой уже сообщили (для уведомлений без повторов), — учитывает время без пульса.
+ */
+export const liveStatusSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("not-connected") }),
+  /** Пульса нет дольше порога: since — время последнего пульса. */
+  z.object({ kind: z.literal("silent"), since: isoTime }),
+  z.object({ kind: z.literal("no-key") }),
+  z.object({ kind: z.literal("blocked"), reasons: z.array(text) }),
+  z.object({ kind: z.literal("ok"), warnings: z.array(text) }),
+]);
+export type LiveStatus = z.infer<typeof liveStatusSchema>;
+
 /** Контракт GET /api/live/status — карточка «Реальный счёт». */
 export const liveStatusResponseSchema = z.object({
   state: liveStateSchema.nullable(),
   silentAfterMs: z.number(),
+  /** Состояние на момент ответа (сервер считает той же deriveLiveStatus, что карточка и шапка). */
+  current: liveStatusSchema,
 });
 export type LiveStatusResponse = z.infer<typeof liveStatusResponseSchema>;

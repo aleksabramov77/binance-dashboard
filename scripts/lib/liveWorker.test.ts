@@ -6,6 +6,7 @@ import {
   emptyMemory,
   fixtureHeartbeat,
   fixtureRefusal,
+  hasAnyTradeKey,
   noKeyHeartbeat,
   RESTRICTIONS_EVERY_MS,
   runCheck,
@@ -251,6 +252,19 @@ describe("пульс без ключа, фикстуры и отправка", (
     expect(fixtureRefusal({ hasTradeKey: false, appUrl: "мусор" })).toMatch(
       /не распознан/,
     );
+  });
+
+  it("фикстура запрещена при любом из BINANCE_TRADE_API_KEY / SECRET, даже без пары", () => {
+    expect(hasAnyTradeKey({})).toBe(false);
+    expect(hasAnyTradeKey({ BINANCE_TRADE_API_KEY: " " })).toBe(false);
+    expect(hasAnyTradeKey({ BINANCE_TRADE_API_KEY: "dummy" })).toBe(true);
+    expect(hasAnyTradeKey({ BINANCE_TRADE_API_SECRET: "dummy" })).toBe(true);
+    expect(
+      fixtureRefusal({
+        hasTradeKey: hasAnyTradeKey({ BINANCE_TRADE_API_KEY: "dummy" }),
+        appUrl: "http://localhost:5004",
+      }),
+    ).toMatch(/BINANCE_TRADE_API_KEY или BINANCE_TRADE_API_SECRET/);
   });
 
   it("в отправляемом пульсе нет ключа и секрета", async () => {

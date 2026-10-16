@@ -34,6 +34,7 @@ import {
   fixtureHeartbeat,
   fixtureRefusal,
   HEARTBEAT_EVERY_MS,
+  hasAnyTradeKey,
   isLiveFixture,
   noKeyHeartbeat,
   runCheck,
@@ -101,7 +102,10 @@ if (!appUrl)
 const secret = getLiveWorkerSecret();
 const creds = getLiveTradeCredentials();
 if (args.fixture) {
-  const refusal = fixtureRefusal({ hasTradeKey: creds !== null, appUrl });
+  const refusal = fixtureRefusal({
+    hasTradeKey: hasAnyTradeKey(process.env),
+    appUrl,
+  });
   if (refusal) fail(refusal);
 }
 

@@ -164,6 +164,14 @@ describe("checkLiveSilence", () => {
       silentAfterMs: 5 * MIN,
     });
     await checkLiveSilence(T0 + 21 * MIN);
+    // state.status — оценка последнего пульса (для уведомлений), а current — «что сейчас»: воркер молчит.
+    const view = await getLiveStatusView(T0 + 21 * MIN);
+    expect(view.state?.status).toBe("ok");
+    expect(view.state?.silentSince).not.toBeNull();
+    expect(view.current).toEqual({
+      kind: "silent",
+      since: new Date(T0).toISOString(),
+    });
     expect(statusLogs()).toEqual([
       {
         message: "Воркер реального счёта молчит: последний пульс 6 мин назад",

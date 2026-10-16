@@ -1,14 +1,11 @@
-import type { LiveHeartbeat, LiveState, LiveVerdict } from "../model/heartbeat";
+import type {
+  LiveHeartbeat,
+  LiveState,
+  LiveStatus,
+  LiveVerdict,
+} from "../model/heartbeat";
 
 // Состояние реального счёта для карточки, шапки и уведомлений (spec 0047, AC5–AC7). Чистые функции.
-
-export type LiveStatus =
-  | { kind: "not-connected" }
-  /** Пульса нет дольше порога: since — время последнего пульса. */
-  | { kind: "silent"; since: string }
-  | { kind: "no-key" }
-  | { kind: "blocked"; reasons: string[] }
-  | { kind: "ok"; warnings: string[] };
 
 /** Пульс старше порога — воркер молчит. */
 export const isSilent = (

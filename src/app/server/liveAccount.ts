@@ -2,6 +2,7 @@
 // уведомления о смене состояния (журнал live.status + Telegram), «молчит» для монитора, данные карточки.
 // Только сервер. Торгового ключа здесь нет — он только у воркера (scripts/live-worker.ts).
 import {
+  deriveLiveStatus,
   type LiveEvent,
   type LiveHeartbeat,
   type LiveHeartbeatReply,
@@ -174,9 +175,14 @@ export function loadLastLiveState(): Promise<LiveState | null> {
 }
 
 /** Данные карточки «Реальный счёт» (GET /api/live/status). */
-export async function getLiveStatusView(): Promise<LiveStatusResponse> {
+export async function getLiveStatusView(
+  now = Date.now(),
+): Promise<LiveStatusResponse> {
+  const state = await loadLastLiveState();
+  const silentAfterMs = getLiveSilentAfterMs();
   return {
-    state: await loadLastLiveState(),
-    silentAfterMs: getLiveSilentAfterMs(),
+    state,
+    silentAfterMs,
+    current: deriveLiveStatus(state, now, silentAfterMs),
   };
 }
