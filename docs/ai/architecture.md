@@ -42,7 +42,7 @@ Zustand (клиентское состояние, если понадобитс�
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
 | Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`, группы активов AG — `model/assetGroup.ts` (`spot` / `usdm` / `coinm`, вид группы `kind`, доступность демо-зеркала; spec 0023), демо-метрики — `computeDemoStats`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015); бэктест по истории — `scripts/lab-backtest.ts` + `scripts/lib/{labBacktest,labHistory}.ts` (`pnpm lab:backtest`, spec 0032; повтор `runTick`, дисковый кэш свечей вне git) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`), `/api/cron/tick`, `/api/cron/demo-mirror` | таблицы `experiments`, `runs`, `paper_trades` (с контекстом входа и MAE, spec 0030), `engine_state`, `demo_mirror_orders`, `skipped_signals` (отсечённые лимитом сигналы, spec 0030; объём ограничен движком) |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
-| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login,help}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → задача в GitHub → Telegram), `features/db-space` (свободное место в базе: пороги, тексты бота), `src/app/server/{logs,logMonitor,alertState,dbSpace,telegramBot}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), `shared/api/github` (REST: issues, метки, комментарии), `.claude/routines/alert-triage.md` (routine разбора тревог), прочий `shared/*` | `/api/logs` (фильтры `level`/`event`/`experiment`/`days`), `/api/cron/log-monitor`, `/api/telegram/webhook`, `/api/auth/*`, страница `/login`, страница `/help` (глоссарий из `docs/ai/glossary.md` через `pnpm glossary`) | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
+| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login,help}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → задача в GitHub → Telegram), `features/db-space` (свободное место в базе: пороги, тексты бота), `src/app/server/{logs,logMonitor,alertState,dbSpace,telegramBot}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), `shared/api/github` (REST: issues, метки, комментарии), `.claude/routines/alert-triage.md` (routine разбора тревог), плашка новой версии (`widgets/app-header`: `NewVersionBanner`, `useNewVersionAvailable`; `shared/lib/client` — версия страницы и `reportClientError`, spec 0036), прочий `shared/*` | `/api/logs` (фильтры `level`/`event`/`experiment`/`days`), `/api/version`, `/api/cron/log-monitor`, `/api/telegram/webhook`, `/api/auth/*`, страница `/login`, страница `/help` (глоссарий из `docs/ai/glossary.md` через `pnpm glossary`) | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
 
 Правила:
 - **Нет импортов между доменами** ни на каком слое. Фича лаборатории не импортирует `entities/trade`,
@@ -173,6 +173,23 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   `GET /api/logs`: `level`, `event` (список через запятую), `experiment` (`data->>'experimentId'`), `days` (1…14)
   — `entities/log-entry/model/filters.ts`. Демо-зеркало пишет каждый отказ/пропуск отдельной записью
   `mirror.rejected` / `mirror.skipped` с `experimentId` (spec 0016).
+
+## Рассинхрон версий клиента (spec 0036)
+- Версия сборки — `deploymentId` в `next.config.ts`: `NEXT_DEPLOYMENT_ID`, иначе `VERCEL_DEPLOYMENT_ID` (id деплоя, задаёт
+  Vercel); локально не задана — механизм выключен. Next ставит `data-dpl-id` на `<html>` и при навигации после деплоя сам
+  делает полную перезагрузку. Но вкладка, которую не трогают, продолжает опрашивать API старым JS: новый контракт (как
+  `futures` → `usdm` в spec 0023) валит её Zod-схемы.
+- Версии: сервер — `getDeploymentVersion()` (`shared/config/env.server.ts`), страница — `getPageVersion()`
+  (`shared/lib/client`; Next снимает `data-dpl-id` сразу при загрузке и подставляет значение вместо
+  `process.env.NEXT_DEPLOYMENT_ID`), сравнение — `isStaleVersion` (обе заданы и различаются).
+- `GET /api/version` → `{ version }`; `useNewVersionAvailable` (`widgets/app-header`) опрашивает раз в 5 мин и при возврате на
+  вкладку, только если версия страницы задана. Новая версия — плашка «Вышла новая версия — Обновить» в шапке; сама страница
+  не перезагружается (не теряется ввод), «Обновить» — `window.location.reload()`.
+- `reportClientError` шлёт `version`; `POST /api/logs` пишет ошибку вкладки со старой сборкой как `warn client.stale`
+  (`clientVersion`, `serverVersion`) — монитор журнала считает всплески только по `level=error`, тревоги нет. Ошибки клиента
+  текущей версии и без версии — `error client`, как раньше.
+- Проверять механизм — прод-сборкой (`VERCEL_DEPLOYMENT_ID=… pnpm build && pnpm start`): в `next dev` с заданной версией
+  бывают ложные перезагрузки из-за перекомпиляции.
 
 ## Данные на диске
 `data/` в `.gitignore`: `snapshots/` (снимки Earn), `logs/`, `pglite/` (локальная БД).

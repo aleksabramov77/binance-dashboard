@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getDatabaseConfig,
   getDbSizeLimit,
+  getDeploymentVersion,
   getGithubAlertsConfig,
   getTelegramConfig,
   isServerless,
@@ -15,6 +16,30 @@ describe("isServerless", () => {
     expect(isServerless({ VERCEL: "1" })).toBe(true);
     expect(isServerless({})).toBe(false);
     expect(isServerless({ VERCEL: "" })).toBe(false);
+  });
+});
+
+describe("getDeploymentVersion", () => {
+  it("id деплоя Vercel; NEXT_DEPLOYMENT_ID — в приоритете", () => {
+    expect(getDeploymentVersion({ VERCEL_DEPLOYMENT_ID: "dpl_1" })).toBe(
+      "dpl_1",
+    );
+    expect(
+      getDeploymentVersion({
+        NEXT_DEPLOYMENT_ID: "dpl_2",
+        VERCEL_DEPLOYMENT_ID: "dpl_1",
+      }),
+    ).toBe("dpl_2");
+  });
+
+  it("не задана или пустая — null", () => {
+    expect(getDeploymentVersion({})).toBeNull();
+    expect(
+      getDeploymentVersion({
+        NEXT_DEPLOYMENT_ID: "",
+        VERCEL_DEPLOYMENT_ID: " ",
+      }),
+    ).toBeNull();
   });
 });
 

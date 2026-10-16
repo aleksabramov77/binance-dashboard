@@ -29,6 +29,8 @@ export const clientErrorSchema = z.object({
   stack: z.string().max(4000).optional(),
   url: z.string().max(500).optional(),
   context: z.record(z.string(), z.unknown()).optional(),
+  /** Версия сборки страницы (deploymentId); нет — не задана. */
+  version: z.string().max(200).optional(),
 });
 
 export type LogLevel = (typeof LOG_LEVELS)[number];

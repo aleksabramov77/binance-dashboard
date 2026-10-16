@@ -17,6 +17,13 @@ export {
   supertrend,
 } from "@binance-dashboard/trading-core";
 export {
+  type AppVersion,
+  appVersionSchema,
+  getPageVersion,
+  isStaleVersion,
+  reportClientError,
+} from "./client";
+export {
   formatAmount,
   formatDateTime,
   formatPercent,
@@ -30,7 +37,6 @@ export {
   type GlossaryTerm,
   parseGlossary,
 } from "./glossary";
-export { reportClientError } from "./reportClientError";
 export {
   defineSortTable,
   type SavedSort,
