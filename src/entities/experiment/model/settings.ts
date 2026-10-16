@@ -103,6 +103,27 @@ export const demoResetResultSchema = z.object({
 export type DemoResetResult = z.infer<typeof demoResetResultSchema>;
 export type LabSettings = z.infer<typeof labSettingsSchema>;
 
+/** Сброс группы активов (spec 0038): Paper — «эра группы» без новой эпохи; Demo — демо-позиции и статистика группы. */
+export const groupResetRequestSchema = z.object({
+  market: marketSchema,
+  account: z.enum(["paper", "demo"]),
+});
+export type GroupResetRequest = z.infer<typeof groupResetRequestSchema>;
+
+export const groupResetResultSchema = z.object({
+  account: z.enum(["paper", "demo"]),
+  /** Сколько экспериментов группы сброшено. */
+  experiments: z.number().int(),
+  /** Paper — закрытые сделки; Demo — закрытые по рынку демо-позиции. */
+  closed: z.number().int(),
+  /** Paper: закрыто без цены (по цене входа, PnL 0). */
+  closedWithoutPrice: z.number().int(),
+  /** Demo: не закрылись — повторит крон зеркала. */
+  failed: z.number().int(),
+  settings: labSettingsSchema,
+});
+export type GroupResetResult = z.infer<typeof groupResetResultSchema>;
+
 export const resetResultSchema = z.object({
   /** false — эпоха fromRunId уже не текущая, ничего не сделано. */
   created: z.boolean(),

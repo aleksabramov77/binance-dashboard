@@ -8,6 +8,7 @@ import {
   getEpoch,
   type ResetRunInput,
   resetExperimentRun,
+  resetGroupRun,
   resetRun,
   setExperimentEnabled,
 } from "./settingsDb";
@@ -249,5 +250,135 @@ describe("отдельный сброс paper-капитала эксперим�
         barsKey: "bars",
       }),
     ).toEqual({ found: false, closed: 0, closedWithoutPrice: 0 });
+  });
+});
+
+describe("сброс Paper группы активов (spec 0038)", () => {
+  /** F01, F02 (usdm; F02 выключен) и S01 (spot) — у каждого открытая сделка и закрытая с PnL. */
+  async function groups() {
+    await seedExperiments(db, [
+      exp("F01"),
+      { ...exp("F02"), enabled: false },
+      { ...exp("S01"), market: "spot" },
+    ]);
+    const runId = await ensureRun(db);
+    const store = createDbExperimentStore(db);
+    for (const [id, market] of [
+      ["F01", "usdm"],
+      ["F02", "usdm"],
+      ["S01", "spot"],
+    ] as const) {
+      await store.insertTrade({
+        ...trade(`${id}-open`, runId),
+        experimentId: id,
+        market,
+      });
+      await store.insertTrade({
+        ...trade(`${id}-done`, runId, true),
+        experimentId: id,
+        market,
+      });
+    }
+    await store.setState("bars", { F01: 1, F02: 2, S01: 3 });
+    return { runId, store };
+  }
+
+  const groupInput = (runId: number) => ({
+    runId,
+    market: "usdm",
+    closes: [
+      { id: "F01-open", close: manual(5, 105), noPrice: false },
+      { id: "F02-open", close: manual(0, 100), noPrice: true },
+    ],
+    initialBudget: 20_000,
+    bars: { F01: 500, F02: 600 },
+    barsKey: "bars",
+  });
+
+  it("закрывает сделки группы, начинает учёт с нового бюджета и метит свечи; эпоха и другие группы те же", async () => {
+    const { runId, store } = await groups();
+    expect(await store.realizedPnl(runId)).toEqual({
+      F01: 3.9,
+      F02: 3.9,
+      S01: 3.9,
+    });
+
+    const r = await resetGroupRun(db, groupInput(runId));
+    expect(r).toEqual({ experiments: 2, closed: 2, closedWithoutPrice: 1 });
+
+    // Новой эпохи нет; учёт группы с нуля, спот как был.
+    expect(await store.currentRunId()).toBe(runId);
+    expect(await db.select().from(runsTable)).toHaveLength(1);
+    expect(await store.realizedPnl(runId)).toEqual({ S01: 3.9 });
+    expect(await store.getState("bars")).toEqual({
+      F01: 500,
+      F02: 600,
+      S01: 3,
+    });
+
+    const rows = await db
+      .select()
+      .from(experimentsTable)
+      .orderBy(experimentsTable.id);
+    expect(
+      rows.map((e) => [e.id, e.initialBudget, e.resetAt !== null, e.enabled]),
+    ).toEqual([
+      ["F01", 20_000, true, true],
+      ["F02", 20_000, true, false],
+      ["S01", 10_000, false, true],
+    ]);
+
+    const trades = await db.select().from(paperTradesTable);
+    const s01Open = trades.find((t) => t.id === "S01-open");
+    expect(s01Open?.closedAt).toBeNull();
+    const f02Open = trades.find((t) => t.id === "F02-open");
+    expect(f02Open?.exitReason).toBe("manual");
+    expect(f02Open?.signal).toEqual({ bar: 1, resetWithoutPrice: true });
+  });
+
+  it("метки свечей и закрытия чужой группы не применяются", async () => {
+    const { runId, store } = await groups();
+    await resetGroupRun(db, {
+      ...groupInput(runId),
+      bars: { F01: 500, S01: 999 },
+    });
+    expect(await store.getState("bars")).toEqual({ F01: 500, F02: 2, S01: 3 });
+  });
+
+  it("регрессия AC9: «Сбросить все Paper» после сброса группы — новая эпоха для всех, защита fromRunId", async () => {
+    const { runId, store } = await groups();
+    await resetGroupRun(db, groupInput(runId));
+    const out = await resetRun(db, {
+      fromRunId: runId,
+      closes: [],
+      state: {},
+      initialBudget: 30_000,
+    });
+    expect(out).toMatchObject({ created: true, runId: runId + 1 });
+    expect(
+      await resetRun(db, { fromRunId: runId, closes: [], state: {} }),
+    ).toEqual({ created: false, runId: runId + 1 });
+    const rows = await db.select().from(experimentsTable);
+    expect(
+      rows.every((e) => e.initialBudget === 30_000 && e.resetAt === null),
+    ).toBe(true);
+    expect(await store.currentRunId()).toBe(runId + 1);
+  });
+
+  it("группа без экспериментов — ничего не меняется", async () => {
+    const { runId, store } = await groups();
+    expect(
+      await resetGroupRun(db, {
+        ...groupInput(runId),
+        market: "coinm",
+        closes: [],
+        bars: {},
+      }),
+    ).toEqual({ experiments: 0, closed: 0, closedWithoutPrice: 0 });
+    expect(await store.realizedPnl(runId)).toEqual({
+      F01: 3.9,
+      F02: 3.9,
+      S01: 3.9,
+    });
   });
 });

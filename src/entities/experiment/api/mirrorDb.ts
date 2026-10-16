@@ -500,12 +500,18 @@ export function toDemoSummary(
 }
 
 /**
- * Захватить открытые демо-позиции эксперимента (или всех, id = null) на закрытие — для демо-сброса.
+ * Что сбрасывает демо-сброс: id эксперимента, группа активов ({ market } — все её эксперименты, spec 0038)
+ * или null — все эксперименты.
+ */
+export type DemoResetScope = string | { market: string } | null;
+
+/**
+ * Захватить открытые демо-позиции эксперимента, группы или всех (null) на закрытие — для демо-сброса.
  * Тот же переход статуса в closing, что и у крона: строку получит только один из них.
  */
 export async function claimOpenMirrors(
   db: Db,
-  experimentId: string | null,
+  scope: DemoResetScope,
 ): Promise<MirrorToClose[]> {
   const rows = await db
     .update(demoMirrorOrdersTable)
@@ -513,24 +519,38 @@ export async function claimOpenMirrors(
     .where(
       and(
         inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
-        experimentId === null
+        scope === null
           ? undefined
-          : eq(demoMirrorOrdersTable.experimentId, experimentId),
+          : typeof scope === "string"
+            ? eq(demoMirrorOrdersTable.experimentId, scope)
+            : inArray(
+                demoMirrorOrdersTable.experimentId,
+                db
+                  .select({ id: experimentsTable.id })
+                  .from(experimentsTable)
+                  .where(eq(experimentsTable.market, scope.market)),
+              ),
       ),
     )
     .returning();
   return rows.map((r) => toClose(r, "manual"));
 }
 
-/** Отметка демо-сброса: статистика эксперимента (или всех) начинается заново. */
+/** Отметка демо-сброса: статистика эксперимента, группы или всех начинается заново. Возвращает, скольких. */
 export async function markDemoReset(
   db: Db,
-  experimentId: string | null,
-): Promise<void> {
-  await db
+  scope: DemoResetScope,
+): Promise<number> {
+  const rows = await db
     .update(experimentsTable)
     .set({ demoResetAt: sql`now()`, updatedAt: sql`now()` })
     .where(
-      experimentId === null ? undefined : eq(experimentsTable.id, experimentId),
-    );
+      scope === null
+        ? undefined
+        : typeof scope === "string"
+          ? eq(experimentsTable.id, scope)
+          : eq(experimentsTable.market, scope.market),
+    )
+    .returning({ id: experimentsTable.id });
+  return rows.length;
 }
