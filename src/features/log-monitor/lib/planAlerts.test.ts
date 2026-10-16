@@ -54,4 +54,12 @@ describe("planAlerts", () => {
       issue,
     ]);
   });
+
+  it("fresh — только новые проблемы, не напоминания (задача в GitHub — один раз)", () => {
+    const first = planAlerts([issue], [], T0, 2 * H);
+    expect(first.fresh).toEqual([issue.key]);
+    const reminder = planAlerts([issue], first.rows, T0 + 2 * H, 2 * H);
+    expect(reminder.notify).toEqual([issue]);
+    expect(reminder.fresh).toEqual([]);
+  });
 });
