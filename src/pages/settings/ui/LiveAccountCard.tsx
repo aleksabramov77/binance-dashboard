@@ -3,8 +3,11 @@
 import { useEffect, useRef } from "react";
 import {
   deriveLiveStatus,
+  LIVE,
   type LiveHeartbeat,
   type LiveStatus,
+  type LiveTrading,
+  liveUsd,
   useLiveAccount,
 } from "@/entities/live-account";
 import { LIVE_FLAG_RULES, LIVE_KEY_FLAGS } from "@/shared/api/binance";
@@ -17,6 +20,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/shared/ui/card";
+import {
+  dailyLimitNote,
+  haltText,
+  LiveHaltControls,
+} from "@/widgets/live-trading";
 
 // Карточка «Реальный счёт» (spec 0047, AC5): состояние торгового ключа субсчёта по последнему пульсу воркера.
 // Ключа у веб-приложения нет — всё, что здесь видно, прислал воркер с VM. Сделок пока нет.
@@ -191,8 +199,90 @@ function HowToConnect({ open }: { open: boolean }) {
   );
 }
 
+/** Торговля реального счёта (spec 0049, AC7): статус, открытые позиции из 5, дневной PnL экспериментов. */
+function Trading({ trading }: { trading: LiveTrading }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-sm font-semibold">Торговля</h3>
+      <p className="text-sm">
+        <span className="text-muted-foreground">Статус: </span>
+        <span className={cn(trading.halt.stopped && "text-destructive")}>
+          {haltText(trading.halt, formatDateTime)}
+        </span>
+        {trading.halt.closeAllRequestedAt &&
+          ` · «Закрыть всё» запрошено ${formatDateTime(trading.halt.closeAllRequestedAt)}, ждёт воркер`}
+      </p>
+      {trading.halt.closeAllResult && trading.halt.closeAllDoneAt && (
+        <p className="text-xs text-muted-foreground">
+          Последнее «Закрыть всё» ({formatDateTime(trading.halt.closeAllDoneAt)}
+          ): закрыто {trading.halt.closeAllResult.closed}, не закрылось{" "}
+          {trading.halt.closeAllResult.failed}
+          {trading.halt.closeAllResult.errors.length > 0 &&
+            ` — ${trading.halt.closeAllResult.errors.join("; ")}`}
+        </p>
+      )}
+      <p className="text-sm">
+        <span className="text-muted-foreground">Открытые позиции: </span>
+        {trading.positions.length} из {LIVE.maxOpenPositions}
+      </p>
+      {trading.positions.length > 0 && (
+        <ul className="flex flex-col gap-0.5 text-sm">
+          {trading.positions.map((p) => (
+            <li key={p.tradeId} className="font-mono text-xs tabular-nums">
+              {p.experimentId} · {p.symbol}
+              {p.market === "usdm" ? " (USDⓈ-M)" : ""} · {p.direction} ·{" "}
+              {p.notionalUsd === null ? "—" : formatUsd(p.notionalUsd)} · вход{" "}
+              {p.entryPrice ?? "—"} · PnL ≈{" "}
+              <span
+                className={cn(
+                  p.pnlUsd !== null &&
+                    (p.pnlUsd < 0 ? "text-destructive" : "text-positive"),
+                )}
+              >
+                {p.pnlUsd === null ? "—" : liveUsd(p.pnlUsd, true)}
+              </span>
+              {p.status !== "protected" && ` · ${p.status}`}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-sm text-muted-foreground">
+        Дневной лимит — реализованный убыток эксперимента за сутки UTC −$
+        {LIVE.dailyLossUsd}.
+      </p>
+      {trading.experiments.length > 0 ? (
+        <ul className="flex flex-col gap-0.5 text-sm">
+          {trading.experiments.map((e) => (
+            <li key={e.id}>
+              <span className="font-mono text-xs">{e.id}</span> {e.name}:{" "}
+              <span className={cn(e.dailyPnl < 0 && "text-destructive")}>
+                {liveUsd(e.dailyPnl, true)}
+              </span>{" "}
+              из −${LIVE.dailyLossUsd}
+              {e.limitHit && (
+                <span className="text-destructive">
+                  {" "}
+                  · {dailyLimitNote(e, formatDateTime)}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Ни у одного эксперимента «Реальный счёт» не включён — переключатель в
+          таблице /experiments.
+        </p>
+      )}
+    </div>
+  );
+}
+
+const STOP_ANCHOR = "live-stop";
+
 export function LiveAccountCard() {
   const ref = useRef<HTMLDivElement>(null);
+  const stopRef = useRef<HTMLDivElement>(null);
   const live = useLiveAccount();
   const state = live.data?.state ?? null;
   const status = live.data
@@ -201,9 +291,13 @@ export function LiveAccountCard() {
   const heartbeat = state?.heartbeat ?? null;
 
   // Карточка рендерится после загрузки — к якорю #live (ссылка из Telegram) браузер ещё не прокрутил.
+  // #live-stop — аварийный блок (ссылка с /experiments и из модалки включения): виден сразу, без ручной прокрутки.
   useEffect(() => {
-    if (live.data && window.location.hash === `#${ANCHOR}`)
+    if (!live.data) return;
+    if (window.location.hash === `#${ANCHOR}`)
       ref.current?.scrollIntoView({ block: "start" });
+    if (window.location.hash === `#${STOP_ANCHOR}`)
+      stopRef.current?.scrollIntoView({ block: "start" });
   }, [live.data]);
 
   return (
@@ -217,14 +311,30 @@ export function LiveAccountCard() {
         </CardTitle>
         <CardDescription>
           Торговый субсчёт Binance (спот и USDⓈ-M). Ключ с чтением и торговлей —
-          только у воркера на VM, выводов и переводов у него нет. Сделок пока
-          нет: воркер проверяет ключ и раз в минуту присылает пульс.
+          только у воркера на VM, выводов и переводов у него нет. Воркер раз в
+          минуту проверяет ключ, присылает пульс и повторяет свежие входы
+          экспериментов с включённым «Реальным счётом».
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {live.isPending && <p className="text-muted-foreground">Загрузка…</p>}
         {live.error && <p className="text-destructive">{live.error.message}</p>}
         {status && <StatusLine status={status} />}
+        <div
+          id={STOP_ANCHOR}
+          ref={stopRef}
+          className="flex scroll-mt-4 flex-col gap-2 rounded-lg border border-destructive/40 p-3"
+        >
+          <h3 className="text-sm font-semibold">Аварийный стоп</h3>
+          <p className="text-xs text-muted-foreground">
+            «Стоп входов» — новые реальные сделки не открываются, открытые
+            доживают со своими TP/SL. «Закрыть всё» — стоп входов и закрытие
+            всех реальных позиций по рынку на ближайшем прогоне воркера (до 2
+            минут).
+          </p>
+          <LiveHaltControls />
+        </div>
+        {live.data && <Trading trading={live.data.trading} />}
         {heartbeat && state && (
           <>
             <div className="flex flex-col gap-1">

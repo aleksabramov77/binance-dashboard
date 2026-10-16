@@ -35,6 +35,7 @@ const summary = (
   initialBudget: 1000,
   enabled: true,
   demoMirror: false,
+  liveMirror: false,
   parentId: null,
   variantNote: null,
   disabled: null,

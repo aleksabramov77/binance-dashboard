@@ -2,6 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { z } from "zod";
+import {
+  type ExperimentLiveMirror,
+  liveMirrorToggleReplySchema,
+} from "../model/liveMirrorApi";
 import type { ExperimentMirrorMode } from "../model/mirrorAuto";
 import {
   type BudgetForm,
@@ -163,6 +167,33 @@ export function useResetDemo() {
     onSuccess: (data) => {
       queryClient.setQueryData(labSettingsQueryKey, data.settings);
       void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+    },
+  });
+}
+
+/**
+ * Карточка и полоса «Реальный счёт» (`entities/live-account`, ключ ["live", "status"]): переключатель меняет список
+ * включённых экспериментов. Ключ строкой, без импорта слайса: сущности одного слоя не знают друг о друге.
+ */
+const LIVE_QUERY_KEY = ["live"] as const;
+
+/** Переключатель «Реальный счёт» эксперимента (spec 0049): включение — со словом подтверждения. */
+export function useSetExperimentLiveMirror() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { ok: true; id: string; liveMirror: boolean },
+    Error,
+    ExperimentLiveMirror
+  >({
+    mutationFn: (body) =>
+      request("/api/experiments/settings/live", liveMirrorToggleReplySchema, {
+        method: "POST",
+        body,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      void queryClient.invalidateQueries({ queryKey: labSettingsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEY });
     },
   });
 }

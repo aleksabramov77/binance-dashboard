@@ -173,3 +173,9 @@ export const experimentLiveMirrorSchema = z.object({
   confirm: z.string().max(20).optional(),
 });
 export type ExperimentLiveMirror = z.infer<typeof experimentLiveMirrorSchema>;
+
+export const liveMirrorToggleReplySchema = z.object({
+  ok: z.literal(true),
+  id: z.string(),
+  liveMirror: z.boolean(),
+});

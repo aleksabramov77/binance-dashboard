@@ -112,6 +112,7 @@ export {
   useResetExperimentPaper,
   useResetGroup,
   useSetExperimentEnabled,
+  useSetExperimentLiveMirror,
   useSetExperimentMirrorMode,
   useSetNextBudget,
 } from "./api/useLabSettings";

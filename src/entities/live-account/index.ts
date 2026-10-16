@@ -11,6 +11,7 @@ export {
 // Только сервер: чтение и запись последнего пульса (вызывает композиция src/app/server/liveAccount.ts).
 export { loadLiveState, saveLiveState } from "./api/liveStateDb";
 export { liveAccountQueryKey, useLiveAccount } from "./api/useLiveAccount";
+export { useLiveHalt } from "./api/useLiveHalt";
 // Реальное зеркало (spec 0049): лимиты, проверки входа, PnL по исполнениям, тексты журнала и Telegram. Чистые
 // функции без сети и БД: прогон собирает воркер (scripts/lib/liveMirrorRun.ts), хранилище — src/app/server/liveMirror.ts.
 export { LIVE, LIVE_SKIP } from "./config/liveMirror";

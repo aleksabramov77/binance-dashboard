@@ -16,6 +16,7 @@ export const SORT_KEYS = [
   "profitFactor",
   "maxDrawdown",
   "equity",
+  "live",
   "demo",
   "demoTrades",
   "demoWinRate",
@@ -53,6 +54,9 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
       return s.closed ? s.maxDrawdownPct : null;
     case "equity":
       return s.equity;
+    case "live":
+      // Сначала торгующие на реальном счёте.
+      return e.liveMirror ? 1 : 0;
     case "demo":
       // Сначала торгующие на демо, среди них — по числу демо-сделок.
       return (e.demoMirror ? 1e6 : 0) + e.demo.trades;
