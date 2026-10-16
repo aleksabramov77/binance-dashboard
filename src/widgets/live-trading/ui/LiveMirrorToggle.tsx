@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
   type DemoSummary,
   type ExperimentMarket,
@@ -20,6 +20,7 @@ import { cn, formatDateTime } from "@/shared/lib";
 import {
   dailyLimitNote,
   keyBlockReason,
+  keyBlockShort,
   LIVE_MODE_MEANING,
   liveModeHint,
   liveModeNote,
@@ -59,6 +60,7 @@ export function LiveMirrorToggle({
     ? deriveLiveStatus(live.data.state, Date.now(), live.data.silentAfterMs)
     : null;
   const keyReason = keyBlockReason(status, formatDateTime);
+  const keyShort = keyBlockShort(status);
   const limit = dailyLimitNote(
     live.data?.trading.experiments.find((e) => e.id === id),
     formatDateTime,
@@ -87,7 +89,16 @@ export function LiveMirrorToggle({
   return (
     <div
       className="inline-flex flex-col items-center gap-0.5"
-      title={coinm ? COINM_REASON : liveModeHint(view, formatDateTime)}
+      title={
+        coinm
+          ? COINM_REASON
+          : [
+              liveModeHint(view, formatDateTime),
+              mode === "off" ? keyReason : null,
+            ]
+              .filter(Boolean)
+              .join("\n")
+      }
     >
       <fieldset
         aria-label={`Реальный счёт ${id}`}
@@ -127,35 +138,16 @@ export function LiveMirrorToggle({
           );
         })}
       </fieldset>
-      {coinm && (
-        <span className="max-w-32 text-center text-[10px] leading-tight text-muted-foreground">
-          {COINM_REASON}
-        </span>
-      )}
+      {coinm && <Note>{COINM_REASON}</Note>}
       {!coinm && note && !(mode === "auto" && liveMirror) && (
-        <span
-          className={cn(
-            "max-w-44 text-center text-[10px] leading-tight",
-            mode === "off" ? "text-destructive" : "text-muted-foreground",
-          )}
-        >
-          {note}
-        </span>
+        <Note tone={mode === "off" ? "danger" : "muted"}>{note}</Note>
       )}
-      {!coinm && mode === "off" && keyReason && live.data && (
-        <span className="max-w-40 text-center text-[10px] leading-tight text-muted-foreground">
-          {keyReason}
-        </span>
+      {!coinm && mode === "off" && status && keyShort && live.data && (
+        <Note>{keyShort}</Note>
       )}
-      {limit && (
-        <span className="max-w-40 text-center text-[10px] leading-tight text-destructive">
-          дневной лимит: {limit}
-        </span>
-      )}
+      {limit && <Note tone="danger">дневной лимит: {limit}</Note>}
       {mutation.error && dialog === null && (
-        <span className="max-w-40 text-[10px] leading-tight text-destructive">
-          {mutation.error.message}
-        </span>
+        <Note tone="danger">{mutation.error.message}</Note>
       )}
       {dialog && (
         <LiveModeDialog
@@ -168,5 +160,28 @@ export function LiveMirrorToggle({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Подпись под переключателем: переносится в пределах ячейки (ячейка таблицы — nowrap), иначе длинная причина вылезала
+ * на соседнюю колонку (найдено в 0052). Подробности — в подсказке переключателя.
+ */
+function Note({
+  tone = "muted",
+  children,
+}: {
+  tone?: "muted" | "danger";
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "max-w-40 text-center text-[10px] leading-tight break-words whitespace-normal",
+        tone === "danger" ? "text-destructive" : "text-muted-foreground",
+      )}
+    >
+      {children}
+    </span>
   );
 }

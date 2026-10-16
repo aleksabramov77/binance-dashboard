@@ -136,6 +136,21 @@ describe("sortExperiments", () => {
     ).toEqual(["S01", "S03", "F01", "S02"]);
   });
 
+  it("реальный счёт: по убыванию — торгующие, потом «Авто» и «Вкл + автовыкл» без торговли, потом «Выкл» (spec 0053)", () => {
+    const rows = [
+      summary("S96", "usdm", []),
+      { ...summary("S97", "usdm", []), liveMirrorMode: "auto" as const },
+      {
+        ...summary("S98", "usdm", []),
+        liveMirrorMode: "on" as const,
+        liveMirror: true,
+      },
+    ];
+    expect(
+      sortExperiments(rows, "all", "live", "desc").map((e) => e.id),
+    ).toEqual(["S98", "S97", "S96"]);
+  });
+
   it("ag: spot раньше usdm по возрастанию, при равенстве — по id", () => {
     const groups = [
       summary("F02", "usdm", []),

@@ -40,6 +40,19 @@ export function keyBlockReason(
   }
 }
 
+/** Короткая причина под переключателем (полная — в подсказке): «воркер не подключён — включить нельзя»; null — можно. */
+export function keyBlockShort(status: LiveStatus | null): string | null {
+  if (!status) return null;
+  const short = {
+    ok: null,
+    "not-connected": "воркер не подключён",
+    silent: "воркер молчит",
+    "no-key": "ключ не задан",
+    blocked: "ключ заблокирован",
+  }[status.kind];
+  return short ? `${short} — включить нельзя` : null;
+}
+
 /** «−$15,20 за сутки · входы до 03:00» — пометка сработавшего дневного лимита эксперимента; null — не сработал. */
 export function dailyLimitNote(
   day: LiveExperimentDay | undefined,

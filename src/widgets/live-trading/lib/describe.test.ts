@@ -3,6 +3,7 @@ import {
   dailyLimitNote,
   haltText,
   keyBlockReason,
+  keyBlockShort,
   type LiveModeView,
   liveModeHint,
   liveModeNote,
@@ -145,5 +146,18 @@ describe("режимы реального счёта: подписи (spec 0053,
     expect(hint).toMatch(
       /Проверка 07:00: Авто · ждёт: 12 из 30 демо-сделок; демо — 12 демо-сделок, средний R \+0,10; реальный PnL −\$3,20, убыточных подряд 2/,
     );
+  });
+});
+
+describe("короткая причина под переключателем (найдено в 0052)", () => {
+  it("не длиннее «ключ заблокирован — включить нельзя»; годный ключ — ничего", () => {
+    expect(keyBlockShort({ kind: "ok", warnings: [] })).toBeNull();
+    expect(
+      keyBlockShort({ kind: "blocked", reasons: ["вывод разрешён", "маржа"] }),
+    ).toBe("ключ заблокирован — включить нельзя");
+    expect(keyBlockShort({ kind: "not-connected" })).toBe(
+      "воркер не подключён — включить нельзя",
+    );
+    expect(keyBlockShort(null)).toBeNull();
   });
 });
