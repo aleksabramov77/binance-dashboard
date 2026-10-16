@@ -48,8 +48,16 @@ export const liveHeartbeatSchema = z.object({
   /** Версия воркера (сборка). */
   version: z.string().min(1).max(64),
   sentAt: isoTime,
-  /** Пульс фикстуры (локальная проверка); null — настоящий. */
-  fixture: z.enum(LIVE_FIXTURES).nullable(),
+  /**
+   * Рукопожатие после старта воркера (spec 0049, nit ревью 0047): UID основного счёта ещё не получен — пульс только
+   * запрашивает его, приложение такой пульс не сохраняет. Явный признак вместо распознавания по тексту причины.
+   */
+  handshake: z.boolean(),
+  /**
+   * Пульс фикстуры (локальная проверка); demo-venue — воркер в режиме «площадка демо» (тот же код, Binance Demo,
+   * spec 0049); null — настоящий. Production такие пульсы не принимает.
+   */
+  fixture: z.enum([...LIVE_FIXTURES, "demo-venue"]).nullable(),
   verdict: liveVerdictSchema,
   /** Причины блокировки — по-русски, по каждому пункту. */
   reasons: z.array(text).max(20),

@@ -386,6 +386,7 @@ describe("pulseWithHandshake", () => {
     const handshake = noKeyHeartbeat(base);
     const build = vi.fn(async () => ({
       ...handshake,
+      handshake: true,
       verdict: "blocked" as const,
       reasons: [MAIN_UID_PENDING_REASON],
       uid: { status: "pending" as const, note: MAIN_UID_PENDING_REASON },

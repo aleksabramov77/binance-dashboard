@@ -85,6 +85,13 @@
       "when": 1792145142517,
       "tag": "0011_live_worker_state",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792150528939,
+      "tag": "0012_live_mirror",
+      "breakpoints": true
     }
   ]
 }

@@ -148,7 +148,11 @@ export async function ingestHeartbeat(
   if (next) await saveLiveState(db, next);
   await emit(events, heartbeat);
   const reply: LiveHeartbeatReply = { ok: true, verdict: heartbeat.verdict };
-  if (heartbeat.fixture === null && heartbeat.verdict !== "no-key")
+  // UID основного нужен настоящему воркеру и «площадке демо» (у неё тоже идёт UID-проверка); готовым фикстурам — нет.
+  if (
+    (heartbeat.fixture === null || heartbeat.fixture === "demo-venue") &&
+    heartbeat.verdict !== "no-key"
+  )
     reply.mainAccount = await getMainAccountUid(now);
   return reply;
 }

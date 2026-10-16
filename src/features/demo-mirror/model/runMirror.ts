@@ -7,6 +7,7 @@ import type {
 import {
   listingKey,
   type MirrorListing,
+  type MirrorPlanPolicy,
   type MirrorTradeInput,
   planMirror,
 } from "../lib/planMirror";
@@ -64,8 +65,11 @@ export interface MirrorDeps<
    * (spec 0043). Читается раз за прогон на рынок и только если есть вход; исключение — входы идут без проверки.
    */
   freeUsd: (market: "spot" | "usdm") => Promise<number>;
-  /** Захват сделки (вставка pending). false — её уже взял другой прогон. */
-  claim: (tradeId: string) => Promise<boolean>;
+  /**
+   * Захват сделки (вставка pending). false — её уже взял другой прогон. kind — что будет дальше: вход или пропуск
+   * (реальное зеркало пишет пропуск одной вставкой в markSkipped, spec 0049; демо kind не читает).
+   */
+  claim: (tradeId: string, kind: MirrorDecision["kind"]) => Promise<boolean>;
   open: (req: MirrorOrderRequest) => Promise<R>;
   /** Отметить захваченную сделку пропущенной (не открывалась). */
   markSkipped: (tradeId: string, reason: string) => Promise<void>;
@@ -91,6 +95,19 @@ export interface MirrorDeps<
     tradeId: string,
     result: Awaited<ReturnType<MirrorDeps<C, R>["close"]>>,
   ) => Promise<void>;
+  /** Лимит на монету и тексты пропусков площадки; нет — демо (DEMO_MIRROR_POLICY). */
+  policy?: MirrorPlanPolicy;
+  /**
+   * Проверка входа перед захватом (spec 0049, реальное зеркало: лимиты, стоп, объём, средства) вместо резерва демо
+   * (MIRROR.minFreeUsd). Вход — как есть или с новым объёмом, пропуск с причиной, null — кандидат ждёт следующего
+   * прогона (не прочитали состояние — не входим). spend — вход отправлен (не rejected).
+   */
+  gate?: {
+    check: (
+      d: Extract<MirrorDecision, { kind: "open" }>,
+    ) => Promise<MirrorDecision | null>;
+    spend: (d: Extract<MirrorDecision, { kind: "open" }>) => void;
+  };
 }
 
 export interface MirrorRunResult {
@@ -175,6 +192,7 @@ export async function runMirror<
     now,
     await checkListing(deps, candidates),
     futuresMode,
+    deps.policy,
   );
   for (const [i, d] of decisions.entries()) {
     // Бюджет исчерпан — не захватываем ничего, в том числе пропуски: план следующего прогона
@@ -183,20 +201,26 @@ export async function runMirror<
       result.deferred = decisions.length - i;
       break;
     }
-    // Резерв демо-кошелька (spec 0043) — до захвата: пропуск по нему отмечается, как остальные.
+    // Резерв демо-кошелька (spec 0043) или проверки реального счёта (gate, spec 0049) — до захвата: пропуск по ним
+    // отмечается, как остальные; null — кандидат ждёт следующего прогона.
     const step =
-      d.kind === "open"
-        ? await reserve.check(d, notional.get(d.tradeId) ?? 0)
-        : d;
-    if (!(await deps.claim(step.tradeId))) continue;
+      d.kind !== "open"
+        ? d
+        : deps.gate
+          ? await deps.gate.check(d)
+          : await reserve.check(d, notional.get(d.tradeId) ?? 0);
+    if (!step) continue;
+    if (!(await deps.claim(step.tradeId, step.kind))) continue;
     if (step.kind === "skip") {
       await deps.markSkipped(step.tradeId, step.reason);
       result.skipped++;
       continue;
     }
     const r = await deps.open(step.request);
-    if (r.status !== "rejected")
-      reserve.spend(step.request.market, notional.get(step.tradeId) ?? 0);
+    if (r.status !== "rejected") {
+      if (deps.gate) deps.gate.spend(step);
+      else reserve.spend(step.request.market, notional.get(step.tradeId) ?? 0);
+    }
     await deps.saveOpen(step.tradeId, r);
     result.opened.push({
       tradeId: step.tradeId,

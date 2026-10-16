@@ -15,6 +15,7 @@ const SILENT = 5 * MIN;
 
 const pulse = (over: Partial<LiveHeartbeat> = {}): LiveHeartbeat => ({
   version: "test",
+  handshake: false,
   sentAt: new Date(T0).toISOString(),
   fixture: null,
   verdict: "ok",
@@ -130,27 +131,26 @@ describe("planHeartbeat", () => {
     ]);
   });
 
-  it("рукопожатие после старта (UID pending) — ничего не сохраняется, событий нет", () => {
+  it("рукопожатие — явное поле handshake (и uid pending): ничего не сохраняется, событий нет", () => {
     const handshake = pulse({
+      handshake: true,
       verdict: "blocked",
       reasons: [MAIN_UID_PENDING_REASON],
       uid: { status: "pending", note: MAIN_UID_PENDING_REASON },
     });
     expect(isHandshake(handshake)).toBe(true);
-    // Другая причина блокировки или ошибка биржи — обычный пульс, а не рукопожатие.
-    expect(
-      isHandshake({ ...handshake, reasons: ["Binance не принял ключ"] }),
-    ).toBe(false);
+    // Без признака — обычный пульс, даже с ожиданием UID; признак без ожидания UID — тоже обычный.
+    expect(isHandshake({ ...handshake, handshake: false })).toBe(false);
     expect(
       isHandshake({
         ...handshake,
-        reasons: [MAIN_UID_PENDING_REASON, "ещё причина"],
+        uid: { status: "different", note: null },
       }),
     ).toBe(false);
-    expect(isHandshake({ ...handshake, error: "429" })).toBe(false);
-    expect(isHandshake({ ...handshake, verdict: "ok", reasons: [] })).toBe(
-      false,
-    );
+    // Текст причины больше не важен.
+    expect(
+      isHandshake({ ...handshake, reasons: ["другая формулировка"] }),
+    ).toBe(true);
     expect(planHeartbeat(state(), handshake, T0 + MIN, SILENT)).toEqual({
       next: null,
       events: [],

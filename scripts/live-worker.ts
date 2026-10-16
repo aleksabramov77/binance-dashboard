@@ -1,28 +1,57 @@
-// `pnpm live:worker` — воркер реального счёта (spec 0047). Отдельный процесс: только у него торговый ключ субсчёта
-// (BINANCE_TRADE_API_KEY / SECRET). Раз в минуту проверяет ключ (права — при старте и каждые 10 мин) и шлёт пульс
-// в приложение: POST ${LIVE_APP_URL}/api/live/heartbeat, Bearer LIVE_WORKER_SECRET. Входящих соединений не
-// принимает, DATABASE_URL и Telegram ему не нужны, журнал — stdout/stderr (на VM — journald), файлов не пишет.
-// Сделок нет: клиент реального счёта в этой задаче умеет только читать (src/shared/api/binance/liveAllowlist.ts).
+// `pnpm live:worker` — воркер реального счёта (spec 0047, 0049). Отдельный процесс: только у него торговый ключ субсчёта
+// (BINANCE_TRADE_API_KEY / SECRET). Раз в минуту проверяет ключ (права — при старте и каждые 10 мин), шлёт пульс
+// в приложение (POST ${LIVE_APP_URL}/api/live/heartbeat, Bearer LIVE_WORKER_SECRET) и, если пульс принят, — прогон
+// реального зеркала (spec 0049): входы включённых экспериментов, закрытия, сверка ног, «Закрыть всё». Хранилище — API
+// приложения /api/live/mirror/*. Входящих соединений не принимает, DATABASE_URL и Telegram ему не нужны, журнал —
+// stdout/stderr (на VM — journald), файлов не пишет. Ордера — только через клиент Live с белым списком.
 //
 //   pnpm live:worker                 — цикл раз в минуту (на VM — systemd-сервис binance-live)
-//   pnpm live:worker --once          — один пульс и выход (код 1 — пульс не принят)
+//   pnpm live:worker --once          — один пульс и один прогон зеркала, выход (код 1 — пульс не принят)
 //   pnpm live:worker --once --fixture ok|blocked|main-account
-//                                    — готовый пульс без биржи: только без ключа и только на localhost
+//                                    — готовый пульс без биржи: только без ключа и только на localhost (зеркала нет)
+//   pnpm live:worker --venue demo    — «площадка демо»: тот же код и белый список, но Binance Demo и ключ
+//                                    BINANCE_DEMO_* — только для локальной проверки (не production, только localhost)
 //
 // Сборка в один файл для VM: `pnpm live:build` → dist/live-worker.mjs (`node dist/live-worker.mjs --once`).
 import { existsSync, readFileSync } from "node:fs";
+import type { z } from "zod";
 import {
+  LIVE,
+  LIVE_FIXTURES,
   type LiveFixture,
   type LiveHeartbeat,
   liveHeartbeatReplySchema,
 } from "@/entities/live-account";
 import {
+  closeDemoPosition,
+  placeTrade,
+  SPOT_ENTRY_SLIPPAGE,
+  sizeEntry,
+  sweepTriggeredLegs,
+  type TradeVenueContext,
+} from "@/features/execute-trade";
+import { KEY_REJECTED_REASON } from "@/shared/api/binance";
+import {
+  enableOnewayMode,
+  fetchDemoFills,
+  fetchDemoFuturesAccountBusy,
+  fetchDemoPositionMode,
+  fetchDemoPrice,
+  fetchDemoSymbolRules,
+  fetchDemoUsdtBalances,
+} from "@/shared/api/binance/demo.server";
+import {
   fetchLiveApiRestrictions,
   fetchLiveFuturesAccount,
   fetchLiveSpotAccount,
+  LIVE_DEMO_HOSTS,
+  type LiveClient,
+  liveClient,
+  liveVenue,
 } from "@/shared/api/binance/live.server";
 import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import {
+  getDemoTradingConfig,
   getLiveAppUrl,
   getLiveTradeCredentials,
   getLiveWorkerSecret,
@@ -30,7 +59,14 @@ import {
 import { describeNetworkError } from "@/shared/lib/fetchRetry";
 import { disableLogFiles, log } from "@/shared/lib/logger.server";
 import {
+  type LiveExchange,
+  mirrorApi,
+  runLiveMirror,
+} from "./lib/liveMirrorRun";
+import {
   appUrlRefusal,
+  DEMO_VENUE_FLAGS,
+  demoVenueRefusal,
   emptyMemory,
   fixtureHeartbeat,
   fixtureRefusal,
@@ -71,16 +107,23 @@ function loadEnvFile(file: string) {
 function parseArgs(argv: string[]): {
   once: boolean;
   fixture: LiveFixture | null;
+  demoVenue: boolean;
 } {
   const once = argv.includes("--once");
+  const v = argv.indexOf("--venue");
+  const venue = v === -1 ? "live" : (argv[v + 1] ?? "");
+  if (venue !== "live" && venue !== "demo")
+    throw new Error(`--venue: ожидается live | demo, получено «${venue}»`);
   const i = argv.indexOf("--fixture");
-  if (i === -1) return { once, fixture: null };
+  if (i === -1) return { once, fixture: null, demoVenue: venue === "demo" };
   const value = argv[i + 1] ?? "";
   if (!isLiveFixture(value))
     throw new Error(
-      `--fixture: ожидается ok | blocked | main-account, получено «${value}»`,
+      `--fixture: ожидается ${LIVE_FIXTURES.join(" | ")}, получено «${value}»`,
     );
-  return { once, fixture: value };
+  if (venue === "demo")
+    throw new Error("--fixture и --venue demo вместе нельзя");
+  return { once, fixture: value, demoVenue: false };
 }
 
 function fail(message: string): never {
@@ -113,13 +156,40 @@ if (args.fixture) {
   if (refusal) fail(refusal);
 }
 
+if (args.demoVenue) {
+  const refusal = demoVenueRefusal({
+    production: process.env.NODE_ENV === "production",
+    appUrl,
+  });
+  if (refusal) fail(refusal);
+}
+
+/**
+ * Клиент биржи: настоящий торговый ключ на хостах Binance или («площадка демо») ключ Binance Demo на демо-хостах —
+ * тот же белый список и та же логика. null — ключа нет: только пульс «ключ не задан».
+ */
+function makeClient(): LiveClient | null {
+  if (!args.demoVenue) return creds ? liveClient(creds) : null;
+  const demo = getDemoTradingConfig();
+  if (!demo)
+    fail(
+      "--venue demo: не задан ключ Binance Demo (BINANCE_DEMO_API_KEY / SECRET)",
+    );
+  return liveClient({ live: demo.credentials }, LIVE_DEMO_HOSTS);
+}
+const client = makeClient();
+const venue = client ? liveVenue(client) : null;
+
 let prices: { at: number; value: Map<string, number> } | null = null;
-const deps: WorkerDeps | null = creds
+const deps: WorkerDeps | null = client
   ? {
       now: Date.now,
-      fetchRestrictions: () => fetchLiveApiRestrictions(creds),
-      fetchSpotAccount: () => fetchLiveSpotAccount(creds),
-      fetchFuturesAccount: () => fetchLiveFuturesAccount(creds),
+      // На демо-хостах прав ключа (/sapi/v1/account/apiRestrictions) нет — «площадка демо» считает их годными.
+      fetchRestrictions: args.demoVenue
+        ? async () => DEMO_VENUE_FLAGS
+        : () => fetchLiveApiRestrictions(client),
+      fetchSpotAccount: () => fetchLiveSpotAccount(client),
+      fetchFuturesAccount: () => fetchLiveFuturesAccount(client),
       fetchPrices: async () => {
         if (prices && Date.now() - prices.at < PRICES_TTL_MS)
           return prices.value;
@@ -130,29 +200,71 @@ const deps: WorkerDeps | null = creds
   : null;
 const memory = emptyMemory();
 
-async function send(heartbeat: LiveHeartbeat) {
+/** Биржа реального зеркала: общая логика ордеров execute-trade на площадке Live. */
+const exchange: LiveExchange | null = venue
+  ? (() => {
+      const ctx: TradeVenueContext = {
+        venue,
+        maxNotionalUsd: LIVE.notionalHardCapUsd,
+        maxRiskPct: LIVE.maxRiskPct,
+        autoHedge: false,
+      };
+      return {
+        placeTrade: (req) => placeTrade(req, ctx),
+        closePosition: (req) => closeDemoPosition(req, venue),
+        sweepLegs: (legs, overBudget) =>
+          sweepTriggeredLegs(legs, overBudget, venue),
+        symbolRules: (market, symbol) =>
+          fetchDemoSymbolRules(market, symbol, venue),
+        price: (market, symbol) => fetchDemoPrice(market, symbol, venue),
+        balances: () => fetchDemoUsdtBalances(venue),
+        positionMode: () => fetchDemoPositionMode(venue),
+        futuresBusy: () => fetchDemoFuturesAccountBusy(venue),
+        enableOneway: () => enableOnewayMode(venue),
+        fills: (market, symbol) => fetchDemoFills(venue, market, symbol, 100),
+        sizeEntry,
+        spotSlippage: SPOT_ENTRY_SLIPPAGE,
+      };
+    })()
+  : null;
+
+/** POST в приложение с секретом воркера; ответ — по схеме. Ошибка — исключение (прогон ничего не открывает). */
+async function post<T extends z.ZodType>(
+  path: string,
+  body: unknown,
+  schema: T,
+): Promise<z.infer<T>> {
   let res: Response;
   try {
-    res = await fetch(`${appUrl}/api/live/heartbeat`, {
+    res = await fetch(`${appUrl}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
       },
-      body: JSON.stringify(toWire(heartbeat)),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
   } catch (error) {
     throw new Error(`приложение не ответило: ${describeNetworkError(error)}`);
   }
-  const body: unknown = await res.json().catch(() => null);
+  const data: unknown = await res.json().catch(() => null);
   if (!res.ok) {
-    const reason = (body as { error?: unknown } | null)?.error;
+    const reason = (data as { error?: unknown } | null)?.error;
     throw new Error(
-      `приложение ответило ${res.status}${typeof reason === "string" ? `: ${reason}` : ""}`,
+      `${path}: приложение ответило ${res.status}${typeof reason === "string" ? `: ${reason}` : ""}`,
     );
   }
-  return liveHeartbeatReplySchema.parse(body);
+  return schema.parse(data);
+}
+const api = mirrorApi(post);
+
+function send(heartbeat: LiveHeartbeat) {
+  return post(
+    "/api/live/heartbeat",
+    toWire(heartbeat),
+    liveHeartbeatReplySchema,
+  );
 }
 
 let lastSummary = "";
@@ -178,7 +290,7 @@ function logPulse(heartbeat: LiveHeartbeat) {
 
 async function cycle(): Promise<void> {
   // Рукопожатие после старта (ждём UID основного счёта) → один повтор сразу; дальше — по таймеру.
-  await pulseWithHandshake({
+  const sent = await pulseWithHandshake({
     memory,
     build: async () => {
       const base = {
@@ -186,11 +298,12 @@ async function cycle(): Promise<void> {
         sentAt: new Date().toISOString(),
         fixture: args.fixture,
       };
-      return args.fixture
-        ? fixtureHeartbeat(args.fixture, base)
-        : deps
-          ? await runCheck(deps, memory, base)
-          : noKeyHeartbeat(base);
+      if (args.fixture) return fixtureHeartbeat(args.fixture, base);
+      const pulse = {
+        ...base,
+        fixture: args.demoVenue ? ("demo-venue" as const) : null,
+      };
+      return deps ? await runCheck(deps, memory, pulse) : noKeyHeartbeat(pulse);
     },
     send: async (heartbeat) => {
       const reply = await send(heartbeat);
@@ -198,6 +311,43 @@ async function cycle(): Promise<void> {
       return reply;
     },
   });
+  // Пульс принят — прогон реального зеркала. Фикстуры и воркер без ключа сделок не делают.
+  const last = sent.at(-1);
+  if (args.fixture || !exchange || !last || last.handshake) return;
+  try {
+    const r = await runLiveMirror({
+      api,
+      ex: exchange,
+      now: Date.now,
+      verdictOk: last.verdict === "ok",
+      keyAccepted: !last.reasons.includes(KEY_REJECTED_REASON),
+    });
+    const run = r.run;
+    if (
+      r.closeAll ||
+      (run &&
+        (run.opened.length ||
+          run.closed.length ||
+          run.skipped ||
+          run.swept.length ||
+          run.deferred))
+    )
+      log.info(
+        "live.mirror",
+        `Реальное зеркало: открыто ${run?.opened.length ?? 0}, закрыто ${run?.closed.length ?? 0}, закрыто биржей ${run?.swept.length ?? 0}, пропущено ${run?.skipped ?? 0}${run?.deferred ? `, отложено ${run.deferred}` : ""}${r.closeAll ? `; «Закрыть всё»: закрыто ${r.closeAll.closed}, не закрылось ${r.closeAll.failed}` : ""}`,
+        {
+          opened: run?.opened ?? [],
+          closed: run?.closed ?? [],
+          closeAll: r.closeAll,
+        },
+      );
+  } catch (error) {
+    // Приложение недоступно или ответило ошибкой — ничего не открывается, повтор на следующем прогоне (AC11).
+    log.error(
+      "live.mirror",
+      `Прогон реального зеркала не выполнен: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 async function safeCycle(): Promise<boolean> {
@@ -215,7 +365,7 @@ async function safeCycle(): Promise<boolean> {
 
 log.info(
   "live.worker",
-  `Воркер реального счёта ${VERSION}: ${args.fixture ? `фикстура ${args.fixture}` : creds ? "ключ задан" : "ключ не задан"}, пульс → ${appUrl}${secret ? "" : " (без LIVE_WORKER_SECRET)"}`,
+  `Воркер реального счёта ${VERSION}: ${args.fixture ? `фикстура ${args.fixture}` : args.demoVenue ? "площадка демо (Binance Demo, только локально)" : creds ? "ключ задан" : "ключ не задан"}, пульс → ${appUrl}${secret ? "" : " (без LIVE_WORKER_SECRET)"}`,
 );
 
 async function main() {

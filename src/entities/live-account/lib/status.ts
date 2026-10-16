@@ -1,4 +1,3 @@
-import { MAIN_UID_PENDING_REASON } from "@/shared/api/binance";
 import type {
   LiveHeartbeat,
   LiveState,
@@ -51,17 +50,13 @@ export interface LiveEvent {
 }
 
 /**
- * Рукопожатие после старта воркера: пульс заблокирован ТОЛЬКО ожиданием UID основного счёта (uid pending, единственная
- * причина — MAIN_UID_PENDING_REASON, ошибок биржи нет). Такой пульс — лишь запрос UID: он не сохраняется и не считается
- * сменой состояния, иначе каждый перезапуск давал бы пару сообщений «заблокирован» → «годится». Воркер получает UID
- * в ответе и один раз сразу шлёт полный пульс. Любая другая блокировка или ошибка — обычный пульс, сохраняется.
+ * Рукопожатие после старта воркера (явное поле handshake, spec 0049): пульс только запрашивает UID основного счёта —
+ * не сохраняется и не считается сменой состояния, иначе каждый перезапуск давал бы пару сообщений «заблокирован» →
+ * «годится». Воркер ставит признак только в ветке «ждём UID»; приложение дополнительно требует uid pending — пульс с
+ * признаком, но без ожидания UID, сохраняется как обычный. Воркер получает UID в ответе и один раз сразу шлёт полный пульс.
  */
 export const isHandshake = (heartbeat: LiveHeartbeat): boolean =>
-  heartbeat.uid?.status === "pending" &&
-  heartbeat.verdict === "blocked" &&
-  heartbeat.reasons.length === 1 &&
-  heartbeat.reasons[0] === MAIN_UID_PENDING_REASON &&
-  heartbeat.error === null;
+  heartbeat.handshake && heartbeat.uid?.status === "pending";
 
 /**
  * Приём пульса: новое состояние и события. Смена оценки (годится ↔ заблокирован ↔ ключ не задан) или первый
@@ -78,7 +73,12 @@ export function planHeartbeat(
   if (isHandshake(heartbeat)) return { next: null, events: [] };
   const at = new Date(now).toISOString();
   const events: LiveEvent[] = [];
-  const fixture = heartbeat.fixture ? ` (фикстура ${heartbeat.fixture})` : "";
+  const fixture =
+    heartbeat.fixture === "demo-venue"
+      ? " (площадка демо)"
+      : heartbeat.fixture
+        ? ` (фикстура ${heartbeat.fixture})`
+        : "";
   const level = heartbeat.verdict === "ok" ? "info" : "warn";
   const text = verdictText(heartbeat.verdict, heartbeat.reasons);
 

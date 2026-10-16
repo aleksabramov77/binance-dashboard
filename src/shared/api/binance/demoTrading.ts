@@ -473,6 +473,36 @@ export async function demoEnableHedgeMode(
   }
 }
 
+/**
+ * Включить One-way mode (spec 0049, реальный счёт: одна позиция на монету). Биржа переключает только без позиций и
+ * ордеров на счёте (-4067/-4068 — исключение, счёт остаётся в Hedge). Уже One-way (-4059) — не ошибка.
+ */
+export async function enableOnewayMode(
+  venue: TradeVenue,
+): Promise<"switched" | "already"> {
+  try {
+    await venue.signed(
+      "usdm",
+      "POST",
+      "/fapi/v1/positionSide/dual",
+      anySchema,
+      { dualSidePosition: "false" },
+    );
+    positionModeCaches.set(modeKey(venue), { at: Date.now(), mode: "oneway" });
+    return "switched";
+  } catch (error) {
+    if (error instanceof BinanceApiError && error.code === -4059) {
+      positionModeCaches.set(modeKey(venue), {
+        at: Date.now(),
+        mode: "oneway",
+      });
+      return "already";
+    }
+    positionModeCaches.set(modeKey(venue), null);
+    throw error;
+  }
+}
+
 /** Есть ли на демо-фьючерсах хоть одна позиция или открытый ордер (обычный или algo) — по всему счёту. */
 export async function fetchDemoFuturesAccountBusy(
   venue: TradeVenue,
