@@ -21,6 +21,9 @@ import {
 } from "@/shared/ui/Dialog";
 import { MODE_MEANING, mirrorModeHint } from "../lib/modeHint";
 
+/** Подпись под переключателем без ключа Binance Demo (полный текст — в подсказке «Вкл»). */
+const NO_KEY_CAPTION = "«Вкл» недоступно: нет ключа Binance Demo";
+
 const LABEL: Record<DemoMirrorMode, string> = {
   off: "Выкл",
   auto: "Авто",
@@ -30,8 +33,9 @@ const LABEL: Record<DemoMirrorMode, string> = {
 /**
  * Переключатель демо-зеркала «Выкл · Авто · Вкл» (spec 008, 0043). «Вкл» — с подтверждением в модалке, «Выкл» и
  * «Авто» — сразу («Авто» сразу решает автомат). В «Авто» подсвечено решение автомата: «Авто · вкл» (цвет демо-колонок)
- * или «Авто · выкл» (приглушённо); у ручных положений — пометка «вручную». У групп без зеркала (COIN-M, spec 0023)
- * переключатель недоступен, причина — в подсказке; без ключа Binance Demo недоступно «Вкл».
+ * или «Авто · выкл» (приглушённо); у ручных положений — пометка «вручную». У группы без зеркала переключатель
+ * недоступен, без ключа Binance Demo недоступно «Вкл»; причина — подписью под переключателем, как у «Реального счёта»
+ * (spec 0056, AC2), а не только в подсказке.
  */
 export function DemoMirrorToggle({
   experiment,
@@ -52,6 +56,8 @@ export function DemoMirrorToggle({
   const mutation = useSetExperimentMirrorMode();
   const { id, demoMirrorMode: mode, demoMirror } = experiment;
   const blocked = ASSET_GROUPS[experiment.market].demoMirrorBlocked;
+  // Видимая причина недоступности: группа без зеркала — весь переключатель, нет ключа — «Вкл».
+  const caption = blocked ?? (demoConfigured ? null : NO_KEY_CAPTION);
 
   const choose = (next: DemoMirrorMode) => {
     if (next === mode) return;
@@ -123,6 +129,11 @@ export function DemoMirrorToggle({
           вручную
         </span>
       )}
+      {caption && (
+        <span className="max-w-32 text-center text-[10px] leading-tight text-muted-foreground">
+          {caption}
+        </span>
+      )}
       {mutation.error && !confirmOn && (
         <span className="max-w-40 text-[10px] leading-tight text-destructive">
           {mutation.error.message}
@@ -142,6 +153,13 @@ export function DemoMirrorToggle({
               (demo.binance.com, виртуальные деньги) в течение 1–2 минут: тот же
               объём (~$50), стоп и тейк выставятся на бирже.
             </li>
+            {experiment.market === "coinm" && (
+              <li>
+                COIN-M: то же число контрактов, что у paper-сделки (BTC — $100,
+                остальные — $10), маржа — в монете контракта; вход пропускается,
+                если её свободной маржи после входа останется меньше $50.
+              </li>
+            )}
             <li>
               Когда paper-сделка закроется, позиция на демо-счёте закроется по
               рынку.

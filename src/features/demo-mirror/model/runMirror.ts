@@ -5,11 +5,16 @@ import type {
   MirrorOrderRequest,
 } from "../lib/planMirror";
 import {
+  coinmMarginCoin,
+  type FuturesModes,
   listingKey,
+  type MirrorFuturesMarket,
   type MirrorListing,
+  type MirrorMarket,
   type MirrorPlanPolicy,
   type MirrorTradeInput,
   planMirror,
+  tradablePair,
 } from "../lib/planMirror";
 
 // Прогон demo-зеркала (spec 008). Хранилище и биржа — зависимости: их собирает
@@ -24,7 +29,7 @@ export interface MirrorStep {
 /** Демо-позиция на закрытие. Остальные поля (свои ордера) runMirror не читает — передаёт в close. */
 export interface MirrorCloseItem {
   tradeId: string;
-  market: "spot" | "usdm";
+  market: MirrorMarket;
   symbol: string;
   direction: "long" | "short";
   quantity: number;
@@ -51,20 +56,22 @@ export interface MirrorDeps<
   /** Зеркала, которые держат или открывают позицию: монета и сторона (лимит на монету, встречные). */
   activeMirrors: () => Promise<ActiveMirror[]>;
   /**
-   * Режим позиций демо-фьючерсов: в One-way встречная сторона по монете — пропуск, в Hedge — вход.
-   * Исключение — режим неизвестен: встречные кандидаты ждут следующего прогона.
+   * Режим позиций демо-фьючерсов рынка (у USDⓈ-M и COIN-M свой): в One-way встречная сторона по монете — пропуск, в
+   * Hedge — вход. Исключение — режим неизвестен: встречные кандидаты ждут следующего прогона.
    */
-  positionMode: () => Promise<"oneway" | "hedge">;
+  positionMode: (market: MirrorFuturesMarket) => Promise<"oneway" | "hedge">;
   /**
    * Есть ли символ на демо-рынке: false — точно нет (вход пропускается), исключение — сеть
    * (кандидат ждёт следующего прогона). Проверяется до захвата сделки и запроса на вход.
    */
-  hasSymbol: (market: "spot" | "usdm", symbol: string) => Promise<boolean>;
+  hasSymbol: (market: MirrorMarket, symbol: string) => Promise<boolean>;
   /**
-   * Свободные USDT демо-кошелька группы (Spot — free, USDⓈ-M — availableBalance) для резерва MIRROR.minFreeUsd
-   * (spec 0043). Читается раз за прогон на рынок и только если есть вход; исключение — входы идут без проверки.
+   * Свободные деньги демо-кошелька для резерва, $: Spot — free USDT, USDⓈ-M — availableBalance USDT (резерв
+   * MIRROR.minFreeUsd, spec 0043); COIN-M — свободная маржа монеты контракта symbol × её цена (резерв
+   * MIRROR.coinmMinFreeUsd, spec 0056). Читается раз за прогон на кошелёк и только если есть вход; исключение — входы
+   * этого кошелька идут без проверки.
    */
-  freeUsd: (market: "spot" | "usdm") => Promise<number>;
+  freeUsd: (market: MirrorMarket, symbol: string) => Promise<number>;
   /**
    * Захват сделки (вставка pending). false — её уже взял другой прогон. kind — что будет дальше: вход или пропуск
    * (реальное зеркало пишет пропуск одной вставкой в markSkipped, spec 0049; демо kind не читает).
@@ -182,11 +189,14 @@ export async function runMirror<
 
   const now = deps.now();
   const candidates = await deps.listCandidates(new Date(now - 60 * 60_000));
-  let futuresMode: "oneway" | "hedge" | null = null;
-  if (candidates.some((c) => c.market === "usdm"))
-    futuresMode = await deps.positionMode().catch(() => null);
+  // Режим позиций — только рынков, у которых есть кандидаты (у USDⓈ-M и COIN-M он свой).
+  const futuresModes: FuturesModes = { usdm: null, coinm: null };
+  for (const market of ["usdm", "coinm"] as const)
+    if (candidates.some((c) => c.market === market))
+      futuresModes[market] = await deps.positionMode(market).catch(() => null);
   // Расход входа на резерв — оценка по paper-объёму (~$50): на USDⓈ-M уходит маржа (плечо 1 — тот же объём), а
   // fitMinNotional может поднять заявку до минимума символа (до 3×). Для резерва в $500 такой точности хватает.
+  // COIN-M: paper-объём — ровно контракты × размер, маржа при плече 1 — столько же в монете контракта.
   const notional = new Map(
     candidates.map((c) => [c.tradeId, c.quantity * c.entryPrice]),
   );
@@ -196,7 +206,7 @@ export async function runMirror<
     await deps.activeMirrors(),
     now,
     await checkListing(deps, candidates),
-    futuresMode,
+    futuresModes,
     deps.policy,
   );
   for (const [i, d] of decisions.entries()) {
@@ -224,7 +234,7 @@ export async function runMirror<
     const r = await deps.open(step.request);
     if (r.status !== "rejected") {
       if (deps.gate) deps.gate.spend(step);
-      else reserve.spend(step.request.market, notional.get(step.tradeId) ?? 0);
+      else reserve.spend(step.request, notional.get(step.tradeId) ?? 0);
     }
     await deps.saveOpen(step.tradeId, r);
     result.opened.push({
@@ -236,19 +246,28 @@ export async function runMirror<
   return result;
 }
 
+/** Кошелёк резерва: Spot и USDⓈ-M — свой рынок, COIN-M — монета маржи контракта (spec 0056). */
+const walletOf = (r: Pick<MirrorOrderRequest, "market" | "symbol">) =>
+  r.market === "coinm" ? `coinm:${coinmMarginCoin(r.symbol)}` : r.market;
+
+/** $0,30 — копейки видны: у COIN-M свободной маржи монеты бывает меньше доллара. */
+const cents = (usd: number) => `$${usd.toFixed(2).replace(".", ",")}`;
+
 /**
- * Резерв демо-кошелька прогона (spec 0043): остаток читается один раз на рынок и только при первом входе, каждый
- * вход прогона вычитает свой объём (paper-объём, ~$50). Остаток не прочитался — входы идут как раньше.
+ * Резерв демо-кошелька прогона (spec 0043, 0056): остаток читается один раз на кошелёк (Spot, USDⓈ-M, монета COIN-M) и
+ * только при первом входе, каждый вход прогона вычитает свой объём (paper-объём, ~$50). Остаток не прочитался — входы
+ * идут как раньше.
  */
 function freeFunds(deps: Pick<MirrorDeps, "freeUsd">) {
-  const left = new Map<"spot" | "usdm", Promise<number | null>>();
-  const read = (market: "spot" | "usdm") => {
-    let value = left.get(market);
+  const left = new Map<string, Promise<number | null>>();
+  const read = (r: MirrorOrderRequest) => {
+    const key = walletOf(r);
+    let value = left.get(key);
     if (!value) {
       value = Promise.resolve()
-        .then(() => deps.freeUsd(market))
+        .then(() => deps.freeUsd(r.market, r.symbol))
         .catch(() => null);
-      left.set(market, value);
+      left.set(key, value);
     }
     return value;
   };
@@ -258,20 +277,26 @@ function freeFunds(deps: Pick<MirrorDeps, "freeUsd">) {
       d: Extract<MirrorDecision, { kind: "open" }>,
       cost: number,
     ): Promise<MirrorDecision> {
-      const free = await read(d.request.market);
-      if (free === null || free - cost >= MIRROR.minFreeUsd) return d;
+      const free = await read(d.request);
+      const coinm = d.request.market === "coinm";
+      const reserve = coinm ? MIRROR.coinmMinFreeUsd : MIRROR.minFreeUsd;
+      if (free === null || free - cost >= reserve) return d;
       return {
         tradeId: d.tradeId,
         kind: "skip",
-        // Остаток после входа; свободных меньше объёма входа — $0, а не отрицательная сумма.
-        reason: `мало свободных средств на демо: $${Math.max(0, Math.round(free - cost))} < резерв $${MIRROR.minFreeUsd}`,
+        reason: coinm
+          ? // Монета, её свободная маржа и что нужно: резерв + маржа входа (плечо 1 — объём входа).
+            `мало свободной маржи ${coinmMarginCoin(d.request.symbol)} на демо: ${cents(free)} < резерв $${reserve} + вход ~${cents(cost)}`
+          : // Остаток после входа; свободных меньше объёма входа — $0, а не отрицательная сумма.
+            `мало свободных средств на демо: $${Math.max(0, Math.round(free - cost))} < резерв $${reserve}`,
       };
     },
-    spend(market: "spot" | "usdm", cost: number) {
-      const value = left.get(market);
+    spend(r: MirrorOrderRequest, cost: number) {
+      const key = walletOf(r);
+      const value = left.get(key);
       if (value)
         left.set(
-          market,
+          key,
           value.then((v) => (v === null ? null : v - cost)),
         );
     },
@@ -287,7 +312,8 @@ async function checkListing(
   const seen = new Set<string>();
   for (const t of candidates) {
     const k = listingKey(t);
-    if (seen.has(k) || !t.symbol.endsWith("USDT")) continue;
+    // Пара не та (не к USDT, у COIN-M — не …USD_PERP) — планировщик сам пропустит её с причиной.
+    if (seen.has(k) || !tradablePair(t)) continue;
     seen.add(k);
     try {
       if (!(await deps.hasSymbol(t.market, t.symbol))) listing.missing.add(k);

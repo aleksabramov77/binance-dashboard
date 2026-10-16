@@ -112,11 +112,11 @@ describe("авто-зеркало в БД (spec 0043)", () => {
     expect(auto.demoMirrorSince).toEqual(on.demoMirrorSince);
   });
 
-  it("«Вкл» для COIN-M и неизвестного id — false", async () => {
+  it("«Вкл» для COIN-M — как у остальных групп (spec 0056); неизвестный id — false", async () => {
     await seedExperiments(db, [exp("PC99", { market: "coinm" })]);
-    expect(await setExperimentMirrorMode(db, "PC99", "on")).toBe(false);
+    expect(await setExperimentMirrorMode(db, "PC99", "on")).toBe(true);
     expect(await setExperimentMirrorMode(db, "nope", "off")).toBe(false);
-    expect((await row("PC99")).demoMirror).toBe(false);
+    expect((await row("PC99")).demoMirror).toBe(true);
   });
 
   it("решение автомата пишется, только пока положение то же", async () => {
@@ -183,14 +183,17 @@ describe("авто-зеркало в БД (spec 0043)", () => {
       closed("d", runId, "PC99", "2026-10-11T11:00:00.000Z", 1),
     );
     const data = await readMirrorAutoRows(db);
-    expect(data?.rows.map((r) => r.id)).toEqual(["S98"]);
-    expect(data?.rows[0].trades.map((t) => t.rMultiple)).toEqual([1, -0.5]);
-    expect(data?.rows[0]).toMatchObject({
+    // COIN-M — тоже группа с демо-зеркалом (spec 0056).
+    expect(data?.rows.map((r) => r.id).sort()).toEqual(["PC99", "S98"]);
+    const s98 = data?.rows.find((r) => r.id === "S98");
+    expect(s98?.trades.map((t) => t.rMultiple)).toEqual([1, -0.5]);
+    expect(s98).toMatchObject({
       mode: "auto",
       advice: null,
       auto: null,
       demoMirror: false,
     });
-    expect((await readMirrorAutoRows(db, ["PC99"]))?.rows).toEqual([]);
+    const pc = (await readMirrorAutoRows(db, ["PC99"]))?.rows;
+    expect(pc?.map((r) => r.trades.map((t) => t.rMultiple))).toEqual([[1]]);
   });
 });

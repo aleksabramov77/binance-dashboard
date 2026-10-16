@@ -116,7 +116,7 @@ export function parsePrivateExperiments(
       );
       return;
     }
-    // Демо-зеркало COIN-M — позже (spec 0023): включить его файлом нельзя, как и тумблером.
+    // Группа без демо-зеркала: включить его файлом нельзя, как и тумблером (с spec 0056 зеркало есть у всех групп).
     const blocked = ASSET_GROUPS[e.market].demoMirrorBlocked;
     if (e.demoMirror && blocked) {
       errors.push(`${who}: поле demoMirror — ${blocked}`);

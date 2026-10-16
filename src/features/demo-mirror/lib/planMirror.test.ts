@@ -238,3 +238,72 @@ describe("planMirror: открытые зеркала до PR 2b (без protect
     expect(d.map((x) => x.kind)).toEqual(["open", "open"]);
   });
 });
+
+describe("planMirror: COIN-M (spec 0056)", () => {
+  const btc = (over: Partial<MirrorTradeInput> = {}) =>
+    trade({
+      market: "coinm",
+      symbol: "BTCUSD_PERP",
+      entryPrice: 81_000,
+      quantity: 100 / 81_000,
+      stop: 77_000,
+      takeProfit: 85_000,
+      ...over,
+    });
+
+  it("бессрочный …USD_PERP — вход с плечом 1 и ценой paper для контрактов; не …USD_PERP — пропуск", () => {
+    const [d] = planMirror([btc()], [], NOW);
+    expect(d).toMatchObject({
+      kind: "open",
+      request: {
+        market: "coinm",
+        symbol: "BTCUSD_PERP",
+        leverage: 1,
+        referencePrice: 81_000,
+      },
+    });
+    expect(planMirror([btc({ symbol: "BTCUSD_251226" })], [], NOW)).toEqual([
+      {
+        tradeId: "t1",
+        kind: "skip",
+        reason:
+          "BTCUSD_251226: демо-зеркало торгует только бессрочные контракты COIN-M (…USD_PERP).",
+      },
+    ]);
+  });
+
+  it("режим позиций свой у рынка: USDⓈ-M в Hedge не открывает встречный COIN-M в One-way", () => {
+    const longBtc = {
+      market: "coinm" as const,
+      symbol: "BTCUSD_PERP",
+      direction: "long" as const,
+      hasRefs: true,
+    };
+    const short = btc({
+      tradeId: "s",
+      direction: "short",
+      stop: 85_000,
+      takeProfit: 77_000,
+    });
+    const modes = { usdm: "hedge", coinm: "oneway" } as const;
+    expect(planMirror([short], [longBtc], NOW, undefined, modes)[0].kind).toBe(
+      "skip",
+    );
+    expect(
+      planMirror([short], [longBtc], NOW, undefined, {
+        usdm: "oneway",
+        coinm: "hedge",
+      })[0].kind,
+    ).toBe("open");
+    // Лонг USDⓈ-M по BTCUSDT шорту COIN-M по BTCUSD_PERP не встречный: рынки и позиции разные.
+    expect(
+      planMirror(
+        [short],
+        [{ ...longBtc, market: "usdm", symbol: "BTCUSDT" }],
+        NOW,
+        undefined,
+        modes,
+      )[0].kind,
+    ).toBe("open");
+  });
+});

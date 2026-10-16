@@ -113,8 +113,17 @@ export const labSettingsSchema = z.object({
       demo: demoSummarySchema.extend({ resetAt: z.string().nullable() }),
     }),
   ),
-  /** Свободные USDT на демо-счёте Binance; null — ключа нет или биржа не ответила. */
-  demoBalances: z.object({ spot: z.number(), usdm: z.number() }).nullable(),
+  /**
+   * Свободное на демо-счёте Binance, $: USDT Spot и USDⓈ-M; COIN-M — сумма свободной маржи монет в $ (spec 0056),
+   * null — она не прочиталась. Всё null — ключа нет или биржа не ответила.
+   */
+  demoBalances: z
+    .object({
+      spot: z.number(),
+      usdm: z.number(),
+      coinm: z.number().nullable(),
+    })
+    .nullable(),
 });
 
 export const experimentResetSchema = z.object({ id: z.string().min(1) });

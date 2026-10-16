@@ -72,8 +72,8 @@ const toClose = (
 });
 
 /**
- * Тумблер зеркала. Включить можно только в группе, которую зеркало умеет (DEMO_MIRROR_MARKETS):
- * COIN-M — false, как и неизвестный id (композиция различает их по market эксперимента).
+ * Тумблер зеркала. Включить можно только в группе, которую зеркало умеет (DEMO_MIRROR_MARKETS: Spot, USDⓈ-M,
+ * COIN-M — spec 0056); другая группа — false, как и неизвестный id.
  */
 export async function setExperimentDemoMirror(
   db: Db,
@@ -128,7 +128,7 @@ export async function listMirrorCandidates(
     .where(
       and(
         eq(experimentsTable.demoMirror, true),
-        // COIN-M на демо не зеркалим (spec 0023) — даже если флаг включили в обход тумблера.
+        // Только группы, которые зеркало умеет (COIN-M — с spec 0056), даже если флаг включили в обход тумблера.
         inArray(paperTradesTable.market, [...DEMO_MIRROR_MARKETS]),
         isNull(paperTradesTable.closedAt),
         gte(paperTradesTable.openedAt, since),
@@ -146,7 +146,7 @@ export async function listMirrorCandidates(
 
 /** Зеркало, которое держит или открывает позицию на демо. */
 export interface ActiveMirrorRow {
-  market: "spot" | "usdm";
+  market: DemoMirrorMarket;
   symbol: string;
   direction: "long" | "short";
   /**
@@ -161,13 +161,15 @@ export interface ActiveMirrorRow {
 
 /**
  * Строка нового учёта: свои ссылки есть и ноги — на свой объём. Фьючерсы без метки legs "quantity" —
- * входы 2b (ноги с closePosition): сработавшая закроет всю сторону вместе с соседями — legacy.
+ * входы 2b (ноги с closePosition): сработавшая закроет всю сторону вместе с соседями — legacy. У COIN-M
+ * (spec 0056) метка есть всегда.
  */
 function ownLegsOnly(market: string, raw: unknown): boolean {
   const refs = parseProtectRefs(raw);
   if (!refs) return false;
+  if (market === "spot") return true;
   return (
-    market !== "usdm" || (refs.market === "usdm" && refs.legs === "quantity")
+    refs.market !== "spot" && refs.market === market && refs.legs === "quantity"
   );
 }
 
@@ -305,7 +307,8 @@ export async function claimMirrorToClose(
 }
 
 /**
- * Открытые фьючерсные зеркала со своими ссылками — для сверки ног (своя нога сработала — снять вторую).
+ * Открытые фьючерсные зеркала (USDⓈ-M и COIN-M) со своими ссылками — для сверки ног (своя нога сработала — снять
+ * вторую).
  */
 export async function listOpenMirrorLegs(db: Db): Promise<
   {
@@ -326,7 +329,7 @@ export async function listOpenMirrorLegs(db: Db): Promise<
     .where(
       and(
         inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
-        eq(demoMirrorOrdersTable.market, "usdm"),
+        inArray(demoMirrorOrdersTable.market, ["usdm", "coinm"]),
         isNotNull(demoMirrorOrdersTable.protectRefs),
       ),
     );

@@ -30,7 +30,11 @@ import {
   withEngineTickLock,
 } from "@/entities/experiment";
 import { ENGINE_KEYS, planReset, priceKey } from "@/features/paper-engine";
-import { fetchDemoUsdtBalances } from "@/shared/api/binance/demo.server";
+import { resolveUsdPrice, sumUsd } from "@/shared/api/binance";
+import {
+  fetchDemoCoinmAvailable,
+  fetchDemoUsdtBalances,
+} from "@/shared/api/binance/demo.server";
 import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import { demoVenue } from "@/shared/api/binance/venue.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
@@ -42,6 +46,7 @@ import {
   withTickLock,
 } from "./experimentEngine";
 import { runMirrorAuto } from "./mirrorAuto";
+import { cachedTickerPrices } from "./tickerPrices";
 
 /** Бюджет следующей эпохи из engine_state; нет или мусор — по умолчанию. */
 async function readNextBudget(
@@ -53,15 +58,46 @@ async function readNextBudget(
   return parsed.success ? parsed.data : DEFAULT_INITIAL_BUDGET;
 }
 
-/** Свободные USDT демо-счёта; ключа нет или биржа не ответила — null (страница не падает). */
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * Свободная маржа COIN-M демо-счёта в $ (spec 0056, AC8): сумма по монетам availableBalance × цена (спот, общий кэш
+ * цен с шапкой); монеты без цены не входят. Не прочиталось — null, Spot и USDⓈ-M видны.
+ */
+async function readCoinmFreeUsd(
+  venue: ReturnType<typeof demoVenue>,
+): Promise<number | null> {
+  try {
+    const free = await fetchDemoCoinmAvailable(venue);
+    if (free.size === 0) return 0;
+    const prices = await cachedTickerPrices("spot");
+    return sumUsd(
+      [...free].map(([asset, amount]) => ({ asset, amount })),
+      (asset) => resolveUsdPrice(asset, prices),
+    ).usd;
+  } catch (error) {
+    log.warn("experiments.settings", "Маржа COIN-M Binance Demo не получена", {
+      error: errorText(error),
+    });
+    return null;
+  }
+}
+
+/** Свободные деньги демо-счёта; ключа нет или биржа не ответила — null (страница не падает). */
 async function readDemoBalances(): Promise<LabSettings["demoBalances"]> {
   const config = getDemoTradingConfig();
   if (!config) return null;
+  const venue = demoVenue(config.credentials);
   try {
-    return await fetchDemoUsdtBalances(demoVenue(config.credentials));
+    const [usdt, coinm] = await Promise.all([
+      fetchDemoUsdtBalances(venue),
+      readCoinmFreeUsd(venue),
+    ]);
+    return { ...usdt, coinm };
   } catch (error) {
     log.warn("experiments.settings", "Балансы Binance Demo не получены", {
-      error: error instanceof Error ? error.message : String(error),
+      error: errorText(error),
     });
     return null;
   }
@@ -189,7 +225,7 @@ const MODE_LABEL: Record<DemoMirrorMode, string> = {
 
 /**
  * Положение демо-зеркала эксперимента «Выкл · Авто · Вкл» (spec 008, 0043); null — эксперимента нет, { blocked } —
- * группа не умеет зеркало (COIN-M, spec 0023: «Демо-зеркало COIN-M — позже») или «Вкл» без ключа Binance Demo.
+ * группа не умеет зеркало (с spec 0056 умеют все, COIN-M тоже) или «Вкл» без ключа Binance Demo.
  * Открытые зеркала не трогаем.
  * «Авто» сразу применяет правило автомата к эксперименту (AC7) — без ожидания суточной проверки.
  */

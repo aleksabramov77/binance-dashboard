@@ -97,7 +97,13 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - COIN-M в движке: юниверс — бессрочные `…USD_PERP` со статусом TRADING (`fetchPerpetuals("coinm")`, размер контракта),
   оборот в $ = контракты × размер (`coinmTicker`), сделка — целые контракты (`sizePosition({ contractSizeUsd })`), PnL и
   комиссии в $ по формулам USDⓈ-M. Рынок без тикеров (dapi недоступен) — его эксперименты ждут следующего тика, одна запись
-  `warn`; остальные группы торгуют. Демо-зеркало COIN-M — позже: `DEMO_MIRROR_MARKETS`, галочка выключена, API — 400.
+  `warn`; остальные группы торгуют.
+- Демо-зеркало COIN-M (spec 0056) — на `demo-dapi.binance.com` (`DEMO_MIRROR_MARKETS` = spot, usdm, coinm; реальный счёт —
+  свой `LIVE_MIRROR_MARKETS` = spot, usdm). Площадка демо знает рынок `coinm` (`shared/api/binance/venue.server.ts`): правила
+  с размером контракта и монетой маржи, режим позиций — свой, стоп и тейк — условные ордера `/dapi/v1/order` (не algo, как у
+  fapi; `coinmOrders.ts` приводит их к виду algo-ордера). Количество на бирже — контракты, сделка и строка зеркала — в монете
+  (контракты × размер / вход, как paper); контракты и размер — в `protect_refs`. Резерв — $50 свободной маржи в монете
+  контракта (`MIRROR.coinmMinFreeUsd`), а не $500 на кошелёк.
 
 ## Сервер и клиент
 - Всё, что использует секреты, `node:crypto` или `node:fs` (логгер), — **только сервер**.
@@ -325,8 +331,8 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   `name`, `hypothesis`, `config`; необязательные `initialBudget` (10 000), `enabled` (`true`), `demoMirror` (`false`; `true` — ручное «Вкл» демо-зеркала, иначе
   «Авто», spec 0043), `parentId` и `variantNote` — вариант контрольного эксперимента и что в нём изменено (spec 0046:
   один уровень; родитель — в файле, каталоге или БД и сам не вариант, иначе `lab:private` отклоняет файл до записи).
-  id — `P` + буква группы + номер: `PS01` (spot), `PF01` (usdm), `PC01` (coinm, spec 0023; `demoMirror: true` для него —
-  ошибка: демо-зеркало COIN-M позже); с id каталога (`S..`, `F..`) не пересекается.
+  id — `P` + буква группы + номер: `PS01` (spot), `PF01` (usdm), `PC01` (coinm, spec 0023; `demoMirror: true` — с spec 0056,
+  как у остальных групп); с id каталога (`S..`, `F..`) не пересекается.
 - `pnpm lab:private [--dry-run] [--prod] [--file <path>]` (`scripts/lab-private.ts`, чистая логика и тесты —
   `scripts/lib/labPrivate.ts`): проверяет файл целиком (схема, лишние поля, префикс ↔ рынок, повторы, пересечение
   с каталогом) до подключения к БД, печатает цель (хост Postgres без пароля или «локальная PGlite») и план
