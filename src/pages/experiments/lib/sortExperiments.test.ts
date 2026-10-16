@@ -83,6 +83,31 @@ describe("sortExperiments", () => {
     ).toEqual(["F01", "S02", "S01"]);
   });
 
+  it("без закрытых сделок (в ячейке «—») — в конце при любом направлении, а не между плюсом и минусом", () => {
+    const rows = [
+      summary("F96", "usdm", []),
+      summary("F97", "usdm", [20]),
+      summary("F98", "usdm", [-8]),
+    ];
+    expect(
+      sortExperiments(rows, "all", "pnl", "desc").map((e) => e.id),
+    ).toEqual(["F97", "F98", "F96"]);
+    expect(sortExperiments(rows, "all", "pnl", "asc").map((e) => e.id)).toEqual(
+      ["F98", "F97", "F96"],
+    );
+    for (const key of [
+      "winRate",
+      "pnl",
+      "profitFactor",
+      "maxDrawdown",
+    ] as const)
+      for (const dir of ["asc", "desc"] as const)
+        expect(
+          sortExperiments(rows, "all", key, dir).at(-1)?.id,
+          `${key} ${dir}`,
+        ).toBe("F96");
+  });
+
   it("пустые значения (нет закрытых сделок) — в конце при любом направлении", () => {
     for (const dir of ["asc", "desc"] as const)
       expect(

@@ -47,7 +47,8 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
     case "winRate":
       return s.winRate;
     case "pnl":
-      return s.realizedPnl;
+      // Без закрытых сделок в ячейке «—», а не 0 $: такие строки — в конце, а не между плюсом и минусом.
+      return s.closed ? s.realizedPnl : null;
     case "profitFactor":
       // Без убытков, но с прибылью — бесконечный profit factor, лучше любого конечного.
       return (
