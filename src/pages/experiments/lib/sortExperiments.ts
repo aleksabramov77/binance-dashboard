@@ -8,6 +8,7 @@ import type { SortDir } from "@/shared/lib";
 import type { MarketFilter } from "../model/useExperimentsView";
 
 export const SORT_KEYS = [
+  "enabled",
   "id",
   "ag",
   "trades",
@@ -35,6 +36,8 @@ const AG_ORDER = Object.keys(ASSET_GROUPS);
 function sortValue(e: ExperimentSummary, key: SortKey): number | null {
   const s = e.stats;
   switch (key) {
+    case "enabled":
+      return e.enabled ? 1 : 0;
     case "id":
       return null;
     case "ag":

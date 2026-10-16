@@ -11,6 +11,7 @@ import {
   DisabledBadge,
   describeRunView,
   type ExperimentSummary,
+  enabledVariantsOf,
   formatProfitFactor,
   formatRate,
   formatSignedUsd,
@@ -21,6 +22,7 @@ import {
 } from "@/entities/experiment";
 import { mirrorLogsHref } from "@/entities/log-entry";
 import { DemoMirrorToggle } from "@/features/demo-mirror-toggle";
+import { ExperimentEnabledSwitch } from "@/features/experiment-toggle";
 import {
   cn,
   defineSortTable,
@@ -72,6 +74,13 @@ const COLUMNS: {
   numeric: boolean;
   description: string;
 }[] = [
+  {
+    key: "enabled",
+    label: "Вкл",
+    numeric: false,
+    description:
+      "Включён ли эксперимент сейчас — при любой эпохе в выборе периода. Включённый открывает новые paper-сделки; включение — сразу. Выключенный новых сделок не открывает, а открытые доводит до выхода; выключение — с причиной (окно), контрольный, у которого идут варианты, — только с подтверждением. Тот же тумблер — в /settings и на странице эксперимента.",
+  },
   {
     key: "id",
     label: "Эксперимент",
@@ -200,7 +209,10 @@ function ColumnHead({
     <SortableHead
       className={cn(
         column.numeric && "text-right",
-        (column.key === "demo" || column.key === "live") && "text-center",
+        (column.key === "demo" ||
+          column.key === "live" ||
+          column.key === "enabled") &&
+          "text-center",
         isDemoColumn(column.key) && DEMO_HEAD_TONE,
       )}
       {...head}
@@ -329,11 +341,14 @@ function ExperimentCell({
 
 function ExperimentRow({
   row,
+  variants,
   demoConfigured,
   collapsed,
   onToggle,
 }: {
   row: ExperimentRowView;
+  /** Включённые варианты, если строка — контрольный (окно выключения). */
+  variants: readonly string[];
   demoConfigured: boolean;
   collapsed: boolean;
   onToggle: (id: string) => void;
@@ -342,8 +357,15 @@ function ExperimentRow({
   const s = e.stats;
   return (
     <TableRow
-      className={cn(!e.enabled && "opacity-50", row.variantOf && "bg-muted/30")}
+      className={cn(
+        // Выключенный затемнён, кроме ячейки тумблера (первой): иначе тумблер плохо видно (spec 0050).
+        !e.enabled && "[&>td:not(:first-child)]:opacity-50",
+        row.variantOf && "bg-muted/30",
+      )}
     >
+      <TableCell className="text-center">
+        <ExperimentEnabledSwitch experiment={e} variants={variants} />
+      </TableCell>
       <ExperimentCell row={row} collapsed={collapsed} onToggle={onToggle} />
       <TableCell>
         <Badge
@@ -485,6 +507,7 @@ function ExperimentsDashboard() {
                 <ExperimentRow
                   key={r.e.id}
                   row={r}
+                  variants={enabledVariantsOf(data.experiments, r.e.id)}
                   demoConfigured={data.demoConfigured}
                   collapsed={collapsed.has(r.e.id)}
                   onToggle={toggle}

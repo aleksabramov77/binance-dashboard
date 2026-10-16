@@ -19,6 +19,15 @@ export default defineConfig([
     },
   },
   {
+    // `/**` обязателен: без него правило для слоя не выключается.
+    files: ["./src/features/**"],
+    rules: {
+      // Слайсы делятся по доменам (docs/ai/architecture.md → «Домены и изоляция»), а не группами папок: в features
+      // их больше 20 (spec 0050). Группировка по доменам — отдельной задачей, если понадобится.
+      "fsd/excessive-slicing": "off",
+    },
+  },
+  {
     files: ["./src/shared/**"],
     rules: {
       // Сегменты shared/api и shared/ui отдают модули по отдельности (binance, openrouter, button…).

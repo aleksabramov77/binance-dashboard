@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   assetGroupOf,
   DisabledBadge,
@@ -9,8 +8,8 @@ import {
   type LabSettings,
   pnlTone,
   useResetExperimentPaper,
-  useSetExperimentEnabled,
 } from "@/entities/experiment";
+import { ExperimentEnabledSwitch } from "@/features/experiment-toggle";
 import {
   cn,
   defineSortTable,
@@ -29,7 +28,6 @@ import {
 } from "@/shared/ui/card";
 import { ConfirmAction } from "@/shared/ui/confirm-action";
 import { SortableHead } from "@/shared/ui/sortable-head";
-import { Switch } from "@/shared/ui/switch";
 import {
   Table,
   TableBody,
@@ -38,7 +36,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
-import { DisableExperimentDialog } from "./DisableExperimentDialog";
 
 type Experiment = LabSettings["experiments"][number];
 
@@ -117,9 +114,6 @@ export function PaperAccountsCard({
 }: {
   experiments: LabSettings["experiments"];
 }) {
-  const toggle = useSetExperimentEnabled();
-  // Эксперимент, для которого открыто окно выключения (spec 0046).
-  const [disabling, setDisabling] = useState<Experiment | null>(null);
   const enabled = experiments.filter((e) => e.enabled).length;
   const { sort, head } = useTableSort(SORT_TABLE);
   const rows = sort
@@ -137,11 +131,6 @@ export function PaperAccountsCard({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {toggle.error && (
-          <p className="mb-3 text-sm text-destructive contain-inline-size">
-            {toggle.error.message}
-          </p>
-        )}
         <Table>
           <TableHeader>
             <TableRow>
@@ -213,15 +202,9 @@ export function PaperAccountsCard({
                   </div>
                 </TableCell>
                 <TableCell className="text-center">
-                  <Switch
-                    checked={e.enabled}
-                    disabled={toggle.isPending && toggle.variables?.id === e.id}
-                    aria-label={`Эксперимент ${e.id}`}
-                    onCheckedChange={(checked) =>
-                      checked
-                        ? toggle.mutate({ id: e.id, enabled: true })
-                        : setDisabling(e)
-                    }
+                  <ExperimentEnabledSwitch
+                    experiment={e}
+                    variants={enabledVariantsOf(experiments, e.id)}
                   />
                 </TableCell>
                 <TableCell className="text-right font-mono tabular-nums">
@@ -254,13 +237,6 @@ export function PaperAccountsCard({
             ))}
           </TableBody>
         </Table>
-        {disabling && (
-          <DisableExperimentDialog
-            experiment={disabling}
-            variants={enabledVariantsOf(experiments, disabling.id)}
-            onClose={() => setDisabling(null)}
-          />
-        )}
       </CardContent>
     </Card>
   );

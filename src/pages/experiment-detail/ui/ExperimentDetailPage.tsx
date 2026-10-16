@@ -24,6 +24,7 @@ import {
   type TradeStatsView,
   useExperiment,
 } from "@/entities/experiment";
+import { ExperimentEnabledSwitch } from "@/features/experiment-toggle";
 import {
   cn,
   defineSortTable,
@@ -46,6 +47,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
+import { enabledFamilyVariants } from "../lib/familyVariants";
 import { useDetailView } from "../model/useDetailView";
 import { VariantFamily } from "./VariantFamily";
 
@@ -423,6 +425,13 @@ export function ExperimentDetailPage({ id }: { id: string }) {
                 {!data.experiment.enabled && (
                   <DisabledBadge disabled={data.disabled} />
                 )}
+                <ExperimentEnabledSwitch
+                  experiment={data.experiment}
+                  variants={enabledFamilyVariants(
+                    data.experiment.id,
+                    data.family,
+                  )}
+                />
               </div>
               <p className="max-w-3xl text-muted-foreground">
                 {data.experiment.hypothesis}
