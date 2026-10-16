@@ -8,10 +8,7 @@ import {
   fetchWalletBalances,
 } from "@/shared/api/binance/account.server";
 import { fetchTickerPrices } from "@/shared/api/binance/public.server";
-import {
-  getBinanceCredentials,
-  isServerless,
-} from "@/shared/config/env.server";
+import { getAppHost, getBinanceCredentials } from "@/shared/config/env.server";
 import { aprWithTiers } from "./tierApr";
 
 const DUST_USD = 0.01;
@@ -22,7 +19,7 @@ export async function loadPortfolio(): Promise<Portfolio> {
   if (!creds)
     return {
       status: "not-configured",
-      hosting: isServerless() ? "cloud" : "local",
+      hosting: getAppHost() === "local" ? "local" : "cloud",
     };
 
   try {

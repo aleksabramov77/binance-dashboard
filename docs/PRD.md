@@ -219,7 +219,7 @@
 **Лаборатория экспериментов ✅** (запрос пользователя 2026-10-10, [spec 003](specs/003-experiments-lab.md)) —
 40 paper-экспериментов (20 Spot + 20 Futures) со своими бюджетами и учётом, статистика по эксперименту/
 рынку/монете/направлению, бюджет $10 000 на каждый эксперимент, сделки по $50 (решение 2026-10-10, раньше — риск 0,5%), сброс капиталов, БД Postgres (Supabase),
-запуск 24/7 на **Supabase (Tokyo: БД + тик в Edge Function) + Vercel (интерфейс)** — основной вариант, Oracle Cloud Free (Dubai) — резерв ([spec 007b](specs/007b-supabase-hosting.md)); вход только через GitHub. Решения пользователя: paper +
+запуск 24/7 на **Supabase (Tokyo: БД + тик в Edge Function) + Vercel (интерфейс)** — основной вариант до переезда на свою VM AWS Lightsail `apps-tokyo` (Tokyo; решение 2026-10-15, [spec 0017](specs/0017-lightsail-vm.md), [deploy-lightsail.md](ai/deploy-lightsail.md)) ([spec 007b](specs/007b-supabase-hosting.md)); вход только через GitHub. Решения пользователя: paper +
 лучшие в демо; ключ реального аккаунта на сервер не кладём.
 Сброс тестовых капиталов (`/settings`, задача 3d) — новая эпоха `runs`: открытые сделки закрываются по
 последней цене (нет цены — по цене входа, PnL 0, пометка `resetWithoutPrice`), старые сделки остаются
@@ -306,6 +306,7 @@ bStocks, но публичного торгового API для них не н�
 | `DB_SIZE_LIMIT_MB` | лимит базы для `/db` и порогов свободного места (по умолчанию 500 — Supabase Free) | — |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | бот уведомлений и чат владельца | — |
 | `TELEGRAM_WEBHOOK_SECRET` | секрет webhook бота (команды `/db`, `/help`); регистрация — `pnpm telegram:setup` | — |
+| `APP_HOST` | `vm` на своей VM (spec 0017): источник журнала `vm`, хостинг «облако»; на Vercel и Mac не задаётся | — |
 
 Баланс OpenRouter виден в шапке дашборда (бейдж «ИИ $…», `GET /api/openrouter/balance`): остаток
 счёта = пополнено − потрачено (`/api/v1/credits`), в подсказке — лимит ключа (`/api/v1/key`).

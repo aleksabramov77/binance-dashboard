@@ -6,7 +6,7 @@ import {
   type LogFilters,
   type LogLevel,
 } from "@/entities/log-entry";
-import { isServerless } from "@/shared/config/env.server";
+import { getAppHost } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { LEVEL_RANK } from "@/shared/lib/logger.server";
 
@@ -15,7 +15,7 @@ export const LOG_RETENTION_DAYS = 14;
 
 /** Приёмник логгера: пачка записей одной вставкой. */
 export async function writeLogs(entries: LogEntry[]): Promise<void> {
-  const source = isServerless() ? "vercel" : "local";
+  const source = getAppHost();
   await getDb()
     .insert(appLogsTable)
     .values(

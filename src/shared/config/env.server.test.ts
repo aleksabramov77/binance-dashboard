@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getAppHost,
   getDatabaseConfig,
   getDbSizeLimit,
   getTelegramConfig,
@@ -14,6 +15,16 @@ describe("isServerless", () => {
     expect(isServerless({ VERCEL: "1" })).toBe(true);
     expect(isServerless({})).toBe(false);
     expect(isServerless({ VERCEL: "" })).toBe(false);
+  });
+});
+
+describe("getAppHost", () => {
+  it("vercel при VERCEL=1, vm при APP_HOST=vm, иначе local", () => {
+    expect(getAppHost({ VERCEL: "1" })).toBe("vercel");
+    expect(getAppHost({ APP_HOST: "vm" })).toBe("vm");
+    expect(getAppHost({ APP_HOST: " vm " })).toBe("vm");
+    expect(getAppHost({})).toBe("local");
+    expect(getAppHost({ APP_HOST: "mac" })).toBe("local");
   });
 });
 

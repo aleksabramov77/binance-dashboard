@@ -192,6 +192,14 @@ export const isServerless = (
   env: Record<string, string | undefined> = process.env,
 ): boolean => env.VERCEL === "1";
 
+/** Где работает процесс: Vercel, своя VM (APP_HOST=vm в /etc/<проект>/app.env, spec 0017) или Mac. */
+export type AppHost = "vercel" | "vm" | "local";
+
+export const getAppHost = (
+  env: Record<string, string | undefined> = process.env,
+): AppHost =>
+  isServerless(env) ? "vercel" : env.APP_HOST?.trim() === "vm" ? "vm" : "local";
+
 /** Куда подключаться: Postgres по DATABASE_URL или встроенный PGlite (локально, без внешних сервисов). */
 export function getDatabaseConfig(
   env: Record<string, string | undefined> = process.env,

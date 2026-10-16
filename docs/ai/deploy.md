@@ -1,3 +1,6 @@
+> **Устарело (2026-10-16).** Oracle VM так и не создавалась; скрипты `scripts/deploy/` удалены. Своя VM теперь —
+> AWS Lightsail `apps-tokyo`: [deploy-lightsail.md](deploy-lightsail.md) (spec 0017).
+
 # Деплой на Oracle Cloud Always Free (резерв)
 
 > **Резервный вариант.** Основной хостинг с 2026-10-10 — Supabase + Vercel: [deploy-supabase.md](deploy-supabase.md).

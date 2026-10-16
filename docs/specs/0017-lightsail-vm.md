@@ -51,7 +51,7 @@ VM общая для нескольких личных проектов (поз�
   - копирует бандл на VM под `deploy`, перезапускает сервис и ждёт ответа сервера;
   - при сбое печатает журнал сервиса.
   Ветка — параметр запуска. Автоматического запуска с `main` пока нет, чтобы прод на Vercel не дублировался.
-  Секреты Actions: `VM_HOST`, `VM_USER=deploy`, `VM_SSH_KEY`.
+  Секреты Actions: `APPS_TOKYO_HOST`, `APPS_TOKYO_USER=deploy`, `APPS_TOKYO_SSH_KEY` (не `VM_*`: под этими именами старый Oracle-`deploy.yml` в `main` начал бы падать после каждого CI).
 - [ ] AC6. **Приложение на VM.**
   - Выкаченный `main` открывается на `https://binance.<ip>.sslip.io` с базой Supabase (как Vercel).
   - Журнал пишет `source = vm` (сейчас `vercel | local`).
