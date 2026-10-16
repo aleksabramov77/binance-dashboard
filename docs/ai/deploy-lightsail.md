@@ -23,7 +23,7 @@
 - `claude` — администратор (sudo), через него работает AI, ключ `~/.ssh/lightsail_apps_tokyo` на Mac владельца;
 - `aleksandr` — администратор (sudo) для владельца, его ключ `~/.ssh/apps_tokyo`;
 - `deploy` — вход для GitHub Actions (ключ `~/.ssh/apps_tokyo_deploy`, приватная часть — в секрете Actions); может только
-  писать в `/srv/<проект>/app` и `sudo systemctl restart|status <проект>`, `sudo journalctl -u <проект>`;
+  писать в `/srv/<проект>/app` и `sudo systemctl enable|restart <проект>`, `sudo systemctl status <проект> --no-pager`, `sudo journalctl -u <проект> -n 80 --no-pager`;
 - `binance`, `binance-live` — сервисы, без входа и без sudo.
 
 Вход под `root` и по паролю закрыт, встроенный `ubuntu` закрыт (`AllowUsers`). Lightsail browser SSH поэтому не
@@ -69,6 +69,6 @@ Homepage `https://binance.<ip>.sslip.io`, callback `https://binance.<ip>.sslip.i
 | Секреты | `ssh claude@<ip> 'sudoedit /etc/binance/app.env'` → рестарт |
 | Новый проект (сайт) | `sudo bash add-project.sh <имя> --port <порт>` → `https://<имя>.<ip>.sslip.io` |
 | Новый фоновый сервис | `sudo bash add-project.sh <имя> --no-web --exec <файл> --memory 128M --heap 96` |
-| Повторить общую настройку | `sudo CLAUDE_KEY=… DEPLOY_KEY=… [OWNER_KEY=…] LOCK_UBUNTU=1 bash bootstrap.sh` |
+| Повторить общую настройку | `sudo CLAUDE_KEY=… DEPLOY_KEY=… [OWNER_KEY=…] bash bootstrap.sh` (повторный запуск сам держит `ubuntu` закрытым) |
 
 Скрипты лежат в `scripts/server/`; на VM их копия — `~claude/server-scripts/`.

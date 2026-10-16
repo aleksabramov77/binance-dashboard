@@ -42,7 +42,8 @@ id "$NAME" >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --shell /usr/s
 
 # Код кладёт deploy (выкатка из CI), сервис только читает; данные — только у сервиса.
 install -d -m 755 "/srv/$NAME"
-install -d -m 750 -o deploy -g "$NAME" "$APP"
+# setgid: файлы выкатки наследуют группу сервиса (rsync --chmod=D2750,F640 в deploy.yml).
+install -d -m 2750 -o deploy -g "$NAME" "$APP"
 install -d -m 700 -o "$NAME" -g "$NAME" "$DATA"
 install -d -m 750 -o root -g "$NAME" "$ETC"
 [ -f "$ETC/app.env" ] || install -m 640 -o root -g "$NAME" /dev/null "$ETC/app.env"
@@ -85,13 +86,17 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable "$NAME" >/dev/null 2>&1
-# Не запускаем, пока нет кода: первый старт делает выкатка.
-[ -f "$APP/$EXEC" ] && systemctl restart "$NAME"
+# Пока кода нет, сервис выключен и при загрузке не стартует (иначе перезапуск каждые 10 с); включает первая выкатка.
+if [ -f "$APP/$EXEC" ]; then
+  systemctl enable "$NAME" >/dev/null 2>&1
+  systemctl restart "$NAME"
+else
+  systemctl disable "$NAME" >/dev/null 2>&1 || true
+fi
 
-# deploy может только перезапустить сервис и посмотреть его состояние и журнал.
+# deploy может только включить и перезапустить сервис и посмотреть его состояние и последние 80 строк журнала.
 cat >"/etc/sudoers.d/50-deploy-$NAME" <<SUDO
-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart $NAME, /usr/bin/systemctl status $NAME, /usr/bin/systemctl status $NAME --no-pager, /usr/bin/journalctl -u $NAME *
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl enable $NAME, /usr/bin/systemctl restart $NAME, /usr/bin/systemctl status $NAME --no-pager, /usr/bin/journalctl -u $NAME -n 80 --no-pager
 SUDO
 chmod 440 "/etc/sudoers.d/50-deploy-$NAME"
 visudo -cq || fail "sudoers не прошёл проверку visudo"

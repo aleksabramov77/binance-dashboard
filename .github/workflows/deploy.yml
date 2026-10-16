@@ -73,10 +73,11 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -t ed25519 "$VM_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-      # --delete: на VM остаётся ровно бандл; .next/cache — ссылка на /var/lib/<проект>/cache (запись сервиса).
+      # --delete: на VM остаётся ровно бандл; права 750/640, группа — сервиса (setgid каталога);
+      # .next/cache — ссылка на /var/lib/<проект>/cache (запись сервиса).
       - name: Копирование на VM
         run: |
-          rsync -az --delete --exclude '.next/cache' \
+          rsync -rlptz --delete --chmod=D2750,F640 --exclude '.next/cache' \
             .next/standalone/ "$VM_USER@$VM_HOST:/srv/$PROJECT/app/"
           ssh "$VM_USER@$VM_HOST" "ln -sfn /var/lib/$PROJECT/cache /srv/$PROJECT/app/.next/cache"
 
@@ -84,13 +85,15 @@ jobs:
         run: |
           ssh "$VM_USER@$VM_HOST" bash -s <<EOF
           set -e
+          sudo /usr/bin/systemctl enable $PROJECT
           sudo /usr/bin/systemctl restart $PROJECT
           for i in \$(seq 1 60); do
             code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:$PORT/ || true)
-            if [ "\$code" != 000 ]; then echo "OK: 127.0.0.1:$PORT → \$code"; exit 0; fi
+            # 2xx–4xx (в т.ч. редирект на вход) — сервер жив; 5xx — сбой (например, вход не настроен).
+            if [ "\$code" -ge 200 ] && [ "\$code" -lt 500 ]; then echo "OK: 127.0.0.1:$PORT → \$code"; exit 0; fi
             sleep 2
           done
           sudo /usr/bin/journalctl -u $PROJECT -n 80 --no-pager
-          echo "::error::$PROJECT не ответил за 2 минуты"
+          echo "::error::$PROJECT не ответил 2xx–4xx за 2 минуты (последний код: \$code)"
           exit 1
           EOF

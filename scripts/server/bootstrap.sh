@@ -2,7 +2,7 @@
 # Общая настройка VM apps-tokyo (AWS Lightsail, Ubuntu 24.04) под несколько личных проектов (spec 0017).
 # Запуск — от root (sudo), повторный запуск безопасен: каждый шаг проверяет, сделан ли он уже.
 #   sudo CLAUDE_KEY="ssh-ed25519 …" DEPLOY_KEY="ssh-ed25519 …" [OWNER_KEY="ssh-ed25519 …"] bash bootstrap.sh
-#   sudo LOCK_UBUNTU=1 bash bootstrap.sh   — после проверки входа под claude: закрыть вход встроенному ubuntu
+#   Повторный запуск (claude уже настроен) закрывает встроенного ubuntu сам; LOCK_UBUNTU=1 — закрыть сразу.
 # Проекты добавляет add-project.sh. Адреса и ключи в git не пишем: репозиторий публичный.
 set -euo pipefail
 
@@ -86,6 +86,9 @@ echo "  $(caddy version | cut -d' ' -f1)"
 # claude — администратор для AI, aleksandr — администратор для владельца: sudo без пароля (паролей нет,
 # вход только по ключу). deploy — вход для GitHub Actions, права — только sudoers проектов (add-project.sh).
 step "Пользователи"
+# Вход claude уже был настроен до этого запуска — значит, его проверили, и встроенный ubuntu закрываем всегда.
+CLAUDE_READY=0
+[ -s /home/claude/.ssh/authorized_keys ] && CLAUDE_READY=1
 add_login_user() { # <имя> <ключ> <sudo:yes|no>
   local name=$1 key=$2 admin=$3
   id "$name" >/dev/null 2>&1 || useradd -m -s /bin/bash "$name"
@@ -109,8 +112,13 @@ visudo -cq || fail "sudoers не прошёл проверку visudo"
 # --- 7. SSH: только ключи, без root ----------------------------------------------
 step "SSH"
 allow="claude aleksandr deploy"
-# Встроенный ubuntu остаётся, пока вход под claude не проверен (LOCK_UBUNTU=1 при повторном запуске).
-[ "${LOCK_UBUNTU:-0}" = 1 ] || allow="$allow ubuntu"
+# Встроенный ubuntu остаётся только на первом запуске, пока вход под claude не проверен. Со второго запуска (или
+# LOCK_UBUNTU=1) он закрыт: нет в AllowUsers, нет ключа и sudo от cloud-init.
+if [ "$CLAUDE_READY" = 1 ] || [ "${LOCK_UBUNTU:-0}" = 1 ]; then
+  rm -f /home/ubuntu/.ssh/authorized_keys /etc/sudoers.d/90-cloud-init-users
+else
+  allow="$allow ubuntu"
+fi
 cat >/etc/ssh/sshd_config.d/10-apps-tokyo.conf <<CONF
 PermitRootLogin no
 PasswordAuthentication no
