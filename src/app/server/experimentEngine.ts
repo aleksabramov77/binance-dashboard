@@ -6,6 +6,7 @@ import {
   type EngineStatus,
   engineTickSchema,
   type OnInvalidExperiment,
+  type RunParam,
   readExperimentDetail,
   readExperimentsOverview,
   readTradeStats,
@@ -257,19 +258,24 @@ export const warnInvalidExperiment: OnInvalidExperiment = ({ id, problem }) =>
     { id, problem },
   );
 
-/** Страница /experiments: каталог со статистикой текущей эпохи. */
-export async function getExperimentsOverview() {
+/** Страница /experiments: каталог со статистикой периода (текущая эпоха, прошлая или все — spec 0046). */
+export async function getExperimentsOverview(run?: RunParam) {
   await ensureEngineReady();
   return readExperimentsOverview(
     getDb(),
     await readEnabled(store()),
     getDemoTradingConfig() !== null,
     warnInvalidExperiment,
+    run,
   );
 }
 
-/** Страница /experiments/[id]; null — эксперимента нет в каталоге. */
-export async function getExperimentDetail(id: string, limit: number) {
+/** Страница /experiments/[id] за период; null — эксперимента нет в каталоге. */
+export async function getExperimentDetail(
+  id: string,
+  limit: number,
+  run?: RunParam,
+) {
   await ensureEngineReady();
   return readExperimentDetail(
     getDb(),
@@ -277,10 +283,11 @@ export async function getExperimentDetail(id: string, limit: number) {
     await readEnabled(store()),
     limit,
     warnInvalidExperiment,
+    run,
   );
 }
 
-/** Страница /stats: разрезы сделок эпохи; null — нет такой эпохи. */
+/** Страница /stats: разрезы сделок периода; несуществующая эпоха — текущая и missingRun. */
 export async function getTradeStats(query: StatsQuery) {
   await ensureEngineReady();
   return readTradeStats(getDb(), query, Date.now(), warnInvalidExperiment);

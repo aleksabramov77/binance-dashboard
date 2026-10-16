@@ -7,8 +7,11 @@ import {
   budgetFormSchema,
   createDbExperimentStore,
   DEFAULT_INITIAL_BUDGET,
+  DISABLE_REASONS,
+  type ExperimentEnabledState,
   type ExperimentMarket,
   type ExperimentResetResult,
+  enabledVariantsOf,
   experimentsTable,
   type GroupResetResult,
   getEpoch,
@@ -101,6 +104,8 @@ export async function getLabSettings(): Promise<LabSettings> {
           enabled: e.enabled,
           demoMirror: e.demoMirror,
           initialBudget: e.initialBudget,
+          parentId: e.parentId,
+          disabled: e.disabled,
           paper: {
             equity: e.stats.equity,
             pnl: e.stats.realizedPnl,
@@ -131,14 +136,39 @@ export async function setNextBudget(
   return getLabSettings();
 }
 
-/** Вкл/выкл эксперимента; null — эксперимента нет. Движок не входит в сделки выключенного. */
+/**
+ * Вкл/выкл эксперимента; null — эксперимента нет. Движок не входит в сделки выключенного. Выключение — с причиной
+ * (spec 0046); контрольный с включёнными вариантами — только с confirmControl, иначе { variants } без записи.
+ */
 export async function toggleExperiment(
   id: string,
-  enabled: boolean,
-): Promise<LabSettings | null> {
+  state: ExperimentEnabledState,
+  confirmControl = false,
+): Promise<LabSettings | null | { variants: string[] }> {
   await ensureEngineReady();
-  if (!(await setExperimentEnabled(getDb(), id, enabled))) return null;
-  log.info("experiments.toggle", `${id} ${enabled ? "включён" : "выключен"}`);
+  const db = getDb();
+  if (!state.enabled && !confirmControl) {
+    const rows = await db
+      .select({
+        id: experimentsTable.id,
+        parentId: experimentsTable.parentId,
+        enabled: experimentsTable.enabled,
+      })
+      .from(experimentsTable)
+      .orderBy(asc(experimentsTable.id));
+    const variants = enabledVariantsOf(rows, id);
+    if (variants.length) return { variants };
+  }
+  if (!(await setExperimentEnabled(db, id, state))) return null;
+  log.info(
+    "experiments.toggle",
+    state.enabled
+      ? `${id} включён`
+      : `${id} выключен: ${DISABLE_REASONS[state.reason]}${state.note ? ` — ${state.note}` : ""}`,
+    state.enabled
+      ? { experimentId: id }
+      : { experimentId: id, reason: state.reason, confirmControl },
+  );
   return getLabSettings();
 }
 

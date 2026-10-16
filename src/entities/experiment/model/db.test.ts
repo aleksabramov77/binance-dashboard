@@ -172,6 +172,49 @@ describe("миграция 0008 (spec 0030): контекст входа, MAE, �
   });
 });
 
+describe("миграция 0009 (spec 0046): варианты и причина выключения", () => {
+  const migration = readFileSync(
+    path.join(
+      process.cwd(),
+      "drizzle/0009_experiment_variants_disable_reason.sql",
+    ),
+    "utf8",
+  )
+    .split("--> statement-breakpoint")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  it("старая строка — без родителя и причины; повторный запуск не трогает данные", async () => {
+    const [before] = await db.select().from(experiments);
+    expect(before).toMatchObject({
+      parentId: null,
+      variantNote: null,
+      disabledReason: null,
+      disabledNote: null,
+      disabledAt: null,
+    });
+    await db
+      .update(experiments)
+      .set({
+        parentId: "F96",
+        variantNote: "цель 3R вместо 2R",
+        disabledReason: "loser",
+        disabledNote: "минус за две эпохи",
+        disabledAt: new Date("2026-10-16T10:00:00Z"),
+      })
+      .where(eq(experiments.id, "F06"));
+    for (const statement of migration) await db.execute(sql.raw(statement));
+    const [after] = await db.select().from(experiments);
+    expect(after).toMatchObject({
+      parentId: "F96",
+      variantNote: "цель 3R вместо 2R",
+      disabledReason: "loser",
+      disabledNote: "минус за две эпохи",
+      disabledAt: new Date("2026-10-16T10:00:00Z"),
+    });
+  });
+});
+
 describe("миграция 0007: futures → usdm (spec 0023, AC2)", () => {
   const MIGRATION = new URL(
     "../../../../drizzle/0007_futures_to_usdm.sql",

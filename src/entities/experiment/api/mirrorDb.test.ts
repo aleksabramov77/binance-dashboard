@@ -227,6 +227,17 @@ describe("демо-сводка и демо-сброс", () => {
 
     await markDemoReset(db, "F01");
     expect((await mirrorSummaries(db)).get("F01")).toBeUndefined();
+    // «Все эпохи» и прошлая эпоха (spec 0046): демо-сброс историю не отсекает.
+    expect((await mirrorSummaries(db, "all")).get("F01")).toMatchObject({
+      closed: 1,
+      pnl: 2,
+    });
+    expect((await mirrorSummaries(db, { runId: 1 })).get("F01")).toMatchObject({
+      closed: 1,
+    });
+    expect(
+      (await mirrorSummaries(db, { runId: 999 })).get("F01"),
+    ).toBeUndefined();
 
     // Без фактического выхода PnL — по цене выхода paper-сделки.
     const runId = await ensureRun(db);

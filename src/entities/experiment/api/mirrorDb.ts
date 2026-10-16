@@ -466,11 +466,16 @@ export const emptyMirrorSummary = (): MirrorSummary => ({
 });
 
 /**
- * Демо-сводка по экспериментам: все зеркала с момента experiments.demo_reset_at (без привязки к
- * эпохе paper — демо-счёт один на все эпохи).
+ * Какие зеркала сводить (spec 0046): current — с момента experiments.demo_reset_at (без привязки к эпохе paper —
+ * демо-счёт один на все эпохи); all — все зеркала, демо-сбросы историю не отсекают; { runId } — зеркала
+ * paper-сделок этой эпохи (прошлая эпоха на /experiments).
  */
+export type MirrorScope = "current" | "all" | { runId: number };
+
+/** Демо-сводка по экспериментам за scope (по умолчанию — с последнего демо-сброса). */
 export async function mirrorSummaries(
   db: Db,
+  scope: MirrorScope = "current",
 ): Promise<Map<string, MirrorSummary>> {
   const rows = await db
     .select({
@@ -489,7 +494,11 @@ export async function mirrorSummaries(
       eq(paperTradesTable.id, demoMirrorOrdersTable.tradeId),
     )
     .where(
-      sql`${demoMirrorOrdersTable.createdAt} >= coalesce((select ${experimentsTable.demoResetAt} from ${experimentsTable} where ${experimentsTable.id} = ${demoMirrorOrdersTable.experimentId}), '-infinity'::timestamptz)`,
+      scope === "current"
+        ? sql`${demoMirrorOrdersTable.createdAt} >= coalesce((select ${experimentsTable.demoResetAt} from ${experimentsTable} where ${experimentsTable.id} = ${demoMirrorOrdersTable.experimentId}), '-infinity'::timestamptz)`
+        : scope === "all"
+          ? undefined
+          : eq(paperTradesTable.runId, scope.runId),
     );
   // Порядок закрытия — для просадки от пика; незакрытые (null) в pnls не попадают.
   const closedTime = (r: (typeof rows)[number]) =>
