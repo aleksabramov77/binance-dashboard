@@ -83,6 +83,7 @@ export {
   useExperiments,
 } from "./api/useExperiments";
 export {
+  LabSettingsError,
   labSettingsQueryKey,
   useLabSettings,
   useResetCapitals,

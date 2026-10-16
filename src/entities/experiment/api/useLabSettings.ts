@@ -5,6 +5,7 @@ import type { z } from "zod";
 import type { ExperimentMirrorMode } from "../model/mirrorAuto";
 import {
   type BudgetForm,
+  controlConflictSchema,
   type DemoResetRequest,
   type DemoResetResult,
   demoResetResultSchema,
@@ -26,6 +27,24 @@ import {
 
 export const labSettingsQueryKey = ["experiments", "settings"] as const;
 
+/** Тело ошибки API настроек: { error }, у ответа 409 «контрольный с включёнными вариантами» — ещё variants (spec 0046). */
+const errorBodySchema = controlConflictSchema.partial();
+
+/**
+ * Ошибка запроса настроек лаборатории. variants — включённые варианты контрольного из ответа 409: окно выключения
+ * показывает по ним предупреждение и галочку, даже если данные страницы устарели (spec 0050).
+ */
+export class LabSettingsError extends Error {
+  readonly status: number;
+  readonly variants: string[];
+  constructor(message: string, status: number, variants: string[] = []) {
+    super(message);
+    this.name = "LabSettingsError";
+    this.status = status;
+    this.variants = variants;
+  }
+}
+
 async function request<T>(
   url: string,
   schema: z.ZodType<T>,
@@ -41,8 +60,13 @@ async function request<T>(
   });
   const body: unknown = await res.json().catch(() => null);
   if (!res.ok) {
-    const error = (body as { error?: string } | null)?.error;
-    throw new Error(error ?? `Сервер ответил ${res.status}`);
+    const parsed = errorBodySchema.safeParse(body);
+    const error = parsed.success ? parsed.data : {};
+    throw new LabSettingsError(
+      error.error ?? `Сервер ответил ${res.status}`,
+      res.status,
+      error.variants,
+    );
   }
   return schema.parse(body);
 }
