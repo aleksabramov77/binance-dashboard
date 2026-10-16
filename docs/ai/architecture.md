@@ -40,9 +40,9 @@ Zustand (клиентское состояние, если понадобитс�
 | Earn | `pages/earn` (вкладки Simple / Dual / Стейкинг и DeFi / Гид), `widgets/{best-offers,changes-feed,offers-table,dual-offers-table,yield-products-table,kind-summary,earn-guide,allocation-plan}`, `features/{collect-snapshot,refresh-snapshot,offer-filters,load-earn-catalog,allocation-advice}`, `entities/{earn-offer,earn-product}` (сложные продукты, гид — spec 0019) | `/api/earn/*` (в т.ч. `/api/earn/summary` — публичная сводка, `/api/earn/advanced` — каталоги по ключу), `/api/cron/earn-snapshot` | таблица `earn_snapshots` (`entities/earn-offer/model/db.ts`); каталоги сложных продуктов — только кэш в памяти 5 мин |
 | Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
-| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам (`computeMarketBudgets`, `useExperimentBudgets`), группы активов AG — `model/assetGroup.ts` (`spot` / `usdm` / `coinm`, вид группы `kind`, доступность демо-зеркала; spec 0023), демо-метрики — `computeDemoStats`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; сброс группы активов — `resetGroupRun` / `resetGroupCapital` / `resetGroupDemo`, карточка `/settings#groups`, spec 0038; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015); бэктест по истории — `scripts/lab-backtest.ts` + `scripts/lib/{labBacktest,labHistory}.ts` (`pnpm lab:backtest`, spec 0032; повтор `runTick`, дисковый кэш свечей вне git) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`, `/api/experiments/reset/group`), `/api/cron/tick`, `/api/cron/demo-mirror` | таблицы `experiments`, `runs`, `paper_trades` (с контекстом входа и MAE, spec 0030), `engine_state`, `demo_mirror_orders`, `skipped_signals` (отсечённые лимитом сигналы, spec 0030; объём ограничен движком) |
+| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам (`computeMarketBudgets`, `useExperimentBudgets`), группы активов AG — `model/assetGroup.ts` (`spot` / `usdm` / `coinm`, вид группы `kind`, доступность демо-зеркала; spec 0023), демо-метрики — `computeDemoStats`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; сброс группы активов — `resetGroupRun` / `resetGroupCapital` / `resetGroupDemo`, карточка `/settings#groups`, spec 0038; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015); бэктест по истории — `scripts/lab-backtest.ts` + `scripts/lib/{labBacktest,labHistory}.ts` (`pnpm lab:backtest`, spec 0032; повтор `runTick`, дисковый кэш свечей вне git); реальный счёт (spec 0047) — `entities/live-account` (пульс воркера: схема, последний пульс в БД, состояние), карточка `pages/settings` → `LiveAccountCard`, воркер `scripts/live-worker.ts` + `scripts/lib/liveWorker.ts` (`pnpm live:worker`, бандл `pnpm live:build`), композиция `src/app/server/liveAccount.ts` | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`, `/api/experiments/reset/group`), `/api/cron/tick`, `/api/cron/demo-mirror`, `/api/live/heartbeat` (пульс воркера, Bearer `LIVE_WORKER_SECRET`), `/api/live/status` (карточка) | таблицы `experiments`, `runs`, `paper_trades` (с контекстом входа и MAE, spec 0030), `engine_state`, `demo_mirror_orders`, `skipped_signals` (отсечённые лимитом сигналы, spec 0030; объём ограничен движком), `live_worker_state` (последний пульс воркера реального счёта и состояние для уведомлений, spec 0047) |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
-| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`, `accountBalances.ts`), `proxy.ts`, `widgets/app-header` (в т.ч. «Счета» — чипы групп Paper / Demo / Real, spec 0038), `entities/account-balance` (остатки Demo и Real по группам), `pages/{logs,login,help}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → задача в GitHub → Telegram), `features/db-space` (свободное место в базе: пороги, тексты бота), `src/app/server/{logs,logMonitor,alertState,dbSpace,telegramBot}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), `shared/api/github` (REST: issues, метки, комментарии), `.claude/routines/alert-triage.md` (routine разбора тревог), плашка новой версии (`widgets/app-header`: `NewVersionBanner`, `useNewVersionAvailable`; `shared/lib/client` — версия страницы и `reportClientError`, spec 0036), прочий `shared/*` | `/api/accounts/balances` (кэш 60 с), `/api/logs` (фильтры `level`/`event`/`experiment`/`days`), `/api/version`, `/api/cron/log-monitor`, `/api/telegram/webhook`, `/api/auth/*`, страница `/login`, страница `/help` (глоссарий из `docs/ai/glossary.md` через `pnpm glossary`) | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
+| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`, `accountBalances.ts`), `proxy.ts`, `widgets/app-header` (в т.ч. «Счета» — чипы групп Paper / Demo / Real, spec 0038; Real — торговый субсчёт по пульсу воркера, spec 0047), `entities/account-balance` (остатки Demo и Real по группам), `pages/{logs,login,help}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → задача в GitHub → Telegram), `features/db-space` (свободное место в базе: пороги, тексты бота), `src/app/server/{logs,logMonitor,alertState,dbSpace,telegramBot}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), `shared/api/github` (REST: issues, метки, комментарии), `.claude/routines/alert-triage.md` (routine разбора тревог), плашка новой версии (`widgets/app-header`: `NewVersionBanner`, `useNewVersionAvailable`; `shared/lib/client` — версия страницы и `reportClientError`, spec 0036), прочий `shared/*` | `/api/accounts/balances` (кэш 60 с), `/api/logs` (фильтры `level`/`event`/`experiment`/`days`), `/api/version`, `/api/cron/log-monitor`, `/api/telegram/webhook`, `/api/auth/*`, страница `/login`, страница `/help` (глоссарий из `docs/ai/glossary.md` через `pnpm glossary`) | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
 
 Правила:
 - **Нет импортов между доменами** ни на каком слое. Фича лаборатории не импортирует `entities/trade`,
@@ -114,6 +114,8 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - Binance публичное API (рынок, Earn) — без ключа.
 - Binance read-only ключ — портфель (`BINANCE_API_KEY/SECRET`).
 - Binance Demo Trading — сделки на виртуальные деньги (`BINANCE_DEMO_API_KEY/SECRET`).
+- Binance реальный счёт (торговый субсчёт, spec 0047) — ключ `BINANCE_TRADE_API_KEY/SECRET` только у воркера на VM,
+  клиент `shared/api/binance/live.server.ts` с белым списком запросов (сейчас только чтение).
 - OpenRouter — «Разбор от ИИ» (`OPENROUTER_API_KEY`).
 Сетевые повторы — `shared/lib/fetchRetry.ts`; подписанные запросы — `shared/api/binance/signed.ts`.
 
@@ -126,7 +128,9 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - Режим — `getAuthConfig()` (`shared/config/env.server.ts`): без `AUTH_SECRET` вне production — защита
   выключена (локальная разработка, `/api/auth/*` → 404); в production без полного набора `AUTH_*` или при
   частичной настройке — **закрыто всё** (503, fail-closed).
-- Без сессии открыты только `/login`, `/api/auth/*`, `/api/cron/*` и `/api/telegram/*`. Cron защищён своим секретом:
+- Без сессии открыты только `/login`, `/api/auth/*`, `/api/cron/*`, `/api/telegram/*` и точный путь
+  `/api/live/heartbeat` (пульс воркера реального счёта: `Authorization: Bearer $LIVE_WORKER_SECRET`, проверка
+  `checkCronAuth` — без секрета или с неверным 401, в production без `LIVE_WORKER_SECRET` 503). Cron защищён своим секретом:
   `Authorization: Bearer $CRON_SECRET` (`shared/lib/auth/cronAuth.server.ts`, сравнение за постоянное время);
   webhook Telegram — заголовком `X-Telegram-Bot-Api-Secret-Token` = `TELEGRAM_WEBHOOK_SECRET` (`checkSecretHeader`, без секрета — 503).
 - UI: `features/auth` — кнопка «Войти через GitHub», меню пользователя в хедере (аватар, логин, «Выйти»).
@@ -173,6 +177,50 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   `GET /api/logs`: `level`, `event` (список через запятую), `experiment` (`data->>'experimentId'`), `days` (1…14)
   — `entities/log-entry/model/filters.ts`. Демо-зеркало пишет каждый отказ/пропуск отдельной записью
   `mirror.rejected` / `mirror.skipped` с `experimentId` (spec 0016).
+
+## Воркер реального счёта (spec 0047)
+- Отдельный Node-процесс `scripts/live-worker.ts`: единственный, у кого есть торговый ключ субсчёта. Входящих соединений
+  не принимает, `DATABASE_URL` и Telegram не знает; журнал — только stdout/stderr (`disableLogFiles()` в логгере: файлов
+  `data/logs` нет, приёмник БД не подключён). Env: `BINANCE_TRADE_API_KEY`, `BINANCE_TRADE_API_SECRET`,
+  `LIVE_WORKER_SECRET`, `LIVE_APP_URL`; локально подхватывает `.env.local` из текущего каталога.
+- Цикл раз в минуту (`scripts/lib/liveWorker.ts`, `runCheck`): права ключа (`apiRestrictions`) при старте и каждые
+  10 мин, пока ключ заблокирован — каждый цикл; при годном ключе — аккаунт Spot (UID, остатки, equity по публичным
+  ценам), UID против основного счёта (UID основного присылает приложение в ответе на пульс, по read-only ключу), при
+  `enableFutures` — аккаунт USDⓈ-M. Заблокирован — дальше проверки прав на биржу не ходит. Ошибка биржи — в поле
+  `error` пульса, оценка не снимается.
+- Пульс: `POST ${LIVE_APP_URL}/api/live/heartbeat` (схема `liveHeartbeatSchema`), ответ — `{ ok, verdict, mainAccount }`.
+  Приложение хранит последний пульс в `live_worker_state`; смена оценки (годится ↔ заблокирован ↔ ключ не задан) — одна
+  запись `live.status` и одно сообщение Telegram (только в production и не для фикстур). «Молчит» (нет пульса дольше
+  `LIVE_SILENT_AFTER_SEC`, по умолчанию 5 мин) ловит монитор журнала: правило `live:silent` без напоминаний
+  (`repeat: false`) + запись `live.status`; вернулся — запись «снова на связи», «Восстановлено» шлёт монитор. Пока пульса
+  не было ни разу, правило не срабатывает.
+- Команды: `pnpm live:worker` (цикл), `--once` (один пульс, код 1 — не принят), `--fixture ok|blocked|main-account`
+  (готовый пульс без биржи; отказ, если задан торговый ключ или `LIVE_APP_URL` не localhost/127.0.0.1; production
+  фикстуры не принимает).
+- Бандл для VM: `pnpm live:build` → `dist/live-worker.mjs` (esbuild, ESM, target node22, все зависимости внутри,
+  версия = версия пакета + коммит). `dist/` в `.gitignore`.
+- Установка на VM (делает сессия «Migration to AWS», `scripts/server/add-project.sh binance-live --no-web`): пользователь
+  и сервис `binance-live`, env — `/etc/binance-live/app.env` (640, только для пользователя воркера), исходящие —
+  `api.binance.com`, `fapi.binance.com` и хост `LIVE_APP_URL`. Unit (примерно):
+  ```ini
+  [Unit]
+  Description=Binance Dashboard — воркер реального счёта
+  After=network-online.target
+  Wants=network-online.target
+
+  [Service]
+  User=binance-live
+  EnvironmentFile=/etc/binance-live/app.env
+  WorkingDirectory=/opt/binance-live
+  ExecStart=/usr/bin/node /opt/binance-live/live-worker.mjs
+  Restart=always
+  RestartSec=10
+
+  [Install]
+  WantedBy=multi-user.target
+  ```
+  Проверка после установки: `sudo -u binance-live node /opt/binance-live/live-worker.mjs --once` → «Пульс принят»;
+  журнал — `journalctl -u binance-live`.
 
 ## Рассинхрон версий клиента (spec 0036)
 - Версия сборки — `deploymentId` в `next.config.ts`: `NEXT_DEPLOYMENT_ID`, иначе `VERCEL_DEPLOYMENT_ID` (id деплоя, задаёт

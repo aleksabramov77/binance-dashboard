@@ -347,6 +347,7 @@ bStocks, но публичного торгового API для них не н�
 | `DEMO_MAX_NOTIONAL_USD` | лимит объёма демо-сделки (по умолчанию 1000) | — |
 | `BINANCE_TRADE_API_KEY` / `BINANCE_TRADE_API_SECRET` | реальный счёт (§3.7, spec 0047): ключ **субсчёта**, только в env воркера на VM | чтение + Spot + Futures, IP-whitelist VM; **без вывода и переводов** — воркер проверяет и блокирует |
 | `LIVE_WORKER_SECRET`, `LIVE_APP_URL` | пульс воркера реального счёта → `POST /api/live/heartbeat` (секрет — у воркера и на Vercel) | — |
+| `LIVE_SILENT_AFTER_SEC` | через сколько секунд без пульса «воркер молчит» (по умолчанию 300; у приложения) | — |
 | `OPENROUTER_API_KEY` | «Разбор от ИИ» через OpenRouter | — |
 | `ANALYSIS_MODEL` | модель разбора (по умолчанию `anthropic/claude-haiku-5.5`) | — |
 | `AUTH_SECRET`, `AUTH_GITHUB_ID/SECRET`, `AUTH_ALLOWED_GITHUB_LOGINS` | вход через GitHub только для владельца (spec 006) | в production обязательны |
