@@ -66,9 +66,9 @@ const HELP: Record<SortKey, string> = {
   id: "Код эксперимента.",
   name: "Название эксперимента.",
   trading:
-    "Галочка — новые входы эксперимента повторяются на демо-счёте Binance (виртуальные деньги). Включение и выключение — с подтверждением.",
+    "Переключатель «Выкл · Авто · Вкл»: повторяются ли новые входы эксперимента на демо-счёте Binance (виртуальные деньги). «Авто» — раз в сутки решает автомат по paper-сделкам, «Авто · вкл» — сейчас торгует; «Вкл» / «Выкл» — вручную, автомат их не меняет. «Вкл» — с подтверждением.",
   trades:
-    "Сделки на демо-счёте с последнего демо-сброса: закрытые (+ открытые сейчас); «отказ» — биржа не приняла вход, «пропуск» — зеркало само не повторяло вход (монета занята другим зеркалом, вход старше 10 минут).",
+    "Сделки на демо-счёте с последнего демо-сброса: закрытые (+ открытые сейчас); «отказ» — биржа не приняла вход, «пропуск» — зеркало само не повторяло вход (встречная позиция без Hedge mode, монеты нет на демо, вход старше 10 минут).",
   winRate: "Доля прибыльных среди закрытых демо-сделок.",
   pnl: "Плюс или минус на демо-счёте по эксперименту с последнего демо-сброса, $, без комиссий.",
   resetAt:
@@ -98,8 +98,8 @@ function ResetDemoButton({ e }: { e: Experiment }) {
         </li>
         <li>Демо-статистика эксперимента (сделки, win rate, PnL) — с нуля.</li>
         <li>
-          Галочка «торговля» и paper-счёт не меняются: новые входы продолжат
-          зеркалиться.
+          Переключатель «торговля» и paper-счёт не меняются: новые входы
+          продолжат зеркалиться.
         </li>
       </ul>
     </ConfirmAction>
@@ -119,10 +119,10 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
   const pnl = experiments.reduce((n, e) => n + e.demo.pnl, 0);
 
   return (
-    <Card>
+    <Card className="w-fit max-w-full min-w-0">
       <CardHeader>
         <CardTitle>Демо-счёт Binance</CardTitle>
-        <CardDescription>
+        <CardDescription className="contain-inline-size">
           Реальные ордера на demo.binance.com с виртуальными деньгами. Торгуют{" "}
           {trading} из {experiments.length} экспериментов; открыто позиций:{" "}
           {open}; итог по закрытым:{" "}
@@ -134,7 +134,7 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {!demoConfigured && (
-          <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+          <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm contain-inline-size">
             На сервере не задан ключ Binance Demo (BINANCE_DEMO_API_KEY /
             SECRET) — торговля на демо-счёте не работает.
           </p>
@@ -147,7 +147,7 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
             </dd>
             <dt className="text-muted-foreground">Свободно USDⓈ-M</dt>
             <dd className="font-mono tabular-nums">
-              {demoBalances ? formatUsd(demoBalances.futures) : "—"}
+              {demoBalances ? formatUsd(demoBalances.usdm) : "—"}
             </dd>
           </dl>
           <ConfirmAction
@@ -168,9 +168,10 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
               </li>
               <li>Демо-статистика всех экспериментов — с нуля.</li>
               <li>
-                Paper-счета и галочки «торговля» не меняются. Баланс демо-счёта
-                приложение сбросить не может (у Binance нет такого API): чтобы
-                начать и баланс с нуля, нажмите «Сброс» на сайте Binance:{" "}
+                Paper-счета и переключатели «торговля» не меняются. Баланс
+                демо-счёта приложение сбросить не может (у Binance нет такого
+                API): чтобы начать и баланс с нуля, нажмите «Сброс» на сайте
+                Binance:{" "}
                 <a
                   href={DEMO_WALLET_URL}
                   target="_blank"
@@ -185,7 +186,7 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
           </ConfirmAction>
         </div>
         {resetAll.data && (
-          <output className="text-sm text-muted-foreground">
+          <output className="text-sm text-muted-foreground contain-inline-size">
             Демо сброшено: закрыто позиций {resetAll.data.closed}
             {resetAll.data.failed > 0 &&
               `, не закрылись ${resetAll.data.failed} — зеркало повторит попытку`}
@@ -245,9 +246,7 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
               return (
                 <TableRow key={e.id}>
                   <TableCell className="font-mono">{e.id}</TableCell>
-                  <TableCell className="max-w-sm whitespace-normal font-medium">
-                    {e.name}
-                  </TableCell>
+                  <TableCell className="font-medium">{e.name}</TableCell>
                   <TableCell className="text-center">
                     <DemoMirrorToggle
                       experiment={e}

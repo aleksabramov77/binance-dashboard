@@ -15,7 +15,7 @@ async function getExperimentBudgets() {
   return experimentBudgetsSchema.parse(body);
 }
 
-/** Бюджеты Spot/Futures текущей эпохи; движок тикает раз в минуту — обновляем раз в 30 с. */
+/** Бюджеты групп Spot, USDⓈ-M и COIN-M текущей эпохи; движок тикает раз в минуту — обновляем раз в 30 с. */
 export function useExperimentBudgets() {
   return useQuery({
     queryKey: experimentBudgetsQueryKey,

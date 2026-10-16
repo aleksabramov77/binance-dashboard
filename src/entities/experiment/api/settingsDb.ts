@@ -1,5 +1,5 @@
 import type { PaperTrade } from "@binance-dashboard/trading-core";
-import { and, count, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import {
   engineStateTable,
@@ -76,11 +76,15 @@ export interface ResetRunInput {
 
 type Closes = ResetRunInput["closes"];
 
-/** Закрыть открытые сделки эпохи runId по плану (manual); уже закрытые пропускаются. */
+/**
+ * Закрыть открытые сделки эпохи runId по плану (manual); уже закрытые пропускаются. experimentIds — закрывать только
+ * сделки этих экспериментов (сброс группы: чужое закрытие в плане не применяется).
+ */
 async function applyCloses(
   tx: Db,
   runId: number,
   closes: Closes,
+  experimentIds?: string[],
 ): Promise<{ closed: number; closedWithoutPrice: number }> {
   let closed = 0;
   let closedWithoutPrice = 0;
@@ -101,6 +105,9 @@ async function applyCloses(
           eq(paperTradesTable.id, id),
           eq(paperTradesTable.runId, runId),
           isNull(paperTradesTable.closedAt),
+          experimentIds === undefined
+            ? undefined
+            : inArray(paperTradesTable.experimentId, experimentIds),
         ),
       )
       .returning({ id: paperTradesTable.id });
@@ -170,6 +177,71 @@ export async function resetRun(
   });
 }
 
+/** Дописать метки свечей в engine_state[barsKey], не трогая метки других экспериментов. */
+async function mergeBars(
+  tx: Db,
+  barsKey: string,
+  bars: Record<string, number>,
+): Promise<void> {
+  if (Object.keys(bars).length === 0) return;
+  await tx
+    .insert(engineStateTable)
+    .values({ key: barsKey, value: bars })
+    .onConflictDoUpdate({
+      target: engineStateTable.key,
+      set: {
+        value: sql`${engineStateTable.value} || ${JSON.stringify(bars)}::jsonb`,
+        updatedAt: sql`now()`,
+      },
+    });
+}
+
+/**
+ * Сброс Paper группы активов — «эра группы» (spec 0038, решение 4): одной транзакцией для всех экспериментов
+ * группы, включая выключенные, — закрыть их открытые сделки текущей эпохи по плану (manual), начать учёт заново
+ * (reset_at = now) со стартового бюджета initialBudget и пометить их текущие свечи обработанными. Новой эпохи нет,
+ * другие группы не меняются. Вызывать под блокировкой тика; closes и bars — только по экспериментам группы.
+ */
+export async function resetGroupRun(
+  db: Db,
+  input: {
+    runId: number;
+    market: string;
+    closes: Closes;
+    initialBudget: number;
+    bars: Record<string, number>;
+    barsKey: string;
+  },
+): Promise<{
+  experiments: number;
+  closed: number;
+  closedWithoutPrice: number;
+}> {
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(experimentsTable)
+      .set({
+        resetAt: sql`now()`,
+        initialBudget: input.initialBudget,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(experimentsTable.market, input.market))
+      .returning({ id: experimentsTable.id });
+    if (rows.length === 0)
+      return { experiments: 0, closed: 0, closedWithoutPrice: 0 };
+    const ids = new Set(rows.map((r) => r.id));
+    const result = await applyCloses(tx, input.runId, input.closes, [...ids]);
+    await mergeBars(
+      tx,
+      input.barsKey,
+      Object.fromEntries(
+        Object.entries(input.bars).filter(([id]) => ids.has(id)),
+      ),
+    );
+    return { experiments: rows.length, ...result };
+  });
+}
+
 /**
  * Отдельный сброс paper-капитала эксперимента (решение пользователя 2026-10-11): закрыть его
  * открытые сделки текущей эпохи (manual), поставить experiments.reset_at = now — учёт эксперимента
@@ -197,19 +269,7 @@ export async function resetExperimentRun(
       return { found: false, closed: 0, closedWithoutPrice: 0 };
     const result = await applyCloses(tx, input.runId, input.closes);
     if (input.bar !== undefined)
-      await tx
-        .insert(engineStateTable)
-        .values({
-          key: input.barsKey,
-          value: { [input.experimentId]: input.bar },
-        })
-        .onConflictDoUpdate({
-          target: engineStateTable.key,
-          set: {
-            value: sql`${engineStateTable.value} || ${JSON.stringify({ [input.experimentId]: input.bar })}::jsonb`,
-            updatedAt: sql`now()`,
-          },
-        });
+      await mergeBars(tx, input.barsKey, { [input.experimentId]: input.bar });
     return { found: true, ...result };
   });
 }

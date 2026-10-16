@@ -36,3 +36,15 @@ export function formatPpDelta(delta: number): string {
   const pp = (delta * 100).toFixed(2).replace(".", ",");
   return `${delta > 0 ? "+" : ""}${pp} п.п.`;
 }
+
+/** Число со словом в нужной форме: 1 сделка, 2 сделки, 5 сделок (11–14 — «сделок»). */
+export function pluralRu(
+  n: number,
+  [one, few, many]: readonly [one: string, few: string, many: string],
+): string {
+  const d10 = Math.abs(n) % 10;
+  const d100 = Math.abs(n) % 100;
+  if (d10 === 1 && d100 !== 11) return `${n} ${one}`;
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return `${n} ${few}`;
+  return `${n} ${many}`;
+}

@@ -5,7 +5,7 @@ import { type MirrorDeps, runMirror } from "./runMirror";
 const NOW = Date.parse("2026-10-11T12:00:00Z");
 const trade = (over: Partial<MirrorTradeInput>): MirrorTradeInput => ({
   tradeId: "t1",
-  market: "futures",
+  market: "usdm",
   symbol: "ETHUSDT",
   direction: "long",
   openedAt: "2026-10-11T11:59:00Z",
@@ -21,8 +21,10 @@ function deps(over: Partial<MirrorDeps> = {}): MirrorDeps {
     now: () => NOW,
     configured: true,
     listCandidates: async () => [],
-    busySymbols: async () => new Set(),
+    activeMirrors: async () => [],
+    positionMode: async () => "oneway",
     hasSymbol: async () => true,
+    freeUsd: async () => 10_000,
     claim: async () => true,
     open: async () => ({
       id: "r1",
@@ -34,6 +36,7 @@ function deps(over: Partial<MirrorDeps> = {}): MirrorDeps {
     }),
     markSkipped: vi.fn(async () => {}),
     saveOpen: vi.fn(async () => {}),
+    sweepLegs: async () => [],
     listToClose: async () => [],
     claimToClose: async () => null,
     close: async () => ({
@@ -177,7 +180,7 @@ describe("runMirror", () => {
     let clock = NOW;
     const claimToClose = vi.fn(async (tradeId: string) => ({
       tradeId,
-      market: "futures" as const,
+      market: "usdm" as const,
       symbol: "ETHUSDT",
       direction: "long" as const,
       quantity: 1,
@@ -207,5 +210,194 @@ describe("runMirror", () => {
     expect(claimToClose).not.toHaveBeenCalledWith("c3");
     expect(open).not.toHaveBeenCalled();
     expect(r.deferred).toBe(1);
+  });
+
+  it("сначала сверка своих ног: закрытые биржей зеркала — в результате, до закрытий и входов", async () => {
+    const order: string[] = [];
+    const r = await runMirror(
+      deps({
+        sweepLegs: async () => {
+          order.push("sweep");
+          return [{ tradeId: "m1", symbol: "ADAUSDT" }];
+        },
+        listToClose: async () => {
+          order.push("list");
+          return [];
+        },
+      }),
+    );
+    expect(order).toEqual(["sweep", "list"]);
+    expect(r.swept).toEqual([{ tradeId: "m1", symbol: "ADAUSDT" }]);
+  });
+
+  it("сверка ног получает бюджет прогона: после 200 с — true", async () => {
+    let clock = NOW;
+    let budgetCheck: (() => boolean) | null = null;
+    await runMirror(
+      deps({
+        now: () => clock,
+        sweepLegs: async (overBudget) => {
+          budgetCheck = overBudget;
+          return [];
+        },
+      }),
+    );
+    expect(budgetCheck).not.toBeNull();
+    const check = budgetCheck as unknown as () => boolean;
+    expect(check()).toBe(false);
+    clock += 201_000;
+    expect(check()).toBe(true);
+  });
+});
+
+describe("runMirror: резерв демо-кошелька (spec 0043)", () => {
+  // Объём каждой сделки — 0,5 × $100 = $50.
+  it("после входа останется меньше $500 — пропуск с причиной, биржа заявку не получает", async () => {
+    const open = vi.fn();
+    const d = deps({
+      open,
+      freeUsd: async () => 540,
+      listCandidates: async () => [trade({ tradeId: "a" })],
+    });
+    const r = await runMirror(d);
+    expect(open).not.toHaveBeenCalled();
+    expect(r.skipped).toBe(1);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "a",
+      "мало свободных средств на демо: $490 < резерв $500",
+    );
+  });
+
+  it("остаток читается раз за прогон на рынок, каждый вход прогона вычитает свой объём", async () => {
+    const freeUsd = vi.fn(async () => 600);
+    const opened: string[] = [];
+    const d = deps({
+      freeUsd,
+      listCandidates: async () => [
+        trade({ tradeId: "a", symbol: "ETHUSDT" }),
+        trade({ tradeId: "b", symbol: "SOLUSDT" }),
+        trade({ tradeId: "c", symbol: "XRPUSDT" }),
+      ],
+      open: async (req) => {
+        opened.push(req.symbol);
+        return {
+          id: "r",
+          status: "protected",
+          message: "ok",
+          entryPrice: 100,
+          filledQuantity: req.quantity,
+          steps: [],
+        };
+      },
+    });
+    const r = await runMirror(d);
+    // 600 − 50 = 550, 550 − 50 = 500 (не меньше резерва), 500 − 50 = 450 — пропуск.
+    expect(opened).toEqual(["ETHUSDT", "SOLUSDT"]);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "c",
+      "мало свободных средств на демо: $450 < резерв $500",
+    );
+    expect(r.skipped).toBe(1);
+    expect(freeUsd).toHaveBeenCalledTimes(1);
+    expect(freeUsd).toHaveBeenCalledWith("usdm");
+  });
+
+  it("отказ биржи средства не тратит: следующий вход проверяется по прежнему остатку", async () => {
+    const opened: string[] = [];
+    const d = deps({
+      freeUsd: async () => 560,
+      listCandidates: async () => [
+        trade({ tradeId: "a", symbol: "ETHUSDT" }),
+        trade({ tradeId: "b", symbol: "SOLUSDT" }),
+      ],
+      open: async (req) => {
+        opened.push(req.symbol);
+        return {
+          id: "r",
+          status: req.symbol === "ETHUSDT" ? "rejected" : "protected",
+          message: "",
+          entryPrice: null,
+          filledQuantity: null,
+          steps: [],
+        };
+      },
+    });
+    await runMirror(d);
+    expect(opened).toEqual(["ETHUSDT", "SOLUSDT"]);
+    expect(d.markSkipped).not.toHaveBeenCalled();
+  });
+
+  it("кошельки рынков считаются отдельно: пустой спот не мешает фьючерсам", async () => {
+    const opened: string[] = [];
+    const d = deps({
+      freeUsd: async (market) => (market === "spot" ? 100 : 10_000),
+      listCandidates: async () => [
+        trade({ tradeId: "s", market: "spot", symbol: "BTCUSDT" }),
+        trade({ tradeId: "f", market: "usdm", symbol: "ETHUSDT" }),
+      ],
+      open: async (req) => {
+        opened.push(`${req.market}:${req.symbol}`);
+        return {
+          id: "r",
+          status: "protected",
+          message: "ok",
+          entryPrice: 100,
+          filledQuantity: req.quantity,
+          steps: [],
+        };
+      },
+    });
+    await runMirror(d);
+    expect(opened).toEqual(["usdm:ETHUSDT"]);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "s",
+      "мало свободных средств на демо: $50 < резерв $500",
+    );
+  });
+
+  it("свободных меньше объёма входа — в причине $0, а не отрицательная сумма", async () => {
+    const d = deps({
+      freeUsd: async () => 30,
+      listCandidates: async () => [trade({ tradeId: "a" })],
+    });
+    await runMirror(d);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "a",
+      "мало свободных средств на демо: $0 < резерв $500",
+    );
+  });
+
+  it("остаток не прочитался — вход идёт как раньше", async () => {
+    const open = vi.fn(async () => ({
+      id: "r",
+      status: "protected" as const,
+      message: "ok",
+      entryPrice: 100,
+      filledQuantity: 0.5,
+      steps: [],
+    }));
+    const d = deps({
+      open,
+      freeUsd: async () => {
+        throw new Error("сеть");
+      },
+      listCandidates: async () => [trade({ tradeId: "a" })],
+    });
+    const r = await runMirror(d);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(r.skipped).toBe(0);
+  });
+
+  it("без входов остаток не запрашивается", async () => {
+    const freeUsd = vi.fn(async () => 0);
+    await runMirror(
+      deps({
+        freeUsd,
+        listCandidates: async () => [
+          trade({ tradeId: "old", openedAt: "2026-10-11T11:00:00Z" }),
+        ],
+      }),
+    );
+    expect(freeUsd).not.toHaveBeenCalled();
   });
 });

@@ -81,6 +81,7 @@ VM общая для нескольких личных проектов (поз�
 - В `app.env` также `TELEGRAM_WEBHOOK_SECRET` (webhook бота пока остаётся на Vercel, перенос — на переключении).
 - Секреты в `app.env` — из `.env.local` и `~/.config/vercel/binance-dashboard-prod.env`, по scp, без вывода
   значений. `AUTH_URL`, `AUTH_GITHUB_*` — отдельное GitHub OAuth App под адрес VM.
+- Плашка «новая версия» (0036) на VM пока выключена, как на Mac: она завязана на id деплоя Vercel (`NEXT_DEPLOYMENT_ID`/`VERCEL_DEPLOYMENT_ID`). Включить — отдельной задачей: id = sha коммита при сборке в CI и тот же id в окружении сервиса.
 - Репозиторий публичный: IP VM, ключи и адреса в git не писать (секреты Actions, плейсхолдер `<ip>` в доках).
 
 ## Журнал

@@ -5,7 +5,7 @@ import { type BudgetInputs, computeMarketBudgets } from "./budgets";
 const experiments: BudgetInputs["experiments"] = [
   { market: "spot", initialBudget: 10_000 },
   { market: "spot", initialBudget: 10_000 },
-  { market: "futures", initialBudget: 5_000 },
+  { market: "usdm", initialBudget: 5_000 },
 ];
 
 const byMarket = (
@@ -27,16 +27,49 @@ describe("computeMarketBudgets", () => {
       unrealized: 0,
       openTrades: 0,
     });
-    expect(r.futures.initial).toBe(5_000);
+    expect(r.usdm.initial).toBe(5_000);
   });
 
-  it("всегда возвращает оба рынка, даже без экспериментов", () => {
+  it("всегда возвращает три группы в порядке Spot, USDⓈ-M, COIN-M, даже без экспериментов", () => {
     const r = computeMarketBudgets(
       { experiments: [], closed: [], open: [] },
       null,
     );
-    expect(r.map((b) => b.market)).toEqual(["spot", "futures"]);
+    expect(r.map((b) => b.market)).toEqual(["spot", "usdm", "coinm"]);
+    // COIN-M без экспериментов — 0 $ и 0 %, а не пропуск.
+    expect(r[2]).toMatchObject({ equity: 0, change: 0, changePct: 0 });
     expect(r[0].changePct).toBe(0);
+  });
+
+  it("нет цены COIN-M — у COIN-M нереализованный не учтён, у USDⓈ-M считается", () => {
+    const r = byMarket(
+      {
+        experiments: [
+          ...experiments,
+          { market: "coinm", initialBudget: 10_000 },
+        ],
+        closed: [],
+        open: [
+          {
+            market: "usdm",
+            symbol: "BTCUSDT",
+            direction: "long",
+            entryPrice: 100,
+            quantity: 1,
+          },
+          {
+            market: "coinm",
+            symbol: "BTCUSD_PERP",
+            direction: "long",
+            entryPrice: 100,
+            quantity: 1,
+          },
+        ],
+      },
+      (market) => (market === "usdm" ? 110 : undefined),
+    );
+    expect(r.coinm).toMatchObject({ unrealized: null, equity: 10_000 });
+    expect(r.usdm.unrealized).not.toBeNull();
   });
 
   it("складывает реализованный PnL (уже после комиссий) по своему рынку", () => {
@@ -45,7 +78,7 @@ describe("computeMarketBudgets", () => {
         experiments,
         closed: [
           { market: "spot", pnl: 300, fees: 12 },
-          { market: "futures", pnl: -250, fees: 5 },
+          { market: "usdm", pnl: -250, fees: 5 },
         ],
         open: [],
       },
@@ -54,8 +87,8 @@ describe("computeMarketBudgets", () => {
     expect(r.spot).toMatchObject({ realized: 300, fees: 12, equity: 20_300 });
     expect(r.spot.change).toBe(300);
     expect(r.spot.changePct).toBeCloseTo(0.015);
-    expect(r.futures).toMatchObject({ equity: 4_750, change: -250 });
-    expect(r.futures.changePct).toBeCloseTo(-0.05);
+    expect(r.usdm).toMatchObject({ equity: 4_750, change: -250 });
+    expect(r.usdm.changePct).toBeCloseTo(-0.05);
   });
 
   it("учитывает нереализованный PnL открытых позиций по последней цене с комиссиями", () => {
@@ -65,7 +98,7 @@ describe("computeMarketBudgets", () => {
         closed: [],
         open: [
           {
-            market: "futures",
+            market: "usdm",
             symbol: "BTCUSDT",
             direction: "short",
             entryPrice: 100,
@@ -74,12 +107,12 @@ describe("computeMarketBudgets", () => {
         ],
       },
       (market, symbol) =>
-        market === "futures" && symbol === "BTCUSDT" ? 90 : undefined,
+        market === "usdm" && symbol === "BTCUSDT" ? 90 : undefined,
     );
-    const fees = FEE_RATE.futures * 10 * (100 + 90);
-    expect(r.futures.unrealized).toBeCloseTo(100 - fees);
-    expect(r.futures.equity).toBeCloseTo(5_000 + 100 - fees);
-    expect(r.futures.openTrades).toBe(1);
+    const fees = FEE_RATE.usdm * 10 * (100 + 90);
+    expect(r.usdm.unrealized).toBeCloseTo(100 - fees);
+    expect(r.usdm.equity).toBeCloseTo(5_000 + 100 - fees);
+    expect(r.usdm.openTrades).toBe(1);
     expect(r.spot.unrealized).toBe(0);
   });
 

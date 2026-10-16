@@ -2,8 +2,8 @@ import { experimentSchema } from "@binance-dashboard/trading-core";
 import { describe, expect, it } from "vitest";
 import {
   EXPERIMENT_CATALOG,
-  FUTURES_EXPERIMENTS,
   SPOT_EXPERIMENTS,
+  USDM_EXPERIMENTS,
 } from "./catalog.ts";
 
 const ids = (prefix: string) =>
@@ -18,11 +18,11 @@ describe("каталог экспериментов", () => {
       expect(experimentSchema.parse(e)).toEqual(e);
   });
 
-  it("20 spot (S01–S20) и 20 futures (F01–F20), id уникальны", () => {
+  it("20 spot (S01–S20) и 20 USDⓈ-M (F01–F20), id уникальны", () => {
     expect(SPOT_EXPERIMENTS.map((e) => e.id)).toEqual(ids("S"));
-    expect(FUTURES_EXPERIMENTS.map((e) => e.id)).toEqual(ids("F"));
+    expect(USDM_EXPERIMENTS.map((e) => e.id)).toEqual(ids("F"));
     expect(SPOT_EXPERIMENTS.every((e) => e.market === "spot")).toBe(true);
-    expect(FUTURES_EXPERIMENTS.every((e) => e.market === "futures")).toBe(true);
+    expect(USDM_EXPERIMENTS.every((e) => e.market === "usdm")).toBe(true);
     expect(new Set(EXPERIMENT_CATALOG.map((e) => e.id)).size).toBe(40);
   });
 

@@ -12,7 +12,7 @@ import type { TradeClose } from "./store.ts";
 // метки свечей поставить. Атомарно применяет план хранилище (entities/experiment → resetRun),
 // цены и время передаёт композиция (src/app/server). Среда-независимый модуль.
 
-/** Ключ цены: рынок и символ — у spot и futures цены разные. */
+/** Ключ цены: рынок и символ — у spot, usdm и coinm цены разные. */
 export const priceKey = (market: string, symbol: string) =>
   `${market}:${symbol}`;
 
@@ -36,7 +36,7 @@ export function planReset(input: {
   experiments: Experiment[];
   /** Открытые сделки текущей эпохи. */
   open: PaperTrade[];
-  /** Последние цены: { "futures:BTCUSDT": 62000 }; нет цены — закрытие по цене входа. */
+  /** Последние цены: { "usdm:BTCUSDT": 62000 }; нет цены — закрытие по цене входа. */
   prices: Record<string, number>;
   now: number;
 }): ResetPlan {

@@ -6,30 +6,17 @@ import {
   type TradeStep,
 } from "@/entities/trade";
 import {
-  type AlgoOrderQuery,
-  BinanceApiError,
   type DemoProtectRefs,
-  demoCancelAllOrders,
-  demoFuturesCloseAt,
-  demoFuturesMarketOrder,
-  demoFuturesPosition,
-  demoFuturesPrepare,
-  demoFuturesReduceMarket,
   demoSpotBuyProtected,
   demoSpotCancelByClientId,
   demoSpotMarketOrder,
   demoSpotOcoSell,
   demoSpotStopLossSell,
-  type FuturesOrder,
-  fetchDemoAlgoOrder,
-  fetchDemoFuturesOrder,
-  fetchDemoOpenSymbols,
   fetchDemoPrice,
   fetchDemoSpotOrderByClientId,
   fetchDemoSpotOrderStatus,
   fetchDemoSymbolRules,
   fetchDemoUsdtBalances,
-  nextRecheckDelay,
   orderErrorOutcome,
   type SpotEntryListResult,
   type SpotOrderQuery,
@@ -40,11 +27,8 @@ import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { SPOT_TAKER_FEE } from "../config/spot";
-import {
-  afterAlgoUnknown,
-  averagePrice,
-  type StoredAlgoRef,
-} from "../lib/closePlan";
+import { TRADE_DEADLINE_MS } from "../config/trade";
+import { averagePrice } from "../lib/closePlan";
 import {
   chooseSpotEntry,
   pendingOutcome,
@@ -54,11 +38,6 @@ import {
 } from "../lib/spotEntry";
 import {
   afterEntryError,
-  afterFuturesOrderCheck,
-  afterFuturesPositionCheck,
-  afterFuturesRollback,
-  afterFuturesStop,
-  afterFuturesTakeProfit,
   afterPending,
   afterProtect,
   afterSell,
@@ -67,7 +46,6 @@ import {
   afterStopLost,
   afterTakeProfitCancel,
   type OrderFailure,
-  type TradeOutcome,
 } from "../lib/tradeOutcome";
 import {
   floorToStep,
@@ -75,54 +53,15 @@ import {
   type ValidatedTrade,
   validateTrade,
 } from "../lib/validateTrade";
-import { futuresFillPrice } from "./futuresFillPrice";
-
-/**
- * Позиция ещё не видна сразу после входа — повторяем: -4509 у closePosition (TP/SL),
- * -2022 у reduceOnly (закрытие по рынку).
- */
-const POSITION_RETRY_DELAYS_MS = [1000, 2000];
-const POSITION_NOT_READY = [-4509, -2022];
-
-async function withPositionRetry<T>(fn: () => Promise<T>): Promise<T> {
-  for (const delay of POSITION_RETRY_DELAYS_MS) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (
-        !(
-          error instanceof BinanceApiError &&
-          POSITION_NOT_READY.includes(error.code ?? 0)
-        )
-      )
-        throw error;
-      await new Promise((r) => setTimeout(r, delay));
-    }
-  }
-  return fn();
-}
-
-const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
-
-type Finish = (
-  status: TradeResult["status"],
-  message: string,
-  entryPrice?: number | null,
-  filledQuantity?: number | null,
-) => TradeResult;
-
-/** Свои защитные ордера сделки (PR 2b): заполняются по ходу, уходят в TradeResult.protectRefs. */
-interface RefsHolder {
-  current: DemoProtectRefs | null;
-}
-
-/** Завершить сделку выбранным исходом (lib/tradeOutcome); цена и объём — только если позиция есть. */
-type Done = (
-  o: TradeOutcome,
-  entryPrice?: number,
-  filled?: number,
-) => TradeResult;
+import { placeFutures } from "./placeFutures";
+import {
+  type Done,
+  errorText,
+  type Finish,
+  type RefsHolder,
+  recheckUntil,
+  sleep,
+} from "./tradeSteps";
 
 /**
  * Исполняет сделку в Binance Demo Trading: спот — покупка и TP/SL одной заявкой OTOCO/OTO,
@@ -132,6 +71,7 @@ type Done = (
  */
 export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   const steps: TradeStep[] = [];
+  const tradeDeadline = Date.now() + TRADE_DEADLINE_MS;
   const base = {
     id: randomUUID(),
     at: new Date().toISOString(),
@@ -227,8 +167,6 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
   });
   if (!checked.ok) return finish("rejected", checked.errors.join(" "));
   const v = checked.value;
-  const entrySide = req.direction === "long" ? "BUY" : "SELL";
-  const exitSide: "BUY" | "SELL" = req.direction === "long" ? "SELL" : "BUY";
 
   for (const detail of v.adjustments)
     steps.push({ label: "Фильтр цены биржи", ok: true, detail });
@@ -244,336 +182,22 @@ export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
       refs,
       steps,
       done,
+      tradeDeadline,
     });
 
-  // Binance не меняет маржу, пока по символу висят ордера (-4067), а второй вход
-  // перезаписал бы TP/SL первого (closePosition). Поэтому повторный вход не пускаем.
-  try {
-    const open = await fetchDemoOpenSymbols(creds, req.symbol);
-    if (open.futures.includes(req.symbol))
-      return finish(
-        "rejected",
-        `По ${req.symbol} уже есть позиция или ордера на демо-фьючерсах — сначала закройте их на demo.binance.com.`,
-      );
-  } catch (error) {
-    return finish(
-      "rejected",
-      `Не удалось проверить открытые позиции — сделка не отправлена, попробуйте ещё раз. ${errorText(error)}`,
-    );
-  }
-
-  try {
-    await demoFuturesPrepare(creds, req.symbol, req.leverage);
-    steps.push({
-      label: "Маржа и плечо",
-      ok: true,
-      detail: `Изолированная, ×${req.leverage}`,
-    });
-  } catch (error) {
-    steps.push({ label: "Маржа и плечо", ok: false, detail: errorText(error) });
-    return finish(
-      "rejected",
-      "Не удалось настроить маржу/плечо — вход не отправлялся.",
-    );
-  }
-
-  const entryLabel = `${req.direction === "long" ? "Лонг" : "Шорт"} по рынку`;
-  const ids = tradeClientIds(base.id);
-  let entryPrice: number;
-  let filled: number;
-  let entryOrderId: number | null = null;
-  const sentAt = Date.now();
-  try {
-    const order = await demoFuturesMarketOrder(
-      creds,
-      req.symbol,
-      entrySide,
-      v.quantity,
-      ids.market,
-    );
-    entryOrderId = order.orderId;
-    filled = order.executedQty || Number(v.quantity);
-    entryPrice =
-      order.avgPrice ||
-      (await futuresFillPrice(creds, req.symbol, order.orderId)) ||
-      price;
-    steps.push({
-      label: entryLabel,
-      ok: true,
-      detail: `${filled} по ~${entryPrice}, ордер #${order.orderId}`,
-    });
-  } catch (error) {
-    const failed = afterEntryError(orderErrorOutcome(error), "futures");
-    if (failed !== "recheck") {
-      steps.push({ label: entryLabel, ok: false, detail: errorText(error) });
-      return done(failed);
-    }
-    // Исход неизвестен (-1007, 5xx, обрыв сети): сверяем свой ордер по clientOrderId, затем позицию.
-    steps.push({
-      label: entryLabel,
-      ok: false,
-      detail: `${errorText(error)} — проверяю ордер ${ids.market} на бирже`,
-    });
-    const deadline = unknownOutcomeDeadline(sentAt, Date.now());
-    let order: FuturesOrder | null | "error";
-    try {
-      order = await recheckUntil(
-        deadline,
-        () =>
-          fetchDemoFuturesOrder(creds, req.symbol, {
-            clientOrderId: ids.market,
-          }),
-        (o) => o !== null && o.executedQty > 0,
-      );
-    } catch (checkError) {
-      steps.push({
-        label: "Проверка ордера",
-        ok: false,
-        detail: errorText(checkError),
-      });
-      order = "error";
-    }
-    const byOrder = afterFuturesOrderCheck(order);
-    if (byOrder !== "checkPosition" && !("filled" in byOrder)) {
-      steps.push({
-        label: "Проверка ордера",
-        ok: true,
-        detail: byOrder.message,
-      });
-      return done(byOrder);
-    }
-    if (byOrder !== "checkPosition") {
-      const o = byOrder.filled;
-      entryOrderId = o.orderId;
-      filled = o.executedQty;
-      entryPrice =
-        o.avgPrice ||
-        (await futuresFillPrice(creds, req.symbol, o.orderId)) ||
-        price;
-      steps.push({
-        label: "Проверка ордера",
-        ok: true,
-        detail: `${o.status}: ${filled} по ~${entryPrice}, ордер #${o.orderId} — ставлю защиту`,
-      });
-    } else {
-      let position: { amount: number; entryPrice: number } | null = null;
-      try {
-        position = await recheckUntil(
-          deadline,
-          () => demoFuturesPosition(creds, req.symbol),
-          (p) => p.amount !== 0,
-        );
-      } catch (checkError) {
-        steps.push({
-          label: "Проверка позиции",
-          ok: false,
-          detail: errorText(checkError),
-        });
-      }
-      const checked = afterFuturesPositionCheck(position);
-      if (!("protect" in checked)) {
-        if (position)
-          steps.push({
-            label: "Проверка позиции",
-            ok: true,
-            detail: "Позиции нет",
-          });
-        return done(checked);
-      }
-      filled = Math.abs(checked.protect.amount);
-      entryPrice = checked.protect.entryPrice || price;
-      steps.push({
-        label: "Проверка позиции",
-        ok: true,
-        detail: `Позиция открыта: ${checked.protect.amount} по ${entryPrice} — ставлю защиту`,
-      });
-    }
-  }
-  const futuresRefs = {
-    market: "futures" as const,
-    entryOrderId,
-    stop: null as StoredAlgoRef | null,
-    takeProfit: null as StoredAlgoRef | null,
-  };
-  refs.current = futuresRefs;
-
-  // Сначала стоп: не встал — позиция без защиты не остаётся, сразу закрываем её по рынку (AC5).
-  const algoCtx = { creds, symbol: req.symbol, exitSide, steps };
-  const stop = await placeProtectiveAlgo(
-    algoCtx,
-    "STOP_MARKET",
-    v.stopLoss,
-    ids.stop,
-  );
-  futuresRefs.stop = stop.ref;
-  const afterStop = afterFuturesStop(stop.placed, req.stopOnly === true);
-  if (afterStop === "rollback")
-    return rollbackFutures({
-      creds,
-      req,
-      rules,
-      exitSide,
-      entryPrice,
-      filled,
-      steps,
-      done,
-    });
-  if (afterStop !== "takeProfit") return done(afterStop, entryPrice, filled);
-
-  // Тейк с неизвестным исходом: protected (стоп стоит), но ссылка по clientAlgoId остаётся —
-  // закрытие снимет висящий тейк.
-  const tp = await placeProtectiveAlgo(
-    algoCtx,
-    "TAKE_PROFIT_MARKET",
-    v.takeProfit,
-    ids.takeProfit,
-  );
-  futuresRefs.takeProfit = tp.ref;
-  return done(afterFuturesTakeProfit(tp.placed), entryPrice, filled);
-}
-
-/**
- * Стоп или тейк фьючерсов со своим clientAlgoId. Биржа отказала — не выставлен, ссылки нет.
- * Исход неизвестен (-1006/-1007, 5xx, сеть, таймаут) — перечитать по clientAlgoId до дедлайна
- * (lib/closePlan → afterAlgoUnknown): ссылка сохраняется в любом случае.
- */
-async function placeProtectiveAlgo(
-  c: {
-    creds: BinanceCredentials;
-    symbol: string;
-    exitSide: "BUY" | "SELL";
-    steps: TradeStep[];
-  },
-  type: "STOP_MARKET" | "TAKE_PROFIT_MARKET",
-  trigger: string,
-  clientAlgoId: string,
-): Promise<{ placed: boolean; ref: StoredAlgoRef | null }> {
-  const label = type === "STOP_MARKET" ? "Stop Loss" : "Take Profit";
-  const sentAt = Date.now();
-  try {
-    const algo = await withPositionRetry(() =>
-      demoFuturesCloseAt(
-        c.creds,
-        c.symbol,
-        c.exitSide,
-        type,
-        trigger,
-        clientAlgoId,
-      ),
-    );
-    c.steps.push({
-      label,
-      ok: true,
-      detail: `${trigger}, закроет всю позицию, #${algo.algoId}`,
-    });
-    return {
-      placed: true,
-      ref: {
-        algoId: algo.algoId,
-        clientAlgoId: algo.clientAlgoId ?? clientAlgoId,
-      },
-    };
-  } catch (error) {
-    c.steps.push({ label, ok: false, detail: errorText(error) });
-    if (orderErrorOutcome(error) === "rejected")
-      return { placed: false, ref: null };
-  }
-  let found: AlgoOrderQuery | null | "error";
-  try {
-    found = await recheckUntil(
-      unknownOutcomeDeadline(sentAt, Date.now()),
-      () => fetchDemoAlgoOrder(c.creds, { clientAlgoId }),
-      (a) => a !== null,
-    );
-  } catch (error) {
-    c.steps.push({
-      label: `Проверка: ${label}`,
-      ok: false,
-      detail: errorText(error),
-    });
-    found = "error";
-  }
-  const checked = afterAlgoUnknown(found, clientAlgoId);
-  if (found !== "error")
-    c.steps.push({
-      label: `Проверка: ${label}`,
-      ok: checked.placed,
-      detail: found
-        ? `${found.algoStatus}, #${found.algoId}`
-        : `Ордера ${clientAlgoId} на бирже нет`,
-    });
-  return checked;
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Перечитывать, пока не найдётся или пока проверка не будет начата после дедлайна
- * (unknownOutcomeDeadline: отправка + recvWindow — позже биржа заявку в движок не передаст).
- * Раньше дедлайна «не найдено» — не вердикт.
- */
-async function recheckUntil<T>(
-  deadline: number,
-  read: () => Promise<T>,
-  found: (value: T) => boolean,
-): Promise<T> {
-  for (;;) {
-    const startedAt = Date.now();
-    const value = await read();
-    if (found(value)) return value;
-    const delay = nextRecheckDelay(Date.now(), deadline, startedAt);
-    if (delay === null) return value;
-    await sleep(delay);
-  }
-}
-
-/**
- * Фьючерсы: стоп не встал — закрыть позицию по рынку (reduceOnly на исполненный объём) и снять
- * ордера символа (algo-стоп мог дойти до биржи, если оборвалась сеть). Позиции нет — rejected
- * без цены входа: в демо-статистику такая сделка не попадает. Не закрылась — unprotected (тревога).
- * Снимаем все ордера символа: пока по символу одна позиция (spec 0012, PR 1).
- */
-async function rollbackFutures(c: {
-  creds: BinanceCredentials;
-  req: TradeRequest;
-  rules: SymbolRules;
-  exitSide: "BUY" | "SELL";
-  entryPrice: number;
-  filled: number;
-  steps: TradeStep[];
-  done: Done;
-}): Promise<TradeResult> {
-  const { creds, req, steps } = c;
-  const label = "Закрытие по рынку (стоп не встал)";
-  try {
-    const qty = floorToStep(c.filled, c.rules.stepSize);
-    const order = await withPositionRetry(() =>
-      demoFuturesReduceMarket(creds, req.symbol, c.exitSide, qty),
-    );
-    steps.push({
-      label,
-      ok: true,
-      detail: `${order.executedQty || qty} по ~${order.avgPrice || "рынку"}, ордер #${order.orderId}`,
-    });
-  } catch (error) {
-    steps.push({ label, ok: false, detail: errorText(error) });
-    return c.done(afterFuturesRollback(false), c.entryPrice, c.filled);
-  }
-  try {
-    await demoCancelAllOrders(creds, "futures", req.symbol);
-    steps.push({
-      label: "Снять ордера символа",
-      ok: true,
-      detail: "Сняты возможные остатки TP/SL",
-    });
-  } catch (error) {
-    steps.push({
-      label: "Снять ордера символа",
-      ok: false,
-      detail: errorText(error),
-    });
-  }
-  return c.done(afterFuturesRollback(true));
+  return placeFutures({
+    creds,
+    req,
+    v,
+    rules,
+    price,
+    tradeId: base.id,
+    refs,
+    steps,
+    finish,
+    done,
+    tradeDeadline,
+  });
 }
 
 interface SpotContext {
@@ -588,6 +212,8 @@ interface SpotContext {
   refs: RefsHolder;
   steps: TradeStep[];
   done: Done;
+  /** Общий срок сделки (config/trade → TRADE_DEADLINE_MS). */
+  tradeDeadline: number;
 }
 
 /** Перечитать статусы отложенных ордеров: сразу после входа они PENDING_NEW. */
@@ -602,9 +228,11 @@ const recheckSpotOrder = (
   symbol: string,
   clientOrderId: string,
   deadline: number,
+  tradeDeadline: number,
 ) =>
   recheckUntil(
     deadline,
+    tradeDeadline,
     () => fetchDemoSpotOrderByClientId(creds, symbol, clientOrderId),
     (order) => order !== null,
   );
@@ -626,6 +254,7 @@ async function recheckSpotList(
       req.symbol,
       ids.working,
       deadline,
+      c.tradeDeadline,
     );
     if (!working) {
       steps.push({
@@ -877,6 +506,7 @@ async function placeSpotMarket(c: SpotContext): Promise<TradeResult> {
           req.symbol,
           ids.market,
           unknownOutcomeDeadline(sentAt, Date.now()),
+          c.tradeDeadline,
         )) ?? "missing";
     } catch (checkError) {
       steps.push({
@@ -1006,7 +636,13 @@ async function protectOrSell(
   const sellLabel = "Продажа по рынку (стоп не встал)";
   let sold = false;
   try {
-    const order = await demoSpotMarketOrder(creds, req.symbol, "SELL", sellQty);
+    const order = await demoSpotMarketOrder(
+      creds,
+      req.symbol,
+      "SELL",
+      sellQty,
+      c.ids.close,
+    );
     sold = true;
     steps.push({
       label: sellLabel,

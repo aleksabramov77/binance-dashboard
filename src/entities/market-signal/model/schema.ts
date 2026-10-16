@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { tradeMarketSchema } from "@/shared/api/binance";
 
 export const indicatorsSchema = z.object({
   rsi1h: z.number(),
@@ -30,7 +31,7 @@ export const setupSchema = z.object({
   base: z.string(),
   kind: z.enum(["rebound-long", "overheat-short"]),
   direction: z.enum(["long", "short"]),
-  market: z.enum(["spot", "futures"]),
+  market: tradeMarketSchema,
   /** ready — есть подтверждающая свеча; watch — условия выполнены, ждём разворота. */
   status: z.enum(["ready", "watch"]),
   entry: z.number(),

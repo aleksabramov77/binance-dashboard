@@ -3,17 +3,20 @@ import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { demoMirrorOrdersTable } from "../model/db";
+import { demoMirrorOrdersTable, experimentsTable } from "../model/db";
 import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
 import {
-  activeMirrorSymbols,
+  activeMirrors,
   claimMirror,
   claimMirrorToClose,
   claimOpenMirrors,
   listMirrorCandidates,
   listMirrorsToClose,
+  listOpenMirrorLegs,
   type MirrorCandidate,
   markDemoReset,
+  markMirrorClosedByExchange,
+  markMirrorUnprotected,
   mirrorStatuses,
   mirrorSummaries,
   setExperimentDemoMirror,
@@ -29,7 +32,7 @@ afterEach(() => close());
 
 const exp = (id: string): Experiment => ({
   id,
-  market: "futures",
+  market: "usdm",
   name: id,
   hypothesis: "тест",
   config: {
@@ -54,7 +57,7 @@ const trade = (
   id,
   runId,
   experimentId,
-  market: "futures",
+  market: "usdm",
   symbol: "ETHUSDT",
   direction: "long",
   openedAt,
@@ -73,6 +76,8 @@ const trade = (
   pnl: null,
   rMultiple: null,
   demoOrderRef: null,
+  mae: null,
+  entryContext: {},
   signal: {},
 });
 
@@ -101,21 +106,30 @@ describe("demo-зеркало в БД", () => {
     expect(list[0]).toMatchObject({ stop: 95, takeProfit: 110, quantity: 0.5 });
   });
 
-  it("захват идемпотентен, захваченная сделка не кандидат, символ занят", async () => {
+  it("захват идемпотентен, захваченная сделка не кандидат, зеркало активно", async () => {
     await setup();
     await setExperimentDemoMirror(db, "F01", true);
     const [c] = await listMirrorCandidates(db, SINCE);
     expect(await claimMirror(db, c)).toBe(true);
     expect(await claimMirror(db, c)).toBe(false);
     expect(await listMirrorCandidates(db, SINCE)).toEqual([]);
-    expect(await activeMirrorSymbols(db)).toEqual(new Set(["futures:ETHUSDT"]));
+    // Только что захвачена (pending): ссылки запишет вход — строка нового учёта.
+    expect(await activeMirrors(db)).toEqual([
+      {
+        market: "usdm",
+        symbol: "ETHUSDT",
+        direction: "long",
+        hasRefs: true,
+      },
+    ]);
   });
 
   it("закрытая paper-сделка с открытым зеркалом захватывается на закрытие один раз", async () => {
     // Свои стоп/тейк (PR 2b): сохраняются при входе и приходят в захвате на закрытие.
     const protectRefs = {
-      market: "futures" as const,
+      market: "usdm" as const,
       entryOrderId: 11,
+      legs: "quantity" as const,
       stop: { algoId: 21, clientAlgoId: "bd1-S" },
       takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
     };
@@ -134,6 +148,15 @@ describe("demo-зеркало в БД", () => {
     });
     expect(await listMirrorsToClose(db)).toEqual([]);
     expect(await claimMirrorToClose(db, "a")).toBeNull();
+    // С сохранёнными protect_refs — строка нового учёта (несколько зеркал на монету).
+    expect(await activeMirrors(db)).toEqual([
+      {
+        market: "usdm",
+        symbol: "ETHUSDT",
+        direction: "long",
+        hasRefs: true,
+      },
+    ]);
 
     await store.closeTrade("a", {
       closedAt: "2026-10-11T12:30:00.000Z",
@@ -146,7 +169,7 @@ describe("demo-зеркало в БД", () => {
     expect(await listMirrorsToClose(db)).toEqual(["a"]);
     expect(await claimMirrorToClose(db, "a")).toEqual({
       tradeId: "a",
-      market: "futures",
+      market: "usdm",
       symbol: "ETHUSDT",
       direction: "long",
       quantity: 0.5,
@@ -163,7 +186,7 @@ describe("demo-зеркало в БД", () => {
       steps: [],
       closed: true,
     });
-    expect(await activeMirrorSymbols(db)).toEqual(new Set());
+    expect(await activeMirrors(db)).toEqual([]);
     expect(await mirrorStatuses(db, ["a", "b"])).toEqual(
       new Map([["a", { status: "closed", message: "закрыта" }]]),
     );
@@ -269,7 +292,7 @@ describe("демо-сводка и демо-сброс", () => {
     const candidate = (tradeId: string): MirrorCandidate => ({
       tradeId,
       experimentId: "F01",
-      market: "futures",
+      market: "usdm",
       symbol: "ETHUSDT",
       direction: "long",
       openedAt: "2026-10-11T11:55:00.000Z",
@@ -322,6 +345,139 @@ describe("data-fix drizzle/0005 (spec 0012, AC2)", () => {
 });
 
 describe("protect_refs", () => {
+  it("нога сработала раньше входа: unprotected только из открытых статусов (сброс мог закрыть строку)", async () => {
+    await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      quantity: 0.5,
+    });
+    expect(
+      await markMirrorUnprotected(db, "a", { message: "без стопа", steps: [] }),
+    ).toBe(true);
+    expect(await mirrorStatuses(db, ["a"])).toEqual(
+      new Map([["a", { status: "unprotected", message: "без стопа" }]]),
+    );
+    // «Сбросить Demo» закрыл строку мимо замка — sweep её уже не трогает.
+    await updateMirror(db, "a", {
+      status: "closed",
+      message: "Демо-сброс",
+      steps: [],
+      closed: true,
+    });
+    expect(
+      await markMirrorUnprotected(db, "a", { message: "x", steps: [] }),
+    ).toBe(false);
+    expect((await mirrorStatuses(db, ["a"])).get("a")?.status).toBe("closed");
+  });
+
+  it("фьючерсы 2b (ссылки без legs: «quantity» — ноги с closePosition) — legacy: монета занята", async () => {
+    await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    const refs2b = {
+      market: "usdm" as const,
+      entryOrderId: 1,
+      stop: { algoId: 21, clientAlgoId: "bd1-S" },
+      takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
+    };
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      quantity: 0.5,
+      protectRefs: refs2b,
+    });
+    expect((await activeMirrors(db))[0]?.hasRefs).toBe(false);
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      protectRefs: { ...refs2b, legs: "quantity" },
+    });
+    expect((await activeMirrors(db))[0]?.hasRefs).toBe(true);
+  });
+
+  it("спот со своими ссылками — не legacy (метка legs только у фьючерсов)", async () => {
+    await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    await db.execute(
+      sql.raw(
+        "update demo_mirror_orders set market = 'spot' where trade_id = 'a'",
+      ),
+    );
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      quantity: 40,
+      protectRefs: {
+        market: "spot",
+        orderListId: 7,
+        netQuantity: 39.96,
+        stop: { orderId: 71, clientOrderId: "bd1-S" },
+        takeProfit: { orderId: 72, clientOrderId: "bd1-T" },
+      },
+    });
+    expect(await activeMirrors(db)).toMatchObject([
+      { market: "spot", hasRefs: true },
+    ]);
+  });
+
+  it("своя нога сработала: строка закрыта биржей сразу, с ценой выхода; paper-сделка ещё открыта", async () => {
+    await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    const protectRefs = {
+      market: "usdm" as const,
+      entryOrderId: 1,
+      stop: { algoId: 21, clientAlgoId: "bd1-S" },
+      takeProfit: { algoId: 22, clientAlgoId: "bd1-T" },
+    };
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      entryPrice: 100,
+      quantity: 0.5,
+      protectRefs,
+    });
+    expect(await listOpenMirrorLegs(db)).toEqual([
+      { tradeId: "a", symbol: "ETHUSDT", status: "protected", protectRefs },
+    ]);
+    expect(
+      await markMirrorClosedByExchange(db, "a", {
+        message: "Позиция закрыта биржей",
+        steps: [],
+        exitPrice: 104,
+      }),
+    ).toBe(true);
+    // Повтор и захват на закрытие — уже не трогают закрытую строку.
+    expect(
+      await markMirrorClosedByExchange(db, "a", {
+        message: "x",
+        steps: [],
+        exitPrice: 1,
+      }),
+    ).toBe(false);
+    expect(await listOpenMirrorLegs(db)).toEqual([]);
+    expect(await activeMirrors(db)).toEqual([]);
+    // Демо-PnL — по фактической цене выхода, хотя paper-сделка не закрыта.
+    expect((await mirrorSummaries(db)).get("F01")).toMatchObject({
+      closed: 1,
+      wins: 1,
+      pnl: 2,
+    });
+  });
+
   it("старые строки без ссылок и битый jsonb — null (закрытие по-старому)", async () => {
     const store = await setup();
     await setExperimentDemoMirror(db, "F01", true);
@@ -333,6 +489,15 @@ describe("protect_refs", () => {
       steps: [],
       quantity: 0.5,
     });
+    // Открытая строка до PR 2b (без protect_refs) — монета занята для новых зеркал (planMirror).
+    expect(await activeMirrors(db)).toEqual([
+      {
+        market: "usdm",
+        symbol: "ETHUSDT",
+        direction: "long",
+        hasRefs: false,
+      },
+    ]);
     await db.execute(
       sql`update demo_mirror_orders set protect_refs = '{"market":"spot"}'::jsonb where trade_id = 'a'`,
     );
@@ -348,5 +513,74 @@ describe("protect_refs", () => {
       tradeId: "a",
       protectRefs: null,
     });
+  });
+});
+
+describe("демо-сброс группы (spec 0038)", () => {
+  /** F01 (usdm) и S01 (spot) с открытыми зеркалами; F02 (usdm) без зеркала. */
+  async function groups() {
+    await seedExperiments(db, [
+      exp("F01"),
+      exp("F02"),
+      { ...exp("S01"), market: "spot" },
+    ]);
+    const runId = await ensureRun(db);
+    const store = createDbExperimentStore(db);
+    await store.insertTrade(trade("f", runId, "F01"));
+    await store.insertTrade({ ...trade("s", runId, "S01"), market: "spot" });
+    await setExperimentDemoMirror(db, "F01", true);
+    await setExperimentDemoMirror(db, "S01", true);
+    for (const c of await listMirrorCandidates(db, SINCE)) {
+      await claimMirror(db, c);
+      await updateMirror(db, c.tradeId, {
+        status: "protected",
+        message: "ok",
+        steps: [],
+        entryPrice: 100,
+        quantity: 0.5,
+      });
+    }
+  }
+
+  const demoResetAt = async () =>
+    new Map(
+      (
+        await db
+          .select({ id: experimentsTable.id, at: experimentsTable.demoResetAt })
+          .from(experimentsTable)
+      ).map((r) => [r.id, r.at]),
+    );
+
+  const ids = (list: { tradeId: string }[]) =>
+    list.map((m) => m.tradeId).sort();
+
+  it("группа: захватывает позиции и отмечает сброс только у экспериментов группы", async () => {
+    await groups();
+    expect(ids(await claimOpenMirrors(db, { market: "usdm" }))).toEqual(["f"]);
+    expect(await markDemoReset(db, { market: "usdm" })).toBe(2);
+    const at = await demoResetAt();
+    expect(at.get("F01")).not.toBeNull();
+    expect(at.get("F02")).not.toBeNull();
+    expect(at.get("S01")).toBeNull();
+    // Спот не тронут: его позиция всё ещё открыта.
+    expect(ids(await claimOpenMirrors(db, { market: "spot" }))).toEqual(["s"]);
+  });
+
+  it("регрессия AC9: null — все эксперименты и все позиции, как раньше", async () => {
+    await groups();
+    expect(ids(await claimOpenMirrors(db, null))).toEqual(["f", "s"]);
+    expect(await markDemoReset(db, null)).toBe(3);
+    expect([...(await demoResetAt()).values()].every((v) => v !== null)).toBe(
+      true,
+    );
+  });
+
+  it("один эксперимент (id) — только он", async () => {
+    await groups();
+    expect(ids(await claimOpenMirrors(db, "S01"))).toEqual(["s"]);
+    expect(await markDemoReset(db, "S01")).toBe(1);
+    const at = await demoResetAt();
+    expect(at.get("S01")).not.toBeNull();
+    expect(at.get("F01")).toBeNull();
   });
 });

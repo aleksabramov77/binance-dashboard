@@ -15,7 +15,9 @@ import {
 import { ENGINE_KEYS, EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import { createMemoryDb } from "@/shared/db/client.server";
 import {
+  buildTickDeps,
   createPerpetualsSource,
+  createPerpetualsSources,
   type EngineTickEnv,
   prepareEngineDb,
   runEngineTick,
@@ -63,6 +65,25 @@ const market: EngineTickEnv["market"] = {
       quoteVolume: 1e10,
     },
   ],
+  fetchCoinmTickers: async () => [
+    {
+      symbol: "BTCUSD_PERP",
+      lastPrice: 100,
+      priceChangePercent: 1,
+      highPrice: 101,
+      lowPrice: 99,
+      volume: 1e7,
+    },
+    // Нет в справочнике бессрочных (поставочный) — в тикеры движка не попадает.
+    {
+      symbol: "BTCUSD_251226",
+      lastPrice: 100,
+      priceChangePercent: 1,
+      highPrice: 101,
+      lowPrice: 99,
+      volume: 1e7,
+    },
+  ],
   fetchFundingRates: async () => ({ BTCUSDT: 0.0001 }),
 };
 
@@ -70,7 +91,8 @@ const env = (over: Partial<EngineTickEnv> = {}): EngineTickEnv => ({
   db,
   runner: "supabase",
   market,
-  perpetuals: async () => new Set(["BTCUSDT"]),
+  perpetuals: async (m) =>
+    new Map(m === "usdm" ? [["BTCUSDT", null]] : [["BTCUSD_PERP", 100]]),
   cache: new Map(),
   ...over,
 });
@@ -217,6 +239,40 @@ describe.skipIf(!pgUrl)("withEngineTickLock на Postgres: два сеанса",
   });
 });
 
+describe("buildTickDeps: свечи", () => {
+  it("прокидывает startTime в fetchKlines и режет limit до 1000 (баг 0028)", async () => {
+    const fetchKlines = vi.fn(market.fetchKlines);
+    const deps = buildTickDeps(
+      env({ market: { ...market, fetchKlines } }),
+      createDbExperimentStore(db),
+    );
+    await deps.candles("usdm", "BTCUSDT", "1m", 1500, 1_000_000);
+    await deps.candles("spot", "BTCUSDT", "1h", 301);
+    expect(fetchKlines.mock.calls).toEqual([
+      ["usdm", "BTCUSDT", "1m", 1000, 1_000_000],
+      ["spot", "BTCUSDT", "1h", 301, undefined],
+    ]);
+  });
+
+  it("пустой справочник фьючерсов (после фильтра только крипты) — warn в журнал (spec 0029)", async () => {
+    const log = vi.fn();
+    const deps = buildTickDeps(
+      env({ perpetuals: async () => new Map(), log }),
+      createDbExperimentStore(db),
+    );
+    expect(await deps.tickers("usdm")).toEqual([]);
+    expect(await deps.tickers("coinm")).toEqual([]);
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      "engine.perpetuals",
+      expect.stringContaining("пуст"),
+    );
+    log.mockClear();
+    await deps.tickers("spot");
+    expect(log).not.toHaveBeenCalled();
+  });
+});
+
 describe("createPerpetualsSource", () => {
   it("кэширует справочник на TTL, при сбое обновления отдаёт старую копию", async () => {
     let now = 0;
@@ -232,6 +288,40 @@ describe("createPerpetualsSource", () => {
     now = 2000;
     expect(await source()).toEqual(new Set(["A"]));
     expect(fetchSymbols).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("buildTickDeps: группы активов (spec 0023)", () => {
+  it("COIN-M: только бессрочные из справочника, оборот в $ и размер контракта; funding — своей группы", async () => {
+    const funding = vi.fn(market.fetchFundingRates);
+    const deps = buildTickDeps(
+      env({ market: { ...market, fetchFundingRates: funding } }),
+      createDbExperimentStore(db),
+    );
+    expect(await deps.tickers("coinm")).toEqual([
+      {
+        symbol: "BTCUSD_PERP",
+        lastPrice: 100,
+        priceChangePercent: 1,
+        quoteVolume: 1e9,
+        contractSize: 100,
+      },
+    ]);
+    expect((await deps.tickers("usdm")).map((t) => t.symbol)).toEqual([
+      "BTCUSDT",
+    ]);
+    await deps.funding("coinm");
+    expect(await deps.funding("spot")).toEqual({});
+    expect(funding.mock.calls).toEqual([["coinm"]]);
+  });
+
+  it("справочники USDⓈ-M и COIN-M кэшируются раздельно", async () => {
+    const fetch = vi.fn(async (m: "usdm" | "coinm") => new Map([[m, null]]));
+    const source = createPerpetualsSources(fetch, 1000, () => 0);
+    await source("usdm");
+    await source("coinm");
+    await source("coinm");
+    expect(fetch.mock.calls).toEqual([["usdm"], ["coinm"]]);
   });
 });
 

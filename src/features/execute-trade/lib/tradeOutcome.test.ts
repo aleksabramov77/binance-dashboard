@@ -1,18 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  afterEarlyStopDrop,
   afterEntryError,
   afterFuturesOrderCheck,
   afterFuturesPositionCheck,
   afterFuturesRollback,
   afterFuturesStop,
   afterFuturesTakeProfit,
+  afterPartialEntryRestop,
   afterPending,
   afterProtect,
   afterSell,
   afterSpotBuy,
   afterSpotRecheck,
+  afterStopBeforeEntry,
   afterStopLost,
   afterTakeProfitCancel,
+  UNCONFIRMED_ENTRY,
 } from "./tradeOutcome";
 
 describe("ошибка отправки входа", () => {
@@ -35,16 +39,107 @@ describe("ошибка отправки входа", () => {
 });
 
 describe("фьючерсы", () => {
-  it("проверка позиции после неизвестного исхода", () => {
-    const position = { amount: -0.5, entryPrice: 100 };
-    expect(afterFuturesPositionCheck(position)).toEqual({ protect: position });
+  it("проверка позиции после неизвестного исхода: сторона до входа пуста", () => {
+    const position = { amount: 0.5, entryPrice: 100 };
+    expect(afterFuturesPositionCheck(position, 0, "unknown", 0.5)).toEqual({
+      protect: position,
+    });
     expect(
-      afterFuturesPositionCheck({ amount: 0, entryPrice: 0 }),
+      afterFuturesPositionCheck(
+        { amount: 0, entryPrice: 0 },
+        0,
+        "missing",
+        0.5,
+      ),
     ).toMatchObject({ status: "rejected", withEntry: false });
-    expect(afterFuturesPositionCheck(null)).toMatchObject({
+    expect(afterFuturesPositionCheck(null, 0, "unknown", 0.5)).toMatchObject({
       status: "unprotected",
       withEntry: false,
     });
+  });
+  it("на стороне уже есть объём соседей (PR 2d): защищаем только свой прирост", () => {
+    // Сосед держит 30, наш вход 40 → на стороне 70: защищаем 40, а не 70.
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 70, entryPrice: 0.22 },
+        30,
+        "unknown",
+        40,
+      ),
+    ).toEqual({ protect: { amount: 40, entryPrice: null } });
+  });
+  it("соседи на стороне, свой ордер не найден и сторона не выросла — вход не прошёл, их объём не трогаем", () => {
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 30, entryPrice: 0.22 },
+        30,
+        "missing",
+        40,
+      ),
+    ).toMatchObject({ status: "rejected", withEntry: false });
+  });
+  it("свой ордер не найден, сторона до входа НЕ пуста и выросла — может быть вход соседа: unprotected без защиты и отката (PR 2e)", () => {
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 70, entryPrice: 0.22 },
+        30,
+        "missing",
+        40,
+      ),
+    ).toMatchObject({ status: "unprotected", withEntry: false });
+  });
+  it("свой ордер не найден, сторона до входа пуста и выросла — защищаем, но итог «вход не подтверждён» (PR 2e)", () => {
+    const position = { amount: 40, entryPrice: 0.22 };
+    expect(afterFuturesPositionCheck(position, 0, "missing", 40)).toEqual({
+      protect: position,
+      unconfirmed: true,
+    });
+    expect(UNCONFIRMED_ENTRY).toMatchObject({
+      status: "unprotected",
+      withEntry: true,
+    });
+  });
+  it("свой ордер не найден, сторона не выросла — rejected", () => {
+    for (const before of [0, 30])
+      expect(
+        afterFuturesPositionCheck(
+          { amount: before, entryPrice: 0.22 },
+          before,
+          "missing",
+          40,
+        ),
+      ).toMatchObject({ status: "rejected", withEntry: false });
+  });
+  it("соседи на стороне, свой ордер не найден, прирост неясен — unprotected, не rejected", () => {
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 55, entryPrice: 0.22 },
+        30,
+        "missing",
+        40,
+      ),
+    ).toMatchObject({ status: "unprotected", withEntry: false });
+  });
+  it("соседи на стороне, ордер не прочитан, прирост неясен — unprotected без защиты и отката", () => {
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 55, entryPrice: 0.22 },
+        30,
+        "unknown",
+        40,
+      ),
+    ).toMatchObject({ status: "unprotected", withEntry: false });
+  });
+  it("соседи на стороне, ордер не прочитан, сторона не выросла — вход не прошёл", () => {
+    // Позиция перечитана после окна исполнения ордера: прироста нет — как при пустой стороне.
+    expect(
+      afterFuturesPositionCheck(
+        { amount: 30, entryPrice: 0.22 },
+        30,
+        "unknown",
+        40,
+      ),
+    ).toMatchObject({ status: "rejected", withEntry: false });
   });
   it("стоп не встал — откат; встал — тейк или готово (stopOnly)", () => {
     expect(afterFuturesStop(false, false)).toBe("rollback");
@@ -187,6 +282,41 @@ describe("спот: стоп OTOCO снят биржей, тейк ещё сто
   it("снять тейк не удалось — без продажи и перезащиты, unprotected", () => {
     expect(afterTakeProfitCancel(true)).toBe("protect");
     expect(afterTakeProfitCancel(false)).toMatchObject({
+      status: "unprotected",
+      withEntry: true,
+    });
+  });
+});
+
+describe("фьючерсы: «стоп до входа» (AC10)", () => {
+  it("стоп не принят — вход не отправляется, rejected без цены", () => {
+    expect(afterStopBeforeEntry(true)).toBe("enter");
+    expect(afterStopBeforeEntry(false)).toEqual({
+      status: "rejected",
+      message: "Стоп не принят биржей — вход не отправлялся.",
+      withEntry: false,
+    });
+  });
+});
+
+describe("стоп до входа: вход не прошёл или исполнился частично (ревью #80)", () => {
+  const rejected = afterEntryError("rejected", "futures");
+  if (rejected === "recheck") throw new Error("unexpected");
+  it("стоп снят или уже не активен — исход как есть (rejected)", () => {
+    for (const drop of ["cancelled", "inactive", "none"] as const)
+      expect(afterEarlyStopDrop(rejected, drop)).toBe(rejected);
+  });
+  it("снять стоп не удалось — unprotected без цены и объёма (ссылка на стоп остаётся)", () => {
+    expect(afterEarlyStopDrop(rejected, "error")).toMatchObject({
+      status: "unprotected",
+      withEntry: false,
+    });
+  });
+  it("частичный вход: стоп переставлен — дальше; новый не встал — откат; старый не снят — unprotected", () => {
+    expect(afterPartialEntryRestop("cancelled", true)).toBe("continue");
+    expect(afterPartialEntryRestop("inactive", true)).toBe("continue");
+    expect(afterPartialEntryRestop("cancelled", false)).toBe("rollback");
+    expect(afterPartialEntryRestop("error", null)).toMatchObject({
       status: "unprotected",
       withEntry: true,
     });

@@ -1,6 +1,7 @@
 # AI-конвейер разработки
 
-Решения пользователя (2026-10-10): мержит пользователь (`/merge`); приёмка — AI-Tester + пользователь
+Решения пользователя (2026-10-10): ~~мержит пользователь (`/merge`)~~ — с 2026-10-16 мержит агент сам, когда всё
+готово (тестировщик PASS, `ai-approved`, зелёный CI); приёмка — AI-Tester + пользователь
 по скриншотам; ТЗ — файлы `docs/specs/`; запуск — команды `/feature` и `/bug`. С 2026-10-15 каждая задача —
 в своём worktree с локальным сервером для проверки (скилл `worktree`, `pnpm wt`).
 
@@ -19,7 +20,7 @@
  ├─5. REVIEWER — субагент `reviewer`                       → ревью-комментарий в PR
  │     есть замечания → DEVELOPER правит → TESTER снова все AC на локальном сервере → REVIEWER
  │     (до 3 кругов, дальше — к пользователю); замечаний нет → label `ai-approved`
- ├─6. статусы в PRD, spec и docs/HISTORY.md, зелёный CI → ⏸ пользователь: «мерж» → squash-merge
+ ├─6. статусы в PRD, spec и docs/HISTORY.md, зелёный CI → squash-merge агентом (без ⏸, решение 2026-10-16)
  ├─7. выкатка (`/flow release`) → `pnpm wt remove <ветка>` (сервер остановлен, worktree удалён)
  └─8. закрытие: хвосты проверены, другие сессии оповещены → 🎉 «сессию можно закрывать» (иначе ⛔ «пока не закрывать»)
 CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger · typecheck · Vitest · build.
@@ -36,7 +37,7 @@ CI (GitHub Actions) — на каждый PR и push в main: Biome · Steiger �
 | `/flow bug "<описание>"` | то же со скиллом `bug` |
 | `/flow release` | выкатка влитого в main: `db:migrate` → Edge Function `engine-tick` → кроны → ⏸ env на Vercel (`!`-командой пользователя) → ожидание деплоя Vercel → смоук-проверки |
 | `/flow worktree-cleanup` | удалить worktree давно влитых задач (с остановкой их сервера) и разобрать забытые |
-| `/flow lab ["<фокус>"]` | лаборатория экспериментов (worktree `chore/NNNN-lab-<дата>`): `pnpm lab:report` → отчёт по сделкам эпохи с контекстом рынка → субагент `quant` разбирает (review.md: подозрительное, решения keep/mirror/tune/pivot/kill, команда `lab:apply`) ⏸ → `pnpm lab:apply` только подтверждённое → `quant` пишет карточки гипотез (ideas.md) ⏸ выбор одной → журнал `docs/lab/` (journal.md, hypotheses.md) → PR → `reviewer` → ⏸ мерж → `pnpm wt remove` → выбранная карточка в `flow feature`. Фокус — id («F06 F07»), группа, вопрос или своя идея |
+| `/flow lab ["<фокус>"]` | лаборатория экспериментов (worktree `chore/NNNN-lab-<дата>`): `pnpm lab:report` → отчёт по сделкам эпохи с контекстом рынка → субагент `quant` разбирает (review.md: подозрительное, решения keep/mirror/tune/pivot/kill, команда `lab:apply`) ⏸ → `pnpm lab:apply` только подтверждённое → `quant` пишет карточки гипотез (ideas.md) ⏸ выбор → выбранные эксперименты в `private/experiments.json` (`pnpm lab:private --prod`) → журнал `private/lab/` (journal.md, hypotheses.md, push в приватный репозиторий) → публичный PR только со строкой задачи → `reviewer` → ⏸ мерж → `pnpm wt remove` → новый строительный блок ядра (если нужен) — `flow feature`. Фокус — id («F06 F07»), группа, вопрос или своя идея |
 | `/flow status` | незавершённые прогоны: этап, ветка, PR |
 
 Этап выкатки выполняется, только если выполнено условие из его `note` (например, миграции — только при
@@ -51,7 +52,7 @@ Claude запускать из папки проекта (`~/Projects/my/binance
 | Developer | `.claude/agents/developer.md` | код, тесты, git, push, PR | мержить, менять spec без согласования |
 | Tester | `.claude/agents/tester.md` | Playwright MCP на локальном сервере worktree, скриншоты | править код |
 | Reviewer | `.claude/agents/reviewer.md` | читать код, комментировать PR, ставить label | править код, мержить |
-| Quant | `.claude/agents/quant.md` (из `/flow lab`) | читать отчёт и сделки прогона, считать поверх `trades.csv`, писать `review.md` и `ideas.md` | менять БД (`lab:apply`), код, журнал `docs/lab`, git |
+| Quant | `.claude/agents/quant.md` (из `/flow lab`) | читать отчёт и сделки прогона, считать поверх `trades.csv`, писать `review.md` и `ideas.md` | менять БД (`lab:apply`), код, `private/experiments.json`, журнал `private/lab`, git |
 
 Почему Analyst не субагент: субагенты не ведут диалог с пользователем. Почему Reviewer — отдельный
 субагент: свежий контекст, не «помнит», как писался код.

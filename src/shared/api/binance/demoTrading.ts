@@ -19,36 +19,66 @@ import {
   algoOrderQuerySchema,
   algoOrderSchema,
   anySchema,
+  coinmBalancesSchema,
   exchangeInfoSchema,
   type FuturesOrder,
+  type FuturesSymbolState,
+  futuresAccountAssetsSchema,
   futuresAllOrdersSchema,
   futuresBalancesSchema,
+  futuresOpenAlgoOrdersSchema,
+  futuresOpenOrdersSchema,
   futuresOrderSchema,
   futuresUserTradesSchema,
   orderListReportsSchema,
   orderListSchema,
+  positionModeSchema,
   positionRiskSchema,
   priceSchema,
+  type SpotOpenOrder,
   type SpotOrder,
   type SpotOrderQuery,
   spotAccountBalancesSchema,
   spotAllOrdersSchema,
   spotMyTradesSchema,
+  spotOpenOrdersSchema,
   spotOrderQuerySchema,
   spotOrderSchema,
   spotOrderStatusSchema,
   symbolRowsSchema,
 } from "./demoSchemas";
 import type { Market } from "./market";
+import type { BinanceMarket } from "./markets";
 import { ORDER_RECV_WINDOW_MS } from "./orderOutcome";
+import {
+  entryParams,
+  type FuturesSide,
+  type PositionMode,
+  protectParams,
+  reduceParams,
+} from "./positionMode";
 import { BinanceApiError, type SignedParams, signedRequest } from "./signed";
+import {
+  sumUsd,
+  type UsdPrice,
+  type WalletEquity,
+  type WalletEquityResult,
+} from "./walletEquity";
 
-/** Binance Demo Trading — виртуальные деньги, реальные котировки. */
-const DEMO_URL: Record<Market, string> = {
+/**
+ * Binance Demo Trading — виртуальные деньги, реальные котировки. Хосты: spot, фьючерсы USDⓈ-M и COIN-M
+ * (demo-dapi — пока только чтение баланса, spec 0038; демо-зеркала COIN-M нет).
+ */
+const DEMO_URL = {
   spot: "https://demo-api.binance.com",
   futures: "https://demo-fapi.binance.com",
+  coinm: "https://demo-dapi.binance.com",
+} as const;
+const DEMO_HOST: Record<Market, string> = {
+  spot: DEMO_URL.spot,
+  usdm: DEMO_URL.futures,
 };
-const PREFIX: Record<Market, string> = { spot: "/api/v3", futures: "/fapi/v1" };
+const PREFIX: Record<Market, string> = { spot: "/api/v3", usdm: "/fapi/v1" };
 const RULES_TTL_MS = 10 * 60_000;
 
 /** Справочник демо-фьючерсов (~900 КБ) — грузим редко, держим последнюю удачную копию. */
@@ -95,11 +125,11 @@ export async function fetchDemoSymbolRules(
   if (!futuresRules || Date.now() - futuresRules.at > RULES_TTL_MS) {
     try {
       const raw = await getJson(
-        `${DEMO_URL.futures}${PREFIX.futures}/exchangeInfo`,
+        `${DEMO_URL.futures}${PREFIX.usdm}/exchangeInfo`,
       );
       futuresRules = {
         at: Date.now(),
-        bySymbol: indexRules("futures", raw),
+        bySymbol: indexRules("usdm", raw),
       };
     } catch (error) {
       // Устаревший справочник лучше, чем никакого: шаги цены меняются редко.
@@ -114,7 +144,7 @@ export async function fetchDemoPrice(
   symbol: string,
 ): Promise<number> {
   const raw = await getJson(
-    `${DEMO_URL[market]}${PREFIX[market]}/ticker/price?symbol=${symbol}`,
+    `${DEMO_HOST[market]}${PREFIX[market]}/ticker/price?symbol=${symbol}`,
   );
   return priceSchema.parse(raw).price;
 }
@@ -122,7 +152,7 @@ export async function fetchDemoPrice(
 /** Свободные USDT на демо-споте и демо-фьючерсах. */
 export async function fetchDemoUsdtBalances(
   creds: BinanceCredentials,
-): Promise<{ spot: number; futures: number }> {
+): Promise<{ spot: number; usdm: number }> {
   const [spot, futures] = await Promise.all([
     signedRequest(
       DEMO_URL.spot,
@@ -142,8 +172,80 @@ export async function fetchDemoUsdtBalances(
   ]);
   return {
     spot: spot.balances.find((b) => b.asset === "USDT")?.free ?? 0,
-    futures: futures.find((b) => b.asset === "USDT")?.availableBalance ?? 0,
+    usdm: futures.find((b) => b.asset === "USDT")?.availableBalance ?? 0,
   };
+}
+
+const settle = (p: Promise<WalletEquity>): Promise<WalletEquityResult> =>
+  p.then(
+    (e): WalletEquityResult => ({ ok: true, ...e }),
+    (error: unknown): WalletEquityResult => ({ ok: false, error }),
+  );
+
+/**
+ * Equity демо-счёта в $ по кошелькам, как на demo.binance.com (spec 0038): Spot — free + locked всех активов;
+ * USDⓈ-M — walletBalance + unrealizedProfit; COIN-M — balance + crossUnPnl; всё × цена актива в $. Кошельки
+ * читаются параллельно и независимо: ошибка одного не мешает остальным. Только чтение.
+ */
+export async function fetchDemoEquity(
+  creds: BinanceCredentials,
+  price: UsdPrice,
+): Promise<Record<BinanceMarket, WalletEquityResult>> {
+  const [spot, usdm, coinm] = await Promise.all([
+    settle(
+      signedRequest(
+        DEMO_URL.spot,
+        creds,
+        "GET",
+        "/api/v3/account",
+        spotAccountBalancesSchema,
+        { omitZeroBalances: true },
+      ).then((a) =>
+        sumUsd(
+          a.balances.map((b) => ({
+            asset: b.asset,
+            amount: b.free + b.locked,
+          })),
+          price,
+        ),
+      ),
+    ),
+    settle(
+      signedRequest(
+        DEMO_URL.futures,
+        creds,
+        "GET",
+        "/fapi/v3/account",
+        futuresAccountAssetsSchema,
+      ).then((a) =>
+        sumUsd(
+          a.assets.map((b) => ({
+            asset: b.asset,
+            amount: b.walletBalance + b.unrealizedProfit,
+          })),
+          price,
+        ),
+      ),
+    ),
+    settle(
+      signedRequest(
+        DEMO_URL.coinm,
+        creds,
+        "GET",
+        "/dapi/v1/balance",
+        coinmBalancesSchema,
+      ).then((rows) =>
+        sumUsd(
+          rows.map((b) => ({
+            asset: b.asset,
+            amount: b.balance + b.crossUnPnl,
+          })),
+          price,
+        ),
+      ),
+    ),
+  ]);
+  return { spot, usdm, coinm };
 }
 
 /** clientOrderId — свой id ордера: по нему перечитываем ордер, если исход заявки неизвестен. */
@@ -321,12 +423,17 @@ export async function demoSpotCancelByClientId(
   }
 }
 
-/** Изолированная маржа и плечо для символа. «Уже установлено» — не ошибка. */
+/**
+ * Изолированная маржа и плечо для символа. «Уже установлено» (-4046) — не ошибка. По символу уже
+ * есть ордера/позиция другого зеркала (-4047/-4048, на демо -4067): тип маржи не меняется,
+ * вход идёт с тем, что есть — "kept". Плечо меняется и при открытой позиции.
+ */
 export async function demoFuturesPrepare(
   creds: BinanceCredentials,
   symbol: string,
   leverage: number,
-): Promise<void> {
+): Promise<"isolated" | "kept"> {
+  let margin: "isolated" | "kept" = "isolated";
   try {
     await signedRequest(
       DEMO_URL.futures,
@@ -337,9 +444,11 @@ export async function demoFuturesPrepare(
       { symbol, marginType: "ISOLATED" },
     );
   } catch (error) {
-    // -4046: No need to change margin type.
-    if (!(error instanceof BinanceApiError && error.code === -4046))
-      throw error;
+    const code = error instanceof BinanceApiError ? error.code : undefined;
+    // Демо на marginType при открытых ордерах отвечает -4067 (проверено 2026-10-15), по документации — -4047.
+    if (code !== undefined && [-4047, -4048, -4067, -4068].includes(code))
+      margin = "kept";
+    else if (code !== -4046) throw error;
   }
   await signedRequest(
     DEMO_URL.futures,
@@ -349,15 +458,187 @@ export async function demoFuturesPrepare(
     anySchema,
     { symbol, leverage },
   );
+  return margin;
 }
 
-/** clientOrderId — свой id: по нему перечитываем вход, если исход неизвестен. */
+/** Кэш режима позиций: меняется редко (только на пустом счёте), а спрашиваем перед каждым входом. */
+const POSITION_MODE_TTL_MS = 30_000;
+let positionModeCache: { at: number; mode: PositionMode } | null = null;
+
+/** Режим позиций демо-фьючерсов (GET /fapi/v1/positionSide/dual): Hedge или One-way. */
+export async function fetchDemoPositionMode(
+  creds: BinanceCredentials,
+): Promise<PositionMode> {
+  if (
+    positionModeCache &&
+    Date.now() - positionModeCache.at < POSITION_MODE_TTL_MS
+  )
+    return positionModeCache.mode;
+  const res = await signedRequest(
+    DEMO_URL.futures,
+    creds,
+    "GET",
+    "/fapi/v1/positionSide/dual",
+    positionModeSchema,
+  );
+  const mode: PositionMode = res.dualSidePosition ? "hedge" : "oneway";
+  positionModeCache = { at: Date.now(), mode };
+  return mode;
+}
+
+/**
+ * Включить Hedge mode. Биржа переключает только без позиций и ордеров на счёте (-4067/-4068 —
+ * исключение, вызывающий остаётся в One-way). Уже включён (-4059) — не ошибка.
+ */
+export async function demoEnableHedgeMode(
+  creds: BinanceCredentials,
+): Promise<"switched" | "already"> {
+  try {
+    await signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "POST",
+      "/fapi/v1/positionSide/dual",
+      anySchema,
+      { dualSidePosition: "true" },
+    );
+    positionModeCache = { at: Date.now(), mode: "hedge" };
+    return "switched";
+  } catch (error) {
+    if (error instanceof BinanceApiError && error.code === -4059) {
+      positionModeCache = { at: Date.now(), mode: "hedge" };
+      return "already";
+    }
+    positionModeCache = null;
+    throw error;
+  }
+}
+
+/** Есть ли на демо-фьючерсах хоть одна позиция или открытый ордер (обычный или algo) — по всему счёту. */
+export async function fetchDemoFuturesAccountBusy(
+  creds: BinanceCredentials,
+): Promise<boolean> {
+  const [positions, orders, algos] = await Promise.all([
+    signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v3/positionRisk",
+      positionRiskSchema,
+    ),
+    signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v1/openOrders",
+      symbolRowsSchema,
+    ),
+    signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v1/openAlgoOrders",
+      symbolRowsSchema,
+    ),
+  ]);
+  return (
+    positions.some((p) => p.positionAmt !== 0) ||
+    orders.length > 0 ||
+    algos.length > 0
+  );
+}
+
+/** Позиции, открытые обычные и algo-ордера символа — для проверки своей стороны и закрытия старых строк. */
+export async function fetchDemoFuturesSymbolState(
+  creds: BinanceCredentials,
+  symbol: string,
+): Promise<FuturesSymbolState> {
+  const [positions, orders, algos] = await Promise.all([
+    signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v3/positionRisk",
+      positionRiskSchema,
+      { symbol },
+    ),
+    signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v1/openOrders",
+      futuresOpenOrdersSchema,
+      { symbol },
+    ),
+    signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "GET",
+      "/fapi/v1/openAlgoOrders",
+      futuresOpenAlgoOrdersSchema,
+      { symbol },
+    ),
+  ]);
+  return {
+    positions: positions.map((p) => ({
+      positionSide: p.positionSide,
+      amount: p.positionAmt,
+      entryPrice: p.entryPrice,
+    })),
+    orders,
+    algos,
+  };
+}
+
+/**
+ * Открытые algo-ордера (TP/SL) всего фьючерсного счёта одним запросом — для сверки своих ног
+ * зеркал за прогон (spec 0012, PR 2d).
+ */
+export async function fetchDemoOpenAlgoOrders(
+  creds: BinanceCredentials,
+): Promise<FuturesSymbolState["algos"]> {
+  return signedRequest(
+    DEMO_URL.futures,
+    creds,
+    "GET",
+    "/fapi/v1/openAlgoOrders",
+    futuresOpenAlgoOrdersSchema,
+  );
+}
+
+/** Отменить обычный ордер фьючерсов. false — отменять нечего (-2011). */
+export async function demoFuturesCancelOrder(
+  creds: BinanceCredentials,
+  symbol: string,
+  orderId: number,
+): Promise<boolean> {
+  try {
+    await signedRequest(
+      DEMO_URL.futures,
+      creds,
+      "DELETE",
+      "/fapi/v1/order",
+      anySchema,
+      {
+        symbol,
+        orderId,
+      },
+    );
+    return true;
+  } catch (error) {
+    if (isNoSuchOrder(error)) return false;
+    throw error;
+  }
+}
+
+/** Вход по рынку. clientOrderId — свой id: по нему перечитываем вход, если исход неизвестен. */
 export async function demoFuturesMarketOrder(
   creds: BinanceCredentials,
   symbol: string,
   side: "BUY" | "SELL",
   quantity: string,
-  clientOrderId?: string,
+  clientOrderId: string | undefined,
+  pos: FuturesSide,
 ): Promise<FuturesOrder> {
   return signedRequest(
     DEMO_URL.futures,
@@ -372,6 +653,7 @@ export async function demoFuturesMarketOrder(
       quantity,
       newOrderRespType: "RESULT",
       recvWindow: ORDER_RECV_WINDOW_MS,
+      ...entryParams(pos),
       ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
     },
   );
@@ -403,13 +685,18 @@ export async function fetchDemoFuturesOrder(
   }
 }
 
-/** Условный ордер, закрывающий всю позицию при достижении цены (TP или SL). */
-export async function demoFuturesCloseAt(
+/**
+ * Условный ордер (TP или SL) на свой объём при достижении цены (spec 0012, PR 2c): quantity, без
+ * closePosition — сработавший не закроет объём других зеркал. One-way — reduceOnly, Hedge — positionSide.
+ */
+export async function demoFuturesProtect(
   creds: BinanceCredentials,
   symbol: string,
   side: "BUY" | "SELL",
   type: "STOP_MARKET" | "TAKE_PROFIT_MARKET",
   triggerPrice: string,
+  quantity: string,
+  pos: FuturesSide,
   clientAlgoId?: string,
 ) {
   return signedRequest(
@@ -424,7 +711,7 @@ export async function demoFuturesCloseAt(
       side,
       type,
       triggerPrice,
-      closePosition: true,
+      ...protectParams(pos, quantity),
       workingType: "MARK_PRICE",
       priceProtect: true,
       // Короткое окно — дедлайн перечитывания при неизвестном исходе (как у входа).
@@ -481,12 +768,17 @@ export async function demoCancelAlgoOrder(
   }
 }
 
-/** Закрытие (части) фьючерсной позиции по рынку: reduceOnly — не откроет встречную позицию. */
+/**
+ * Закрытие (части) своей позиции по рынку: One-way — reduceOnly (не откроет встречную), Hedge —
+ * positionSide своей стороны.
+ */
 export async function demoFuturesReduceMarket(
   creds: BinanceCredentials,
   symbol: string,
   side: "BUY" | "SELL",
   quantity: string,
+  pos: FuturesSide,
+  clientOrderId?: string,
 ): Promise<FuturesOrder> {
   return signedRequest(
     DEMO_URL.futures,
@@ -499,50 +791,69 @@ export async function demoFuturesReduceMarket(
       side,
       type: "MARKET",
       quantity,
-      reduceOnly: true,
+      ...reduceParams(pos),
       newOrderRespType: "RESULT",
+      // Свой id закрытия — сделка в истории «Демо-сделки» не смешается с соседними по монете.
+      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
     },
   );
 }
-
-/** Binance: -2011 Unknown order / нет открытых ордеров — для «отменить всё» это не ошибка. */
-const isNothingToCancel = (error: unknown) =>
-  error instanceof BinanceApiError && error.code === -2011;
 
 /** Binance: -2011 (отмена: ордер неизвестен/уже не активен), -2013 (запрос: ордера нет). */
 const isNoSuchOrder = (error: unknown) =>
   error instanceof BinanceApiError &&
   (error.code === -2011 || error.code === -2013);
 
-/**
- * Отменяет все открытые ордера по символу: spot — включая OCO; futures — обычные и algo (TP/SL).
- * Нечего отменять — не ошибка.
- */
-export async function demoCancelAllOrders(
+/** Открытые ордера спота по символу — для закрытия старых строк (снимаются только свои стороны). */
+export async function fetchDemoSpotOpenOrders(
   creds: BinanceCredentials,
-  market: Market,
   symbol: string,
-): Promise<void> {
-  const paths =
-    market === "spot"
-      ? ["/api/v3/openOrders"]
-      : ["/fapi/v1/allOpenOrders", "/fapi/v1/algoOpenOrders"];
-  for (const path of paths) {
-    try {
-      await signedRequest(DEMO_URL[market], creds, "DELETE", path, anySchema, {
+): Promise<SpotOpenOrder[]> {
+  return signedRequest(
+    DEMO_URL.spot,
+    creds,
+    "GET",
+    "/api/v3/openOrders",
+    spotOpenOrdersSchema,
+    {
+      symbol,
+    },
+  );
+}
+
+/** Отменить ордер спота по orderId (ордер из списка снимает весь список). false — отменять нечего. */
+export async function demoSpotCancelOrder(
+  creds: BinanceCredentials,
+  symbol: string,
+  orderId: number,
+): Promise<boolean> {
+  try {
+    await signedRequest(
+      DEMO_URL.spot,
+      creds,
+      "DELETE",
+      "/api/v3/order",
+      anySchema,
+      {
         symbol,
-      });
-    } catch (error) {
-      if (!isNothingToCancel(error)) throw error;
-    }
+        orderId,
+      },
+    );
+    return true;
+  } catch (error) {
+    if (isNoSuchOrder(error)) return false;
+    throw error;
   }
 }
 
-/** Текущая позиция по символу на демо-фьючерсах (размер со знаком: минус — шорт). */
-export async function demoFuturesPosition(
+/**
+ * Позиции символа на демо-фьючерсах по сторонам: One-way — одна строка BOTH (размер со знаком,
+ * минус — шорт), Hedge — LONG и SHORT отдельно. Своя сторона — lib/futuresMode → ownPosition.
+ */
+export async function demoFuturesPositions(
   creds: BinanceCredentials,
   symbol: string,
-): Promise<{ amount: number; entryPrice: number }> {
+): Promise<FuturesSymbolState["positions"]> {
   const rows = await signedRequest(
     DEMO_URL.futures,
     creds,
@@ -551,11 +862,11 @@ export async function demoFuturesPosition(
     positionRiskSchema,
     { symbol },
   );
-  const amount = rows.reduce((s, r) => s + r.positionAmt, 0);
-  return {
-    amount,
-    entryPrice: rows.find((r) => r.positionAmt !== 0)?.entryPrice ?? 0,
-  };
+  return rows.map((r) => ({
+    positionSide: r.positionSide,
+    amount: r.positionAmt,
+    entryPrice: r.entryPrice,
+  }));
 }
 
 /** Одно исполнение (fill) ордера на демо-счёте. */
@@ -573,6 +884,8 @@ export interface DemoFill {
   commissionAsset: string;
   /** Только фьючерсы: зафиксированный PnL исполнения. */
   realizedPnl: number | null;
+  /** Сторона позиции: Hedge — LONG/SHORT, One-way и спот — BOTH. */
+  positionSide: string;
 }
 
 const symbolsOf = (rows: { symbol: string }[]) =>
@@ -625,7 +938,7 @@ export async function fetchDemoTradedSymbols(
       spot: [
         ...new Set([...symbolsOf(orderLists), ...symbolsOf(spotOpen), ...held]),
       ],
-      futures: [
+      usdm: [
         ...new Set([
           ...symbolsOf(income),
           ...positions.keys(),
@@ -680,7 +993,7 @@ export async function fetchDemoOpenSymbols(
   ]);
   return {
     spot: [...new Set(symbolsOf(spotOpen))],
-    futures: [
+    usdm: [
       ...new Set([
         ...symbolsOf(positions.filter((p) => p.positionAmt !== 0)),
         ...symbolsOf(futOpen),
@@ -719,6 +1032,7 @@ export async function fetchDemoFills(
         commission: r.commission,
         commissionAsset: r.commissionAsset,
         realizedPnl: null,
+        positionSide: "BOTH",
       }));
     }
     const rows = await signedRequest(
@@ -741,6 +1055,7 @@ export async function fetchDemoFills(
       commission: r.commission,
       commissionAsset: r.commissionAsset,
       realizedPnl: r.realizedPnl,
+      positionSide: r.positionSide,
     }));
   } catch (error) {
     // -1121 Invalid symbol: монета на балансе без пары к USDT.
@@ -791,16 +1106,23 @@ export async function fetchDemoSymbolOrders(
     return toFuturesSymbolOrders(algos, orders);
   } catch (error) {
     if (error instanceof BinanceApiError && error.code === -1121)
-      return { closeKinds: new Map(), openStops: [] };
+      return {
+        closeKinds: new Map(),
+        openStops: [],
+        groups: new Map(),
+        fullExits: new Set(),
+      };
     throw error;
   }
 }
 
 export interface DemoPosition {
-  /** Размер со знаком: минус — шорт. */
+  /** Размер со знаком: минус — шорт (в Hedge — сумма сторон). */
   amount: number;
   entryPrice: number;
   unrealizedPnl: number;
+  /** Размер по сторонам (positionSide → размер со знаком): Hedge — LONG/SHORT, One-way — BOTH. */
+  bySide: Record<string, number>;
 }
 
 /** Открытые позиции демо-фьючерсов по символам. */
@@ -822,6 +1144,7 @@ export async function fetchDemoFuturesPositions(
       amount: (prev?.amount ?? 0) + r.positionAmt,
       entryPrice: r.entryPrice,
       unrealizedPnl: (prev?.unrealizedPnl ?? 0) + r.unRealizedProfit,
+      bySide: { ...prev?.bySide, [r.positionSide]: r.positionAmt },
     });
   }
   return bySymbol;

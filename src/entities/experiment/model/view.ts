@@ -4,6 +4,7 @@ import {
 } from "@binance-dashboard/trading-core";
 import { z } from "zod";
 import { mirrorViewSchema } from "./mirror";
+import { demoMirrorModeSchema, mirrorAutoSnapshotSchema } from "./mirrorAuto";
 
 // Контракт API страниц лаборатории: GET /api/experiments и GET /api/experiments/[id] (spec 003, 3b).
 
@@ -63,7 +64,13 @@ export const experimentSummarySchema = experimentSchema
     enabled: true,
     demoMirror: true,
   })
-  .extend({ stats: tradeStatsSchema, demo: demoSummarySchema });
+  .extend({
+    /** Положение переключателя «Выкл · Авто · Вкл» и последнее решение авто-зеркала (spec 0043). */
+    demoMirrorMode: demoMirrorModeSchema,
+    demoMirrorAuto: mirrorAutoSnapshotSchema.nullable(),
+    stats: tradeStatsSchema,
+    demo: demoSummarySchema,
+  });
 
 export const experimentsResponseSchema = z.object({
   run: runInfoSchema,

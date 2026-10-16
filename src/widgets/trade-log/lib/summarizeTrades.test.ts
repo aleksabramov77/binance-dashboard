@@ -9,7 +9,7 @@ const order = ({
   trade: Partial<ExecutedOrder["trade"]>;
 }): ExecutedOrder => ({
   id: Math.random().toString(),
-  market: "futures",
+  market: "usdm",
   symbol: "BATUSDT",
   side: "SELL",
   at: "2026-10-10T00:00:00Z",

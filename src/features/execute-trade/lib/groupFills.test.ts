@@ -3,7 +3,7 @@ import type { DemoFill } from "@/shared/api/binance/demo.server";
 import { groupFills, orderKey } from "./groupFills";
 
 const fill = (over: Partial<DemoFill>): DemoFill => ({
-  market: "futures",
+  market: "usdm",
   symbol: "BATUSDT",
   orderId: 1,
   time: 1_000,
@@ -14,6 +14,7 @@ const fill = (over: Partial<DemoFill>): DemoFill => ({
   commission: 0.001,
   commissionAsset: "USDT",
   realizedPnl: 0,
+  positionSide: "BOTH",
   ...over,
 });
 
@@ -43,7 +44,7 @@ describe("groupFills", () => {
       }),
     ]);
     expect(orders).toHaveLength(2);
-    expect(orders.find((o) => o.market === "futures")?.realizedPnl).toBe(-2);
+    expect(orders.find((o) => o.market === "usdm")?.realizedPnl).toBe(-2);
     expect(orders.find((o) => o.market === "spot")?.realizedPnl).toBeNull();
   });
 
@@ -54,9 +55,18 @@ describe("groupFills", () => {
       fill({ orderId: 3, time: 2 }),
     ]);
     expect(orders.map(orderKey)).toEqual([
-      "futures-BATUSDT-2",
-      "futures-BATUSDT-3",
-      "futures-BATUSDT-1",
+      "usdm-BATUSDT-2",
+      "usdm-BATUSDT-3",
+      "usdm-BATUSDT-1",
     ]);
+  });
+});
+
+describe("groupFills: средняя цена", () => {
+  it("без хвоста плавающей точки", () => {
+    const [o] = groupFills([
+      fill({ qty: 39, price: 0.1738, quoteQty: 6.7782 }),
+    ]);
+    expect(o.avgPrice).toBe(0.1738);
   });
 });

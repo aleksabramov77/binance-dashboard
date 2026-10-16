@@ -359,7 +359,7 @@ const F06: ExperimentConfig = {
 };
 
 /** USDⓈ-M Futures (бессрочные) — long и short. */
-const FUTURES: Entry[] = [
+const USDM: Entry[] = [
   {
     id: "F01",
     name: "Baseline: сканер, оба направления",
@@ -610,10 +610,13 @@ const FUTURES: Entry[] = [
     },
   },
 ];
-export const FUTURES_EXPERIMENTS = FUTURES.map(make("futures"));
+export const USDM_EXPERIMENTS = USDM.map(make("usdm"));
 
-/** Каталог лаборатории: 20 spot + 20 futures. Сид в БД — upsert по id (задача 2b). */
+/**
+ * Публичный каталог лаборатории: 20 Spot + 20 USDⓈ-M. Сид в БД — upsert по id (задача 2b). Эксперименты
+ * COIN-M (PC..) — приватные, в private/experiments.json (spec 0015, 0023).
+ */
 export const EXPERIMENT_CATALOG: Experiment[] = [
   ...SPOT_EXPERIMENTS,
-  ...FUTURES_EXPERIMENTS,
+  ...USDM_EXPERIMENTS,
 ];

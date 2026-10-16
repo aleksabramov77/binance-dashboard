@@ -3,8 +3,11 @@
 // Edge Function Supabase (spec 007b). Только сервер.
 import {
   createDbExperimentStore,
+  type EngineExposure,
   type EngineStatus,
   engineTickSchema,
+  type OnInvalidExperiment,
+  readEngineExposure,
   readExperimentDetail,
   readExperimentsOverview,
   readTradeStats,
@@ -19,24 +22,32 @@ import {
   readRunner,
   type TickResult,
 } from "@/features/paper-engine";
+import type { FuturesMarket, Perpetuals } from "@/shared/api/binance";
 import {
   fetch24hTickers,
+  fetchCoinmTickers,
   fetchFundingRates,
   fetchKlines,
-  fetchPerpetualSymbols,
+  fetchPerpetuals,
 } from "@/shared/api/binance/public.server";
+import { sendTelegramMessage } from "@/shared/api/telegram";
 import {
   getDemoTradingConfig,
   getRunnerRole,
+  getTelegramConfig,
 } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
-import { log } from "@/shared/lib/logger.server";
+import { flushLogs, log } from "@/shared/lib/logger.server";
 import {
-  createPerpetualsSource,
+  createPerpetualsSources,
   type EngineTickEnv,
   prepareEngineDb,
   runEngineTick,
 } from "./engineTick";
+import {
+  announceEngineToggle,
+  type EngineToggleActor,
+} from "./engineToggleNotice";
 
 const MINUTE = 60_000;
 /** Тик — через несколько секунд после начала минуты: Binance успевает закрыть свечу. */
@@ -51,7 +62,7 @@ interface EngineProcess {
   exclusive: Promise<unknown> | null;
   ready: Promise<void> | null;
   cache: CandleCache;
-  perpetuals: () => Promise<Set<string>>;
+  perpetuals: (market: FuturesMarket) => Promise<Perpetuals>;
   warnedRunner: boolean;
 }
 
@@ -68,8 +79,9 @@ function engine(): EngineProcess {
     exclusive: null,
     ready: null,
     cache: new Map(),
-    perpetuals: createPerpetualsSource(
-      fetchPerpetualSymbols,
+    // Юниверс лаборатории — только крипта: без индексов и токенов реальных активов (spec 0029).
+    perpetuals: createPerpetualsSources(
+      (m) => fetchPerpetuals(m, { cryptoOnly: true }),
       PERPETUALS_TTL_MS,
       Date.now,
     ),
@@ -115,7 +127,12 @@ function tickEnv(): EngineTickEnv {
   return {
     db: getDb(),
     runner: runnerRole(),
-    market: { fetchKlines, fetch24hTickers, fetchFundingRates },
+    market: {
+      fetchKlines,
+      fetch24hTickers,
+      fetchCoinmTickers,
+      fetchFundingRates,
+    },
     perpetuals: e.perpetuals,
     cache: e.cache,
     log: (level, event, message, data) => log[level](event, message, data),
@@ -223,15 +240,56 @@ export async function getEngineStatus(): Promise<EngineStatus> {
   };
 }
 
-/** Тумблер «Автоторговля» лаборатории. Включили — первый тик сразу, не дожидаясь минуты. */
+/** Отложенная работа после ответа; вне запроса Next — сразу. */
+export type Defer = (task: () => Promise<void>) => void;
+const runNow: Defer = (task) => {
+  void task();
+};
+
+/** Открытые paper-сделки и демо-позиции — для модалки выключения «Автоторговли» (spec 0044). */
+export async function getEngineExposure(): Promise<EngineExposure> {
+  return readEngineExposure(getDb());
+}
+
+function telegramSender(): ((text: string) => Promise<void>) | null {
+  const telegram = getTelegramConfig();
+  const chatId = telegram?.chatId;
+  if (!telegram || !chatId) return null;
+  return (text) => sendTelegramMessage(telegram.token, chatId, text);
+}
+
+/**
+ * Тумблер «Автоторговля» лаборатории. Включили — первый тик сразу, не дожидаясь минуты.
+ * Каждое переключение — запись engine.toggle (кто, сколько позиций осталось без проверки) и
+ * уведомление в Telegram после ответа (spec 0044); сбой подсчёта или Telegram тумблер не роняет.
+ */
 export async function setEngineEnabled(
   enabled: boolean,
+  actor: EngineToggleActor,
+  defer: Defer = runNow,
 ): Promise<EngineStatus> {
   await ensureEngineReady();
   await store().setState(ENGINE_KEYS.enabled, enabled);
-  log.info(
-    "engine.toggle",
-    enabled ? "Движок лаборатории включён" : "Движок лаборатории выключен",
+  const exposure = enabled
+    ? null
+    : await getEngineExposure().catch((error: unknown) => {
+        log.warn(
+          "engine.toggle",
+          "Не удалось посчитать открытые сделки для журнала",
+          undefined,
+          error,
+        );
+        return null;
+      });
+  announceEngineToggle(
+    { enabled, ...actor, at: new Date(), exposure },
+    {
+      info: (event, message, data) => log.info(event, message, data),
+      warn: (event, message, data) => log.warn(event, message, data),
+      send: telegramSender(),
+      // warn о сбое Telegram появляется уже после ответа — дописываем журнал сами.
+      defer: (task) => defer(() => task().then(flushLogs)),
+    },
   );
   if (enabled)
     tickExperimentEngine().catch((error) =>
@@ -240,6 +298,14 @@ export async function setEngineEnabled(
   return getEngineStatus();
 }
 
+/** Строка experiments не прошла строгую схему (spec 0029): страницы показывают остальные, строку — в журнал. */
+export const warnInvalidExperiment: OnInvalidExperiment = ({ id, problem }) =>
+  log.warn(
+    "experiment.invalid",
+    `эксперимент ${id} пропущен: конфиг не проходит схему`,
+    { id, problem },
+  );
+
 /** Страница /experiments: каталог со статистикой текущей эпохи. */
 export async function getExperimentsOverview() {
   await ensureEngineReady();
@@ -247,17 +313,24 @@ export async function getExperimentsOverview() {
     getDb(),
     await readEnabled(store()),
     getDemoTradingConfig() !== null,
+    warnInvalidExperiment,
   );
 }
 
 /** Страница /experiments/[id]; null — эксперимента нет в каталоге. */
 export async function getExperimentDetail(id: string, limit: number) {
   await ensureEngineReady();
-  return readExperimentDetail(getDb(), id, await readEnabled(store()), limit);
+  return readExperimentDetail(
+    getDb(),
+    id,
+    await readEnabled(store()),
+    limit,
+    warnInvalidExperiment,
+  );
 }
 
 /** Страница /stats: разрезы сделок эпохи; null — нет такой эпохи. */
 export async function getTradeStats(query: StatsQuery) {
   await ensureEngineReady();
-  return readTradeStats(getDb(), query, Date.now());
+  return readTradeStats(getDb(), query, Date.now(), warnInvalidExperiment);
 }

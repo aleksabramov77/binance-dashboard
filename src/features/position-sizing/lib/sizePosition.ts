@@ -38,7 +38,7 @@ export function sizePosition(
   if (cappedByLimit) quantity = settings.maxNotional / setup.entry;
 
   const leverage =
-    setup.market === "futures"
+    setup.market === "usdm"
       ? Math.min(Math.max(1, Math.round(settings.leverage)), MAX_LEVERAGE)
       : 1;
   const notionalUsd = quantity * setup.entry;

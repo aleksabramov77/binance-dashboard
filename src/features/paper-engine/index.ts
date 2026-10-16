@@ -2,13 +2,14 @@
 // клиентских компонентов. Модули среды-независимы (Node и Deno): только trading-core и zod.
 export {
   EXPERIMENT_CATALOG,
-  FUTURES_EXPERIMENTS,
   INITIAL_BUDGET,
   SPOT_EXPERIMENTS,
+  USDM_EXPERIMENTS,
 } from "./config/catalog.ts";
 export { ENGINE } from "./config/engine.ts";
 export type { CandleCache } from "./lib/candles.ts";
 export {
+  coinmTicker,
   isEligibleSymbol,
   type MarketTicker,
   pickUniverse,
@@ -35,6 +36,7 @@ export {
   type EngineRunner,
   type ExperimentStore,
   RUNNERS,
+  type SkippedSignalCount,
   type TradeClose,
   type TradeProgress,
 } from "./model/store.ts";

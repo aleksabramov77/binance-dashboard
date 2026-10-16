@@ -20,6 +20,7 @@ const long = (patch: Partial<OpenPosition> = {}): OpenPosition => ({
   takeProfit: 104,
   atr: 1,
   extreme: 100,
+  mae: 100,
   openedAt: 0,
   checkedUntil: 0,
   ...patch,
@@ -48,6 +49,7 @@ describe("walkExits: стоп и тейк", () => {
       exit: null,
       stop: 98,
       extreme: 101.5,
+      mae: 99,
       checkedUntil: 2 * MIN,
     });
   });
@@ -116,7 +118,8 @@ describe("walkExits: безубыток и трейлинг", () => {
       p,
     );
     expect(r.exit).toBeNull();
-    expect(r.stop).toBe(103);
+    // 105 − 2 × (1 / 100) × 105: дистанция — 2 ATR входа в % цены от экстремума.
+    expect(r.stop).toBeCloseTo(102.9, 10);
     const out = walkExits(
       {
         ...pos,
@@ -127,7 +130,8 @@ describe("walkExits: безубыток и трейлинг", () => {
       [m(3, 103.5, 104, 102.5)],
       p,
     );
-    expect(out.exit).toEqual({ reason: "trail", price: 103, at: 3 * MIN });
+    expect(out.exit).toMatchObject({ reason: "trail", at: 3 * MIN });
+    expect(out.exit?.price).toBeCloseTo(102.9, 10);
   });
 
   it("short: трейлинг вниз", () => {
@@ -136,7 +140,7 @@ describe("walkExits: безубыток и трейлинг", () => {
       [m(0, 100, 100, 97)],
       policy({ trailAtr: 2 }),
     );
-    expect(r.stop).toBe(99);
+    expect(r.stop).toBeCloseTo(97 * 1.02, 10);
   });
 
   it("без стопа трейлинг создаёт стоп", () => {
@@ -145,7 +149,7 @@ describe("walkExits: безубыток и трейлинг", () => {
       [m(0, 100, 110, 100)],
       policy({ trailAtr: 3 }),
     );
-    expect(r.stop).toBe(107);
+    expect(r.stop).toBeCloseTo(110 * 0.97, 10);
   });
 });
 
@@ -158,5 +162,137 @@ describe("walkExits: тайм-стоп", () => {
       policy({ timeStopBars: 2 }),
     );
     expect(r.exit).toEqual({ reason: "time", price: 100.5, at: 2 * HOUR });
+  });
+});
+
+describe("walkExits: MAE — худшая цена с входа (spec 0030)", () => {
+  it("long — минимум low, short — максимум high по всем свечам", () => {
+    const candles = [m(0, 100, 101, 99.2), m(1, 100, 101.8, 98.6)];
+    expect(walkExits(long(), candles, policy()).mae).toBe(98.6);
+    expect(walkExits(short(), candles, policy()).mae).toBe(101.8);
+  });
+
+  it("свеча выхода по тейку учтена своим low/high", () => {
+    const r = walkExits(
+      long(),
+      [m(0, 100, 100.5, 99.5), m(1, 100, 104.5, 98.5)],
+      policy(),
+    );
+    expect(r.exit?.reason).toBe("tp");
+    expect(r.mae).toBe(98.5);
+    const s = walkExits(
+      short(),
+      [m(0, 100, 100.5, 99.5), m(1, 100, 101.5, 95.5)],
+      policy(),
+    );
+    expect(s.exit?.reason).toBe("tp");
+    expect(s.mae).toBe(101.5);
+  });
+
+  it("стоп: MAE — цена срабатывания, а не хвост свечи после выхода; гэп — open", () => {
+    expect(walkExits(long(), [m(0, 99, 99.5, 96)], policy()).mae).toBe(98);
+    expect(walkExits(long(), [m(0, 97, 97.5, 96)], policy()).mae).toBe(97);
+    expect(walkExits(short(), [m(0, 101, 103, 100.5)], policy()).mae).toBe(102);
+  });
+
+  it("тайм-стоп: MAE учитывает open свечи выхода", () => {
+    const r = walkExits(
+      long({ takeProfit: null, initialStop: null, stop: null }),
+      [m(0, 100, 100.5, 99.8), m(60, 99, 99.5, 97)],
+      policy({ timeStopBars: 1 }),
+    );
+    expect(r.exit?.reason).toBe("time");
+    expect(r.mae).toBe(99);
+  });
+
+  it("MAE лучше входа не бывает: начальное значение — цена входа", () => {
+    expect(walkExits(long(), [m(0, 101, 102, 100.5)], policy()).mae).toBe(100);
+  });
+
+  it("MAE не известна (сделка до spec 0030) — остаётся null", () => {
+    expect(
+      walkExits(long({ mae: null }), [m(0, 100, 101, 99)], policy()).mae,
+    ).toBeNull();
+    expect(
+      walkExits(long({ mae: null }), [m(0, 99, 99.5, 96)], policy()).mae,
+    ).toBeNull();
+  });
+});
+
+describe("walkExits: трейлинг масштабируется с ценой (баг 0041)", () => {
+  // Шорт по монете с ценой 1,00 и ATR 0,05 (5 % цены), трейлинг 2 ATR — дистанция 10 % от экстремума.
+  const coin = (patch: Partial<OpenPosition> = {}): OpenPosition =>
+    short({
+      entryPrice: 1,
+      initialStop: 1.1,
+      stop: 1.1,
+      takeProfit: null,
+      atr: 0.05,
+      extreme: 1,
+      mae: 1,
+      ...patch,
+    });
+  const trail = policy({ trailAtr: 2 });
+  /** Обвал на 80 %: по 0,01 за минуту с 1,00 до 0,20, без откатов. */
+  const crash = Array.from({ length: 80 }, (_, i) =>
+    m(i, 1 - i * 0.01, 1 - i * 0.01, 1 - (i + 1) * 0.01),
+  );
+
+  it("«зомби»: после обвала и колебаний ±30 % от минимума позиция закрывается трейлингом", () => {
+    // Колебания 0,20 ↔ 0,26 (+30 % от минимума) — неделя минутных свечей.
+    const chop = Array.from({ length: 7 * 24 * 60 }, (_, i) =>
+      m(80 + i, 0.2, 0.26, 0.2),
+    );
+    const r = walkExits(coin(), [...crash, ...chop], trail);
+    expect(r.exit?.reason).toBe("trail");
+    expect(r.exit?.at).toBe(80 * MIN);
+    expect(r.exit?.price).toBeCloseTo(0.22, 10);
+  });
+
+  it("шорт после −80 %: стоп — минимум + 2 × 5 %, откат на 7,5 % не закрывает, на 12,5 % — закрывает", () => {
+    const r = walkExits(coin(), crash, trail);
+    expect(r.exit).toBeNull();
+    expect(r.extreme).toBeCloseTo(0.2, 10);
+    expect(r.stop).toBeCloseTo(0.22, 10);
+    const at = r.checkedUntil;
+    const from = coin({
+      stop: r.stop,
+      extreme: r.extreme,
+      mae: r.mae,
+      checkedUntil: at,
+    });
+    expect(
+      walkExits(from, [m(at / MIN, 0.2, 0.215, 0.2)], trail).exit,
+    ).toBeNull();
+    expect(
+      walkExits(from, [m(at / MIN, 0.2, 0.225, 0.2)], trail).exit,
+    ).toMatchObject({ reason: "trail" });
+  });
+
+  it("лонг после +100 %: дистанция вдвое больше в абсолюте (2 ATR входа × 2)", () => {
+    const r = walkExits(
+      long({ initialStop: null, stop: null, takeProfit: null }),
+      [m(0, 100, 200, 100)],
+      policy({ trailAtr: 2 }),
+    );
+    expect(r.stop).toBeCloseTo(196, 10);
+  });
+
+  it("при extreme = цена входа дистанция прежняя — trailAtr × ATR входа", () => {
+    const flat = [m(0, 100, 100, 99.5)];
+    expect(
+      walkExits(
+        long({ initialStop: null, stop: null, takeProfit: null }),
+        flat,
+        policy({ trailAtr: 2 }),
+      ).stop,
+    ).toBe(98);
+    expect(
+      walkExits(
+        short({ initialStop: null, stop: null, takeProfit: null }),
+        [m(0, 100, 100.5, 100)],
+        policy({ trailAtr: 2 }),
+      ).stop,
+    ).toBe(102);
   });
 });

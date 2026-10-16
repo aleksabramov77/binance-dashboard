@@ -40,9 +40,9 @@ Zustand (клиентское состояние, если понадобитс�
 | Earn | `pages/earn` (вкладки Simple / Dual / Стейкинг и DeFi / Гид), `widgets/{best-offers,changes-feed,offers-table,dual-offers-table,yield-products-table,kind-summary,earn-guide,allocation-plan}`, `features/{collect-snapshot,refresh-snapshot,offer-filters,load-earn-catalog,allocation-advice}`, `entities/{earn-offer,earn-product}` (сложные продукты, гид — spec 0019) | `/api/earn/*` (в т.ч. `/api/earn/summary` — публичная сводка, `/api/earn/advanced` — каталоги по ключу), `/api/cron/earn-snapshot` | таблица `earn_snapshots` (`entities/earn-offer/model/db.ts`); каталоги сложных продуктов — только кэш в памяти 5 мин |
 | Портфель | `pages/portfolio`, `widgets/{holdings-table,portfolio-summary,rebalance-plan}`, `features/{load-portfolio,portfolio-advice}`, `entities/holding` | `/api/portfolio` | — |
 | Сигналы и демо-сделки | `pages/signals`, `widgets/{market-movers,setup-cards,signals-help,trade-log}`, `features/{scan-market,analyze-setup,setup-review,trade-ticket,execute-trade,position-sizing}`, `entities/{market-signal,trade}` | `/api/signals/*`, `/api/trade/*`, `/api/analysis` | — |
-| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам `MarketBudgets`, группы активов AG — `model/assetGroup.ts`, демо-метрики — `computeDemoStats`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере), `features/demo-mirror` (зеркало в Binance Demo, spec 008; включение с подтверждением — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`), `/api/cron/tick`, `/api/cron/demo-mirror` | таблицы `experiments`, `runs`, `paper_trades`, `engine_state`, `demo_mirror_orders` |
+| Лаборатория экспериментов | ядро `packages/trading-core` (`@binance-dashboard/trading-core`: индикаторы, схемы, стратегии, выходы, sizing, исполнение), `entities/experiment` (фасад ядра, UI стратегий, бюджеты по рынкам (`computeMarketBudgets`, `useExperimentBudgets`), группы активов AG — `model/assetGroup.ts` (`spot` / `usdm` / `coinm`, вид группы `kind`, доступность демо-зеркала; spec 0023), демо-метрики — `computeDemoStats`), `features/paper-engine` (тик движка, юниверс, кэш свечей, каталог 40 экспериментов, интерфейс `ExperimentStore`; среда-независимый — Node и Deno, задача 1d), `features/engine-toggle` (тумблер «Автоторговля» в хедере и в `/settings` → Paper: подтверждение в модалке с числом открытых позиций — `readEngineExposure`, `GET /api/experiments/engine/exposure`; журнал `engine.toggle` с логином и Telegram — `src/app/server/engineToggleNotice.ts`, spec 0044), `features/demo-mirror` (зеркало в Binance Demo, spec 008; переключатель «Выкл · Авто · Вкл» — `features/demo-mirror-toggle`; биржу и БД передаёт `src/app/server/demoMirror.ts`; резерв демо-кошелька — `MIRROR.minFreeUsd`, spec 0043), авто-зеркало (spec 0043: правило и тексты — чистые функции `entities/experiment/lib/{decideMirrorAuto,mirrorAutoMessages}.ts`, пороги — `entities/experiment/config/mirrorAuto.ts`, БД — `entities/experiment/api/mirrorAutoDb.ts`, композиция — `src/app/server/mirrorAuto.ts`), `pages/{experiments,experiment-detail,stats,settings}` (сброс эпохи и настройки — `entities/experiment/api/settingsDb.ts`, `features/paper-engine/model/planReset.ts`; сброс группы активов — `resetGroupRun` / `resetGroupCapital` / `resetGroupDemo`, карточка `/settings#groups`, spec 0038; агрегаты сделок — `entities/experiment/lib/stats.ts`, разрезы `/stats` — `entities/experiment/lib/slices.ts`); запись приватных экспериментов в БД — `scripts/lab-private.ts` + `scripts/lib/labPrivate.ts` (`pnpm lab:private`, spec 0015); бэктест по истории — `scripts/lab-backtest.ts` + `scripts/lib/{labBacktest,labHistory}.ts` (`pnpm lab:backtest`, spec 0032; повтор `runTick`, дисковый кэш свечей вне git) | `/api/experiments/*` (в т.ч. `/api/experiments/stats`, `/api/experiments/settings/mirror`, `/api/experiments/reset/group`), `/api/cron/tick`, `/api/cron/demo-mirror`, `/api/cron/mirror-auto` | таблицы `experiments`, `runs`, `paper_trades` (с контекстом входа и MAE, spec 0030), `engine_state`, `demo_mirror_orders`, `skipped_signals` (отсечённые лимитом сигналы, spec 0030; объём ограничен движком) |
 | ИИ-кредиты | `entities/ai-credits` | `/api/openrouter/*` | — |
-| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`), `proxy.ts`, `widgets/app-header`, `pages/{logs,login,help}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → Telegram), `features/db-space` (свободное место в базе: пороги, тексты бота), `src/app/server/{logs,logMonitor,alertState,dbSpace,telegramBot}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), прочий `shared/*` | `/api/logs` (фильтры `level`/`event`/`experiment`/`days`), `/api/cron/log-monitor`, `/api/telegram/webhook`, `/api/auth/*`, страница `/login`, страница `/help` (глоссарий из `docs/ai/glossary.md` через `pnpm glossary`) | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
+| Платформа (не домен) | `app/*`, `src/app/server/*` (в т.ч. `auth.ts`, `accountBalances.ts`), `proxy.ts`, `widgets/app-header` (в т.ч. «Счета» — чипы групп Paper / Demo / Real, spec 0038), `entities/account-balance` (остатки Demo и Real по группам), `pages/{logs,login,help}`, `entities/log-entry` (таблицы `app_logs`, `alert_state`), `features/log-monitor` (монитор журнала → задача в GitHub → Telegram), `features/db-space` (свободное место в базе: пороги, тексты бота), `src/app/server/{logs,logMonitor,alertState,dbSpace,telegramBot}.ts`, `features/auth` (вход, `UserMenu`), `shared/lib/auth/*` (`accessPolicy`, `cronAuth.server`), `shared/api/github` (REST: issues, метки, комментарии), `.claude/routines/alert-triage.md` (routine разбора тревог), плашка новой версии (`widgets/app-header`: `NewVersionBanner`, `useNewVersionAvailable`; `shared/lib/client` — версия страницы и `reportClientError`, spec 0036), прочий `shared/*` | `/api/accounts/balances` (кэш 60 с), `/api/logs` (фильтры `level`/`event`/`experiment`/`days`), `/api/version`, `/api/cron/log-monitor`, `/api/telegram/webhook`, `/api/auth/*`, страница `/login`, страница `/help` (глоссарий из `docs/ai/glossary.md` через `pnpm glossary`) | таблицы `app_logs`, `alert_state`; локально ещё `data/logs`; подключение к БД |
 
 Правила:
 - **Нет импортов между доменами** ни на каком слое. Фича лаборатории не импортирует `entities/trade`,
@@ -76,7 +76,8 @@ Zustand (клиентское состояние, если понадобитс�
   `node:*`, Next и `*.server`, с явными расширениями `.ts` в относительных импортах (бандлер Supabase
   не угадывает расширения) — оба правила проверяет Biome; `pnpm check:edge` — `deno check` функций.
 - Исключение: `@/shared/lib` реэкспортирует индикаторы (ema/rsi/atr и ta-серии) из `trading-core`, чтобы
-  сканер Сигналов не дублировал математику. Индикаторы доменно-нейтральны; если ядро начнут использовать
+  сканер Сигналов не дублировал математику; так же `shared/api/binance/markets.ts` берёт из ядра чтение старого имени
+  рынка `futures` (`normalizeMarket`, `withLegacyMarketField`, spec 0023) — одна реализация на всё приложение. Индикаторы доменно-нейтральны; если ядро начнут использовать
   другие домены шире индикаторов — вынести индикаторы в свой пакет.
 - Новый слайс — сразу в таблицу выше, в свой домен. Новый домен — новая строка.
 
@@ -85,6 +86,18 @@ Workspace-пакет `@binance-dashboard/trading-core` (spec 003): индика�
 выходы, размер позиции, исполнение paper-сделок. Только чистые функции и Zod — без React, Next, `@/…`,
 сети, БД и env (Biome `overrides`). Приложение импортирует пакет (`transpilePackages` в `next.config.ts`);
 UI сущности — в `src/entities/experiment`. Подробно — `packages/trading-core/README.md`.
+
+## Группы активов (AG, spec 0016, 0023)
+- Значения `market` в коде, БД и URL — `spot`, `usdm` (USDⓈ-M, `fapi`), `coinm` (COIN-M, `dapi`); коды для людей —
+  `SPOT`, `FT:USDM`, `FT:COINM` (`entities/experiment/model/assetGroup.ts` → `ASSET_GROUPS`, порядок ключей — порядок в
+  шапке и фильтрах). Схема — одна, `marketSchema` из `trading-core`; «это фьючерс» — признак `MARKET_KIND` / `isFuturesMarket`
+  (шорт, плечо, funding), а не сравнение со строкой. Старое имя `futures` (до spec 0023) читают `legacyMarketSchema`
+  (ядро: журнал, `?market=futures`), `parseMarketParam` (фильтры nuqs) и `tradeMarketSchema` (`shared/api/binance`:
+  сетапы и сделки Сигналов, у них только `spot` / `usdm`). Данные в БД переведены миграцией `drizzle/0007_futures_to_usdm.sql`.
+- COIN-M в движке: юниверс — бессрочные `…USD_PERP` со статусом TRADING (`fetchPerpetuals("coinm")`, размер контракта),
+  оборот в $ = контракты × размер (`coinmTicker`), сделка — целые контракты (`sizePosition({ contractSizeUsd })`), PnL и
+  комиссии в $ по формулам USDⓈ-M. Рынок без тикеров (dapi недоступен) — его эксперименты ждут следующего тика, одна запись
+  `warn`; остальные группы торгуют. Демо-зеркало COIN-M — позже: `DEMO_MIRROR_MARKETS`, галочка выключена, API — 400.
 
 ## Сервер и клиент
 - Всё, что использует секреты, `node:crypto` или `node:fs` (логгер), — **только сервер**.
@@ -132,6 +145,18 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - Монитор журнала (`features/log-monitor`, `POST /api/cron/log-monitor`, pg_cron каждые 15 мин): всплески ошибок,
   5xx по ручкам, движок не тикает, упавший cron, старый Earn → разбор ИИ (`LOG_ANALYSIS_MODEL`) → Telegram;
   повтор не чаще 2 ч, «восстановлено» один раз. Журнал хранится 14 дней.
+- Задачи по тревогам (spec 0037, `features/log-monitor/model/trackAlertIssues.ts`, клиент `shared/api/github`): задан
+  `GITHUB_ALERTS_TOKEN` — новая тревога до отправки в Telegram заводит issue в `GITHUB_ALERTS_REPO` (по умолчанию
+  приватный `aleksabramov77/binance-dashboard-private`) с маркером `<!-- alert:<ключ> -->`, деталями, ИИ-разбором и
+  записями журнала; метка `alert` запускает облачную routine Claude (`.claude/routines/alert-triage.md`: разбор без кода
+  или draft PR). Сверх `ALERT_AUTOFIX_PER_DAY` (3) issue с `alert` за 24 ч — метка `alert-queued`, без автозапуска.
+  Напоминание о той же тревоге — комментарий «повтор: …» в открытый issue с маркером (ищется среди открытых issue с
+  `alert` или `alert-queued`, все страницы, до 1000); закрытый issue заново не заводится. Метки
+  `alert`, `alert-queued`, `alert-no-code`, `alert-pr` код создаёт при первом issue. Ссылка на issue — строкой под
+  тревогой в Telegram. Сбой GitHub не мешает уведомлению и `alert_state` — `warn monitor.github` (текст записи —
+  `githubWarnings`). GitHub недоступен в момент новой тревоги — issue по ней не появится до её следующего возникновения
+  (после «восстановлено»): напоминания issue не заводят. Без токена
+  монитор работает как раньше.
 - Свободное место в базе (spec 0021, `features/db-space`, `src/app/server/dbSpace.ts`): тот же cron замеряет размер
   базы (`getDbUsage`: `pg_database_size` и топ таблиц по `pg_total_relation_size`; на этапе 3 миграции меняется только
   она) относительно `DB_SIZE_LIMIT_MB` (500) и шлёт одно сообщение на каждый порог свободного места 50/40/30/20/10/5 %
@@ -148,9 +173,35 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   `GET /api/logs`: `level`, `event` (список через запятую), `experiment` (`data->>'experimentId'`), `days` (1…14)
   — `entities/log-entry/model/filters.ts`. Демо-зеркало пишет каждый отказ/пропуск отдельной записью
   `mirror.rejected` / `mirror.skipped` с `experimentId` (spec 0016).
+- Авто-зеркало (spec 0043, `POST /api/cron/mirror-auto`, pg_cron `mirror-auto` в 07:00 UTC — ставит
+  `pnpm mirror:supabase cron-install-auto`, ручной запуск — `pnpm mirror:supabase auto [--dry-run]`): положение
+  `experiments.demo_mirror_mode` (`auto` / `on` / `off`), флаг `demo_mirror` по-прежнему читает зеркало. В «Авто» правило
+  включает и выключает флаг, ручные положения не трогает — только подсказка (последняя — `demo_mirror_advice`, без
+  повторов, пока условие держится). Каждое изменение — `info mirror.auto`, подсказка — `info mirror.advice` с
+  `experimentId` и сообщение в Telegram (только `NODE_ENV=production`; локальный сервер и скрипты — только журнал).
+  Перевод в «Авто» из UI или `lab:apply --mirror-auto` сразу решает по правилу для эксперимента.
+
+## Рассинхрон версий клиента (spec 0036)
+- Версия сборки — `deploymentId` в `next.config.ts`: `NEXT_DEPLOYMENT_ID`, иначе `VERCEL_DEPLOYMENT_ID` (id деплоя, задаёт
+  Vercel); локально не задана — механизм выключен. Next ставит `data-dpl-id` на `<html>` и при навигации после деплоя сам
+  делает полную перезагрузку. Но вкладка, которую не трогают, продолжает опрашивать API старым JS: новый контракт (как
+  `futures` → `usdm` в spec 0023) валит её Zod-схемы.
+- Версии: сервер — `getDeploymentVersion()` (`shared/config/env.server.ts`), страница — `getPageVersion()`
+  (`shared/lib/client`; Next снимает `data-dpl-id` сразу при загрузке и подставляет значение вместо
+  `process.env.NEXT_DEPLOYMENT_ID`), сравнение — `isStaleVersion` (обе заданы и различаются).
+- `GET /api/version` → `{ version }`; `useNewVersionAvailable` (`widgets/app-header`) опрашивает раз в 5 мин и при возврате на
+  вкладку, только если версия страницы задана. Новая версия — плашка «Вышла новая версия — Обновить» в шапке; сама страница
+  не перезагружается (не теряется ввод), «Обновить» — `window.location.reload()`.
+- `reportClientError` шлёт `version`; `POST /api/logs` пишет ошибку вкладки со старой сборкой как `warn client.stale`
+  (`clientVersion`, `serverVersion`) — монитор журнала считает всплески только по `level=error`, тревоги нет. Ошибки клиента
+  текущей версии и без версии — `error client`, как раньше.
+- Проверять механизм — прод-сборкой (`VERCEL_DEPLOYMENT_ID=… pnpm build && pnpm start`): в `next dev` с заданной версией
+  бывают ложные перезагрузки из-за перекомпиляции.
 
 ## Данные на диске
 `data/` в `.gitignore`: `snapshots/` (снимки Earn), `logs/`, `pglite/` (локальная БД).
+Кэш истории Binance для бэктеста (`pnpm lab:backtest`, spec 0032) — вне репозитория: `~/.cache/binance-dashboard`
+(свечи и funding по месяцам, общий для всех worktree; `--cache <каталог>` — другой). В БД свечи не хранятся.
 `private/` в `.gitignore` — клон приватного репозитория (см. «Приватные эксперименты»).
 
 ## Приватные эксперименты (spec 0015)
@@ -162,8 +213,10 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   ссылку (`pnpm wt new` / `pnpm wt link`, список `.claude/worktree-links.json`). Содержимое: `experiments.json`
   (эксперименты), `lab/` (анализы `/flow lab`), `README.md`.
 - `private/experiments.json` — массив в формате каталога (`experimentSchema` из `trading-core`): `id`, `market`,
-  `name`, `hypothesis`, `config`; необязательные `initialBudget` (10 000), `enabled` (`true`), `demoMirror` (`false`).
-  id — `P` + буква рынка + номер: `PS01` (spot), `PF01` (futures); с id каталога (`S..`, `F..`) не пересекается.
+  `name`, `hypothesis`, `config`; необязательные `initialBudget` (10 000), `enabled` (`true`), `demoMirror` (`false`; `true` — ручное «Вкл» демо-зеркала, иначе
+  «Авто», spec 0043).
+  id — `P` + буква группы + номер: `PS01` (spot), `PF01` (usdm), `PC01` (coinm, spec 0023; `demoMirror: true` для него —
+  ошибка: демо-зеркало COIN-M позже); с id каталога (`S..`, `F..`) не пересекается.
 - `pnpm lab:private [--dry-run] [--prod] [--file <path>]` (`scripts/lab-private.ts`, чистая логика и тесты —
   `scripts/lib/labPrivate.ts`): проверяет файл целиком (схема, лишние поля, префикс ↔ рынок, повторы, пересечение
   с каталогом) до подключения к БД, печатает цель (хост Postgres без пароля или «локальная PGlite») и план
@@ -189,7 +242,7 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   `getDb`, `migrateDb`, `closeDb`, `createMemoryDb` (тесты). Только сервер. Схемы в клиент не
   передаются: запросы явно указывают таблицу (`db.select().from(experimentsTable)`).
 - Таблицы живут в слайсах своих доменов — `src/entities/<сущность>/model/db.ts` (лаборатория:
-  `experiments`, `runs` — эпохи сброса, `paper_trades`, `engine_state`) и экспортируются через public API
+  `experiments`, `runs` — эпохи сброса, `paper_trades`, `engine_state`, `skipped_signals`) и экспортируются через public API
   сущности. Внешние ключи и джойны — только внутри домена.
 - Подключение: `DATABASE_URL` → postgres.js (прод — Supabase, пулер в режиме transaction, `prepare: false`);
   без неё — встроенный PGlite в `PGLITE_DIR` (по умолчанию `data/pglite`), внешние сервисы не нужны.

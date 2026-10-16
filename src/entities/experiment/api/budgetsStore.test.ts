@@ -58,6 +58,8 @@ const trade = (
   pnl: null,
   rMultiple: null,
   demoOrderRef: null,
+  mae: null,
+  entryContext: {},
   signal: {},
 });
 
@@ -72,7 +74,7 @@ const close_ = (pnl: number, fees: number) => ({
 
 describe("loadBudgetInputs", () => {
   it("берёт только сделки текущей эпохи и агрегирует закрытые по рынку", async () => {
-    await seedExperiments(db, [exp("S01", "spot"), exp("F01", "futures")]);
+    await seedExperiments(db, [exp("S01", "spot"), exp("F01", "usdm")]);
     const store = createDbExperimentStore(db);
     const old = await ensureRun(db);
     await store.insertTrade(trade("old", old, "S01", "spot"));
@@ -86,7 +88,7 @@ describe("loadBudgetInputs", () => {
     await store.closeTrade("a", close_(10, 0.2));
     await store.insertTrade(trade("b", run, "S01", "spot"));
     await store.closeTrade("b", close_(-4, 0.2));
-    await store.insertTrade(trade("c", run, "F01", "futures"));
+    await store.insertTrade(trade("c", run, "F01", "usdm"));
 
     const { runId, inputs } = await loadBudgetInputs(db);
     expect(runId).toBe(run);
@@ -94,7 +96,7 @@ describe("loadBudgetInputs", () => {
     expect(inputs.closed).toEqual([{ market: "spot", pnl: 6, fees: 0.4 }]);
     expect(inputs.open).toEqual([
       {
-        market: "futures",
+        market: "usdm",
         symbol: "BTCUSDT",
         direction: "long",
         entryPrice: 100,

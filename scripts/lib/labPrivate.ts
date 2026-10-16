@@ -5,8 +5,10 @@ import {
   type Experiment,
   type ExperimentMarket,
   experimentSchema,
+  legacyMarketSchema,
 } from "@binance-dashboard/trading-core";
 import { z } from "zod";
+import { ASSET_GROUPS } from "@/entities/experiment";
 
 /** Как у каталога (features/paper-engine): стартовый бюджет, включён, без demo-зеркала. */
 export const PRIVATE_DEFAULTS = {
@@ -15,11 +17,15 @@ export const PRIVATE_DEFAULTS = {
   demoMirror: false,
 } as const;
 
-/** P + буква рынка + номер: PS01 — spot, PF01 — futures. Не пересекается с id каталога (S.., F..). */
-export const PRIVATE_ID_PATTERN = /^P([SF])\d{2,}$/;
+/**
+ * P + буква группы + номер: PS01 — spot, PF01 — usdm (USDⓈ-M), PC01 — coinm (COIN-M, spec 0023).
+ * Не пересекается с id каталога (S.., F..).
+ */
+export const PRIVATE_ID_PATTERN = /^P([SFC])\d{2,}$/;
 const PREFIX_MARKET: Record<string, ExperimentMarket> = {
   S: "spot",
-  F: "futures",
+  F: "usdm",
+  C: "coinm",
 };
 
 /**
@@ -28,6 +34,8 @@ const PREFIX_MARKET: Record<string, ExperimentMarket> = {
  */
 export const privateExperimentSchema = z.strictObject({
   ...experimentSchema.shape,
+  // Файл, написанный до spec 0023, называет USDⓈ-M старым именем futures — читаем его как usdm.
+  market: legacyMarketSchema,
   name: z.string().trim().min(1),
   hypothesis: z.string().trim().min(1),
   initialBudget: experimentSchema.shape.initialBudget.default(
@@ -83,15 +91,22 @@ export function parsePrivateExperiments(
     const who = label(index, id);
     const parsed = privateExperimentSchema.safeParse(item);
     if (!parsed.success) {
-      for (const issue of parsed.error.issues)
-        errors.push(`${who}: поле ${fieldPath(issue.path)} — ${issue.message}`);
+      for (const issue of parsed.error.issues) {
+        // Лишние поля строгой схемы — по ошибке на каждое, с путём до самого поля (config.marketFiltr).
+        const paths =
+          issue.code === "unrecognized_keys"
+            ? issue.keys.map((key) => [...issue.path, key])
+            : [issue.path];
+        for (const path of paths)
+          errors.push(`${who}: поле ${fieldPath(path)} — ${issue.message}`);
+      }
       return;
     }
     const e = parsed.data;
     const prefix = PRIVATE_ID_PATTERN.exec(e.id)?.[1];
     if (!prefix) {
       errors.push(
-        `${who}: поле id — нужен вид PS01 (spot) или PF01 (futures): «P», буква рынка и номер`,
+        `${who}: поле id — нужен вид PS01 (spot), PF01 (usdm) или PC01 (coinm): «P», буква группы и номер`,
       );
       return;
     }
@@ -99,6 +114,12 @@ export function parsePrivateExperiments(
       errors.push(
         `${who}: поле market — префикс P${prefix} означает ${PREFIX_MARKET[prefix]}, а указано ${e.market}`,
       );
+      return;
+    }
+    // Демо-зеркало COIN-M — позже (spec 0023): включить его файлом нельзя, как и тумблером.
+    const blocked = ASSET_GROUPS[e.market].demoMirrorBlocked;
+    if (e.demoMirror && blocked) {
+      errors.push(`${who}: поле demoMirror — ${blocked}`);
       return;
     }
     if (catalogIds.has(e.id)) {

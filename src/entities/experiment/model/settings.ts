@@ -1,5 +1,6 @@
 import { marketSchema } from "@binance-dashboard/trading-core";
 import { z } from "zod";
+import { demoMirrorModeSchema, mirrorAutoSnapshotSchema } from "./mirrorAuto";
 import { demoSummarySchema } from "./view";
 // Контракт /settings лаборатории (spec 003, задача 3d): эпоха, стартовый бюджет, тумблеры экспериментов.
 
@@ -46,8 +47,19 @@ export type Epoch = z.infer<typeof epochSchema>;
 
 export const labSettingsSchema = z.object({
   epoch: epochSchema,
-  /** Бюджет, с которым идёт текущая эпоха (по экспериментам; разный — максимум). */
-  currentBudget: z.number(),
+  /**
+   * Стартовые бюджеты по группам активов (spec 0038): сброс группы меняет бюджет только её экспериментов, поэтому
+   * один «текущий бюджет» на всех не годится. experiments — все строки группы (их сбрасывает сброс группы); min/max —
+   * разброс бюджета внутри группы (0 — экспериментов нет).
+   */
+  groupBudgets: z.array(
+    z.object({
+      market: marketSchema,
+      experiments: z.number().int(),
+      min: z.number(),
+      max: z.number(),
+    }),
+  ),
   /** Бюджет для следующей эпохи — вступит после сброса. */
   nextBudget: z.number(),
   /** На сервере задан ключ Binance Demo — без него зеркало не может торговать (spec 008). */
@@ -60,6 +72,9 @@ export const labSettingsSchema = z.object({
       hypothesis: z.string(),
       enabled: z.boolean(),
       demoMirror: z.boolean(),
+      /** Положение переключателя «Выкл · Авто · Вкл» и последнее решение авто-зеркала (spec 0043). */
+      demoMirrorMode: demoMirrorModeSchema,
+      demoMirrorAuto: mirrorAutoSnapshotSchema.nullable(),
       initialBudget: z.number(),
       /** Paper-счёт эксперимента в текущей эпохе (с учётом отдельного сброса). */
       paper: z.object({
@@ -75,7 +90,7 @@ export const labSettingsSchema = z.object({
     }),
   ),
   /** Свободные USDT на демо-счёте Binance; null — ключа нет или биржа не ответила. */
-  demoBalances: z.object({ spot: z.number(), futures: z.number() }).nullable(),
+  demoBalances: z.object({ spot: z.number(), usdm: z.number() }).nullable(),
 });
 
 export const experimentResetSchema = z.object({ id: z.string().min(1) });
@@ -102,6 +117,27 @@ export const demoResetResultSchema = z.object({
 });
 export type DemoResetResult = z.infer<typeof demoResetResultSchema>;
 export type LabSettings = z.infer<typeof labSettingsSchema>;
+
+/** Сброс группы активов (spec 0038): Paper — «эра группы» без новой эпохи; Demo — демо-позиции и статистика группы. */
+export const groupResetRequestSchema = z.object({
+  market: marketSchema,
+  account: z.enum(["paper", "demo"]),
+});
+export type GroupResetRequest = z.infer<typeof groupResetRequestSchema>;
+
+export const groupResetResultSchema = z.object({
+  account: z.enum(["paper", "demo"]),
+  /** Сколько экспериментов группы сброшено. */
+  experiments: z.number().int(),
+  /** Paper — закрытые сделки; Demo — закрытые по рынку демо-позиции. */
+  closed: z.number().int(),
+  /** Paper: закрыто без цены (по цене входа, PnL 0). */
+  closedWithoutPrice: z.number().int(),
+  /** Demo: не закрылись — повторит крон зеркала. */
+  failed: z.number().int(),
+  settings: labSettingsSchema,
+});
+export type GroupResetResult = z.infer<typeof groupResetResultSchema>;
 
 export const resetResultSchema = z.object({
   /** false — эпоха fromRunId уже не текущая, ничего не сделано. */

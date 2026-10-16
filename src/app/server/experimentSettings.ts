@@ -1,22 +1,28 @@
 // Композиция /settings лаборатории (spec 003, задача 3d): сброс тестовых капиталов (новая эпоха),
 // стартовый бюджет следующей эпохи, вкл/выкл экспериментов, отдельный сброс paper-капитала
 // эксперимента. Демо-сброс — src/app/server/demoMirror.ts. Только сервер.
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import {
+  ASSET_GROUPS,
   budgetFormSchema,
   createDbExperimentStore,
   DEFAULT_INITIAL_BUDGET,
+  type DemoMirrorMode,
+  type ExperimentMarket,
   type ExperimentResetResult,
   experimentsTable,
+  type GroupResetResult,
   getEpoch,
   type LabSettings,
+  MARKETS,
   type ResetRequest,
   type ResetResult,
   readExperimentsOverview,
   resetExperimentRun,
+  resetGroupRun,
   resetRun,
-  setExperimentDemoMirror,
   setExperimentEnabled,
+  setExperimentMirrorMode,
   withEngineTickLock,
 } from "@/entities/experiment";
 import { ENGINE_KEYS, planReset, priceKey } from "@/features/paper-engine";
@@ -25,7 +31,12 @@ import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
-import { ensureEngineReady, withTickLock } from "./experimentEngine";
+import {
+  ensureEngineReady,
+  warnInvalidExperiment,
+  withTickLock,
+} from "./experimentEngine";
+import { runMirrorAuto } from "./mirrorAuto";
 
 /** Бюджет следующей эпохи из engine_state; нет или мусор — по умолчанию. */
 async function readNextBudget(
@@ -59,14 +70,24 @@ export async function getLabSettings(): Promise<LabSettings> {
   const [rows, epoch, overview, demoBalances, nextBudget] = await Promise.all([
     db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
     store.currentRunId().then((runId) => getEpoch(db, runId)),
-    readExperimentsOverview(db, false, demoConfigured),
+    readExperimentsOverview(db, false, demoConfigured, warnInvalidExperiment),
     readDemoBalances(),
     readNextBudget(store),
   ]);
   const summaries = new Map(overview.experiments.map((e) => [e.id, e]));
   return {
     epoch,
-    currentBudget: Math.max(0, ...rows.map((e) => e.initialBudget)),
+    groupBudgets: MARKETS.map((market) => {
+      const budgets = rows
+        .filter((e) => e.market === market)
+        .map((e) => e.initialBudget);
+      return {
+        market,
+        experiments: budgets.length,
+        min: budgets.length ? Math.min(...budgets) : 0,
+        max: budgets.length ? Math.max(...budgets) : 0,
+      };
+    }),
     nextBudget,
     demoConfigured,
     demoBalances,
@@ -81,6 +102,8 @@ export async function getLabSettings(): Promise<LabSettings> {
           hypothesis: e.hypothesis,
           enabled: e.enabled,
           demoMirror: e.demoMirror,
+          demoMirrorMode: e.demoMirrorMode,
+          demoMirrorAuto: e.demoMirrorAuto,
           initialBudget: e.initialBudget,
           paper: {
             equity: e.stats.equity,
@@ -123,23 +146,50 @@ export async function toggleExperiment(
   return getLabSettings();
 }
 
-/** Demo-зеркало эксперимента (spec 008); null — эксперимента нет. Открытые зеркала не трогаем. */
-export async function toggleDemoMirror(
+const DEMO_KEY_MISSING =
+  "На сервере не задан ключ Binance Demo (BINANCE_DEMO_API_KEY / SECRET) — включить торговлю на демо-счёте нельзя.";
+
+const MODE_LABEL: Record<DemoMirrorMode, string> = {
+  off: "Выкл (вручную)",
+  auto: "Авто",
+  on: "Вкл (вручную)",
+};
+
+/**
+ * Положение демо-зеркала эксперимента «Выкл · Авто · Вкл» (spec 008, 0043); null — эксперимента нет, { blocked } —
+ * группа не умеет зеркало (COIN-M, spec 0023: «Демо-зеркало COIN-M — позже») или «Вкл» без ключа Binance Demo.
+ * Открытые зеркала не трогаем.
+ * «Авто» сразу применяет правило автомата к эксперименту (AC7) — без ожидания суточной проверки.
+ */
+export async function setDemoMirrorMode(
   id: string,
-  demoMirror: boolean,
-): Promise<LabSettings | null> {
+  mode: DemoMirrorMode,
+): Promise<LabSettings | null | { blocked: string }> {
   await ensureEngineReady();
-  if (!(await setExperimentDemoMirror(getDb(), id, demoMirror))) return null;
-  log.info(
-    "experiments.mirror",
-    `${id}: demo-зеркало ${demoMirror ? "включено" : "выключено"}`,
-  );
+  const db = getDb();
+  const [row] = await db
+    .select({ market: experimentsTable.market })
+    .from(experimentsTable)
+    .where(eq(experimentsTable.id, id));
+  if (!row) return null;
+  const group = ASSET_GROUPS[row.market as ExperimentMarket];
+  if (mode !== "off" && group?.demoMirrorBlocked)
+    return { blocked: group.demoMirrorBlocked };
+  // Как в UI и lab:apply: без ключа Binance Demo ручное «Вкл» бессмысленно — зеркало не сможет торговать.
+  if (mode === "on" && getDemoTradingConfig() === null)
+    return { blocked: DEMO_KEY_MISSING };
+  if (!(await setExperimentMirrorMode(db, id, mode))) return null;
+  log.info("experiments.mirror", `${id}: демо-зеркало — ${MODE_LABEL[mode]}`, {
+    experimentId: id,
+    mode,
+  });
+  if (mode === "auto") await runMirrorAuto({ ids: [id] });
   return getLabSettings();
 }
 
 /** Последние цены по рынкам открытых сделок; рынок не ответил — его сделки закроются без цены. */
 async function lastPrices(
-  markets: Set<"spot" | "futures">,
+  markets: Set<ExperimentMarket>,
 ): Promise<Record<string, number>> {
   const prices: Record<string, number> = {};
   await Promise.all(
@@ -289,6 +339,69 @@ export function resetExperimentCapital(
       return {
         closed: outcome.closed,
         closedWithoutPrice: outcome.closedWithoutPrice,
+        settings: await getLabSettings(),
+      };
+    }
+    throw new Error(
+      "Сброс не выполнен: блокировку тика держит другой процесс дольше минуты. Повторите позже.",
+    );
+  });
+}
+
+/**
+ * Сброс Paper группы активов — «эра группы» (spec 0038, решение 4): под блокировкой тика для всех экспериментов
+ * группы (включая выключенные) закрыть открытые сделки по последней цене (manual; без цены — по цене входа),
+ * начать учёт заново (reset_at) с бюджета next_budget и пометить текущие свечи обработанными. Новой эпохи нет,
+ * другие группы не меняются; демо-позиции закрытых сделок закроет крон зеркала.
+ */
+export function resetGroupCapital(
+  market: ExperimentMarket,
+): Promise<GroupResetResult> {
+  return withTickLock(async () => {
+    await ensureEngineReady();
+    const db = getDb();
+    const store = createDbExperimentStore(db);
+    const inGroup = (e: { market: ExperimentMarket }) => e.market === market;
+    const runId = await store.currentRunId();
+    const openBefore = (await store.openTrades(runId)).filter(inGroup);
+    const prices = await lastPrices(new Set(openBefore.map((t) => t.market)));
+
+    for (let attempt = 0; attempt < RESET_LOCK_ATTEMPTS; attempt++) {
+      const locked = await withEngineTickLock(db, async (tx) => {
+        const s = createDbExperimentStore(tx);
+        const current = await s.currentRunId();
+        const [experiments, open, initialBudget] = await Promise.all([
+          s.listExperiments().then((list) => list.filter(inGroup)),
+          s.openTrades(current).then((list) => list.filter(inGroup)),
+          readNextBudget(s),
+        ]);
+        const plan = planReset({ experiments, open, prices, now: Date.now() });
+        const outcome = await resetGroupRun(tx, {
+          runId: current,
+          market,
+          closes: plan.closes,
+          initialBudget,
+          bars: plan.bars,
+          barsKey: ENGINE_KEYS.bars,
+        });
+        return { ...outcome, runId: current, initialBudget };
+      });
+      if (!locked.acquired) {
+        await new Promise((r) => setTimeout(r, RESET_LOCK_RETRY_MS));
+        continue;
+      }
+      const outcome = locked.value;
+      log.info(
+        "experiments.reset_group",
+        `${ASSET_GROUPS[market].code}: Paper группы сброшен — экспериментов ${outcome.experiments}, закрыто сделок ${outcome.closed}, бюджет $${outcome.initialBudget}`,
+        { market, ...outcome },
+      );
+      return {
+        account: "paper",
+        experiments: outcome.experiments,
+        closed: outcome.closed,
+        closedWithoutPrice: outcome.closedWithoutPrice,
+        failed: 0,
         settings: await getLabSettings(),
       };
     }

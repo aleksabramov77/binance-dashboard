@@ -1,7 +1,16 @@
-import type { Experiment, PaperTrade } from "@binance-dashboard/trading-core";
+import type {
+  Experiment,
+  PaperTrade,
+  SkippedSignal,
+} from "@binance-dashboard/trading-core";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { experimentsTable } from "../model/db.ts";
+import {
+  experimentsTable,
+  paperTradesTable,
+  skippedSignalsTable,
+} from "../model/db.ts";
 import {
   createDbExperimentStore,
   ensureRun,
@@ -17,7 +26,7 @@ afterEach(() => close());
 
 const exp = (id: string, name = id): Experiment => ({
   id,
-  market: "futures",
+  market: "usdm",
   name,
   hypothesis: "тест",
   config: {
@@ -37,7 +46,7 @@ const trade = (id: string, runId: number): PaperTrade => ({
   id,
   runId,
   experimentId: "F01",
-  market: "futures",
+  market: "usdm",
   symbol: "BTCUSDT",
   direction: "long",
   openedAt: "2026-10-10T10:00:00.000Z",
@@ -56,6 +65,8 @@ const trade = (id: string, runId: number): PaperTrade => ({
   pnl: null,
   rMultiple: null,
   demoOrderRef: null,
+  mae: 100,
+  entryContext: { v: 1, adx14: 31.5, btcAboveEma200_4h: true },
   signal: { bar: 1 },
 });
 
@@ -69,6 +80,22 @@ describe("хранилище лаборатории на Drizzle (PGlite)", () =
     expect(list.map((e) => e.id)).toEqual(["F01", "F02"]);
     expect(list[0].name).toBe("Новое имя");
     expect(list.every((e) => !e.enabled)).toBe(true);
+  });
+
+  it("строка с незнакомым полем конфига пропускается, остальные читаются (spec 0029)", async () => {
+    await seedExperiments(db, [exp("F01"), exp("F02")]);
+    await db
+      .update(experimentsTable)
+      .set({ config: { ...exp("F01").config, marketFiltr: {} } as never })
+      .where(eq(experimentsTable.id, "F01"));
+    const invalid: string[] = [];
+    const list = await createDbExperimentStore(db).listExperiments((r) =>
+      invalid.push(`${r.id}: ${r.problem}`),
+    );
+    expect(list.map((e) => e.id)).toEqual(["F02"]);
+    expect(invalid).toEqual([
+      expect.stringMatching(/^F01: config\.marketFiltr — /),
+    ]);
   });
 
   it("первая эпоха создаётся один раз", async () => {
@@ -86,13 +113,20 @@ describe("хранилище лаборатории на Drizzle (PGlite)", () =
     await store.insertTrade(trade("t2", run));
     expect(await store.openTrades(run)).toHaveLength(2);
 
-    await store.updateTrade("t1", { stop: 99, extreme: 103, checkedUntil: 5 });
+    await store.updateTrade("t1", {
+      stop: 99,
+      extreme: 103,
+      mae: 99.2,
+      checkedUntil: 5,
+    });
     const [t1] = await store.openTrades(run);
     expect(t1).toMatchObject({
       id: "t1",
       stop: 99,
       extreme: 103,
+      mae: 99.2,
       checkedUntil: 5,
+      entryContext: { v: 1, adx14: 31.5, btcAboveEma200_4h: true },
     });
     expect(t1.openedAt).toBe("2026-10-10T10:00:00.000Z");
 
@@ -103,6 +137,7 @@ describe("хранилище лаборатории на Drizzle (PGlite)", () =
       fees: 0.1,
       pnl: 3.9,
       rMultiple: 1.95,
+      mae: 98.9,
     });
     await store.closeTrade("t2", {
       closedAt: "2026-10-10T11:00:00.000Z",
@@ -111,8 +146,14 @@ describe("хранилище лаборатории на Drizzle (PGlite)", () =
       fees: 0.1,
       pnl: -2.1,
       rMultiple: -1.05,
+      mae: 98,
     });
     expect(await store.openTrades(run)).toHaveLength(0);
+    const [closed] = await db
+      .select({ mae: paperTradesTable.mae })
+      .from(paperTradesTable)
+      .where(eq(paperTradesTable.id, "t1"));
+    expect(closed.mae).toBe(98.9);
     expect((await store.realizedPnl(run)).F01).toBeCloseTo(1.8);
   });
 
@@ -124,5 +165,50 @@ describe("хранилище лаборатории на Drizzle (PGlite)", () =
     await store.setState("bars", { S01: 123 });
     expect(await store.getState("enabled")).toBe(false);
     expect(await store.getState("bars")).toEqual({ S01: 123 });
+  });
+});
+
+describe("отсечённые сигналы (spec 0030, PGlite)", () => {
+  const skip = (
+    id: string,
+    runId: number,
+    patch: Partial<SkippedSignal> = {},
+  ): SkippedSignal => ({
+    id,
+    runId,
+    experimentId: "F01",
+    market: "usdm",
+    symbol: "ETHUSDT",
+    direction: "long",
+    bar: Date.parse("2026-10-10T10:00:00Z"),
+    at: "2026-10-10T11:00:05.000Z",
+    reason: "max-open",
+    entryPrice: 100.05,
+    stop: 98,
+    takeProfit: null,
+    ...patch,
+  });
+
+  it("вставка идемпотентна, счётчики — по эксперименту и причине эпохи, срок хранения", async () => {
+    await seedExperiments(db, [exp("F01"), exp("F02")]);
+    const store = createDbExperimentStore(db);
+    const run = await store.currentRunId();
+    await store.insertSkippedSignals([
+      skip("a", run),
+      skip("a", run),
+      skip("b", run, { reason: "symbol-busy" }),
+      skip("c", run, { at: "2026-08-01T00:00:00.000Z" }),
+      skip("d", run, { experimentId: "F02" }),
+    ]);
+    const counts = await store.skippedSignalCounts(run, ["F01"]);
+    expect(counts.sort((x, y) => x.reason.localeCompare(y.reason))).toEqual([
+      { experimentId: "F01", reason: "max-open", count: 2 },
+      { experimentId: "F01", reason: "symbol-busy", count: 1 },
+    ]);
+    expect(await store.skippedSignalCounts(run, [])).toEqual([]);
+
+    await store.pruneSkippedSignals("2026-09-01T00:00:00.000Z");
+    const ids = (await db.select().from(skippedSignalsTable)).map((r) => r.id);
+    expect(ids.sort()).toEqual(["a", "b", "d"]);
   });
 });

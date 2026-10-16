@@ -23,6 +23,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFrame,
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
@@ -104,7 +105,7 @@ export function YieldProductsTable({
     );
   const right = "text-right";
   return (
-    <div className="overflow-clip rounded-xl border bg-card">
+    <TableFrame>
       <Table>
         <TableHeader>
           <TableRow>
@@ -188,6 +189,6 @@ export function YieldProductsTable({
           ))}
         </TableBody>
       </Table>
-    </div>
+    </TableFrame>
   );
 }

@@ -1,15 +1,30 @@
 import {
   type Experiment,
-  experimentSchema,
   marketSchema,
   type PaperTrade,
+  type SkippedSignal,
+  skippedSignalSchema,
 } from "@binance-dashboard/trading-core";
 import { and, asc, desc, eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { filterTrades, periodStart, sliceStats } from "../lib/slices";
 import { computeStats, equityCurve } from "../lib/stats";
 import { ASSET_GROUPS } from "../model/assetGroup";
-import { experimentsTable, paperTradesTable, runsTable } from "../model/db";
+import {
+  experimentsTable,
+  paperTradesTable,
+  runsTable,
+  skippedSignalsTable,
+} from "../model/db";
+import {
+  type DemoMirrorMode,
+  mirrorAutoSnapshotSchema,
+} from "../model/mirrorAuto";
+import {
+  type OnInvalidExperiment,
+  parseExperimentRow,
+  parseExperimentRows,
+} from "../model/parseRows";
 import type {
   StatsGroupBy,
   StatsQuery,
@@ -64,11 +79,15 @@ async function runTrades(
   return rows.map(toTrade);
 }
 
-/** Все эксперименты каталога со статистикой текущей эпохи. */
+/**
+ * Все эксперименты каталога со статистикой текущей эпохи. Строки, не прошедшие схему, пропускаются
+ * (onInvalid — в журнал), остальные показываются — так и во всех чтениях ниже.
+ */
 export async function readExperimentsOverview(
   db: Db,
   engineEnabled: boolean,
   demoConfigured = false,
+  onInvalid?: OnInvalidExperiment,
 ): Promise<ExperimentsResponse> {
   const run = await currentRun(db);
   const [rows, trades, demo] = await Promise.all([
@@ -86,39 +105,48 @@ export async function readExperimentsOverview(
     run,
     engineEnabled,
     demoConfigured,
-    experiments: rows.map((r) => {
-      const e = experimentSchema.parse(r);
-      return {
-        id: e.id,
-        market: e.market,
-        name: e.name,
-        hypothesis: e.hypothesis,
-        initialBudget: e.initialBudget,
-        enabled: e.enabled,
-        demoMirror: e.demoMirror,
-        stats: computeStats(byExperiment.get(e.id) ?? [], e.initialBudget),
-        demo: toDemoSummary(
-          demo.get(e.id) ?? emptyMirrorSummary(),
-          e.initialBudget,
-        ),
-      };
-    }),
+    experiments: parseExperimentRows(rows, onInvalid).map(
+      ({ experiment: e, row }) => {
+        const auto = mirrorAutoSnapshotSchema.safeParse(row.demoMirrorAuto);
+        return {
+          id: e.id,
+          market: e.market,
+          name: e.name,
+          hypothesis: e.hypothesis,
+          initialBudget: e.initialBudget,
+          enabled: e.enabled,
+          demoMirror: e.demoMirror,
+          demoMirrorMode: row.demoMirrorMode,
+          demoMirrorAuto: auto.success ? auto.data : null,
+          stats: computeStats(byExperiment.get(e.id) ?? [], e.initialBudget),
+          demo: toDemoSummary(
+            demo.get(e.id) ?? emptyMirrorSummary(),
+            e.initialBudget,
+          ),
+        };
+      },
+    ),
   };
 }
 
-/** Эксперимент, статистика, equity-кривая и последние limit сделок эпохи; null — нет такого id. */
+/**
+ * Эксперимент, статистика, equity-кривая и последние limit сделок эпохи; null — нет такого id или
+ * строка не проходит схему (тогда onInvalid).
+ */
 export async function readExperimentDetail(
   db: Db,
   id: string,
   engineEnabled: boolean,
   limit: number,
+  onInvalid?: OnInvalidExperiment,
 ): Promise<ExperimentDetailResponse | null> {
   const [row] = await db
     .select()
     .from(experimentsTable)
     .where(eq(experimentsTable.id, id));
   if (!row) return null;
-  const experiment: Experiment = experimentSchema.parse(row);
+  const experiment = parseExperimentRow(row, onInvalid);
+  if (!experiment) return null;
   const run = await currentRun(db);
   const trades = await runTrades(db, run.id, id);
   const shown = trades.slice(-limit).reverse();
@@ -170,36 +198,123 @@ function groupLabel(
 /** Эксперимент каталога плюс дата его отдельного сброса paper-учёта (null — не сбрасывался). */
 export type LabExperiment = Experiment & { resetAt: string | null };
 
+/** Сколько отсечённых сигналов эксперимента с этой причиной записано в эпохе. */
+export interface LabSkippedCount {
+  experimentId: string;
+  reason: string;
+  count: number;
+}
+
+/** Эпоха отчёта лаборатории: endedAt — начало следующей эпохи; null — эпоха текущая. */
+export interface LabRun {
+  id: number;
+  startedAt: string;
+  endedAt: string | null;
+}
+
 /**
- * Все эксперименты и учтённые сделки текущей эпохи — для отчёта лаборатории (`pnpm lab:report`).
- * Сделки уже отфильтрованы по сбросу эксперимента (countedTrade); дата сброса отдаётся, чтобы отчёт
- * считал темп сделок и период эксперимента с неё.
+ * Эксперименты, учтённые сделки и отсечённые сигналы эпохи — для отчёта лаборатории (`pnpm lab:report`).
+ * runId не задан — текущая эпоха; иначе — прошлая (`--run`), неизвестный id — ошибка со списком эпох.
+ * Учёт по сбросу эксперимента — как countedTrade: сделки и сигналы не раньше reset_at; для прошлой эпохи
+ * сброс учитывается, только если он был до её конца (сброс в следующих эпохах её учёт не трогает). Дата
+ * сброса отдаётся, чтобы отчёт считал темп сделок и период эксперимента с неё. Конфиг экспериментов —
+ * текущий: если его меняли после эпохи, отчёт по прошлой эпохе описывает новый конфиг.
  */
-export async function readLabDataset(db: Db): Promise<{
-  run: ExperimentsResponse["run"];
+export async function readLabDataset(
+  db: Db,
+  onInvalid?: OnInvalidExperiment,
+  runId?: number,
+): Promise<{
+  run: LabRun;
   experiments: LabExperiment[];
   trades: PaperTrade[];
+  skipped: SkippedSignal[];
+  /** Записано отсечённых сигналов за всю эпоху по эксперименту и причине — без учёта сброса: так считает лимит движка. */
+  skippedCounts: LabSkippedCount[];
 }> {
-  const run = await currentRun(db);
-  const [rows, trades] = await Promise.all([
+  const runs = await db.select().from(runsTable).orderBy(asc(runsTable.id));
+  if (!runs.length) throw new Error("Эпоха учёта не создана");
+  const index =
+    runId === undefined
+      ? runs.length - 1
+      : runs.findIndex((r) => r.id === runId);
+  if (index < 0)
+    throw new Error(
+      `эпохи ${runId} нет; есть: ${runs.map((r) => r.id).join(", ")}`,
+    );
+  const next = runs[index + 1];
+  const run: LabRun = {
+    id: runs[index].id,
+    startedAt: runs[index].startedAt.toISOString(),
+    endedAt: next ? next.startedAt.toISOString() : null,
+  };
+  const [rows, tradeRows, skippedRows] = await Promise.all([
     db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
-    runTrades(db, run.id),
+    db
+      .select()
+      .from(paperTradesTable)
+      .where(eq(paperTradesTable.runId, run.id))
+      .orderBy(asc(paperTradesTable.openedAt)),
+    db
+      .select()
+      .from(skippedSignalsTable)
+      .where(eq(skippedSignalsTable.runId, run.id))
+      .orderBy(asc(skippedSignalsTable.at)),
   ]);
+  const end = next?.startedAt.getTime() ?? Number.POSITIVE_INFINITY;
+  const experiments = parseExperimentRows(rows, onInvalid).map(
+    ({ experiment, row }) => ({
+      ...experiment,
+      resetAt:
+        row.resetAt && row.resetAt.getTime() < end
+          ? row.resetAt.toISOString()
+          : null,
+    }),
+  );
+  const resetOf = new Map(
+    experiments.map((e) => [
+      e.id,
+      e.resetAt === null ? Number.NEGATIVE_INFINITY : Date.parse(e.resetAt),
+    ]),
+  );
+  const counted = (experimentId: string, at: number) =>
+    at >= (resetOf.get(experimentId) ?? Number.NEGATIVE_INFINITY);
   return {
     run,
-    experiments: rows.map((r) => ({
-      ...experimentSchema.parse(r),
-      resetAt: r.resetAt?.toISOString() ?? null,
-    })),
-    trades,
+    experiments,
+    trades: tradeRows
+      .filter((r) => counted(r.experimentId, r.openedAt.getTime()))
+      .map(toTrade),
+    skipped: skippedRows
+      .filter((r) => counted(r.experimentId, r.at.getTime()))
+      .flatMap((r) => {
+        const parsed = skippedSignalSchema.safeParse({
+          ...r,
+          at: r.at.toISOString(),
+        });
+        return parsed.success ? [parsed.data] : [];
+      }),
+    skippedCounts: [
+      ...skippedRows
+        .reduce((counts, r) => {
+          const key = `${r.experimentId}:${r.reason}`;
+          counts.set(key, {
+            experimentId: r.experimentId,
+            reason: r.reason,
+            count: (counts.get(key)?.count ?? 0) + 1,
+          });
+          return counts;
+        }, new Map<string, LabSkippedCount>())
+        .values(),
+    ],
   };
 }
 
 /** Тумблеры всех экспериментов — для `pnpm lab:apply` (сравнить «было → стало» перед записью). */
-export async function readExperimentFlags(
-  db: Db,
-): Promise<
-  Pick<Experiment, "id" | "name" | "market" | "enabled" | "demoMirror">[]
+export async function readExperimentFlags(db: Db): Promise<
+  (Pick<Experiment, "id" | "name" | "market" | "enabled" | "demoMirror"> & {
+    demoMirrorMode: DemoMirrorMode;
+  })[]
 > {
   return db
     .select({
@@ -208,6 +323,7 @@ export async function readExperimentFlags(
       market: experimentsTable.market,
       enabled: experimentsTable.enabled,
       demoMirror: experimentsTable.demoMirror,
+      demoMirrorMode: experimentsTable.demoMirrorMode,
     })
     .from(experimentsTable)
     .orderBy(asc(experimentsTable.id))
@@ -224,6 +340,7 @@ export async function readTradeStats(
   db: Db,
   query: StatsQuery,
   now: number,
+  onInvalid?: OnInvalidExperiment,
 ): Promise<TradeStatsResponse | null> {
   const runs = (
     await db.select().from(runsTable).orderBy(desc(runsTable.id))
@@ -237,7 +354,9 @@ export async function readTradeStats(
     db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
     runTrades(db, run.id),
   ]);
-  const experiments = rows.map((r) => experimentSchema.parse(r));
+  const experiments = parseExperimentRows(rows, onInvalid).map(
+    (x) => x.experiment,
+  );
   const since = periodStart(query.period, now);
   const filtered = filterTrades(trades, {
     market: query.market,

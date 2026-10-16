@@ -4,10 +4,11 @@ import type {
   TradeDirection,
 } from "./experiment.ts";
 
-/** Комиссия taker Binance без скидок: spot 0,1%, USDⓈ-M futures 0,05%. */
+/** Комиссия taker Binance без скидок: spot 0,1%, USDⓈ-M и COIN-M futures 0,05%. */
 export const FEE_RATE: Record<ExperimentMarket, number> = {
   spot: 0.001,
-  futures: 0.0005,
+  usdm: 0.0005,
+  coinm: 0.0005,
 };
 
 /** Проскальзывание рыночного ордера. */

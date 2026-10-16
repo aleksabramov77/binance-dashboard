@@ -4,9 +4,9 @@
 
 | Мир | Хосты | Ключ | Точка входа |
 |---|---|---|---|
-| Публичное API (рынок, Earn) | `api.binance.com`, `fapi.binance.com`, `www.binance.com/bapi` | не нужен | `public.server.ts` |
+| Публичное API (рынок, Earn) | `api.binance.com`, `fapi.binance.com`, `dapi.binance.com` (COIN-M), `www.binance.com/bapi` | не нужен | `public.server.ts` |
 | Аккаунт (read-only) | `api.binance.com` (`/sapi`, `/api/v3/account`) | `BINANCE_API_KEY/SECRET` | `account.server.ts` |
-| Demo Trading (сделки) | `demo-api.binance.com`, `demo-fapi.binance.com` | `BINANCE_DEMO_API_KEY/SECRET` | `demo.server.ts` |
+| Demo Trading (сделки) | `demo-api.binance.com`, `demo-fapi.binance.com`; `demo-dapi.binance.com` (COIN-M) — только чтение баланса | `BINANCE_DEMO_API_KEY/SECRET` | `demo.server.ts` |
 
 ## Публичный API модуля
 - `index.ts` — **клиент-безопасный**: только типы и чистые функции (`resolveUsdPrice`). Его можно
@@ -19,12 +19,20 @@
   `timestamp` и подпись на каждую попытку, повторы при сетевых сбоях, валидация ответа Zod.
   Ошибка биржи → `BinanceApiError` (с `code`, повторять бессмысленно); 2xx с неожиданным телом →
   `ResponseFormatError` (для ордеров значит «скорее всего исполнен»).
-- `marketApi.ts` — **среда-независимые** публичные рыночные запросы (`createMarketApi(getJson)`): тикеры,
-  свечи, бессрочные фьючерсы, funding. Без `@/…` и `node:*` — его импортирует и Edge Function Supabase
+- `markets.ts` — имена рынков (spec 0023): `BinanceMarket` = `spot` / `usdm` (USDⓈ-M, fapi) / `coinm` (COIN-M, dapi),
+  `FuturesMarket`, `Market` = `spot` / `usdm` — рынки ручных сделок и Binance Demo; `tradeMarketSchema` читает старое
+  `futures` как `usdm` (сетапы и сделки от старого клиента), `withLegacyMarketField` — то же для объектов с полем market;
+  сама нормализация — одна, в `trading-core` (`normalizeMarket`).
+- `marketApi.ts` — **среда-независимые** публичные рыночные запросы (`createMarketApi(getJson)`): тикеры
+  (`fetch24hTickers` — Spot/USDⓈ-M, `fetchCoinmTickers` — COIN-M: оборот в контрактах), свечи по любому рынку,
+  бессрочные контракты `fetchPerpetuals(market, { cryptoOnly })` (символ → размер контракта COIN-M; у dapi статус —
+  `contractStatus`; `cryptoOnly` — только `underlyingType = COIN`, поле есть у fapi и dapi, spec 0029),
+  funding `fetchFundingRates(market)`. Без `@/…` и `node:*` — его импортирует и Edge Function Supabase
   `engine-tick` (Deno, spec 007b). Транспорт (повторы, журнал) передаётся аргументом.
 - `market.ts` — `createMarketApi` поверх `getJsonWithRetry` (`shared/lib/fetchRetry.ts`) для Node;
   `client.ts` — Earn и цены через тот же `getJsonWithRetry`.
-- `accountClient.ts` — Spot, Funding, Simple Earn (read-only).
+- `accountClient.ts` — Spot, Funding, Simple Earn (read-only): позиции и история начислений (см. «Earn: история
+  начислений» ниже).
 - `earnAccountClient.ts` + `earnAccountSchemas.ts` — каталоги сложных продуктов Earn (spec 0019), только подписанные
   GET (USER_DATA, read-only ключ). Экспорт — через `account.server.ts`, типы — через `index.ts`. См. «Earn: сложные
   продукты» ниже.
@@ -38,6 +46,14 @@
   (`toFuturesSymbolOrders` / `toSpotSymbolOrders`: чем исполнился выход — algo TP/SL у futures по
   `actualOrderId`, ликвидация по `clientOrderId` `autoclose-…`, тип ордера OCO у spot; активные стопы
   со стороной). Тесты разбора — `demoOrders.test.ts`.
+- `walletEquity.ts` — оценка кошельков в $ (spec 0038, клиент-безопасно): `sumUsd(rows, price)` — сумма остатков × цена,
+  активы без цены — в `unpriced`; `walletsByMarket(wallets)` — кошельки `/sapi/v1/asset/wallet/balance` по рынкам
+  (`WALLET_MARKET`: «Spot», «USDⓈ-M Futures», «COIN-M Futures» — имена сверены пробой 2026-10-16). Сеть —
+  `fetchDemoEquity(creds, price)` в `demoTrading.ts`: equity демо-счёта по кошелькам, как на demo.binance.com — Spot
+  `/api/v3/account` (free + locked), USDⓈ-M `/fapi/v3/account` (walletBalance + unrealizedProfit: у `/fapi/v3/balance`
+  PnL только кросс-позиций, а зеркало открывает изолированные), COIN-M `demo-dapi` `/dapi/v1/balance` (balance +
+  crossUnPnl); кошельки независимы — ошибка одного не мешает другим (`WalletEquityResult`). Кэш 60 с — у вызывающего
+  (`src/app/server/accountBalances.ts`).
 - `demoRules.ts` — чистый разбор фильтров exchangeInfo в `SymbolRules`: шаги, минимумы, коридор цены
   `priceBand` (спот: `PERCENT_PRICE_BY_SIDE` или `PERCENT_PRICE`; у фьючерсов null — algo-триггеры фильтр не
   ограничивает), `otoAllowed`/`ocoAllowed`. Тесты — `demoRules.test.ts`.
@@ -51,10 +67,20 @@
   и `nextRecheckDelay` — сколько перечитывать заявку с неизвестным исходом, прежде чем сказать «её нет».
   Перечитать ордер спота по своему id — `fetchDemoSpotOrderByClientId` (null — `-2013`, ордера нет);
   `clientOrderId` задают `demoSpotMarketOrder` и `spotEntryListRequest` (`clientIds`).
+- `positionMode.ts` — режим позиций фьючерсов (spec 0012, PR 2c): `FuturesSide` (режим + сторона) и параметры
+  ордеров — вход (`entryParams`: Hedge — `positionSide`), закрытие (`reduceParams`: One-way — `reduceOnly`, Hedge —
+  `positionSide`, reduceOnly там не передаётся), защита на свой объём (`protectParams`: `quantity`, без
+  `closePosition`). Сеть: `fetchDemoPositionMode` (GET `/fapi/v1/positionSide/dual`, кэш 30 с), `demoEnableHedgeMode`
+  (только на пустом счёте; `-4059` — уже включён), `fetchDemoFuturesAccountBusy`, `fetchDemoFuturesSymbolState`
+  (позиции по сторонам, открытые обычные и algo-ордера), `demoFuturesPositions`, `demoFuturesCancelOrder`,
+  `fetchDemoSpotOpenOrders` / `demoSpotCancelOrder`. `demoFuturesMarketOrder`, `demoFuturesProtect` (бывший
+  `demoFuturesCloseAt`), `demoFuturesReduceMarket` принимают `FuturesSide`. `demoFuturesPrepare`: `-4047/-4048`
+  (ордера/позиция по символу) — тип маржи не меняется, не ошибка.
 - `protectRefs.ts` — `demoProtectRefsSchema` (клиент-безопасно): ссылки на свои стоп/тейк сделки (spec 0012, PR 2b).
   Свои ордера: `fetchDemoAlgoOrder` / `demoCancelAlgoOrder` (по algoId или clientAlgoId; нет — `-2013`/`-2011`), `demoSpotCancelByClientId`,
   `fetchDemoFuturesOrder` (по orderId или clientOrderId; null — `-2013`); свои id принимают `demoFuturesMarketOrder`,
-  `demoFuturesCloseAt` (`clientAlgoId`), `demoSpotOcoSell`, `demoSpotStopLossSell`.
+  `demoFuturesProtect` (`clientAlgoId`), `demoSpotOcoSell`, `demoSpotStopLossSell`. `fetchDemoOpenAlgoOrders` —
+  открытые algo-ордера всего счёта одним запросом (сверка своих ног зеркал за прогон).
 - Таймаут каждого запроса — `REQUEST_TIMEOUT_MS` (15 с, `shared/lib/fetchRetry.ts`, `AbortSignal.timeout`): больше 10 с,
   за которые Binance сам отвечает -1007. Сработал — сетевая ошибка: чтение после таймаута повторяется не больше
   `TIMEOUT_RETRIES` (1) раза, у ордера исход неизвестен. `actualOrderId` 0 / "" / не положительный — не срабатывал.
@@ -67,15 +93,18 @@
 - Лимиты веса Binance: не делать запросов в цикле по сотням символов; кэшировать справочники. Лимит — 6000 веса
   в минуту **на IP**, а исходящий IP Vercel общий с чужими приложениями. Для одной цены — `fetchTickerPrices(market)`
   (`ticker/price`, вес 4/2), а не `ticker/24hr` без символа (вес 80/40).
-- После 429/418 `getJsonWithRetry` (`src/shared/lib/fetchRetry.ts`) ставит паузу на хост: срок берётся из `Retry-After`
-  или «banned until» (по умолчанию 60 с). Во время паузы запрос сразу бросает `HttpError` без похода в сеть, потому что
-  повтор во время бана удлиняет бан. Пауза одна на процесс (на Vercel — на экземпляр функции), в журнале — `binance.cooldown`.
+- После 429/418 ставится пауза на хост: срок берётся из `Retry-After` или «banned until» (по умолчанию 60 с). Во время
+  паузы запрос сразу бросает `CooldownError` (`HttpError`) без похода в сеть, потому что повтор во время бана удлиняет бан.
+  Пауза общая для публичных (`getJsonWithRetry`) и подписанных (`signedRequest`, с spec 0022) запросов: функции
+  `assertNoCooldown` / `recordCooldown` в `src/shared/lib/fetchRetry.ts`. Ордер на паузе не отправлен —
+  `orderErrorOutcome` считает его отказом. Пауза одна на процесс (на Vercel — на экземпляр функции), в журнале —
+  `binance.cooldown`.
 - Ошибки `-1121` (Invalid symbol) и `-4046` (margin type уже установлен) — ожидаемые, обрабатываются явно.
 - `-4067` на `/fapi/v1/marginType` — по символу есть открытые ордера (даже если маржа уже изолированная);
   `placeTrade` не доходит до этого вызова, если символ уже в сделке.
 - Тесты схем — `demoSchemas.test.ts`; сетевые функции не тестируются (нет моков сети).
-- `fetchFundingRates` — `/fapi/v1/premiumIndex` одним запросом по всем фьючерсам (без ключа): ставки
-  funding для движка лаборатории (F14). У поставочных контрактов ставки нет — они пропускаются.
+- `fetchFundingRates(market)` — `/fapi/v1/premiumIndex` или `/dapi/v1/premiumIndex` одним запросом по всем фьючерсам
+  рынка (без ключа): ставки funding для движка лаборатории (F14 и его копии в COIN-M). У поставочных контрактов ставки нет — они пропускаются.
 
 ## Earn: сложные продукты (spec 0019, проба полей 2026-10-15)
 Все ответы сверены пробой на живом read-only ключе. Числа — строками (`z.coerce.number()`), время — мс, `duration` —
@@ -97,3 +126,20 @@
   `rateHistory` у Binance тяжелее обычных ручек — дёргается только на холодный кэш (4 запроса).
 - Ручки `…/account` (балансы позиций) не используются: «Мои позиции» — вне scope 0019.
 - Нет аккаунта RWUSD/BFUSD или другая ошибка группы → группа уходит в `warnings` загрузчика, остальные видны.
+
+## Earn: история начислений (spec 0022, проба 2026-10-15)
+Колонка «Вчера» в таблице портфеля. Обе ручки — подписанные GET (USER_DATA, read-only ключ), вес 150 (IP), окно
+`startTime`/`endTime` не больше 30 дней (`endTime` включительно), страницы по 100 (`fetchAllPages`).
+
+| Функция | Ручка | Параметры | Поля, которые используем |
+|---|---|---|---|
+| `fetchFlexibleRewards` | `GET /sapi/v1/simple-earn/flexible/history/rewardsRecord` | `type` **обязателен** (без него `-1102`): `BONUS`, `REALTIME`, `REWARDS`, `ALL`; `startTime`, `endTime` | `rows[] {asset, rewards, productId, type, time}` — в документации `projectId`, в ответе `productId` (схема берёт любое) |
+| `fetchLockedRewards` | `GET /sapi/v1/simple-earn/locked/history/rewardsRecord` | `startTime`, `endTime` | `rows[] {positionId, asset, amount, time, type}` — по документации (на аккаунте пробы Locked-позиций нет) |
+
+- `REALTIME` — начисление по базовой ставке, одна строка на продукт за сутки (`time` — 23:59:59 UTC); `BONUS` —
+  бонусная ступень (`tierAnnualPercentageRate`), приходит в течение суток. Они не пересекаются: `REALTIME` совпадает
+  с `yesterdayRealTimeRewards` позиции, `BONUS` — ровно ступень (500 USDT × 4 % / 365).
+- `ALL` отдаёт ровно объединение `BONUS` + `REALTIME` без повторов — загрузчик портфеля делает один запрос вместо
+  трёх. `REWARDS` («старая история») за 30 дней пуст; суммируются только `BONUS` и `REALTIME`
+  (`features/load-portfolio/model/yesterdayRewards.ts`).
+- `rewards`/`amount` — в монете `asset` (монета награды); в USD — по цене этой монеты.

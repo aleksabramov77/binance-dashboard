@@ -21,7 +21,7 @@ export async function recheckSetup(setup: Setup): Promise<SetupRecheck> {
     symbol: setup.symbol,
     base: setup.base,
     spot: market === "spot",
-    futures: market === "futures",
+    futures: market === "usdm",
     price: ticker.lastPrice,
     change24h: ticker.priceChangePercent / 100,
     quoteVolumeUsd: ticker.quoteVolume,

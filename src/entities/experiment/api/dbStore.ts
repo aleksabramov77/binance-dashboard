@@ -1,17 +1,35 @@
 import {
   type Experiment,
-  experimentSchema,
   type PaperTrade,
   paperTradeSchema,
+  type SkippedSignal,
+  skipReasonSchema,
 } from "@binance-dashboard/trading-core";
-import { and, asc, desc, eq, isNotNull, isNull, sql, sum } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  sql,
+  sum,
+} from "drizzle-orm";
 import {
   engineStateTable,
   experimentsTable,
   type PaperTradeRow,
   paperTradesTable,
   runsTable,
+  skippedSignalsTable,
 } from "../model/db.ts";
+import {
+  type OnInvalidExperiment,
+  parseExperimentRows,
+} from "../model/parseRows.ts";
 import { countedTrade } from "./accounting.ts";
 import type { ExperimentDb } from "./tickLock.ts";
 
@@ -48,7 +66,8 @@ export async function ensureRun(db: Db): Promise<number> {
 
 /**
  * Сид каталога: upsert по id. Обновляет описание и конфиг из кода; включённость, demo-зеркало и
- * стартовый бюджет — настройки пользователя — пишутся только при первой вставке.
+ * стартовый бюджет — настройки пользователя — пишутся только при первой вставке. Положение зеркала (spec 0043):
+ * `demoMirror: true` — ручное «Вкл», иначе «Авто».
  */
 export async function seedExperiments(
   db: Db,
@@ -66,6 +85,7 @@ export async function seedExperiments(
         initialBudget: e.initialBudget,
         enabled: e.enabled,
         demoMirror: e.demoMirror,
+        demoMirrorMode: e.demoMirror ? "on" : "auto",
       })
       .onConflictDoUpdate({
         target: experimentsTable.id,
@@ -82,12 +102,15 @@ export async function seedExperiments(
 /** Хранилище движка лаборатории поверх таблиц домена. */
 export function createDbExperimentStore(db: Db) {
   return {
-    async listExperiments(): Promise<Experiment[]> {
+    /** Строки, не прошедшие строгую схему, пропускаются и уходят в onInvalid (spec 0029). */
+    async listExperiments(
+      onInvalid?: OnInvalidExperiment,
+    ): Promise<Experiment[]> {
       const rows = await db
         .select()
         .from(experimentsTable)
         .orderBy(asc(experimentsTable.id));
-      return rows.map((r) => experimentSchema.parse(r));
+      return parseExperimentRows(rows, onInvalid).map((x) => x.experiment);
     },
 
     currentRunId: () => ensureRun(db),
@@ -137,11 +160,16 @@ export function createDbExperimentStore(db: Db) {
 
     async updateTrade(
       id: string,
-      p: Pick<PaperTrade, "stop" | "extreme" | "checkedUntil">,
+      p: Pick<PaperTrade, "stop" | "extreme" | "mae" | "checkedUntil">,
     ): Promise<void> {
       await db
         .update(paperTradesTable)
-        .set({ stop: p.stop, extreme: p.extreme, checkedUntil: p.checkedUntil })
+        .set({
+          stop: p.stop,
+          extreme: p.extreme,
+          mae: p.mae,
+          checkedUntil: p.checkedUntil,
+        })
         .where(eq(paperTradesTable.id, id));
     },
 
@@ -150,12 +178,56 @@ export function createDbExperimentStore(db: Db) {
       c: Pick<
         PaperTrade,
         "exitPrice" | "exitReason" | "fees" | "pnl" | "rMultiple"
-      > & { closedAt: string },
+      > & { closedAt: string; mae?: number | null },
     ): Promise<void> {
       await db
         .update(paperTradesTable)
         .set({ ...c, closedAt: new Date(c.closedAt) })
         .where(eq(paperTradesTable.id, id));
+    },
+
+    /** Сколько отсечённых сигналов уже записано в эпохе — по эксперименту и причине (лимит объёма). */
+    async skippedSignalCounts(
+      runId: number,
+      experimentIds: string[],
+    ): Promise<
+      { experimentId: string; reason: SkippedSignal["reason"]; count: number }[]
+    > {
+      if (experimentIds.length === 0) return [];
+      const rows = await db
+        .select({
+          experimentId: skippedSignalsTable.experimentId,
+          reason: skippedSignalsTable.reason,
+          count: count(),
+        })
+        .from(skippedSignalsTable)
+        .where(
+          and(
+            eq(skippedSignalsTable.runId, runId),
+            inArray(skippedSignalsTable.experimentId, experimentIds),
+          ),
+        )
+        .groupBy(skippedSignalsTable.experimentId, skippedSignalsTable.reason);
+      return rows.flatMap((r) => {
+        const parsed = skipReasonSchema.safeParse(r.reason);
+        return parsed.success ? [{ ...r, reason: parsed.data }] : [];
+      });
+    },
+
+    /** Вставка отсечённых сигналов; строка с тем же id уже есть — пропускается. */
+    async insertSkippedSignals(rows: SkippedSignal[]): Promise<void> {
+      if (rows.length === 0) return;
+      await db
+        .insert(skippedSignalsTable)
+        .values(rows.map((r) => ({ ...r, at: new Date(r.at) })))
+        .onConflictDoNothing({ target: skippedSignalsTable.id });
+    },
+
+    /** Удалить отсечённые сигналы старше before (ISO) — срок хранения. */
+    async pruneSkippedSignals(before: string): Promise<void> {
+      await db
+        .delete(skippedSignalsTable)
+        .where(lt(skippedSignalsTable.at, new Date(before)));
     },
 
     async getState(key: string): Promise<unknown> {

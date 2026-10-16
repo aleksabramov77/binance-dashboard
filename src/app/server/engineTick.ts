@@ -11,6 +11,7 @@ import {
 } from "@/entities/experiment";
 import {
   type CandleCache,
+  coinmTicker,
   type EngineRunner,
   EXPERIMENT_CATALOG,
   type ExperimentStore,
@@ -19,7 +20,11 @@ import {
   type TickDeps,
   type TickResult,
 } from "@/features/paper-engine";
-import type { MarketApi } from "@/shared/api/binance/marketApi";
+import type {
+  FuturesMarket,
+  MarketApi,
+  Perpetuals,
+} from "@/shared/api/binance/marketApi";
 
 /** Binance отдаёт не больше 1000 свечей за запрос. */
 const MAX_KLINES = 1000;
@@ -30,10 +35,16 @@ export interface EngineTickEnv {
   runner: EngineRunner;
   market: Pick<
     MarketApi,
-    "fetchKlines" | "fetch24hTickers" | "fetchFundingRates"
+    | "fetchKlines"
+    | "fetch24hTickers"
+    | "fetchCoinmTickers"
+    | "fetchFundingRates"
   >;
-  /** Символы бессрочных USDT-фьючерсов (с кэшем — createPerpetualsSource). */
-  perpetuals: () => Promise<Set<string>>;
+  /**
+   * Бессрочные контракты USDⓈ-M и COIN-M в торговле (символ → размер контракта COIN-M), с кэшем —
+   * createPerpetualsSources.
+   */
+  perpetuals: (market: FuturesMarket) => Promise<Perpetuals>;
   /** Кэш свечей между тиками: на VM живёт в процессе, в Edge Function — на время экземпляра. */
   cache?: CandleCache;
   log?: TickDeps["log"];
@@ -51,12 +62,12 @@ export async function prepareEngineDb(db: ExperimentDb): Promise<void> {
 }
 
 /** Справочник бессрочных фьючерсов с TTL; сбой обновления — старая копия, если она есть. */
-export function createPerpetualsSource(
-  fetchSymbols: () => Promise<Set<string>>,
+export function createPerpetualsSource<T>(
+  fetchSymbols: () => Promise<T>,
   ttlMs: number,
   clock: () => number,
-): () => Promise<Set<string>> {
-  let cached: { at: number; symbols: Set<string> } | null = null;
+): () => Promise<T> {
+  let cached: { at: number; symbols: T } | null = null;
   return async () => {
     const now = clock();
     if (cached && now - cached.at < ttlMs) return cached.symbols;
@@ -71,6 +82,19 @@ export function createPerpetualsSource(
   };
 }
 
+/** Справочники бессрочных контрактов USDⓈ-M и COIN-M — у каждого рынка свой кэш с TTL. */
+export function createPerpetualsSources(
+  fetchPerpetuals: (market: FuturesMarket) => Promise<Perpetuals>,
+  ttlMs: number,
+  clock: () => number,
+): (market: FuturesMarket) => Promise<Perpetuals> {
+  const sources: Record<FuturesMarket, () => Promise<Perpetuals>> = {
+    usdm: createPerpetualsSource(() => fetchPerpetuals("usdm"), ttlMs, clock),
+    coinm: createPerpetualsSource(() => fetchPerpetuals("coinm"), ttlMs, clock),
+  };
+  return (market) => sources[market]();
+}
+
 /** TickDeps движка поверх хранилища (Drizzle в транзакции блокировки) и публичных данных Binance. */
 export function buildTickDeps(
   env: EngineTickEnv,
@@ -79,20 +103,36 @@ export function buildTickDeps(
   return {
     runner: env.runner,
     store,
-    candles: (market, symbol, interval, limit) =>
+    candles: (market, symbol, interval, limit, startTime) =>
       env.market.fetchKlines(
         market,
         symbol,
         interval,
         Math.min(limit, MAX_KLINES),
+        startTime,
       ),
     tickers: async (market) => {
-      const list = await env.market.fetch24hTickers(market);
-      if (market === "spot") return list;
-      const perps = await env.perpetuals();
-      return list.filter((t) => perps.has(t.symbol));
+      if (market === "spot") return env.market.fetch24hTickers("spot");
+      const perps = await env.perpetuals(market);
+      // Справочник только крипты пуст (Binance сменил underlyingType?) — юниверс группы пуст молча (spec 0029).
+      if (perps.size === 0)
+        env.log?.(
+          "warn",
+          "engine.perpetuals",
+          `справочник бессрочных ${market} пуст после фильтра только крипты: эксперименты группы без юниверса`,
+        );
+      if (market === "usdm")
+        return (await env.market.fetch24hTickers("usdm")).filter((t) =>
+          perps.has(t.symbol),
+        );
+      // COIN-M: оборот в $ и размер сделки — по размеру контракта из exchangeInfo.
+      return (await env.market.fetchCoinmTickers()).flatMap((t) => {
+        const size = perps.get(t.symbol);
+        return size ? [coinmTicker(t, size)] : [];
+      });
     },
-    funding: () => env.market.fetchFundingRates(),
+    funding: async (market) =>
+      market === "spot" ? {} : env.market.fetchFundingRates(market),
     cache: env.cache,
     log: env.log,
   };

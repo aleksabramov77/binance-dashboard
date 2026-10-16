@@ -1,5 +1,6 @@
 import type { TradeResult } from "@/entities/trade";
 import { SPOT_ENTRY_SLIPPAGE_TEXT } from "../config/spot";
+import { FUTURES_GROWTH_TOLERANCE } from "../config/trade";
 
 // Выбор исхода сделки по результатам шагов placeTrade (spec 0012): чистые функции, сеть — в model.
 // Правило: позиция без стопа — только unprotected; rejected — только когда позиции точно нет.
@@ -49,16 +50,78 @@ export function afterEntryError(
 }
 
 /**
- * Фьючерсы, исход входа неизвестен: позиция на бирже (null — проверить не удалось).
- * Позиция есть — { protect }: ставить защиту на неё.
+ * Итог сделки, чей вход биржа не подтвердила (свой `-M` не найден), а позиция на пустой до входа
+ * стороне появилась: защита выставлена, но статус — unprotected, чтобы человек проверил (PR 2e).
  */
-export function afterFuturesPositionCheck<P extends { amount: number }>(
-  position: P | null,
-): TradeOutcome | { protect: P } {
+export const UNCONFIRMED_ENTRY = outcome(
+  "unprotected",
+  "Вход не подтверждён биржей (свой ордер не найден), но позиция появилась — защита выставлена, проверьте на demo.binance.com.",
+  true,
+);
+
+/**
+ * Фьючерсы, исход входа неизвестен, свой ордер `-M` не подтверждён — сверка по позиции своей стороны
+ * (null — проверить не удалось) относительно снимка до входа (before): на стороне могут быть позиции
+ * других зеркал (PR 2d), их объём — не наш. { protect } — свой объём (прирост), entryPrice null —
+ * средняя цена стороны не наша, берём текущую.
+ * - свой ордер не найден и после дедлайна (missing; поиск — до отправки + recvWindow, позже биржа его не
+ *   примет): прироста нет — вход не прошёл; сторона до входа была пуста и выросла — позиция почти
+ *   наверняка своя (с блокировкой прогона параллельного входа соседа нет): защищаем её, но итог —
+ *   unprotected «вход не подтверждён» ({ protect, unconfirmed }); сторона не была пуста — прирост может
+ *   быть входом соседа: unprotected без защиты и отката (PR 2e);
+ * - ордер не прочитан (unknown), сторона до входа пуста: позиция есть — вся она наша, нет — вход не прошёл;
+ * - unknown, сторона не пуста: прирост ≈ объёму заявки (FUTURES_GROWTH_TOLERANCE) — защищаем прирост;
+ *   прироста нет — вход не прошёл; иначе неясно, чей объём, — unprotected без защиты и отката.
+ */
+export function afterFuturesPositionCheck(
+  position: { amount: number; entryPrice: number } | null,
+  before: number,
+  order: "missing" | "unknown",
+  expectedQty: number,
+):
+  | TradeOutcome
+  | {
+      protect: { amount: number; entryPrice: number | null };
+      /** Свой ордер входа не найден — защиту ставим, но итог сделки — UNCONFIRMED_ENTRY. */
+      unconfirmed?: true;
+    } {
   if (position === null) return outcome("unprotected", UNKNOWN_FUTURES);
-  if (position.amount === 0)
-    return outcome("rejected", "Вход не исполнился — позиции на бирже нет.");
-  return { protect: position };
+  // Свой ордер `-M` не найден и после дедлайна: прирост стороны, даже ≈ заявке, может быть входом
+  // соседнего зеркала (параллельный прогон) — не защищаем его как свой и не откатываем (PR 2e).
+  if (order === "missing") {
+    const grown = position.amount - before;
+    if (grown > expectedQty * FUTURES_GROWTH_TOLERANCE && before <= 0)
+      return { protect: position, unconfirmed: true };
+    if (grown > expectedQty * FUTURES_GROWTH_TOLERANCE)
+      return outcome(
+        "unprotected",
+        "Свой ордер входа на бирже не найден, а позиция стороны выросла — возможно, это вход другого зеркала: защиту и откат не ставили, проверьте на demo.binance.com.",
+      );
+    return outcome(
+      "rejected",
+      before > 0
+        ? "Вход не исполнился — своего ордера на бирже нет, сторона не выросла (её держат другие зеркала)."
+        : "Вход не исполнился — позиции на бирже нет.",
+    );
+  }
+  if (before <= 0) {
+    if (position.amount === 0)
+      return outcome("rejected", "Вход не исполнился — позиции на бирже нет.");
+    return { protect: position };
+  }
+  const growth = position.amount - before;
+  const tolerance = expectedQty * FUTURES_GROWTH_TOLERANCE;
+  if (Math.abs(growth - expectedQty) <= tolerance)
+    return { protect: { amount: growth, entryPrice: null } };
+  if (Math.abs(growth) <= tolerance)
+    return outcome(
+      "rejected",
+      "Вход не исполнился — сторона не выросла (её держат другие зеркала).",
+    );
+  return outcome(
+    "unprotected",
+    "Неизвестно, исполнился ли свой вход: сторона уже открыта другими зеркалами, прирост не совпал с заявкой — защиту и откат не ставили, проверьте на demo.binance.com.",
+  );
 }
 
 const FUTURES_FINAL = [
@@ -86,6 +149,60 @@ export function afterFuturesOrderCheck<
     );
   return "checkPosition";
 }
+
+/**
+ * Фьючерсы, «стоп до входа» (AC10, Hedge, за флагом): стоп не встал — вход не отправляется,
+ * позиции нет.
+ */
+export function afterStopBeforeEntry(placed: boolean): TradeOutcome | "enter" {
+  return placed
+    ? "enter"
+    : outcome("rejected", "Стоп не принят биржей — вход не отправлялся.");
+}
+
+/** Чем кончилось снятие своего algo-ордера: снят, уже не активен, не было ссылки, ошибка. */
+export type CancelResult = "cancelled" | "inactive" | "none" | "error";
+
+/**
+ * Вход не прошёл, стоп «до входа» снимаем (Hedge: стоп с positionSide + quantity без reduceOnly —
+ * висящий при срабатывании закроет объём соседа). Снять не удалось — не rejected: unprotected без цены
+ * и объёма, но со ссылкой на стоп (protectRefs.stop) — закрытие строки снимет его и ничего не докроет.
+ */
+export function afterEarlyStopDrop(
+  failed: TradeOutcome,
+  drop: CancelResult,
+): TradeOutcome {
+  if (drop !== "error") return failed;
+  return outcome(
+    "unprotected",
+    `${failed.message} Свой стоп «до входа» снять не удалось — он на бирже; закрытие строки снимет его.`,
+  );
+}
+
+/**
+ * «Стоп до входа» стоит на объём заявки, а вход исполнился частично: стоп переставляется на
+ * исполненный объём (иначе при срабатывании закрыл бы лишнее — объём соседа). Старый снять не удалось —
+ * unprotected с ценой и объёмом (проверить вручную); новый не встал — откат; иначе — дальше.
+ */
+export function afterPartialEntryRestop(
+  cancel: CancelResult,
+  newStopPlaced: boolean | null,
+): TradeOutcome | "rollback" | "continue" {
+  if (cancel === "error")
+    return outcome(
+      "unprotected",
+      "Вход исполнен частично, а стоп «до входа» на полный объём снять не удалось — проверьте на demo.binance.com.",
+      true,
+    );
+  if (newStopPlaced === false) return "rollback";
+  return "continue";
+}
+
+/** Общий срок сделки истёк до отправки входа — ничего не отправлено. */
+export const DEADLINE_BEFORE_ENTRY = outcome(
+  "rejected",
+  "Биржа долго не отвечает — вход не отправлялся, попробуйте позже.",
+);
 
 /** Фьючерсы: стоп после входа. Не встал — откат (позиция без стопа не остаётся, AC5). */
 export function afterFuturesStop(

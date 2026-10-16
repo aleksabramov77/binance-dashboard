@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { z } from "zod";
-import type { ExperimentDemoMirror } from "../model/mirror";
+import type { ExperimentMirrorMode } from "../model/mirrorAuto";
 import {
   type BudgetForm,
   type DemoResetRequest,
@@ -12,6 +12,9 @@ import {
   type ExperimentReset,
   type ExperimentResetResult,
   experimentResetResultSchema,
+  type GroupResetRequest,
+  type GroupResetResult,
+  groupResetResultSchema,
   type LabSettings,
   labSettingsSchema,
   type ResetRequest,
@@ -93,10 +96,10 @@ export function useSetExperimentEnabled() {
   });
 }
 
-/** Demo-зеркало эксперимента (spec 008): новые paper-сделки повторяются на Binance Demo. */
-export function useSetExperimentDemoMirror() {
+/** Положение демо-зеркала эксперимента «Выкл · Авто · Вкл» (spec 008, 0043): «Авто» сразу решает автомат. */
+export function useSetExperimentMirrorMode() {
   const queryClient = useQueryClient();
-  return useMutation<LabSettings, Error, ExperimentDemoMirror>({
+  return useMutation<LabSettings, Error, ExperimentMirrorMode>({
     mutationFn: (body) =>
       request("/api/experiments/settings/mirror", labSettingsSchema, {
         method: "POST",
@@ -121,6 +124,29 @@ export function useResetExperimentPaper() {
     onSuccess: (data) => {
       queryClient.setQueryData(labSettingsQueryKey, data.settings);
       void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+    },
+  });
+}
+
+/**
+ * Остатки счетов в шапке (`entities/account-balance`, ключ ["accounts", "balances"]): сброс группы меняет Paper
+ * группы, а демо-сброс — позиции демо-счёта. Ключ строкой, без импорта слайса: сущности одного слоя не знают друг о друге.
+ */
+const ACCOUNTS_QUERY_KEY = ["accounts"] as const;
+
+/** Сброс группы активов (spec 0038): Paper или Demo всех экспериментов группы; эпоха и другие группы — без изменений. */
+export function useResetGroup() {
+  const queryClient = useQueryClient();
+  return useMutation<GroupResetResult, Error, GroupResetRequest>({
+    mutationFn: (body) =>
+      request("/api/experiments/reset/group", groupResetResultSchema, {
+        method: "POST",
+        body,
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(labSettingsQueryKey, data.settings);
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      void queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY });
     },
   });
 }

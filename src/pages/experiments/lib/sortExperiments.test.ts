@@ -35,6 +35,8 @@ const summary = (
   initialBudget: 1000,
   enabled: true,
   demoMirror: false,
+  demoMirrorMode: "auto",
+  demoMirrorAuto: null,
   demo: demo(),
   stats: computeStats(
     pnls.map((pnl, i) => ({
@@ -50,7 +52,7 @@ const summary = (
 
 const list = [
   summary("S02", "spot", [10, -5]),
-  summary("F01", "futures", [50]),
+  summary("F01", "usdm", [50]),
   summary("S01", "spot", []),
 ];
 
@@ -76,11 +78,11 @@ describe("sortExperiments", () => {
       ).toBe("S01");
   });
 
-  it("ag: spot раньше futures по возрастанию, при равенстве — по id", () => {
+  it("ag: spot раньше usdm по возрастанию, при равенстве — по id", () => {
     const groups = [
-      summary("F02", "futures", []),
+      summary("F02", "usdm", []),
       summary("S03", "spot", []),
-      summary("F01", "futures", []),
+      summary("F01", "usdm", []),
     ];
     expect(
       sortExperiments(groups, "all", "ag", "asc").map((e) => e.id),

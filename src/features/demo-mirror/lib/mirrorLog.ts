@@ -5,7 +5,7 @@ export interface MirrorLogSubject {
   tradeId: string;
   experimentId: string;
   symbol: string;
-  market: "spot" | "futures";
+  market: "spot" | "usdm";
 }
 
 export function mirrorLogEntry(

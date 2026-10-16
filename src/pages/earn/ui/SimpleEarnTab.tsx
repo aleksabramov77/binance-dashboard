@@ -47,7 +47,7 @@ export function SimpleEarnTab() {
       {data?.latest && (
         <>
           <BestOffers ranked={ranked} amountUsd={filters.amount} />
-          <div className="grid gap-8 xl:grid-cols-[1fr_380px]">
+          <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1fr)_380px]">
             <OffersTable ranked={ranked} />
             <ChangesFeed
               changes={data.changes}

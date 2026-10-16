@@ -159,7 +159,7 @@ export function validateTrade(
 ): { ok: true; value: ValidatedTrade } | { ok: false; errors: string[] } {
   const { price, rules, maxNotionalUsd, availableUsd, maxRiskPct } = ctx;
   const errors: string[] = [];
-  if (req.direction === "short" && req.market !== "futures")
+  if (req.direction === "short" && req.market !== "usdm")
     errors.push("Шорт возможен только на фьючерсах.");
   if (req.market === "spot" && req.leverage !== 1)
     errors.push("На Spot плечо не используется.");

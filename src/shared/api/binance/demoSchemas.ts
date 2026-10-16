@@ -132,9 +132,64 @@ export const positionRiskSchema = z.array(
       positionAmt: decimal,
       entryPrice: decimal,
       unRealizedProfit: decimal.catch(0),
+      // One-way — BOTH; Hedge — LONG и SHORT отдельными строками.
+      positionSide: z.string().catch("BOTH"),
     })
     .loose(),
 );
+
+/** GET /fapi/v1/positionSide/dual: true — Hedge mode. */
+export const positionModeSchema = z
+  .object({ dualSidePosition: z.boolean() })
+  .loose();
+
+/** Открытые обычные ордера фьючерсов символа (для снятия защитных своей стороны). */
+export const futuresOpenOrdersSchema = z.array(
+  z
+    .object({
+      orderId: z.number(),
+      side: z.enum(["BUY", "SELL"]),
+      positionSide: z.string().catch("BOTH"),
+      type: z.string(),
+      reduceOnly: z.boolean().catch(false),
+      closePosition: z.boolean().catch(false),
+    })
+    .loose(),
+);
+
+/** Открытые algo-ордера (TP/SL) символа. */
+export const futuresOpenAlgoOrdersSchema = z.array(
+  z
+    .object({
+      algoId: z.number(),
+      clientAlgoId: z.string().nullable().catch(null),
+      symbol: z.string().catch(""),
+      side: z.enum(["BUY", "SELL"]),
+      positionSide: z.string().catch("BOTH"),
+      orderType: z.string(),
+    })
+    .loose(),
+);
+
+export interface FuturesSymbolState {
+  positions: { positionSide: string; amount: number; entryPrice: number }[];
+  orders: z.infer<typeof futuresOpenOrdersSchema>;
+  algos: z.infer<typeof futuresOpenAlgoOrdersSchema>;
+}
+
+/** Открытые ордера спота символа. */
+export const spotOpenOrdersSchema = z.array(
+  z
+    .object({
+      orderId: z.number(),
+      orderListId: z.number().catch(-1),
+      clientOrderId: z.string(),
+      side: z.enum(["BUY", "SELL"]),
+      type: z.string(),
+    })
+    .loose(),
+);
+export type SpotOpenOrder = z.infer<typeof spotOpenOrdersSchema>[number];
 
 /** История и активные algo-ордера (TP/SL) символа на демо-фьючерсах. */
 /**
@@ -160,6 +215,7 @@ export const algoHistorySchema = z.array(
       triggerPrice: decimal.catch(0),
       // id рыночного ордера, которым исполнился TP/SL; не срабатывал — null.
       actualOrderId: actualOrderIdSchema,
+      clientAlgoId: z.string().nullable().catch(null),
     })
     .loose(),
 );
@@ -185,6 +241,7 @@ export const spotAllOrdersSchema = z.array(
       side: z.enum(["BUY", "SELL"]),
       status: z.string(),
       stopPrice: decimal.catch(0),
+      clientOrderId: z.string().catch(""),
     })
     .loose(),
 );
@@ -206,6 +263,10 @@ export const algoOrderQuerySchema = z
     algoId: z.number(),
     algoStatus: z.string(),
     actualOrderId: actualOrderIdSchema,
+    // Средняя цена исполнения сработавшего ордера; не срабатывал — 0.
+    actualPrice: decimal.catch(0),
+    // Исполненный объём сработавшего ордера; поле есть только после исполнения — иначе 0.
+    actualQty: decimal.catch(0),
   })
   .loose();
 export type AlgoOrderQuery = z.infer<typeof algoOrderQuerySchema>;
@@ -227,6 +288,31 @@ export const futuresBalancesSchema = z.array(
       balance: decimal,
       availableBalance: decimal,
     })
+    .loose(),
+);
+
+/**
+ * Активы счёта USDⓈ-M (`/fapi/v3/account`). У `/fapi/v3/balance` нереализованный PnL только кросс-позиций
+ * (`crossUnPnl`), а зеркало открывает изолированные — поэтому equity берётся отсюда: `unrealizedProfit` по всем.
+ */
+export const futuresAccountAssetsSchema = z
+  .object({
+    assets: z.array(
+      z
+        .object({
+          asset: z.string(),
+          walletBalance: decimal,
+          unrealizedProfit: decimal,
+        })
+        .loose(),
+    ),
+  })
+  .loose();
+
+/** Балансы COIN-M (`/dapi/v1/balance`): в монете актива; нереализованный PnL — `crossUnPnl`. */
+export const coinmBalancesSchema = z.array(
+  z
+    .object({ asset: z.string(), balance: decimal, crossUnPnl: decimal })
     .loose(),
 );
 
@@ -264,6 +350,7 @@ export const futuresUserTradesSchema = z.array(
       commission: decimal,
       commissionAsset: z.string(),
       time: z.number(),
+      positionSide: z.string().catch("BOTH"),
     })
     .loose(),
 );

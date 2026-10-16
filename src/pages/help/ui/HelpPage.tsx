@@ -8,6 +8,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFrame,
   TableHead,
   TableHeader,
   TableRow,
@@ -40,7 +41,7 @@ function Section({ title, terms }: Glossary["sections"][number]) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-lg font-semibold">{title}</h2>
-      <div className="overflow-clip rounded-xl border bg-card">
+      <TableFrame>
         <Table>
           <TableHeader>
             <TableRow>
@@ -63,13 +64,17 @@ function Section({ title, terms }: Glossary["sections"][number]) {
                   {t.code || <span className="text-muted-foreground">—</span>}
                 </TableCell>
                 <TableCell className="whitespace-normal text-muted-foreground">
-                  {t.description}
+                  {/* Ширина описания ограничена: таблица по содержимому (spec 0022), а абзац в одну строку
+                      растянул бы её на тысячи пикселей. На узком окне колонка сужается до 16rem. */}
+                  <div className="max-w-[clamp(16rem,40vw,40rem)]">
+                    {t.description}
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </div>
+      </TableFrame>
     </section>
   );
 }
