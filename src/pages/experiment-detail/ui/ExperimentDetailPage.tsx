@@ -5,7 +5,9 @@ import Link from "next/link";
 import {
   assetGroupOf,
   type DemoSummary,
+  DisabledBadge,
   describeConfig,
+  describeRunView,
   EquityChart,
   type ExitReason,
   formatProfitFactor,
@@ -14,8 +16,11 @@ import {
   formatSignedUsd,
   MIRROR_STATUS_LABELS,
   type MirrorView,
+  MissingRunNotice,
   type PaperTrade,
   pnlTone,
+  RunSelect,
+  runEnd,
   type TradeStatsView,
   useExperiment,
 } from "@/entities/experiment";
@@ -41,6 +46,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
+import { useDetailView } from "../model/useDetailView";
+import { VariantFamily } from "./VariantFamily";
 
 const EXIT_LABELS: Record<ExitReason, string> = {
   tp: "тейк",
@@ -56,13 +63,19 @@ function Metric({
   label,
   value,
   tone,
+  hint,
 }: {
   label: string;
   value: string;
   tone?: string;
+  /** Подсказка по наведению. */
+  hint?: string;
 }) {
   return (
-    <div className="flex flex-col gap-0.5 rounded-lg border bg-card px-3 py-2">
+    <div
+      className="flex flex-col gap-0.5 rounded-lg border bg-card px-3 py-2"
+      title={hint}
+    >
       <span className="text-xs text-muted-foreground">{label}</span>
       <span
         className={cn("font-mono text-lg font-semibold tabular-nums", tone)}
@@ -73,10 +86,14 @@ function Metric({
   );
 }
 
+/** Бюджет прошлых эпох не хранится (PRD «Открытые вопросы»): проценты — от текущего. */
+const BUDGET_HINT =
+  "Equity, процент и просадка считаются от текущего стартового бюджета эксперимента: бюджет прошлых эпох не хранится.";
+
 function Metrics({ s }: { s: TradeStatsView }) {
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-      <Metric label="Equity" value={formatUsd(s.equity)} />
+      <Metric label="Equity" value={formatUsd(s.equity)} hint={BUDGET_HINT} />
       <Metric
         label="PnL"
         value={formatSignedUsd(s.realizedPnl)}
@@ -95,19 +112,29 @@ function Metrics({ s }: { s: TradeStatsView }) {
       <Metric
         label="Max DD"
         value={s.closed ? formatRate(-s.maxDrawdownPct) : "—"}
+        hint={BUDGET_HINT}
       />
       <Metric label="Комиссии" value={formatUsd(s.fees)} />
     </div>
   );
 }
 
-/** Демо-счёт Binance эксперимента (spec 008): отдельно от paper, с последнего демо-сброса. */
-function DemoMetrics({ d, mirrored }: { d: DemoSummary; mirrored: boolean }) {
+/** Демо-счёт Binance эксперимента (spec 008): отдельно от paper, за период страницы. */
+function DemoMetrics({
+  d,
+  mirrored,
+  period,
+}: {
+  d: DemoSummary;
+  mirrored: boolean;
+  /** За что сводка: с последнего демо-сброса, зеркала эпохи или все. */
+  period: string;
+}) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-sm font-medium text-muted-foreground">
         Демо-счёт Binance{" "}
-        {mirrored ? "· торговля включена" : "· торговля выключена"}
+        {mirrored ? "· торговля включена" : "· торговля выключена"} · {period}
       </h2>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         <Metric
@@ -134,6 +161,7 @@ function DemoMetrics({ d, mirrored }: { d: DemoSummary; mirrored: boolean }) {
 }
 
 const TRADE_SORT_KEYS = [
+  "run",
   "openedAt",
   "closedAt",
   "symbol",
@@ -151,6 +179,7 @@ const TRADES_TABLE = defineSortTable(
   TRADE_SORT_KEYS,
 );
 const HELP: Record<(typeof TRADE_SORT_KEYS)[number], string> = {
+  run: "Эпоха учёта, в которой открыта сделка (видна в «Все эпохи»).",
   openedAt: "Время входа в сделку (по закрытию свечи сигнала).",
   closedAt: "Время выхода. «открыта» — сделка ещё идёт.",
   symbol: "Торговая пара.",
@@ -170,6 +199,7 @@ const TRADE_SORT_VALUE: Record<
   (typeof TRADE_SORT_KEYS)[number],
   (t: PaperTrade) => SortValue
 > = {
+  run: (t) => t.runId,
   openedAt: (t) => Date.parse(t.openedAt),
   // Открытые сделки (без выхода) — в конце.
   closedAt: (t) => (t.closedAt ? Date.parse(t.closedAt) : null),
@@ -202,9 +232,12 @@ function MirrorCell({ mirror }: { mirror: MirrorView | undefined }) {
 function TradesTable({
   trades,
   mirrors,
+  showRun,
 }: {
   trades: PaperTrade[];
   mirrors: Record<string, MirrorView>;
+  /** «Все эпохи»: колонка «Эпоха» (spec 0046). */
+  showRun: boolean;
 }) {
   const { sort, head } = useTableSort(TRADES_TABLE);
   const rows = sort
@@ -222,7 +255,7 @@ function TradesTable({
   if (trades.length === 0)
     return (
       <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-        В этой эпохе сделок ещё нет.
+        За выбранный период сделок нет.
       </p>
     );
   return (
@@ -230,6 +263,15 @@ function TradesTable({
       <Table>
         <TableHeader>
           <TableRow>
+            {showRun && (
+              <SortableHead
+                className="text-right"
+                {...head("run")}
+                description={HELP.run}
+              >
+                Эпоха
+              </SortableHead>
+            )}
             <SortableHead {...head("openedAt")} description={HELP.openedAt}>
               Вход
             </SortableHead>
@@ -281,6 +323,11 @@ function TradesTable({
         <TableBody>
           {rows.map((t) => (
             <TableRow key={t.id}>
+              {showRun && (
+                <TableCell className="text-right font-mono tabular-nums">
+                  №{t.runId}
+                </TableCell>
+              )}
               <TableCell className="text-sm tabular-nums">
                 {formatDateTime(t.openedAt)}
               </TableCell>
@@ -333,12 +380,18 @@ function TradesTable({
 }
 
 export function ExperimentDetailPage({ id }: { id: string }) {
-  const { data, isPending, error } = useExperiment(id);
+  const [{ run }, setView] = useDetailView();
+  const { data, isPending, error } = useExperiment(id, run);
+  const all = data?.scope === "all";
+  const current = !!data && data.scope === data.runs[0]?.id;
+  const period = data ? describeRunView(data) : "";
+  // Переходы со страницы сохраняют выбранный период (?run=).
+  const runQuery = run === null ? "" : `?run=${run}`;
 
   return (
     <div className="flex flex-col gap-6">
       <Link
-        href="/experiments"
+        href={`/experiments${runQuery}`}
         className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" aria-hidden />
@@ -355,33 +408,70 @@ export function ExperimentDetailPage({ id }: { id: string }) {
 
       {data && (
         <>
-          <header className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-sm text-muted-foreground">
-                {data.experiment.id}
-              </span>
-              <h1 className="text-2xl font-semibold tracking-tight">
-                {data.experiment.name}
-              </h1>
-              <Badge variant="outline">
-                {assetGroupOf(data.experiment.market).label}
-              </Badge>
-              {!data.experiment.enabled && (
-                <Badge variant="outline">выключен</Badge>
+          <header className="flex flex-wrap items-end justify-between gap-4">
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-sm text-muted-foreground">
+                  {data.experiment.id}
+                </span>
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  {data.experiment.name}
+                </h1>
+                <Badge variant="outline">
+                  {assetGroupOf(data.experiment.market).label}
+                </Badge>
+                {!data.experiment.enabled && (
+                  <DisabledBadge disabled={data.disabled} />
+                )}
+              </div>
+              <p className="max-w-3xl text-muted-foreground">
+                {data.experiment.hypothesis}
+              </p>
+              {data.disabled?.note && (
+                <p className="max-w-3xl text-sm">
+                  <span className="text-muted-foreground">
+                    Почему выключен:{" "}
+                  </span>
+                  {data.disabled.note}
+                </p>
               )}
+              <p className="text-xs text-muted-foreground">
+                {period} · старт {formatUsd(data.experiment.initialBudget)}
+                {!data.engineEnabled && " · движок выключен"}
+              </p>
             </div>
-            <p className="max-w-3xl text-muted-foreground">
-              {data.experiment.hypothesis}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Эпоха №{data.run.id} с {formatDateTime(data.run.startedAt)} ·
-              старт {formatUsd(data.experiment.initialBudget)}
-              {!data.engineEnabled && " · движок выключен"}
-            </p>
+            <RunSelect view={data} onChange={(r) => setView({ run: r })} />
           </header>
 
+          <MissingRunNotice
+            view={data}
+            onReset={() => setView({ run: null })}
+          />
+
           <Metrics s={data.stats} />
-          <DemoMetrics d={data.demo} mirrored={data.experiment.demoMirror} />
+          {!current && (
+            <p className="-mt-4 text-xs text-muted-foreground">{BUDGET_HINT}</p>
+          )}
+          <DemoMetrics
+            d={data.demo}
+            mirrored={data.experiment.demoMirror}
+            period={
+              all
+                ? "все демо-зеркала"
+                : current
+                  ? "с последнего демо-сброса"
+                  : `зеркала сделок эпохи №${data.run.id}`
+            }
+          />
+
+          {data.family && (
+            <VariantFamily
+              experiment={data.experiment}
+              family={data.family}
+              period={period}
+              runQuery={runQuery}
+            />
+          )}
 
           <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
             <Card>
@@ -392,6 +482,15 @@ export function ExperimentDetailPage({ id }: { id: string }) {
                 <EquityChart
                   points={data.equity}
                   initialBudget={data.experiment.initialBudget}
+                  marks={
+                    all
+                      ? data.runs.map((r) => ({
+                          at: r.startedAt,
+                          label: `эпоха №${r.id}`,
+                        }))
+                      : []
+                  }
+                  end={all ? null : runEnd(data.runs, data.run.id)}
                 />
               </CardContent>
             </Card>
@@ -418,7 +517,11 @@ export function ExperimentDetailPage({ id }: { id: string }) {
               {data.stats.trades > data.trades.length &&
                 ` (последние ${data.trades.length} из ${data.stats.trades})`}
             </h2>
-            <TradesTable trades={data.trades} mirrors={data.mirrors} />
+            <TradesTable
+              trades={data.trades}
+              mirrors={data.mirrors}
+              showRun={all}
+            />
           </section>
         </>
       )}

@@ -3,16 +3,17 @@
 // БД — как у `pnpm db:migrate`: DATABASE_URL из .env.local (прод — Supabase), без неё — локальная PGlite.
 // Запись в Postgres (прод) — только с явным --prod; без него печатаются цель и план, выход с ошибкой.
 // Для локального сервера worktree — `DATABASE_URL= pnpm lab:private` (data/pglite worktree).
-// Upsert по id через seedExperiments: name, hypothesis, config обновляются; enabled, demoMirror, initialBudget
-// пишутся только при вставке, сделки не трогаются. Содержимое экспериментов в журнал приложения не пишем.
+// Upsert по id через seedExperiments: name, hypothesis, config, parentId, variantNote обновляются; enabled,
+// demoMirror, initialBudget пишутся только при вставке, сделки не трогаются. Вариант (spec 0046): родитель должен
+// быть в файле, каталоге или БД и сам не быть вариантом — иначе ошибка до записи. Содержимое экспериментов в журнал приложения не пишем.
 import { existsSync, readFileSync } from "node:fs";
-import { inArray } from "drizzle-orm";
 import { experimentsTable, seedExperiments } from "@/entities/experiment";
 import { EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import { getDatabaseConfig } from "@/shared/config/env.server";
 import { closeDb, getDb, migrateDb } from "@/shared/db/client.server";
 import {
   CLONE_HINT,
+  checkVariantParents,
   DEFAULT_PRIVATE_FILE,
   decideLabPrivateWrite,
   describeDbTarget,
@@ -63,22 +64,31 @@ async function main() {
   const db = getDb();
   // Локальную PGlite готовим сами (может быть пустой); прод мигрирует деплой — схему там не трогаем.
   if (target.kind === "pglite") await migrateDb();
-  const existing = await db
+  const rows = await db
     .select({
       id: experimentsTable.id,
       market: experimentsTable.market,
       name: experimentsTable.name,
       hypothesis: experimentsTable.hypothesis,
       config: experimentsTable.config,
+      parentId: experimentsTable.parentId,
+      variantNote: experimentsTable.variantNote,
     })
-    .from(experimentsTable)
-    .where(
-      inArray(
-        experimentsTable.id,
-        experiments.map((e) => e.id),
-      ),
+    .from(experimentsTable);
+  // Связи вариантов — против каталога и всей таблицы: контрольный может быть и не из файла.
+  const variantErrors = checkVariantParents(experiments, [
+    ...EXPERIMENT_CATALOG,
+    ...rows,
+  ]);
+  if (variantErrors.length)
+    fail(
+      `${file}: ошибок ${variantErrors.length}, в БД ничего не записано:\n${variantErrors.map((e) => `  - ${e}`).join("\n")}`,
     );
-  const plan = planPrivateSeed(experiments, existing);
+  const ids = new Set(experiments.map((e) => e.id));
+  const plan = planPrivateSeed(
+    experiments,
+    rows.filter((r) => ids.has(r.id)),
+  );
   for (const line of plan) console.log(`  ${formatPlanLine(line)}`);
 
   if (decision === "dry-run") {

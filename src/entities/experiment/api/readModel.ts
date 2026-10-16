@@ -5,17 +5,20 @@ import {
   type SkippedSignal,
   skippedSignalSchema,
 } from "@binance-dashboard/trading-core";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { filterTrades, periodStart, sliceStats } from "../lib/slices";
 import { computeStats, equityCurve } from "../lib/stats";
+import { controlOf, variantLetters, variantsByControl } from "../lib/variants";
 import { ASSET_GROUPS } from "../model/assetGroup";
 import {
+  type ExperimentRow,
   experimentsTable,
   paperTradesTable,
   runsTable,
   skippedSignalsTable,
 } from "../model/db";
+import { toDisabledInfo } from "../model/disable";
 import {
   type DemoMirrorMode,
   mirrorAutoSnapshotSchema,
@@ -33,76 +36,163 @@ import type {
 import type {
   ExperimentDetailResponse,
   ExperimentsResponse,
+  FamilyMember,
+  RunParam,
+  RunView,
 } from "../model/view";
-import { countedTrade } from "./accounting";
 import { toTrade } from "./dbStore";
 import {
   emptyMirrorSummary,
+  type MirrorScope,
   mirrorStatuses,
   mirrorSummaries,
   toDemoSummary,
 } from "./mirrorDb";
 
-// Чтение для страниц лаборатории (только сервер): эксперименты и сделки текущей эпохи
-// со статистикой. Эпоха — runs с наибольшим id; сид и создание первой эпохи — ensureEngineReady.
+// Чтение для страниц лаборатории (только сервер): эксперименты и сделки выбранного периода со статистикой —
+// текущая эпоха (по умолчанию), прошлая эпоха или все эпохи сразу (spec 0046). Эпоха — runs, текущая — с
+// наибольшим id; сид и создание первой эпохи — ensureEngineReady.
 
 type Db = PgDatabase<PgQueryResultHKT>;
 
-async function currentRun(db: Db): Promise<ExperimentsResponse["run"]> {
-  const [run] = await db
-    .select()
-    .from(runsTable)
-    .orderBy(desc(runsTable.id))
-    .limit(1);
-  if (!run) throw new Error("Эпоха учёта не создана");
-  return { id: run.id, startedAt: run.startedAt.toISOString() };
+/** Эпоха с границами: endedAt — начало следующей; null — текущая. */
+interface RunRange {
+  id: number;
+  startedAt: Date;
+  endedAt: Date | null;
 }
 
-async function runTrades(
+/** Период выборки: одна эпоха или все. */
+type Scope = RunRange | "all";
+
+const runInfo = (r: RunRange) => ({
+  id: r.id,
+  startedAt: r.startedAt.toISOString(),
+});
+
+/**
+ * Период страницы: запрошенная эпоха, all или текущая (run не задан). Несуществующая эпоха — текущая и missingRun
+ * (страница пишет «эпохи нет»).
+ */
+async function resolveScope(
   db: Db,
-  runId: number,
-  experimentId?: string,
+  requested: RunParam | undefined,
+): Promise<{
+  scope: Scope;
+  first: RunRange;
+  view: RunView;
+  mirrors: MirrorScope;
+}> {
+  const rows = await db.select().from(runsTable).orderBy(asc(runsTable.id));
+  if (!rows.length) throw new Error("Эпоха учёта не создана");
+  const runs: RunRange[] = rows.map((r, i) => ({
+    id: r.id,
+    startedAt: r.startedAt,
+    endedAt: rows[i + 1]?.startedAt ?? null,
+  }));
+  const current = runs[runs.length - 1];
+  const found =
+    typeof requested === "number"
+      ? runs.find((r) => r.id === requested)
+      : undefined;
+  const scope: Scope = requested === "all" ? "all" : (found ?? current);
+  const missingRun = typeof requested === "number" && !found ? requested : null;
+  return {
+    scope,
+    first: runs[0],
+    view: {
+      scope: scope === "all" ? "all" : scope.id,
+      run: runInfo(scope === "all" ? current : scope),
+      runs: runs.map(runInfo).reverse(),
+      missingRun,
+    },
+    // Демо-сводка: текущая эпоха — с последнего демо-сброса (как раньше), прошлая — зеркала её сделок, all — все.
+    mirrors:
+      scope === "all"
+        ? "all"
+        : scope.id === current.id
+          ? "current"
+          : { runId: scope.id },
+  };
+}
+
+/**
+ * Сделки периода по возрастанию opened_at. Эпоха: учёт по отдельному сбросу эксперимента — только сделки не
+ * раньше reset_at, если сброс был до конца эпохи (сброс в следующих эпохах её учёт не трогает; для текущей эпохи
+ * это countedTrade). all — все сделки: отдельные сбросы эксперимента и группы историю не отсекают.
+ */
+async function scopeTrades(
+  db: Db,
+  scope: Scope,
+  experiments: readonly Pick<ExperimentRow, "id" | "resetAt">[],
+  experimentIds?: readonly string[],
 ): Promise<PaperTrade[]> {
   const rows = await db
     .select()
     .from(paperTradesTable)
     .where(
       and(
-        eq(paperTradesTable.runId, runId),
-        experimentId === undefined
+        scope === "all" ? undefined : eq(paperTradesTable.runId, scope.id),
+        experimentIds === undefined
           ? undefined
-          : eq(paperTradesTable.experimentId, experimentId),
-        countedTrade(),
+          : inArray(paperTradesTable.experimentId, [...experimentIds]),
       ),
     )
     .orderBy(asc(paperTradesTable.openedAt));
-  return rows.map(toTrade);
+  if (scope === "all") return rows.map(toTrade);
+  const end = scope.endedAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  const resetOf = new Map(
+    experiments.map((e) => [
+      e.id,
+      e.resetAt && e.resetAt.getTime() < end
+        ? e.resetAt.getTime()
+        : Number.NEGATIVE_INFINITY,
+    ]),
+  );
+  return rows
+    .filter(
+      (r) =>
+        r.openedAt.getTime() >=
+        (resetOf.get(r.experimentId) ?? Number.NEGATIVE_INFINITY),
+    )
+    .map(toTrade);
+}
+
+function byExperiment(
+  trades: readonly PaperTrade[],
+): Map<string, PaperTrade[]> {
+  const out = new Map<string, PaperTrade[]>();
+  for (const t of trades) {
+    const list = out.get(t.experimentId);
+    if (list) list.push(t);
+    else out.set(t.experimentId, [t]);
+  }
+  return out;
 }
 
 /**
- * Все эксперименты каталога со статистикой текущей эпохи. Строки, не прошедшие схему, пропускаются
- * (onInvalid — в журнал), остальные показываются — так и во всех чтениях ниже.
+ * Все эксперименты каталога со статистикой периода (по умолчанию — текущей эпохи). Строки, не прошедшие схему,
+ * пропускаются (onInvalid — в журнал), остальные показываются — так и во всех чтениях ниже.
  */
 export async function readExperimentsOverview(
   db: Db,
   engineEnabled: boolean,
   demoConfigured = false,
   onInvalid?: OnInvalidExperiment,
+  run?: RunParam,
 ): Promise<ExperimentsResponse> {
-  const run = await currentRun(db);
-  const [rows, trades, demo] = await Promise.all([
-    db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
-    runTrades(db, run.id),
-    mirrorSummaries(db),
+  const { scope, view, mirrors } = await resolveScope(db, run);
+  const rows = await db
+    .select()
+    .from(experimentsTable)
+    .orderBy(asc(experimentsTable.id));
+  const [trades, demo] = await Promise.all([
+    scopeTrades(db, scope, rows),
+    mirrorSummaries(db, mirrors),
   ]);
-  const byExperiment = new Map<string, PaperTrade[]>();
-  for (const t of trades) {
-    const list = byExperiment.get(t.experimentId);
-    if (list) list.push(t);
-    else byExperiment.set(t.experimentId, [t]);
-  }
+  const tradesOf = byExperiment(trades);
   return {
-    run,
+    ...view,
     engineEnabled,
     demoConfigured,
     experiments: parseExperimentRows(rows, onInvalid).map(
@@ -118,7 +208,10 @@ export async function readExperimentsOverview(
           demoMirror: e.demoMirror,
           demoMirrorMode: row.demoMirrorMode,
           demoMirrorAuto: auto.success ? auto.data : null,
-          stats: computeStats(byExperiment.get(e.id) ?? [], e.initialBudget),
+          parentId: e.parentId ?? null,
+          variantNote: e.variantNote ?? null,
+          disabled: toDisabledInfo(row),
+          stats: computeStats(tradesOf.get(e.id) ?? [], e.initialBudget),
           demo: toDemoSummary(
             demo.get(e.id) ?? emptyMirrorSummary(),
             e.initialBudget,
@@ -130,8 +223,10 @@ export async function readExperimentsOverview(
 }
 
 /**
- * Эксперимент, статистика, equity-кривая и последние limit сделок эпохи; null — нет такого id или
- * строка не проходит схему (тогда onInvalid).
+ * Эксперимент, статистика, equity-кривая и последние limit сделок периода (по умолчанию — текущей эпохи), а для
+ * контрольного и вариантов — метрики всей группы за тот же период (spec 0046). null — нет такого id или строка не
+ * проходит схему (тогда onInvalid). В «Все эпохи» кривая склеена от начала первой эпохи; процент и просадка — от
+ * текущего бюджета эксперимента (бюджет прошлых эпох не хранится).
  */
 export async function readExperimentDetail(
   db: Db,
@@ -139,36 +234,77 @@ export async function readExperimentDetail(
   engineEnabled: boolean,
   limit: number,
   onInvalid?: OnInvalidExperiment,
+  run?: RunParam,
 ): Promise<ExperimentDetailResponse | null> {
-  const [row] = await db
+  const rows = await db
     .select()
     .from(experimentsTable)
-    .where(eq(experimentsTable.id, id));
+    .orderBy(asc(experimentsTable.id));
+  const row = rows.find((r) => r.id === id);
   if (!row) return null;
   const experiment = parseExperimentRow(row, onInvalid);
   if (!experiment) return null;
-  const run = await currentRun(db);
-  const trades = await runTrades(db, run.id, id);
-  const shown = trades.slice(-limit).reverse();
-  const [mirrors, demo] = await Promise.all([
+
+  // Группа «контрольный + варианты»: невалидные строки других экспериментов в неё не попадают.
+  const parsed = parseExperimentRows(rows);
+  const experiments = parsed.map((x) => x.experiment);
+  const rowOf = new Map(parsed.map((x) => [x.experiment.id, x.row]));
+  const byId = new Map(experiments.map((e) => [e.id, e]));
+  const groups = variantsByControl(experiments);
+  const control = experiment.parentId
+    ? controlOf(experiment, byId)
+    : groups.has(experiment.id)
+      ? experiment
+      : null;
+  const variants = control ? (groups.get(control.id) ?? []) : [];
+  const familyIds = control ? [control.id, ...variants.map((v) => v.id)] : [];
+
+  const { scope, first, view, mirrors } = await resolveScope(db, run);
+  const trades = await scopeTrades(db, scope, rows, [
+    ...new Set([id, ...familyIds]),
+  ]);
+  const tradesOf = byExperiment(trades);
+  const own = tradesOf.get(id) ?? [];
+  const shown = own.slice(-limit).reverse();
+  const [mirrorRows, demo] = await Promise.all([
     mirrorStatuses(
       db,
       shown.map((t) => t.id),
     ),
-    mirrorSummaries(db),
+    mirrorSummaries(db, mirrors),
   ]);
+  const letters = variantLetters(experiments);
+  const member = (e: Experiment): FamilyMember => {
+    const r = rowOf.get(e.id);
+    return {
+      id: e.id,
+      name: e.name,
+      market: e.market,
+      enabled: e.enabled,
+      disabled: r ? toDisabledInfo(r) : null,
+      letter: letters.get(e.id) ?? null,
+      variantNote: e.variantNote ?? null,
+      config: e.config,
+      stats: computeStats(tradesOf.get(e.id) ?? [], e.initialBudget),
+    };
+  };
+  const startedAt = (scope === "all" ? first : scope).startedAt.toISOString();
   return {
-    run,
+    ...view,
     engineEnabled,
     experiment,
-    stats: computeStats(trades, experiment.initialBudget),
-    equity: equityCurve(trades, experiment.initialBudget, run.startedAt),
+    disabled: toDisabledInfo(row),
+    stats: computeStats(own, experiment.initialBudget),
+    equity: equityCurve(own, experiment.initialBudget, startedAt),
     trades: shown,
-    mirrors: Object.fromEntries(mirrors),
+    mirrors: Object.fromEntries(mirrorRows),
     demo: toDemoSummary(
       demo.get(id) ?? emptyMirrorSummary(),
       experiment.initialBudget,
     ),
+    family: control
+      ? { control: member(control), variants: variants.map(member) }
+      : null,
   };
 }
 
@@ -310,10 +446,16 @@ export async function readLabDataset(
   };
 }
 
-/** Тумблеры всех экспериментов — для `pnpm lab:apply` (сравнить «было → стало» перед записью). */
+/**
+ * Тумблеры всех экспериментов — для `pnpm lab:apply` (сравнить «было → стало» перед записью): положение демо-зеркала
+ * (spec 0043), связь варианта с контрольным и причина выключения — для проверки контрольного и смены причины (spec 0046).
+ */
 export async function readExperimentFlags(db: Db): Promise<
   (Pick<Experiment, "id" | "name" | "market" | "enabled" | "demoMirror"> & {
     demoMirrorMode: DemoMirrorMode;
+    parentId: string | null;
+    disabledReason: string | null;
+    disabledNote: string | null;
   })[]
 > {
   return db
@@ -324,6 +466,9 @@ export async function readExperimentFlags(db: Db): Promise<
       enabled: experimentsTable.enabled,
       demoMirror: experimentsTable.demoMirror,
       demoMirrorMode: experimentsTable.demoMirrorMode,
+      parentId: experimentsTable.parentId,
+      disabledReason: experimentsTable.disabledReason,
+      disabledNote: experimentsTable.disabledNote,
     })
     .from(experimentsTable)
     .orderBy(asc(experimentsTable.id))
@@ -333,27 +478,21 @@ export async function readExperimentFlags(db: Db): Promise<
 }
 
 /**
- * Разрезы /stats: сделки выбранной (по умолчанию текущей) эпохи под фильтры, сгруппированные
- * по эксперименту, рынку, монете или направлению. null — нет такой эпохи.
+ * Разрезы /stats: сделки выбранного периода (по умолчанию текущей эпохи, all — всех эпох) под фильтры,
+ * сгруппированные по эксперименту, рынку, монете или направлению. Несуществующая эпоха — текущая и missingRun.
  */
 export async function readTradeStats(
   db: Db,
   query: StatsQuery,
   now: number,
   onInvalid?: OnInvalidExperiment,
-): Promise<TradeStatsResponse | null> {
-  const runs = (
-    await db.select().from(runsTable).orderBy(desc(runsTable.id))
-  ).map((r) => ({ id: r.id, startedAt: r.startedAt.toISOString() }));
-  if (!runs.length) throw new Error("Эпоха учёта не создана");
-  const run =
-    query.run === undefined ? runs[0] : runs.find((r) => r.id === query.run);
-  if (!run) return null;
-
-  const [rows, trades] = await Promise.all([
-    db.select().from(experimentsTable).orderBy(asc(experimentsTable.id)),
-    runTrades(db, run.id),
-  ]);
+): Promise<TradeStatsResponse> {
+  const { scope, view } = await resolveScope(db, query.run);
+  const rows = await db
+    .select()
+    .from(experimentsTable)
+    .orderBy(asc(experimentsTable.id));
+  const trades = await scopeTrades(db, scope, rows);
   const experiments = parseExperimentRows(rows, onInvalid).map(
     (x) => x.experiment,
   );
@@ -365,7 +504,7 @@ export async function readTradeStats(
     symbol: query.symbol,
     since,
   });
-  // Капитал — только экспериментов под фильтры рынка и эксперимента.
+  // Капитал — только экспериментов под фильтры рынка и эксперимента (текущие бюджеты: прошлых эпох не хранятся).
   const funded = experiments.filter(
     (e) =>
       (query.market === undefined || e.market === query.market) &&
@@ -375,8 +514,7 @@ export async function readTradeStats(
   const names = new Map(experiments.map((e) => [e.id, e.name]));
 
   return {
-    run,
-    runs,
+    ...view,
     query,
     since: since === null ? null : new Date(since).toISOString(),
     total: computeStats(filtered, budget),

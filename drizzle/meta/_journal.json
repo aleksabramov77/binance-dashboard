@@ -71,6 +71,13 @@
       "when": 1792135750932,
       "tag": "0009_mirror_auto",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792143380936,
+      "tag": "0010_experiment_variants_disable_reason",
+      "breakpoints": true
     }
   ]
 }
