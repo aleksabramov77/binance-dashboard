@@ -1,23 +1,7 @@
 // Таблицы платформы: журнал приложения и состояние алертов монитора. Раньше журнал писался в
 // data/logs/*.jsonl, но на Vercel постоянного диска нет. drizzle-kit собирает схемы из src/entities/*/model/db.ts.
-import {
-  customType,
-  index,
-  integer,
-  sqliteTable,
-  text,
-} from "drizzle-orm/sqlite-core";
-
-/** Момент как ISO-строка в коде и целое число миллисекунд UTC в SQLite (spec 0059): сортировка и сравнения — числом. */
-const isoTimestamp = customType<{ data: string; driverData: number }>({
-  dataType: () => "integer",
-  toDriver: (iso) => {
-    const ms = Date.parse(iso);
-    if (Number.isNaN(ms)) throw new Error(`не дата: ${iso}`);
-    return ms;
-  },
-  fromDriver: (ms) => new Date(ms).toISOString(),
-});
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { isoTimestamp } from "@/shared/db/columns";
 
 /** Запись журнала (info и выше; debug — только в консоль и локальный файл). */
 export const appLogsTable = sqliteTable(

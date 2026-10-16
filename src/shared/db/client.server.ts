@@ -35,8 +35,9 @@ export function openSqlite(file: string): Connection {
   const client = new Database(file);
   // WAL: читатели не ждут писателя, `.backup` и копия с VM — без остановки сервиса. В памяти WAL не бывает.
   if (file !== MEMORY_PATH) client.pragma("journal_mode = WAL");
-  // NORMAL в режиме WAL: сбой питания теряет максимум последние транзакции, но не портит файл.
-  client.pragma("synchronous = NORMAL");
+  // FULL: каждая транзакция на диске до ответа — сбой питания не теряет закрытия и записи реального счёта; база
+  // маленькая, цена незаметна.
+  client.pragma("synchronous = FULL");
   client.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
   client.pragma("foreign_keys = ON");
   return { db: drizzle(client), client, path: file };

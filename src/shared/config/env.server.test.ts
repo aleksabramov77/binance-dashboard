@@ -77,6 +77,18 @@ describe("getDatabaseConfig", () => {
     ).toEqual({ kind: "sqlite", path: "data/app.db" });
   });
 
+  it("на VM без DATABASE_PATH — ошибка, а не data/app.db в каталоге кода", () => {
+    expect(() => getDatabaseConfig({ APP_HOST: "vm" })).toThrow(
+      /DATABASE_PATH/,
+    );
+    expect(
+      getDatabaseConfig({
+        APP_HOST: "vm",
+        DATABASE_PATH: "/var/lib/binance/app.db",
+      }),
+    ).toEqual({ kind: "sqlite", path: "/var/lib/binance/app.db" });
+  });
+
   it("на Vercel — понятная ошибка: файлу базы там негде жить", () => {
     expect(() => getDatabaseConfig({ VERCEL: "1" })).toThrow(/SQLite/);
   });

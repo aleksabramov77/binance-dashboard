@@ -38,6 +38,8 @@ describe("openSqlite", () => {
     expect(conn.client.pragma("journal_mode", { simple: true })).toBe("wal");
     expect(conn.client.pragma("busy_timeout", { simple: true })).toBe(5000);
     expect(conn.client.pragma("foreign_keys", { simple: true })).toBe(1);
+    // FULL = 2.
+    expect(conn.client.pragma("synchronous", { simple: true })).toBe(2);
     migrateSqlite(conn.db);
     migrateSqlite(conn.db);
     expect(

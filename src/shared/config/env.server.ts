@@ -295,10 +295,14 @@ export function getDatabaseConfig(
     throw new Error(
       "База приложения — файл SQLite (spec 0059): на serverless-хостинге (Vercel) приложение не работает, только на VM.",
     );
-  return {
-    kind: "sqlite",
-    path: env.DATABASE_PATH?.trim() || DEFAULT_DATABASE_PATH,
-  };
+  const path = env.DATABASE_PATH?.trim();
+  // На VM каталог кода только для чтения (ProtectSystem=strict) и перезаписывается выкаткой (rsync --delete):
+  // база по умолчанию data/app.db там не сохранилась бы — путь обязателен.
+  if (!path && getAppHost(env) === "vm")
+    throw new Error(
+      "DATABASE_PATH не задан: на VM база — /var/lib/binance/app.db, путь задаётся в /etc/binance/app.env.",
+    );
+  return { kind: "sqlite", path: path || DEFAULT_DATABASE_PATH };
 }
 
 const RUNNER_ROLES = ["oracle", "supabase"] as const;
