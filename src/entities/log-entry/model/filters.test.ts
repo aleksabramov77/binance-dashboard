@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { logFiltersSearch, mirrorLogsHref, parseLogFilters } from "./filters";
+import {
+  liveLogsHref,
+  logFiltersSearch,
+  mirrorLogsHref,
+  parseLogFilters,
+} from "./filters";
 
 describe("parseLogFilters", () => {
   it("значения по умолчанию", () => {
@@ -36,6 +41,11 @@ describe("logFiltersSearch / mirrorLogsHref", () => {
   it("ссылка на отказы и пропуски эксперимента", () => {
     expect(mirrorLogsHref("F03")).toBe(
       "/logs?event=mirror.rejected%2Cmirror.skipped&experiment=F03&days=14",
+    );
+  });
+  it("ссылка на отказы и пропуски реального счёта", () => {
+    expect(liveLogsHref("S98")).toBe(
+      "/logs?event=live.rejected%2Clive.skipped%2Clive.reconcile&experiment=S98&days=14",
     );
   });
 });
