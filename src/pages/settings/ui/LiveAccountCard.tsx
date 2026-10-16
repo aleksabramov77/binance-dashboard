@@ -263,7 +263,7 @@ function Trading({ trading }: { trading: LiveTrading }) {
                   )}
                 >
                   {c.realizedPnl === null
-                    ? "PnL —"
+                    ? "PnL неизвестен"
                     : c.pnlEstimated
                       ? `≈ ${liveUsd(c.realizedPnl, true)} (оценка)`
                       : liveUsd(c.realizedPnl, true)}

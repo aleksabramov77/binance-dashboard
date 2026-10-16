@@ -41,6 +41,7 @@ import type {
   RunView,
 } from "../model/view";
 import { toTrade } from "./dbStore";
+import { liveAutoOffOf, parseLiveAutoSnapshot } from "./liveAutoDb";
 import {
   emptyMirrorSummary,
   type MirrorScope,
@@ -209,6 +210,13 @@ export async function readExperimentsOverview(
           demoMirrorMode: row.demoMirrorMode,
           demoMirrorAuto: auto.success ? auto.data : null,
           liveMirror: row.liveMirror,
+          liveMirrorMode: row.liveMirrorMode,
+          liveThresholds: {
+            lossUsd: row.liveLossLimitUsd,
+            streak: row.liveLossStreak,
+          },
+          liveAuto: parseLiveAutoSnapshot(row.liveMirrorAuto),
+          liveAutoOff: liveAutoOffOf(row),
           parentId: e.parentId ?? null,
           variantNote: e.variantNote ?? null,
           disabled: toDisabledInfo(row),

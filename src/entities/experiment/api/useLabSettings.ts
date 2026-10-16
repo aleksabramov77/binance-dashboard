@@ -3,9 +3,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { z } from "zod";
 import {
-  type ExperimentLiveMirror,
-  liveMirrorToggleReplySchema,
-} from "../model/liveMirrorApi";
+  type ExperimentLiveMode,
+  type LiveMirrorMode,
+  liveModeReplySchema,
+} from "../model/liveAuto";
 import type { ExperimentMirrorMode } from "../model/mirrorAuto";
 import {
   type BudgetForm,
@@ -201,16 +202,19 @@ export function useResetDemo() {
  */
 const LIVE_QUERY_KEY = ["live"] as const;
 
-/** Переключатель «Реальный счёт» эксперимента (spec 0049): включение — со словом подтверждения. */
-export function useSetExperimentLiveMirror() {
+/**
+ * Переключатель «Реальный счёт» эксперимента «Выкл · Авто · Вкл · Вкл + автовыкл» (spec 0049, 0053): всё, кроме
+ * «Выкл», — со словом подтверждения; «Авто» и «Вкл + автовыкл» — с порогами.
+ */
+export function useSetExperimentLiveMode() {
   const queryClient = useQueryClient();
   return useMutation<
-    { ok: true; id: string; liveMirror: boolean },
+    { ok: true; id: string; mode: LiveMirrorMode; liveMirror: boolean },
     Error,
-    ExperimentLiveMirror
+    ExperimentLiveMode
   >({
     mutationFn: (body) =>
-      request("/api/experiments/settings/live", liveMirrorToggleReplySchema, {
+      request("/api/experiments/settings/live", liveModeReplySchema, {
         method: "POST",
         body,
       }),

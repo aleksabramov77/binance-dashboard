@@ -187,7 +187,7 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   Перевод в «Авто» из UI или `lab:apply --mirror-auto` сразу решает по правилу для эксперимента.
 
 ## Реальное зеркало (spec 0049)
-- Эксперимент с включённым «Реальным счётом» (переключатель в `/experiments`, «Вкл» — модалка со словом «РЕАЛ», только
+- Эксперимент с включённым «Реальным счётом» (переключатель в `/experiments`, режимы — spec 0053 ниже; «Вкл» — модалка со словом «РЕАЛ», только
   при ключе «✅», не COIN-M) повторяет свежие paper-входы на торговом субсчёте. Ордера отправляет только воркер; у него
   нет БД — кандидаты, захват, итоги входов и закрытий, лимиты и стоп идут через `/api/live/mirror/*`
   (`src/app/server/liveMirror.ts`, тела — Zod `liveMirrorApi.ts`).
@@ -237,6 +237,35 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - PnL — по проданной части; нераспроданный остаток спота (комиссия в монете и шаг) в PnL не входит: `leftover_qty`,
   `leftover_usd`, строка в `live.exit`, Telegram и «Последних закрытиях» карточки.
 - Рукопожатие пульса — явное поле `handshake: true` (воркер ставит его только в ветке «ждём UID основного счёта»).
+
+## Режимы реального счёта «Авто» и «Вкл + автовыкл» (spec 0053)
+- Переключатель «Выкл · Авто · Вкл · Вкл + автовыкл» (`widgets/live-trading/ui/LiveMirrorToggle` + `LiveModeDialog`):
+  положение — `experiments.live_mirror_mode`, флаг `live_mirror` по-прежнему читают воркер и захват. Всё, кроме «Выкл», —
+  модалка со словом «РЕАЛ» при ключе «✅»; «Авто» и «Вкл + автовыкл» — с порогами (`live_loss_limit_usd`, по умолчанию
+  $15, Zod 1–1000; `live_loss_streak`, 5, Zod 1–50; `entities/experiment/config/liveAuto.ts`). Активное «Авто» /
+  «Вкл + автовыкл» — модалка только порогов (флаг и окно не меняются). API — `POST /api/experiments/settings/live`
+  `{ id, mode, confirm?, thresholds? }` (`setLiveMode` в `src/app/server/liveMirror.ts`).
+- Правило — чистые функции `entities/experiment/lib/liveAuto.ts`: R демо-сделки (`demoTradeR`: (выход − вход демо) ×
+  знак ÷ |вход − исходный стоп| paper-сделки), пороги (`liveThresholdVerdict`: PnL с `live_mirror_since` ≤ −$ или N
+  убыточных подряд; PnL неизвестен — убыток в серии, в сумме — по своему стопу `stop_loss`, иначе 0), «Авто» по демо
+  (`liveDemoVerdict`: выключен — ≥ 30 демо-сделок окна со средним R > 0; включён — средний R последних 30 < 0) и план
+  (`planLiveAuto`). Тексты — `entities/live-account/lib/liveAutoMessages.ts`.
+- Окно демо: включение — после `demo_mirror_since`, `demo_reset_at` и начала эпохи; обратный порог — после сброса демо и
+  начала эпохи (выключение демо-зеркала автоматом 0043 не прячет убыток от «Авто»). Выход демо — цена выхода демо,
+  иначе paper (как сводка демо).
+- Пороги — атомарно в сохранении закрытия (`closeLiveWithAuto`: закрытие строки, чтение эксперимента `for update`,
+  решение и запись — одна транзакция; вызывают `saveLiveClose` и `saveLiveLegs`). «Авто» и «Вкл + автовыкл» → «Выкл»
+  (`live_auto_off_at`, `live_auto_off_reason`, `live_mirror_by = автомат`), ручное «Вкл» — подсказка (`live_mirror_advice`,
+  без повторов, пока условие держится). Открытые позиции доживают.
+- «Авто» по демо — `runLiveAuto` (`src/app/server/liveAuto.ts`): раз в сутки вместе с авто-зеркалом
+  (`/api/cron/mirror-auto`, таймер `mirror-auto` VM) и сразу при переводе в «Авто». Снимок решения —
+  `live_mirror_auto` (подпись «Авто · ждёт: N из 30 демо-сделок», «Авто · демо R < 0»). «Выкл» (и после автовыключения)
+  автомат не трогает; ручное «Вкл» не меняет никогда. Сбой по эксперименту — `warn live.auto`, ничего не меняется.
+- «Стоп входов» и негодный ключ главнее режима: автомат переключает положения, но входов нет; автовключение при стопе
+  помечено в Telegram. Журнал — `live.auto` (решение с числами), `live.advice` (подсказки, PnL неизвестен); Telegram —
+  только production.
+- Сверка «потерянного» входа передаёт цену своего стопа (`stopLoss` в `/reconcile`: `triggerPrice` algo-ордера,
+  `stopPrice` спота); нет — приложение берёт исходный стоп paper-сделки.
 
 ## Воркер реального счёта (spec 0047)
 - Отдельный Node-процесс `scripts/live-worker.ts`: единственный, у кого есть торговый ключ субсчёта. Входящих соединений
@@ -364,6 +393,24 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   процесса, публичные свечи/тикеры/funding (`premiumIndex`) без ключей. Роль раннера процесса —
   `ENGINE_RUNNER` (`oracle` по умолчанию); тумблер — `engine_state.enabled` (по умолчанию выкл),
   `GET/POST /api/experiments/engine {enabled}`.
+- Хостинг прода (spec 0055): VM `apps-tokyo` — сайт, API, тик движка, фоновые задачи, бот Telegram, демо-зеркало;
+  выкатка — `.github/workflows/deploy.yml` после зелёного CI на `main`. Supabase — только Postgres (pg_cron и
+  Edge Function `engine-tick` выключены), Vercel — резерв без выкаток. Runbook переключения и отката —
+  `docs/ai/deploy-lightsail.md`.
+- Фоновые задачи (spec 0048) — кто и когда их запускает. При `engine_state.runner = supabase` (до переключения и при
+  откате): pg_cron в Supabase вызывает роуты Vercel `/api/cron/{earn-snapshot,log-monitor,demo-mirror,mirror-auto}`
+  (и тик — Edge Function). При `runner = oracle` (с переключения, spec 0055) их запускает своя VM таймерами процесса:
+  `src/app/server/backgroundJobs.ts` из `instrumentation.ts`, только при `APP_HOST=vm` (на Mac и Vercel таймеров нет).
+  Расписание UTC то же, что у pg_cron (`src/app/server/backgroundSchedule.ts`, тест сверяет с
+  `supabase/migrations/*_cron.sql`): снимок Earn `0 3,15 * * *`, монитор журнала и места в базе `*/15 * * * *`,
+  демо-зеркало `* * * * *` на 20-й секунде (после тика на 5-й), авто-зеркало `0 7 * * *`. Перед каждым запуском:
+  не Vercel, `ENGINE_RUNNER` процесса = `engine_state.runner`, прошлый запуск этой задачи закончился — иначе
+  пропуск без записей в БД; строка debug в консоли (journalctl) с причиной — только при смене состояния задачи
+  (первый пропуск после старта или запуска, смена причины, «снова выполняется»). `engine_state.runner` не прочитан
+  (БД недоступна) — пропуск «раннер неизвестен»: одна запись `warn` на серию, не `error` (spec 0055). Расписания
+  разбираются один раз при старте (`scheduleJobs`). Сбой задачи — `log.error` с событием роута (`cron.earn`,
+  `cron.monitor`, `cron.mirror`, `cron.mirror_auto`), процесс и другие задачи работают дальше. Логика общая с роутами;
+  роуты остаются для pg_cron и ручного запуска.
 - Миграции — `drizzle/`: `pnpm db:generate` собирает схемы из `src/entities/*/model/db.ts` (коммитятся).
   Применяются `pnpm db:migrate` и автоматически при старте сервера (`instrumentation.ts`); сбой БД
   пишется в журнал и не роняет дашборд.

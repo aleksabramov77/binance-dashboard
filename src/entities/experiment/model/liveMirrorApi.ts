@@ -196,20 +196,6 @@ export const liveCloseAllReplySchema = z.object({
 export const liveOkSchema = z.object({ ok: z.literal(true) });
 
 /** Переключатель «Реальный счёт» эксперимента (UI → приложение). Включение — только со словом подтверждения. */
-export const experimentLiveMirrorSchema = z.object({
-  id: z.string().min(1),
-  liveMirror: z.boolean(),
-  /** Слово подтверждения (LIVE.confirmWord) — обязательно для включения. */
-  confirm: z.string().max(20).optional(),
-});
-export type ExperimentLiveMirror = z.infer<typeof experimentLiveMirrorSchema>;
-
-export const liveMirrorToggleReplySchema = z.object({
-  ok: z.literal(true),
-  id: z.string(),
-  liveMirror: z.boolean(),
-});
-
 /**
  * Итог сверки «потерянного» входа (pending дольше LIVE_PENDING_STALE_S) с биржей по своему clientOrderId: open — вход
  * нашёлся и стоп стоит; unprotected — вход нашёлся, стопа нет (⚠️, позиция уйдёт в очередь закрытия); skipped — ордера
@@ -221,5 +207,7 @@ export const liveReconcileRequestSchema = liveTradeIdSchema.extend({
   entryPrice: z.number().nullable(),
   quantity: z.number().nullable(),
   protectRefs: mirrorProtectRefsSchema.nullable(),
+  /** Цена своего стопа с биржи (spec 0053); null — не прочитана (приложение возьмёт исходный стоп paper-сделки). */
+  stopLoss: z.number().positive().nullable().default(null),
 });
 export type LiveReconcileRequest = z.infer<typeof liveReconcileRequestSchema>;

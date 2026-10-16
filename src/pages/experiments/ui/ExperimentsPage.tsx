@@ -32,6 +32,7 @@ import {
   useTableSort,
 } from "@/shared/lib";
 import { Badge } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
 import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
@@ -46,6 +47,8 @@ import { LiveMirrorToggle, LiveTradingStrip } from "@/widgets/live-trading";
 import {
   arrangeVariants,
   type ExperimentRowView,
+  hideCollapsed,
+  isGroupedSort,
   SORT_KEYS,
   type SortKey,
   sortExperiments,
@@ -86,7 +89,7 @@ const COLUMNS: {
     label: "Эксперимент",
     numeric: false,
     description:
-      "Код, название и гипотеза эксперимента. Клик по строке — подробности, конфиг и сделки. Варианты (↳) стоят под своим контрольным: «вариант A · что изменено»; шеврон у контрольного сворачивает их.",
+      "Код, название и гипотеза эксперимента. Клик по строке — подробности, конфиг и сделки. При сортировке по этой колонке (и по умолчанию) варианты (↳) стоят под своим контрольным: «вариант A · что изменено»; шеврон у контрольного сворачивает их. При сортировке по другой колонке каждая строка — на своём месте, у варианта метка «вариант A от <контрольный>»; кнопка «Сгруппировать варианты» над таблицей возвращает группы.",
   },
   {
     key: "ag",
@@ -138,7 +141,7 @@ const COLUMNS: {
     label: "Реальный счёт",
     numeric: false,
     description:
-      "Переключатель «Выкл / Вкл» — повторяет ли эксперимент свежие входы на торговом субсчёте Binance реальными деньгами: $10 на сделку (минимум биржи — до $50), не больше 5 позиций на субсчёт, −$15 за сутки у эксперимента → его входы до 00:00 UTC. «Вкл» — с подтверждением словом «РЕАЛ» и только при годном ключе (карточка «Реальный счёт» в /settings). COIN-M — недоступно.",
+      "Переключатель «Выкл · Авто · Вкл · Вкл + автовыкл» — повторяет ли эксперимент свежие входы на торговом субсчёте Binance реальными деньгами. «Авто» — решает автомат: ≥ 30 закрытых демо-сделок со средним R > 0 — включить; средний R последних 30 демо-сделок < 0 или сработал порог — выключить; «Авто · вкл» — сейчас торгует. «Вкл + автовыкл» — включено вручную, приложение выключит по порогам: убыток с момента включения (по умолчанию $15) или серия убыточных сделок (по умолчанию 5). «Вкл» и «Выкл» — вручную, автомат их не меняет. После автовыключения — «Выкл» с причиной и датой, снова включить — только вручную. Лимиты: $10 на сделку (минимум биржи — до $50), не больше 5 позиций на субсчёт, −$15 за сутки у эксперимента → его входы до 00:00 UTC. Всё, кроме «Выкл», — с подтверждением словом «РЕАЛ» и только при годном ключе (карточка «Реальный счёт» в /settings). COIN-M — недоступно.",
   },
   {
     key: "demo",
@@ -279,6 +282,33 @@ function DemoCells({
   );
 }
 
+const experimentHref = (id: string) => `/experiments/${encodeURIComponent(id)}`;
+
+/** Вариант не под своим контрольным (spec 0052, AC3): «вариант A от F96», id контрольного — ссылка на его страницу. */
+function VariantOfBadge({
+  letter,
+  controlId,
+}: {
+  letter: string | null;
+  controlId: string;
+}) {
+  return (
+    // overflow-visible: рамка фокуса ссылки внутри бейджа не обрезается.
+    <Badge
+      variant="outline"
+      className="overflow-visible font-normal text-muted-foreground"
+    >
+      вариант {letter} от{" "}
+      <Link
+        href={experimentHref(controlId)}
+        className="font-mono text-foreground underline-offset-4 hover:underline"
+      >
+        {controlId}
+      </Link>
+    </Badge>
+  );
+}
+
 function ExperimentCell({
   row,
   collapsed,
@@ -288,10 +318,13 @@ function ExperimentCell({
   collapsed: boolean;
   onToggle: (id: string) => void;
 }) {
-  const { e, variantOf, letter, variants } = row;
-  const href = `/experiments/${encodeURIComponent(e.id)}`;
+  const { e, variantOf, letter, nested, variants } = row;
+  const href = experimentHref(e.id);
+  const code = (
+    <span className="font-mono text-xs text-muted-foreground">{e.id}</span>
+  );
   return (
-    <TableCell className={cn("whitespace-normal", variantOf && "pl-8")}>
+    <TableCell className={cn("whitespace-normal", nested && "pl-8")}>
       <div className="flex flex-col gap-0.5">
         {/* Код, название и бейджи — всегда в одну строку (spec 0022, решение 4). */}
         <span className="flex items-center gap-2 whitespace-nowrap">
@@ -311,17 +344,30 @@ function ExperimentCell({
               )}
             </button>
           )}
-          <Link href={href} className="group flex items-center gap-2">
-            {variantOf && (
-              <span className="text-muted-foreground" aria-hidden>
-                ↳
+          {variantOf && !nested ? (
+            // Метка — между кодом и названием: в ней своя ссылка, а ссылка в ссылке недопустима.
+            <>
+              <Link href={href} tabIndex={-1} className="hover:underline">
+                {code}
+              </Link>
+              <VariantOfBadge letter={letter} controlId={variantOf} />
+              <Link href={href} className="font-medium hover:underline">
+                {e.name}
+              </Link>
+            </>
+          ) : (
+            <Link href={href} className="group flex items-center gap-2">
+              {nested && (
+                <span className="text-muted-foreground" aria-hidden>
+                  ↳
+                </span>
+              )}
+              {code}
+              <span className="font-medium group-hover:underline">
+                {e.name}
               </span>
-            )}
-            <span className="font-mono text-xs text-muted-foreground">
-              {e.id}
-            </span>
-            <span className="font-medium group-hover:underline">{e.name}</span>
-          </Link>
+            </Link>
+          )}
           {!e.enabled && <DisabledBadge disabled={e.disabled} />}
         </span>
         {/* contain-inline-size: гипотеза не участвует в ширине колонки, только обрезается многоточием. */}
@@ -360,7 +406,7 @@ function ExperimentRow({
       className={cn(
         // Выключенный затемнён, кроме ячейки тумблера (первой): иначе тумблер плохо видно (spec 0050).
         !e.enabled && "[&>td:not(:first-child)]:opacity-50",
-        row.variantOf && "bg-muted/30",
+        row.nested && "bg-muted/30",
       )}
     >
       <TableCell className="text-center">
@@ -410,21 +456,43 @@ function ExperimentRow({
   );
 }
 
+/** Название колонки — то же, что в заголовке таблицы. */
+const columnLabel = (key: SortKey) =>
+  COLUMNS.find((c) => c.key === key)?.label ?? key;
+
+/** Плоский вид (spec 0052, AC5): почему варианты не под контрольным и возврат к группам — сброс сортировки. */
+function FlatSortNotice({
+  column,
+  onGroup,
+}: {
+  column: string;
+  onGroup: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground">
+      <p>Сортировка по «{column}»: варианты A/B стоят на своих местах</p>
+      <Button type="button" variant="outline" size="sm" onClick={onGroup}>
+        Сгруппировать варианты
+      </Button>
+    </div>
+  );
+}
+
 function ExperimentsDashboard() {
   const [{ market, run }, setView] = useExperimentsView();
   const { data, isPending, error, isPlaceholderData } = useExperiments(run);
   const { sort, head } = useTableSort(SORT_TABLE, DEFAULT_SORT);
   const { collapsed, toggle } = useCollapsedControls();
+  const grouped = isGroupedSort(sort.key);
   const rows = useMemo(() => {
     const all = data?.experiments ?? [];
     return arrangeVariants(
       sortExperiments(all, market, sort.key, sort.dir),
       all,
+      grouped,
     );
-  }, [data, market, sort]);
-  const shown = rows.filter(
-    (r) => r.variantOf === null || !collapsed.has(r.variantOf),
-  );
+  }, [data, market, sort, grouped]);
+  const shown = hideCollapsed(rows, collapsed);
   const total = data?.experiments.reduce((n, e) => n + e.stats.trades, 0) ?? 0;
   const current = !!data && data.scope === data.runs[0]?.id;
 
@@ -488,34 +556,42 @@ function ExperimentsDashboard() {
       )}
 
       {data && (
-        <TableFrame
-          className={cn(
-            "transition-opacity",
-            isPlaceholderData && "opacity-60",
+        <div className="flex flex-col gap-2">
+          {!grouped && (
+            <FlatSortNotice
+              column={columnLabel(sort.key)}
+              onGroup={head(sort.key).onReset}
+            />
           )}
-        >
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {COLUMNS.map((c) => (
-                  <ColumnHead key={c.key} column={c} head={head(c.key)} />
+          <TableFrame
+            className={cn(
+              "transition-opacity",
+              isPlaceholderData && "opacity-60",
+            )}
+          >
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {COLUMNS.map((c) => (
+                    <ColumnHead key={c.key} column={c} head={head(c.key)} />
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {shown.map((r) => (
+                  <ExperimentRow
+                    key={r.e.id}
+                    row={r}
+                    variants={enabledVariantsOf(data.experiments, r.e.id)}
+                    demoConfigured={data.demoConfigured}
+                    collapsed={collapsed.has(r.e.id)}
+                    onToggle={toggle}
+                  />
                 ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {shown.map((r) => (
-                <ExperimentRow
-                  key={r.e.id}
-                  row={r}
-                  variants={enabledVariantsOf(data.experiments, r.e.id)}
-                  demoConfigured={data.demoConfigured}
-                  collapsed={collapsed.has(r.e.id)}
-                  onToggle={toggle}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </TableFrame>
+              </TableBody>
+            </Table>
+          </TableFrame>
+        </div>
       )}
 
       {data && (

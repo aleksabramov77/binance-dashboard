@@ -65,36 +65,6 @@ const toClose = (
   openedAt: r.createdAt.toISOString(),
 });
 
-/**
- * Переключатель «Реальный счёт». Включить можно только Spot и USDⓈ-M (DEMO_MIRROR_MARKETS): COIN-M — null, как и
- * неизвестный id. Возвращает market эксперимента.
- */
-export async function setExperimentLiveMirror(
-  db: Db,
-  id: string,
-  liveMirror: boolean,
-  by: string,
-): Promise<{ id: string; market: string } | null> {
-  const [row] = await db
-    .update(experimentsTable)
-    .set({
-      liveMirror,
-      liveMirrorSince: sql`now()`,
-      liveMirrorBy: by,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      and(
-        eq(experimentsTable.id, id),
-        liveMirror
-          ? inArray(experimentsTable.market, [...DEMO_MIRROR_MARKETS])
-          : undefined,
-      ),
-    )
-    .returning({ id: experimentsTable.id, market: experimentsTable.market });
-  return row ?? null;
-}
-
 /** Открытые paper-сделки экспериментов с включённым «Реальным счётом», не раньше `since`, ещё без строки зеркала. */
 export async function listLiveCandidates(
   db: Db,
