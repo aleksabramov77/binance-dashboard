@@ -292,7 +292,9 @@ describe("вход, выход и дневной PnL", () => {
         feesUsd: 0.1,
         realizedPnl: -16,
         closedBy: "mirror",
+        leftover: null,
       },
+      protectionRemoved: false,
     });
     expect((await getLiveMirror(db, a))?.status).toBe("closed");
     expect(vi.mocked(sendTelegramMessage).mock.calls[1][2]).toMatch(
@@ -327,13 +329,205 @@ describe("вход, выход и дневной PnL", () => {
     expect(state.halt).toEqual({ stopped: true, closeAllRequested: true });
     const items = await liveCloseAll({ phase: "claim" });
     expect(items.map((i) => i.tradeId)).toEqual([a]);
+    await saveLiveClose({
+      tradeId: a,
+      status: "closed",
+      exit: {
+        message: "ok",
+        steps: [],
+        exitPrice: 101,
+        feesUsd: 0,
+        realizedPnl: 0.1,
+        closedBy: "close_all",
+        leftover: null,
+      },
+      protectionRemoved: false,
+    });
     await liveCloseAll({ phase: "done", closed: 1, failed: 0, errors: [] });
     const after = await getLiveTradingView();
     expect(after.halt).toMatchObject({
       stopped: true,
       closeAllRequestedAt: null,
-      closeAllResult: { closed: 1, failed: 0, errors: [] },
+      closeAllResult: { closed: 1, failed: 0, errors: [], remaining: 0 },
     });
     expect((await liveMirrorState()).halt.closeAllRequested).toBe(false);
+  });
+});
+
+describe("повтор закрытий (приёмка 0049)", () => {
+  const openLive = async (symbol: string) => {
+    await toggleOn("S98");
+    const id = await newTrade("S98", symbol);
+    await claimLive(id);
+    await saveLiveOpen({
+      tradeId: id,
+      result: {
+        id: `r-${id}`,
+        status: "protected",
+        message: "ok",
+        entryPrice: 100,
+        filledQuantity: 0.1,
+        steps: [],
+        protectRefs: null,
+      },
+      order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: null },
+    });
+    return id;
+  };
+  const exit = {
+    message: "сеть",
+    steps: [],
+    exitPrice: null,
+    feesUsd: null,
+    realizedPnl: null,
+    closedBy: null,
+    leftover: null,
+  };
+  /** Пауза между повторами — по updated_at: «прошла минута». */
+  const minuteLater = (id: string) =>
+    db.execute(
+      `update live_mirror_orders set updated_at = now() - interval '2 minutes' where trade_id = '${id}'`,
+    );
+
+  it("сбой закрытия → повтор на следующем прогоне → успех; Telegram о сбое один раз, итог — «после N попыток»", async () => {
+    const a = await openLive("AVAXUSDT");
+    await db
+      .update(paperTradesTable)
+      .set({ closedAt: new Date(), exitPrice: 110, exitReason: "takeProfit" })
+      .where(eq(paperTradesTable.id, a));
+    vi.clearAllMocks();
+    expect(await claimLiveClose(a)).not.toBeNull();
+    await saveLiveClose({
+      tradeId: a,
+      status: "failed",
+      exit,
+      protectionRemoved: false,
+    });
+    expect((await getLiveMirror(db, a))?.status).toBe("close_failed");
+    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    // Сразу — пауза; через минуту — снова в очереди.
+    expect((await liveMirrorState()).toClose).not.toContain(a);
+    await minuteLater(a);
+    expect((await liveMirrorState()).toClose).toContain(a);
+    expect(await claimLiveClose(a)).not.toBeNull();
+    await saveLiveClose({
+      tradeId: a,
+      status: "failed",
+      exit,
+      protectionRemoved: false,
+    });
+    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    await minuteLater(a);
+    expect(await claimLiveClose(a)).not.toBeNull();
+    await saveLiveClose({
+      tradeId: a,
+      status: "closed",
+      exit: {
+        ...exit,
+        message: "Позиция закрыта по рынку.",
+        exitPrice: 108,
+        realizedPnl: 0.79,
+        closedBy: "mirror",
+        leftover: { qty: 0.00000986, asset: "AVAX", usd: 0.0003 },
+      },
+      protectionRemoved: false,
+    });
+    expect((await getLiveMirror(db, a))?.status).toBe("closed");
+    expect(sendTelegramMessage).toHaveBeenCalledTimes(2);
+    const text = vi.mocked(sendTelegramMessage).mock.calls[1][2];
+    expect(text).toMatch(/закрыта после 3 попыток/);
+    expect(text).toMatch(
+      /остаток 0\.00000986 AVAX ≈ \$0,00 на субсчёте, в PnL не входит/,
+    );
+    const exitLog = vi
+      .mocked(log.info)
+      .mock.calls.find((c) => c[0] === "live.exit");
+    expect(exitLog?.[2]).toMatchObject({
+      attempts: 3,
+      leftover: { asset: "AVAX" },
+    });
+    const trading = await getLiveTradingView();
+    expect(trading.recent[0]).toMatchObject({
+      tradeId: a,
+      leftoverQty: 0.00000986,
+    });
+  });
+
+  it("защита снята, а выход не прошёл — «без защиты», ⚠️ в Telegram, повтор даже при открытой paper-сделке", async () => {
+    const a = await openLive("DOGEUSDT");
+    await liveHaltAction("close_all", actor);
+    vi.clearAllMocks();
+    expect(
+      (await liveCloseAll({ phase: "claim" })).map((i) => i.tradeId),
+    ).toContain(a);
+    await saveLiveClose({
+      tradeId: a,
+      status: "failed",
+      exit,
+      protectionRemoved: true,
+    });
+    expect((await getLiveMirror(db, a))?.status).toBe("unprotected");
+    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toMatch(
+      /без защиты.*Свои TP\/SL уже сняты/,
+    );
+    await minuteLater(a);
+    expect((await liveMirrorState()).toClose).toContain(a);
+  });
+
+  it("«Закрыть всё» держится, пока позиции есть, и снимается, когда закрыто всё", async () => {
+    const a = await openLive("TRXUSDT");
+    await liveHaltAction("close_all", actor);
+    expect(
+      (await liveCloseAll({ phase: "claim" })).map((i) => i.tradeId),
+    ).toEqual([a]);
+    await saveLiveClose({
+      tradeId: a,
+      status: "failed",
+      exit,
+      protectionRemoved: false,
+    });
+    await liveCloseAll({
+      phase: "done",
+      closed: 0,
+      failed: 1,
+      errors: ["TRXUSDT: сеть"],
+    });
+    let trading = await getLiveTradingView();
+    expect(trading.halt.closeAllRequestedAt).not.toBeNull();
+    expect(trading.halt.closeAllResult).toMatchObject({
+      remaining: 1,
+      runs: 1,
+    });
+    expect((await liveMirrorState()).halt.closeAllRequested).toBe(true);
+    // Следующий прогон: неудачная позиция снова захватывается и закрывается.
+    expect(
+      (await liveCloseAll({ phase: "claim" })).map((i) => i.tradeId),
+    ).toEqual([a]);
+    await saveLiveClose({
+      tradeId: a,
+      status: "closed",
+      exit: { ...exit, message: "ok", realizedPnl: 0, closedBy: "close_all" },
+      protectionRemoved: false,
+    });
+    await liveCloseAll({ phase: "done", closed: 1, failed: 0, errors: [] });
+    trading = await getLiveTradingView();
+    expect(trading.halt.closeAllRequestedAt).toBeNull();
+    expect(trading.halt.closeAllResult).toMatchObject({
+      remaining: 0,
+      runs: 2,
+    });
+    expect(trading.halt.stopped).toBe(true);
+  });
+
+  it("строка «закрывается» дольше 5 минут (прогон оборвался) — снова в очереди", async () => {
+    const a = await openLive("LTCUSDT");
+    await liveHaltAction("close_all", actor);
+    await liveCloseAll({ phase: "claim" });
+    await liveHaltAction("resume", actor);
+    expect((await getLiveMirror(db, a))?.status).toBe("closing");
+    await db.execute(
+      `update live_mirror_orders set updated_at = now() - interval '6 minutes' where trade_id = '${a}'`,
+    );
+    expect((await liveMirrorState()).toClose).toContain(a);
   });
 });

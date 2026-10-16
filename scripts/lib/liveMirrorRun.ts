@@ -97,6 +97,8 @@ export interface LiveExchange {
     message: string;
     steps: { label: string; ok: boolean; detail: string }[];
     exitPrice: number | null;
+    /** Свои TP/SL в этой попытке сняты (closeDemoPosition). */
+    protectionRemoved?: boolean;
   }>;
   sweepLegs: (
     legs: OpenMirrorLegs[],
@@ -128,8 +130,9 @@ export interface LiveExchange {
   spotSlippage: number;
 }
 
-/** «0.00000986» — количество монет без экспоненты и лишних нулей. */
-const formatQty = (q: number) => q.toFixed(8).replace(/\.?0+$/, "");
+/** «Остаток 0.00000986 BTC ≈ $0,81 остался на субсчёте». */
+const leftoverText = (l: { qty: number; asset: string; usd: number }) =>
+  `Остаток ${l.qty.toFixed(8).replace(/\.?0+$/, "")} ${l.asset} ≈ ${liveUsd(l.usd)} остался на субсчёте`;
 
 /** Исполнения ищем с запасом до создания строки: вход отправляется сразу после захвата. */
 const FILLS_SLACK_MS = 60_000;
@@ -153,18 +156,22 @@ async function exitByFills(
   exitPrice: number | null;
   feesUsd: number | null;
   realizedPnl: number | null;
+  leftover: LiveCloseRequest["exit"]["leftover"];
   note: string | null;
 }> {
+  const asset = item.symbol.replace(/USDT$/, "");
   try {
     const pnl = fillsPnl(await ex.fills(item.market, item.symbol), {
       direction: item.direction,
       since: Date.parse(item.openedAt) - FILLS_SLACK_MS,
-      baseAsset: item.symbol.replace(/USDT$/, ""),
+      baseAsset: asset,
     });
-    const notes = [
+    const leftover =
       pnl.leftoverQty > 0
-        ? `Остаток ${formatQty(pnl.leftoverQty)} ${item.symbol.replace(/USDT$/, "")} ≈ ${liveUsd(pnl.leftoverUsd)} остался на субсчёте — в PnL не входит.`
-        : null,
+        ? { qty: pnl.leftoverQty, asset, usd: pnl.leftoverUsd }
+        : null;
+    const notes = [
+      leftover ? `${leftoverText(leftover)} — в PnL не входит.` : null,
       pnl.unpricedFees.length
         ? `Комиссии в ${pnl.unpricedFees.join(", ")} в $ не пересчитаны.`
         : null,
@@ -173,6 +180,7 @@ async function exitByFills(
       exitPrice: pnl.exitPrice ?? fallbackExit,
       feesUsd: pnl.feesUsd,
       realizedPnl: pnl.realizedPnl,
+      leftover,
       note: notes.join(" ") || null,
     };
   } catch (error) {
@@ -180,30 +188,54 @@ async function exitByFills(
       exitPrice: fallbackExit,
       feesUsd: null,
       realizedPnl: null,
+      leftover: null,
       note: `Исполнения не прочитаны — PnL не посчитан: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
 
-async function closeOne(
+/**
+ * Одна попытка закрыть реальную позицию. Не вышло — status failed (строка вернётся в очередь и повторится на
+ * следующем прогоне); исключение биржи — тоже failed, а не обрыв прогона. protectionRemoved — свои TP/SL в этой
+ * попытке уже сняты: позиция без защиты до следующей попытки.
+ */
+export async function closeOne(
   ex: LiveExchange,
   item: LiveToClose,
   fallback: "mirror" | "close_all",
 ): Promise<LiveCloseRequest> {
-  const r = await ex.closePosition(item);
+  let r: Awaited<ReturnType<LiveExchange["closePosition"]>>;
+  try {
+    r = await ex.closePosition(item);
+  } catch (error) {
+    r = {
+      status: "failed",
+      message: `Закрытие не удалось: ${error instanceof Error ? error.message : String(error)}`,
+      steps: [],
+      exitPrice: null,
+    };
+  }
   const fills =
     r.status === "closed"
       ? await exitByFills(ex, item, r.exitPrice)
-      : { exitPrice: null, feesUsd: null, realizedPnl: null, note: null };
+      : {
+          exitPrice: null,
+          feesUsd: null,
+          realizedPnl: null,
+          leftover: null,
+          note: null,
+        };
   return {
     tradeId: item.tradeId,
     status: r.status,
+    protectionRemoved: r.status === "failed" && r.protectionRemoved === true,
     exit: {
       message: fills.note ? `${r.message} ${fills.note}` : r.message,
       steps: r.steps,
       exitPrice: fills.exitPrice,
       feesUsd: fills.feesUsd,
       realizedPnl: fills.realizedPnl,
+      leftover: fills.leftover,
       closedBy:
         r.status === "closed"
           ? closedByOf(r.message, fills.realizedPnl, fallback)
@@ -212,7 +244,10 @@ async function closeOne(
   };
 }
 
-/** «Закрыть всё»: захватить все открытые реальные позиции, закрыть по рынку, сообщить итог. */
+/**
+ * «Закрыть всё»: захватить все открытые реальные позиции (и не закрывшиеся раньше), закрыть по рынку, сообщить итог.
+ * Остались позиции — приложение держит запрос, следующий прогон повторяет.
+ */
 export async function runCloseAll(
   api: MirrorApi,
   ex: LiveExchange,
@@ -222,23 +257,7 @@ export async function runCloseAll(
   let failed = 0;
   const errors: string[] = [];
   for (const item of items) {
-    let body: LiveCloseRequest;
-    try {
-      body = await closeOne(ex, item, "close_all");
-    } catch (error) {
-      body = {
-        tradeId: item.tradeId,
-        status: "failed",
-        exit: {
-          message: `Закрытие не удалось: ${error instanceof Error ? error.message : String(error)}`,
-          steps: [],
-          exitPrice: null,
-          feesUsd: null,
-          realizedPnl: null,
-          closedBy: null,
-        },
-      };
-    }
+    const body = await closeOne(ex, item, "close_all");
     await api.close(body);
     if (body.status === "closed") closed++;
     else {
@@ -421,6 +440,7 @@ export async function runLiveMirror(
             exitPrice: fills?.exitPrice ?? m.exitPrice,
             feesUsd: fills?.feesUsd ?? null,
             realizedPnl: fills?.realizedPnl ?? null,
+            leftover: fills?.leftover ?? null,
             closedBy: m.closedBy === "stop" ? "sl" : "tp",
           },
         });

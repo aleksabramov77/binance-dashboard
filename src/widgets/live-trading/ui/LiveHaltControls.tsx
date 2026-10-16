@@ -48,7 +48,11 @@ export function LiveHaltControls() {
         />
       )}
       <ConfirmAction
-        label={closeAllPending && live.data ? "Закрываю всё…" : "Закрыть всё"}
+        label={
+          closeAllPending && live.data
+            ? `Закрытие идёт: осталось ${positions}`
+            : "Закрыть всё"
+        }
         title="Закрыть все реальные позиции по рынку?"
         description={`Входы остановятся, а воркер на ближайшем прогоне (до 2 минут) закроет по рынку все реальные позиции (сейчас ${positions}) и снимет их ордера. Возобновить входы — отдельной кнопкой.`}
         confirmLabel="Закрыть всё"

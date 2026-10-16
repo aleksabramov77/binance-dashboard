@@ -47,19 +47,40 @@ const CLOSED_BY: Record<string, string> = {
   close_all: "«Закрыть всё»",
 };
 
-/** «🔴 Закрыта: S98 BTCUSDT +$0,84 (TP)». PnL null — не посчитан. */
+/** «остаток 0.00000986 BTC ≈ $0,81 на субсчёте». */
+export function liveLeftoverText(l: {
+  qty: number;
+  asset: string;
+  usd: number;
+}): string {
+  return `остаток ${l.qty.toFixed(8).replace(/\.?0+$/, "")} ${l.asset} ≈ ${liveUsd(l.usd)} на субсчёте`;
+}
+
+/**
+ * «🔴 Закрыта: S98 BTCUSDT +$0,84 (TP)». PnL null — не посчитан. Остаток монеты (в PnL не входит) и «после N
+ * попыток» — в той же строке.
+ */
 export function liveExitText(
   s: LiveTradeSubject,
-  o: { realizedPnl: number | null; closedBy: string | null },
+  o: {
+    realizedPnl: number | null;
+    closedBy: string | null;
+    leftover?: { qty: number; asset: string; usd: number } | null;
+    attempts?: number;
+  },
 ): string {
   const pnl =
     o.realizedPnl === null ? "PnL не посчитан" : liveUsd(o.realizedPnl, true);
   const by = o.closedBy ? ` (${CLOSED_BY[o.closedBy] ?? o.closedBy})` : "";
-  return `🔴 Закрыта: ${subject(s)} ${pnl}${by}`;
+  const extra = [
+    o.leftover ? `${liveLeftoverText(o.leftover)}, в PnL не входит` : null,
+    o.attempts && o.attempts > 1 ? `закрыта после ${o.attempts} попыток` : null,
+  ].filter(Boolean);
+  return `🔴 Закрыта: ${subject(s)} ${pnl}${by}${extra.length ? ` · ${extra.join(" · ")}` : ""}`;
 }
 
 export function liveCloseFailedText(s: LiveTradeSubject, message: string) {
-  return `⚠️ Реальная позиция не закрылась: ${subject(s)} — ${message} Повтор на следующем прогоне.`;
+  return `⚠️ Реальная позиция не закрылась: ${subject(s)} — ${message} Закрытие повторяется каждый прогон воркера, пока позиция не закроется.`;
 }
 
 /** Сработал дневной лимит эксперимента (один раз за сутки). */
@@ -81,11 +102,16 @@ export function liveCloseAllDoneText(r: {
   closed: number;
   failed: number;
   errors: string[];
+  remaining?: number;
+  runs?: number;
 }): string {
   const errors = r.errors.length
     ? ` Ошибки: ${r.errors.slice(0, 3).join("; ")}`
     : "";
-  return `🛑 «Закрыть всё» выполнено: закрыто ${r.closed}, не закрылось ${r.failed}.${errors}`;
+  if (r.remaining)
+    return `🛑 «Закрыть всё»: закрыто ${r.closed}, не закрылось ${r.failed} — осталось ${r.remaining}, закрытие повторяется каждый прогон воркера.${errors}`;
+  const runs = r.runs && r.runs > 1 ? ` за ${r.runs} прогонов` : "";
+  return `🛑 «Закрыть всё» выполнено${runs}: реальных позиций не осталось (в последнем прогоне закрыто ${r.closed}).${errors}`;
 }
 
 export function liveToggleText(

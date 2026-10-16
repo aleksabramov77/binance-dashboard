@@ -3,9 +3,10 @@
 
 // Только сервер: аварийный стоп реального счёта (spec 0049).
 export {
-  completeLiveCloseAll,
+  type LiveCloseAllResult,
   loadLiveHalt,
   requestLiveCloseAll,
+  saveLiveCloseAllRun,
   setLiveStopped,
 } from "./api/liveHaltDb";
 // Только сервер: чтение и запись последнего пульса (вызывает композиция src/app/server/liveAccount.ts).
@@ -33,6 +34,7 @@ export {
   liveEntryText,
   liveExitText,
   liveHaltText,
+  liveLeftoverText,
   liveToggleText,
   liveUnprotectedText,
 } from "./lib/liveMessages";

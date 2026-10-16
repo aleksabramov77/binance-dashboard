@@ -20,6 +20,10 @@ export const liveHaltSchema = z.object({
       closed: z.number(),
       failed: z.number(),
       errors: z.array(z.string()),
+      /** Сколько позиций ещё открыто после прогона: «Закрыть всё» держится, пока не 0. */
+      remaining: z.number().default(0),
+      /** Прогонов воркера по этому запросу. */
+      runs: z.number().default(1),
     })
     .nullable(),
 });
@@ -60,10 +64,25 @@ export const liveExperimentDaySchema = z.object({
 });
 export type LiveExperimentDay = z.infer<typeof liveExperimentDaySchema>;
 
+/** Закрытая реальная сделка для карточки: PnL и нераспроданный остаток (в PnL не входит). */
+export const liveClosedSchema = z.object({
+  tradeId: z.string(),
+  experimentId: z.string(),
+  symbol: z.string(),
+  closedAt: isoTime,
+  realizedPnl: z.number().nullable(),
+  closedBy: z.string().nullable(),
+  leftoverQty: z.number().nullable(),
+  leftoverUsd: z.number().nullable(),
+});
+export type LiveClosed = z.infer<typeof liveClosedSchema>;
+
 /** Торговля реального счёта (часть GET /api/live/status). */
 export const liveTradingSchema = z.object({
   halt: liveHaltSchema,
   positions: z.array(livePositionSchema),
+  /** Последние закрытые реальные сделки (до 5). */
+  recent: z.array(liveClosedSchema),
   /** Дневной PnL и лимит всех экспериментов, у которых были реальные сделки сегодня или включён «Реальный счёт». */
   experiments: z.array(liveExperimentDaySchema),
 });

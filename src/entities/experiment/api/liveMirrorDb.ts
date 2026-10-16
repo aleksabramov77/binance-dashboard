@@ -6,6 +6,8 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
+  or,
   sql,
 } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
@@ -291,6 +293,8 @@ export interface LiveMirrorPatch {
   feesUsd?: number | null;
   realizedPnl?: number | null;
   closedBy?: string | null;
+  leftoverQty?: number | null;
+  leftoverUsd?: number | null;
   protectRefs?: MirrorProtectRefs | null;
   closed?: boolean;
 }
@@ -332,44 +336,64 @@ export async function getLiveMirror(
   return row ?? null;
 }
 
-/** Реальные позиции, чья paper-сделка закрылась: id без захвата (захват — по одной). */
-export async function listLiveToClose(db: Db): Promise<string[]> {
-  const rows = await db
-    .select({ tradeId: liveMirrorOrdersTable.tradeId })
-    .from(liveMirrorOrdersTable)
-    .innerJoin(
-      paperTradesTable,
-      eq(paperTradesTable.id, liveMirrorOrdersTable.tradeId),
-    )
-    .where(
-      and(
-        inArray(liveMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
-        isNotNull(paperTradesTable.closedAt),
-      ),
-    )
-    .orderBy(liveMirrorOrdersTable.updatedAt);
-  return rows.map((r) => r.tradeId);
-}
+/**
+ * Пауза между повторами неудачного закрытия (spec 0049): не чаще раза в прогон воркера (раз в минуту). При 429/418
+ * запрос и так не уходит — пауза на хост общая (fetchRetry).
+ */
+export const LIVE_CLOSE_RETRY_PAUSE_S = 50;
+/** Строка «closing» дольше этого — прогон оборвался после захвата: закрытие берётся снова. */
+export const LIVE_CLOSING_STUCK_S = 300;
 
-/** Захват одной реальной позиции на закрытие (UPDATE … WHERE status). null — её уже взяли или paper не закрыта. */
-export async function claimLiveToClose(
-  db: Db,
-  tradeId: string,
-): Promise<LiveMirrorToClose | null> {
+/**
+ * Какие реальные позиции закрывать: paper-сделка закрылась; закрытие уже не удалось (close_failed) или позиция без
+ * защиты (unprotected) — повтор каждый прогон, пока не закроется; «закрывается» дольше 5 минут — прогон оборвался.
+ */
+function closeDue(db: Db) {
   const closedTrades = db
     .select({ id: paperTradesTable.id })
     .from(paperTradesTable)
     .where(isNotNull(paperTradesTable.closedAt));
+  return or(
+    and(
+      inArray(liveMirrorOrdersTable.status, ["protected"]),
+      inArray(liveMirrorOrdersTable.tradeId, closedTrades),
+    ),
+    and(
+      inArray(liveMirrorOrdersTable.status, ["unprotected", "close_failed"]),
+      lt(
+        liveMirrorOrdersTable.updatedAt,
+        sql`now() - make_interval(secs => ${LIVE_CLOSE_RETRY_PAUSE_S})`,
+      ),
+    ),
+    and(
+      eq(liveMirrorOrdersTable.status, "closing"),
+      lt(
+        liveMirrorOrdersTable.updatedAt,
+        sql`now() - make_interval(secs => ${LIVE_CLOSING_STUCK_S})`,
+      ),
+    ),
+  );
+}
+
+/** Реальные позиции на закрытие: id без захвата (захват — по одной). */
+export async function listLiveToClose(db: Db): Promise<string[]> {
+  const rows = await db
+    .select({ tradeId: liveMirrorOrdersTable.tradeId })
+    .from(liveMirrorOrdersTable)
+    .where(closeDue(db))
+    .orderBy(liveMirrorOrdersTable.updatedAt);
+  return rows.map((r) => r.tradeId);
+}
+
+/** Захват одной реальной позиции на закрытие (UPDATE … WHERE). null — её уже взяли или закрывать не нужно. */
+export async function claimLiveToClose(
+  db: Db,
+  tradeId: string,
+): Promise<LiveMirrorToClose | null> {
   const [row] = await db
     .update(liveMirrorOrdersTable)
     .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
-    .where(
-      and(
-        eq(liveMirrorOrdersTable.tradeId, tradeId),
-        inArray(liveMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
-        inArray(liveMirrorOrdersTable.tradeId, closedTrades),
-      ),
-    )
+    .where(and(eq(liveMirrorOrdersTable.tradeId, tradeId), closeDue(db)))
     .returning();
   if (!row) return null;
   const [paper] = await db
@@ -379,14 +403,66 @@ export async function claimLiveToClose(
   return toClose(row, paper?.reason ?? null);
 }
 
-/** «Закрыть всё»: захват всех открытых реальных позиций на закрытие (closing). */
+/** «Закрыть всё»: захват всех открытых реальных позиций на закрытие (closing), в том числе неудачных прошлых. */
 export async function claimAllLiveOpen(db: Db): Promise<LiveMirrorToClose[]> {
   const rows = await db
     .update(liveMirrorOrdersTable)
     .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
-    .where(inArray(liveMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]))
+    .where(
+      or(
+        inArray(liveMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
+        and(
+          eq(liveMirrorOrdersTable.status, "closing"),
+          lt(
+            liveMirrorOrdersTable.updatedAt,
+            sql`now() - make_interval(secs => ${LIVE_CLOSING_STUCK_S})`,
+          ),
+        ),
+      ),
+    )
     .returning();
   return rows.map((r) => toClose(r, null));
+}
+
+/** Сколько реальных позиций ещё держит субсчёт (активные строки): «Закрыть всё» держится, пока не 0. */
+export async function countLiveActive(db: Db): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)`.mapWith(Number) })
+    .from(liveMirrorOrdersTable)
+    .where(inArray(liveMirrorOrdersTable.status, [...ACTIVE_MIRROR_STATUSES]));
+  return row?.n ?? 0;
+}
+
+/**
+ * Закрытие не удалось: строка снова в очереди (close_failed, или unprotected — свои TP/SL уже сняты), попытка
+ * засчитана. Только из closing. Возвращает номер неудачной попытки; null — строка уже не закрывалась.
+ */
+export async function markLiveCloseFailed(
+  db: Db,
+  tradeId: string,
+  patch: {
+    status: "close_failed" | "unprotected";
+    message: string;
+    steps: unknown[];
+  },
+): Promise<number | null> {
+  const [row] = await db
+    .update(liveMirrorOrdersTable)
+    .set({
+      status: patch.status,
+      message: patch.message,
+      steps: patch.steps,
+      closeAttempts: sql`${liveMirrorOrdersTable.closeAttempts} + 1`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(liveMirrorOrdersTable.tradeId, tradeId),
+        eq(liveMirrorOrdersTable.status, "closing"),
+      ),
+    )
+    .returning({ attempts: liveMirrorOrdersTable.closeAttempts });
+  return row?.attempts ?? null;
 }
 
 /** Открытые фьючерсные реальные позиции со своими ссылками — для сверки ног. */

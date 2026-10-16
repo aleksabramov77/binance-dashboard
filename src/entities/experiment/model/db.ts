@@ -248,6 +248,12 @@ export const liveMirrorOrdersTable = pgTable(
     realizedPnl: doublePrecision("realized_pnl"),
     /** Чем закрыта: tp | sl | mirror (с paper-сделкой) | close_all (аварийный стоп). */
     closedBy: text("closed_by"),
+    /** Неудачных попыток закрытия подряд: Telegram — на первой, итог «закрыто после N попыток» — один раз. */
+    closeAttempts: integer("close_attempts").notNull().default(0),
+    /** Нераспроданный остаток монеты после выхода (спот: комиссия в монете и шаг) — в PnL не входит. */
+    leftoverQty: doublePrecision("leftover_qty"),
+    /** Остаток в $ по цене выхода. */
+    leftoverUsd: doublePrecision("leftover_usd"),
     message: text("message").notNull().default(""),
     steps: jsonb("steps").$type<unknown[]>().notNull().default([]),
     /** Свои защитные ордера (как protect_refs демо-зеркала). */

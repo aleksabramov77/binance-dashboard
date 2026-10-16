@@ -4,6 +4,7 @@ import type { TradeRequest, TradeResult } from "@/entities/trade";
 import { sizeEntry } from "@/features/execute-trade";
 import {
   closedByOf,
+  closeOne,
   type LiveExchange,
   type MirrorApi,
   runLiveMirror,
@@ -267,9 +268,11 @@ describe("runLiveMirror: закрытия и «Закрыть всё»", () => {
     expect(api.close).toHaveBeenCalledWith({
       tradeId: "c1",
       status: "closed",
+      protectionRemoved: false,
       exit: expect.objectContaining({
         exitPrice: 2100,
         closedBy: "mirror",
+        leftover: null,
       }),
     });
     const [body] = api.close.mock.calls[0] as unknown as [
@@ -348,6 +351,71 @@ describe("closedByOf", () => {
     ).toBe("sl");
     expect(closedByOf("Позиция закрыта по рынку.", 1, "close_all")).toBe(
       "close_all",
+    );
+  });
+});
+
+describe("closeOne: попытка закрытия (приёмка 0049)", () => {
+  it("выход не прошёл после снятия своих TP/SL — protectionRemoved, failed (строка вернётся в очередь)", async () => {
+    const ex = fakeExchange({
+      closePosition: vi.fn(async () => ({
+        status: "failed" as const,
+        message: "timeout",
+        steps: [],
+        exitPrice: null,
+        protectionRemoved: true,
+      })),
+    });
+    const body = await closeOne(ex, item, "mirror");
+    expect(body).toMatchObject({ status: "failed", protectionRemoved: true });
+    expect(ex.fills).not.toHaveBeenCalled();
+  });
+
+  it("исключение биржи — failed, а не обрыв прогона", async () => {
+    const ex = fakeExchange({
+      closePosition: vi.fn(async () => {
+        throw new Error("-1021 Timestamp outside of recvWindow");
+      }),
+    });
+    const body = await closeOne(ex, item, "close_all");
+    expect(body).toMatchObject({
+      status: "failed",
+      protectionRemoved: false,
+      exit: { message: expect.stringMatching(/-1021/) },
+    });
+  });
+
+  it("спот с пылью: остаток — отдельно, в PnL не входит", async () => {
+    const ex = fakeExchange({
+      fills: vi.fn(async () => [
+        {
+          time: NOW - 30_000,
+          side: "BUY" as const,
+          qty: 0.00014,
+          quoteQty: 0.00014 * 81_932.01,
+          commission: 0.00000014,
+          commissionAsset: "BTC",
+        },
+        {
+          time: NOW,
+          side: "SELL" as const,
+          qty: 0.00013,
+          quoteQty: 0.00013 * 82_060,
+          commission: 0.0107,
+          commissionAsset: "USDT",
+        },
+      ]),
+    });
+    const body = await closeOne(
+      ex,
+      { ...item, market: "spot", symbol: "BTCUSDT" },
+      "mirror",
+    );
+    expect(body.exit.leftover).toMatchObject({ asset: "BTC" });
+    expect(body.exit.leftover?.qty).toBeCloseTo(0.00000986, 10);
+    expect(body.exit.realizedPnl ?? 0).toBeGreaterThan(-0.01);
+    expect(body.exit.message).toMatch(
+      /Остаток 0\.00000986 BTC ≈ \$0,81 остался на субсчёте — в PnL не входит/,
     );
   });
 });

@@ -68,6 +68,11 @@ export interface CloseDemoResult {
   steps: TradeStep[];
   /** Средняя цена закрытия по рынку; позицию закрыла биржа (TP/SL) или ошибка — null. */
   exitPrice: number | null;
+  /**
+   * Свои стоп/тейк в этой попытке сняты (spec 0049): если при этом status failed — позиция осталась без защиты,
+   * реальное зеркало отмечает её «без защиты» и повторяет закрытие каждый прогон.
+   */
+  protectionRemoved?: boolean;
 }
 
 const errorText = (error: unknown) =>
@@ -83,6 +88,7 @@ export async function closeDemoPosition(
   venue: TradeVenue | null = demoTradeContext()?.venue ?? null,
 ): Promise<CloseDemoResult> {
   const steps: TradeStep[] = [];
+  const removed = { value: false };
   const finish = (
     status: CloseDemoResult["status"],
     message: string,
@@ -92,7 +98,13 @@ export async function closeDemoPosition(
     if (status === "closed")
       log.info("trade.closed", `${req.symbol}: ${message}`, data);
     else log.error("trade.close_failed", `${req.symbol}: ${message}`, data);
-    return { status, message, steps, exitPrice };
+    return {
+      status,
+      message,
+      steps,
+      exitPrice,
+      ...(removed.value && { protectionRemoved: true }),
+    };
   };
 
   if (!venue)
@@ -101,7 +113,7 @@ export async function closeDemoPosition(
       "Ключ Demo Trading не настроен (BINANCE_DEMO_API_KEY / SECRET).",
     );
   if (req.protectRefs)
-    return closeOwn(venue, req, req.protectRefs, steps, finish);
+    return closeOwn(venue, req, req.protectRefs, steps, finish, removed);
 
   // Старые строки без protect_refs: снимаем только защитные ордера своей стороны (lib/futuresMode),
   // а не все ордера символа — чужие (ручные, другие зеркала в Hedge) остаются.
@@ -146,7 +158,7 @@ export async function closeDemoPosition(
 
   try {
     if (futures) {
-      const rules = await fetchDemoSymbolRules("usdm", req.symbol);
+      const rules = await fetchDemoSymbolRules("usdm", req.symbol, venue);
       const qty = rules
         ? floorToStep(futures.amount, rules.stepSize)
         : String(futures.amount);
@@ -176,7 +188,7 @@ export async function closeDemoPosition(
       return finish("closed", "Позиция закрыта по рынку.", exitPrice || null);
     }
 
-    const rules = await fetchDemoSymbolRules("spot", req.symbol);
+    const rules = await fetchDemoSymbolRules("spot", req.symbol, venue);
     if (!rules) return finish("failed", `${req.symbol} нет на демо-споте.`);
     const baseAsset = req.symbol.replace(/USDT$/, "");
     const held = (await fetchDemoSpotHoldings(venue)).get(baseAsset) ?? 0;
@@ -185,7 +197,7 @@ export async function closeDemoPosition(
       Math.min(held, spotNetQuantity(null, req.quantity)),
       rules.stepSize,
     );
-    const price = await fetchDemoPrice("spot", req.symbol);
+    const price = await fetchDemoPrice("spot", req.symbol, venue);
     // Хвост после комиссии дешевле минимального ордера биржа не продаст (-1013 NOTIONAL):
     // позиция по сути закрыта её TP/SL — иначе зеркало повторяло бы продажу каждую минуту.
     if (isDust(Number(qty), price, rules)) {
@@ -213,7 +225,9 @@ export async function closeDemoPosition(
     steps.push({ label: "Закрытие", ok: false, detail: errorText(error) });
     return finish(
       "failed",
-      "Не удалось закрыть позицию — проверьте на demo.binance.com.",
+      venue.kind === "demo"
+        ? "Не удалось закрыть позицию — проверьте на demo.binance.com."
+        : "Не удалось закрыть позицию — закрытие повторится на следующем прогоне.",
     );
   }
 }
@@ -312,6 +326,7 @@ async function closeOwn(
   refs: DemoProtectRefs,
   steps: TradeStep[],
   finish: CloseFinish,
+  removed: { value: boolean },
 ): Promise<CloseDemoResult> {
   // Своё закрытие — с id своей сделки (`bd…-C`): в «Демо-сделках» оно попадёт в свою сделку.
   const closeId = ownCloseId(refs);
@@ -334,8 +349,10 @@ async function closeOwn(
   try {
     const cancelled: string[] = [];
     for (const leg of plan.cancel)
-      if (await cancelOwn(venue, req.symbol, refs, leg))
+      if (await cancelOwn(venue, req.symbol, refs, leg)) {
         cancelled.push(LEG_LABEL[leg]);
+        removed.value = true;
+      }
     steps.push({
       label: "Снять свои ордера",
       ok: true,
@@ -389,9 +406,12 @@ async function closeOwn(
   };
 
   try {
-    const rules = await fetchDemoSymbolRules(req.market, req.symbol);
+    const rules = await fetchDemoSymbolRules(req.market, req.symbol, venue);
     if (!rules)
-      return finish("failed", `${req.symbol} нет на демо-рынке ${req.market}.`);
+      return finish(
+        "failed",
+        `${req.symbol} нет на ${venue.kind === "demo" ? "демо-рынке" : "рынке"} ${req.market}.`,
+      );
     if (req.market === "usdm") {
       // Своя сторона: в Hedge — строка LONG/SHORT, в One-way — общая позиция в сторону сделки.
       const side: FuturesSide = {
@@ -441,7 +461,7 @@ async function closeOwn(
       ownCloseQuantity(own, plan.soldByLegs, held),
       rules.stepSize,
     );
-    const price = await fetchDemoPrice("spot", req.symbol);
+    const price = await fetchDemoPrice("spot", req.symbol, venue);
     // Пыль биржа не продаст (-1013 NOTIONAL) — продавать нечего.
     const sellable = isDust(Number(qty), price, rules) ? 0 : Number(qty);
     if (closeVerdict(plan, sellable) !== "close")
@@ -471,7 +491,9 @@ async function closeOwn(
     steps.push({ label: "Закрытие", ok: false, detail: errorText(error) });
     return finish(
       "failed",
-      "Не удалось закрыть позицию — проверьте на demo.binance.com.",
+      venue.kind === "demo"
+        ? "Не удалось закрыть позицию — проверьте на demo.binance.com."
+        : "Не удалось закрыть позицию — закрытие повторится на следующем прогоне.",
     );
   }
 }

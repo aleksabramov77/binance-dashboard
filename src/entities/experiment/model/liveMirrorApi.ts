@@ -129,11 +129,18 @@ export const liveExitSchema = z.object({
   feesUsd: z.number().nullable(),
   realizedPnl: z.number().nullable(),
   closedBy: z.enum(["tp", "sl", "mirror", "close_all"]).nullable(),
+  /** Нераспроданный остаток монеты (спот) — на субсчёте, в PnL не входит; null — остатка нет. */
+  leftover: z
+    .object({ qty: z.number(), asset: z.string(), usd: z.number() })
+    .nullable()
+    .default(null),
 });
 
 export const liveCloseRequestSchema = liveTradeIdSchema.extend({
   status: z.enum(["closed", "failed"]),
   exit: liveExitSchema,
+  /** Не закрылось, а свои TP/SL в этой попытке уже сняты — позиция без защиты (повтор каждый прогон). */
+  protectionRemoved: z.boolean().default(false),
 });
 export type LiveCloseRequest = z.infer<typeof liveCloseRequestSchema>;
 

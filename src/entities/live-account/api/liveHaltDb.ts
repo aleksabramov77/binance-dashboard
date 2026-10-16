@@ -13,15 +13,25 @@ const iso = (d: Date | null) => d?.toISOString() ?? null;
 
 const resultOf = (raw: unknown): LiveHalt["closeAllResult"] => {
   if (!raw || typeof raw !== "object") return null;
-  const r = raw as { closed?: unknown; failed?: unknown; errors?: unknown };
+  const r = raw as {
+    closed?: unknown;
+    failed?: unknown;
+    errors?: unknown;
+    remaining?: unknown;
+    runs?: unknown;
+  };
   return typeof r.closed === "number" && typeof r.failed === "number"
     ? {
         closed: r.closed,
         failed: r.failed,
         errors: Array.isArray(r.errors) ? r.errors.map(String) : [],
+        remaining: typeof r.remaining === "number" ? r.remaining : 0,
+        runs: typeof r.runs === "number" ? r.runs : 1,
       }
     : null;
 };
+
+export type LiveCloseAllResult = NonNullable<LiveHalt["closeAllResult"]>;
 
 /** Состояние стопа; строки ещё нет — торговля не остановлена. Сбой БД — исключение (вход не идёт). */
 export async function loadLiveHalt(db: Db): Promise<LiveHalt> {
@@ -70,13 +80,13 @@ export function requestLiveCloseAll(db: Db, by: string) {
   });
 }
 
-/** Воркер выполнил «Закрыть всё»: запрос снят, итог сохранён. Стоп входов остаётся до «Возобновить». */
-export function completeLiveCloseAll(
-  db: Db,
-  result: { closed: number; failed: number; errors: string[] },
-) {
+/**
+ * Итог прогона «Закрыть всё». Позиции остались (remaining > 0) — запрос держится, следующий прогон воркера закрывает
+ * снова; позиций нет — запрос снят. Стоп входов остаётся до «Возобновить».
+ */
+export function saveLiveCloseAllRun(db: Db, result: LiveCloseAllResult) {
   return upsert(db, {
-    closeAllRequestedAt: null,
+    ...(result.remaining === 0 && { closeAllRequestedAt: null }),
     closeAllDoneAt: new Date(),
     closeAllResult: result,
   });

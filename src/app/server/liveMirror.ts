@@ -6,6 +6,7 @@ import {
   claimAllLiveOpen,
   claimLiveMirror,
   claimLiveToClose,
+  countLiveActive,
   countLiveSkipsSince,
   experimentsTable,
   getLiveMirror,
@@ -20,13 +21,14 @@ import {
   liveActiveRows,
   liveDailyPnl,
   liveEnabledExperiments,
+  markLiveCloseFailed,
   paperTradesTable,
+  recentLiveClosed,
   setExperimentLiveMirror,
   skipLiveMirror,
   updateLiveMirror,
 } from "@/entities/experiment";
 import {
-  completeLiveCloseAll,
   deriveLiveStatus,
   LIVE,
   LIVE_SKIP,
@@ -34,6 +36,7 @@ import {
   type LiveTradeSubject,
   type LiveTrading,
   liveCloseAllDoneText,
+  liveCloseFailedText,
   liveDailyLimitText,
   liveEntryText,
   liveExitText,
@@ -43,6 +46,7 @@ import {
   loadLiveHalt,
   nextUtcMidnight,
   requestLiveCloseAll,
+  saveLiveCloseAllRun,
   setLiveStopped,
   utcDayStart,
 } from "@/entities/live-account";
@@ -271,10 +275,11 @@ export async function claimLiveClose(
 async function announceExit(
   tradeId: string,
   exit: LiveCloseRequest["exit"],
+  attempts: number,
 ): Promise<void> {
   const row = await getLiveMirror(getDb(), tradeId);
   if (!row) return;
-  const text = liveExitText(subjectOf(row), exit);
+  const text = liveExitText(subjectOf(row), { ...exit, attempts });
   log.info("live.exit", text, {
     experimentId: row.experimentId,
     tradeId,
@@ -283,65 +288,85 @@ async function announceExit(
     feesUsd: exit.feesUsd,
     realizedPnl: exit.realizedPnl,
     closedBy: exit.closedBy,
+    leftover: exit.leftover,
+    attempts,
     steps: exit.steps,
     telegram: await notifyLive(text),
   });
 }
 
-/** Итог закрытия: closed — строка закрыта с PnL по исполнениям, Telegram; failed — повтор на следующем прогоне. */
+/** Поля закрытой строки из итога по исполнениям. */
+const closedPatch = (e: LiveCloseRequest["exit"]) => ({
+  status: "closed" as const,
+  message: e.message,
+  steps: e.steps,
+  exitPrice: e.exitPrice,
+  feesUsd: e.feesUsd,
+  realizedPnl: e.realizedPnl,
+  closedBy: e.closedBy,
+  leftoverQty: e.leftover?.qty ?? null,
+  leftoverUsd: e.leftover?.usd ?? null,
+  closed: true,
+});
+
+/**
+ * Итог попытки закрытия. closed — строка закрыта с PnL по исполнениям, Telegram (после неудачных попыток — «закрыто
+ * после N попыток»). failed — строка снова в очереди и повторяется каждый прогон: close_failed, или «без защиты», если
+ * свои TP/SL уже сняты. Telegram о неудаче — один раз на позицию (первая неудача или снятие защиты), журнал — каждый раз.
+ */
 export async function saveLiveClose(body: LiveCloseRequest): Promise<void> {
   const db = getDb();
-  const closed = body.status === "closed";
   const e = body.exit;
-  const updated = await updateLiveMirror(
-    db,
-    body.tradeId,
-    {
-      status: closed ? "closed" : "close_failed",
-      message: e.message,
-      steps: e.steps,
-      exitPrice: e.exitPrice,
-      feesUsd: e.feesUsd,
-      realizedPnl: e.realizedPnl,
-      closedBy: e.closedBy,
-      closed,
-    },
-    ["closing"],
-  );
-  if (!updated) return;
-  if (closed) return announceExit(body.tradeId, e);
+  if (body.status === "closed") {
+    const before = await getLiveMirror(db, body.tradeId);
+    if (await updateLiveMirror(db, body.tradeId, closedPatch(e), ["closing"]))
+      await announceExit(body.tradeId, e, (before?.closeAttempts ?? 0) + 1);
+    return;
+  }
+  const status = body.protectionRemoved ? "unprotected" : "close_failed";
+  const attempts = await markLiveCloseFailed(db, body.tradeId, {
+    status,
+    message: e.message,
+    steps: e.steps,
+  });
+  if (attempts === null) return;
   const row = await getLiveMirror(db, body.tradeId);
+  if (!row) return;
+  const s = subjectOf(row);
+  const text = body.protectionRemoved
+    ? liveUnprotectedText(
+        s,
+        `${e.message} Свои TP/SL уже сняты — закрытие повторяется каждый прогон.`,
+      )
+    : liveCloseFailedText(s, e.message);
+  const notify = attempts === 1 || body.protectionRemoved;
   log.error(
-    "live.close_failed",
-    `${row?.experimentId ?? ""} ${row?.symbol ?? body.tradeId}: реальная позиция не закрылась — ${e.message}`,
-    { experimentId: row?.experimentId, tradeId: body.tradeId, steps: e.steps },
+    body.protectionRemoved ? "live.unprotected" : "live.close_failed",
+    text,
+    {
+      experimentId: row.experimentId,
+      tradeId: body.tradeId,
+      symbol: row.symbol,
+      attempts,
+      steps: e.steps,
+      telegram: notify
+        ? await notifyLive(text)
+        : "не отправлен: повтор (сообщение было)",
+    },
   );
 }
 
-/** Сверка ног: позицию закрыла биржа (вторая нога снята) или нога сработала до входа (без защиты). */
+/** Сверка ног: позицию закрыла биржа (вторая нога снята) или нога сработала до входа (без защиты — в очередь закрытия). */
 export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
   const db = getDb();
   for (const item of body.items) {
     const e = item.exit;
     if (item.outcome === "closed") {
+      const before = await getLiveMirror(db, item.tradeId);
       if (
-        await updateLiveMirror(
-          db,
-          item.tradeId,
-          {
-            status: "closed",
-            message: e.message,
-            steps: e.steps,
-            exitPrice: e.exitPrice,
-            feesUsd: e.feesUsd,
-            realizedPnl: e.realizedPnl,
-            closedBy: e.closedBy,
-            closed: true,
-          },
-          OPEN_STATUSES,
-        )
+        await updateLiveMirror(db, item.tradeId, closedPatch(e), OPEN_STATUSES)
       )
-        await announceExit(item.tradeId, e);
+        await announceExit(item.tradeId, e, (before?.closeAttempts ?? 0) + 1);
       continue;
     }
     if (
@@ -364,7 +389,10 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
   }
 }
 
-/** «Закрыть всё»: захват всех открытых позиций (claim) и итог воркера (done). */
+/**
+ * «Закрыть всё»: захват всех открытых позиций (claim) и итог прогона воркера (done). Позиции остались — запрос
+ * держится и повторяется следующим прогоном; Telegram — при первом прогоне с остатком и когда закрыто всё.
+ */
 export async function liveCloseAll(
   body:
     | { phase: "claim" }
@@ -372,16 +400,28 @@ export async function liveCloseAll(
 ): Promise<LiveToClose[]> {
   const db = getDb();
   if (body.phase === "claim") return claimAllLiveOpen(db);
+  const halt = await loadLiveHalt(db);
+  // Прогоны этого запроса: итог прошлого прогона того же запроса — после времени запроса.
+  const sameRequest =
+    halt.closeAllRequestedAt !== null &&
+    halt.closeAllDoneAt !== null &&
+    halt.closeAllDoneAt >= halt.closeAllRequestedAt;
+  const runs = (sameRequest ? (halt.closeAllResult?.runs ?? 0) : 0) + 1;
   const result = {
     closed: body.closed,
     failed: body.failed,
     errors: body.errors,
+    remaining: await countLiveActive(db),
+    runs,
   };
-  await completeLiveCloseAll(db, result);
+  await saveLiveCloseAllRun(db, result);
   const text = liveCloseAllDoneText(result);
-  log[result.failed ? "error" : "info"]("live.halt", text, {
+  const notify = result.remaining === 0 || runs === 1;
+  log[result.remaining ? "error" : "info"]("live.halt", text, {
     ...result,
-    telegram: await notifyLive(text, null, "live-stop"),
+    telegram: notify
+      ? await notifyLive(text, null, "live-stop")
+      : "не отправлен: повтор (сообщение было)",
   });
   return [];
 }
@@ -470,12 +510,29 @@ export async function getLiveTradingView(
   const db = getDb();
   const dayStart = utcDayStart(now);
   const until = nextUtcMidnight(now).toISOString();
-  const [halt, active, daily, enabled] = await Promise.all([
+  const [halt, active, daily, enabled, closed] = await Promise.all([
     loadLiveHalt(db),
     liveActiveRows(db),
     liveDailyPnl(db, dayStart),
     liveEnabledExperiments(db),
+    recentLiveClosed(db, 5),
   ]);
+  const recent = closed.flatMap((r) =>
+    r.closedAt
+      ? [
+          {
+            tradeId: r.tradeId,
+            experimentId: r.experimentId,
+            symbol: r.symbol,
+            closedAt: r.closedAt.toISOString(),
+            realizedPnl: r.realizedPnl,
+            closedBy: r.closedBy,
+            leftoverQty: r.leftoverQty,
+            leftoverUsd: r.leftoverUsd,
+          },
+        ]
+      : [],
+  );
   const prices = new Map<"spot" | "usdm", Map<string, number> | null>();
   for (const market of new Set(active.map((a) => a.market)))
     prices.set(market, await cachedTickerPrices(market).catch(() => null));
@@ -502,5 +559,5 @@ export async function getLiveTradingView(
       until,
     };
   });
-  return { halt, positions, experiments };
+  return { halt, positions, recent, experiments };
 }

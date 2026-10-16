@@ -48,7 +48,8 @@ export function LiveTradingStrip() {
             Открыто позиций: {data.trading.positions.length} из{" "}
             {LIVE.maxOpenPositions}
             {keyIssue && ` · ${keyIssue}`}
-            {halt?.closeAllRequestedAt && " · «Закрыть всё» ждёт воркер"}
+            {halt?.closeAllRequestedAt &&
+              ` · закрытие идёт: осталось ${data.trading.positions.length}`}
           </span>
         )}
       </div>

@@ -7,6 +7,7 @@ import {
   type LiveHeartbeat,
   type LiveStatus,
   type LiveTrading,
+  liveLeftoverText,
   liveUsd,
   useLiveAccount,
 } from "@/entities/live-account";
@@ -208,7 +209,7 @@ function Trading({ trading }: { trading: LiveTrading }) {
           {haltText(trading.halt, formatDateTime)}
         </span>
         {trading.halt.closeAllRequestedAt &&
-          ` · «Закрыть всё» запрошено ${formatDateTime(trading.halt.closeAllRequestedAt)}, ждёт воркер`}
+          ` · «Закрыть всё» (${formatDateTime(trading.halt.closeAllRequestedAt)}): закрытие идёт, осталось ${trading.positions.length} — воркер повторяет каждый прогон`}
       </p>
       {trading.halt.closeAllResult && trading.halt.closeAllDoneAt && (
         <p className="text-xs text-muted-foreground">
@@ -243,6 +244,35 @@ function Trading({ trading }: { trading: LiveTrading }) {
             </li>
           ))}
         </ul>
+      )}
+      {trading.recent.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm text-muted-foreground">
+            Последние закрытия:
+          </span>
+          <ul className="flex flex-col gap-0.5">
+            {trading.recent.map((c) => (
+              <li key={c.tradeId} className="font-mono text-xs tabular-nums">
+                {formatDateTime(c.closedAt)} · {c.experimentId} · {c.symbol} ·{" "}
+                <span
+                  className={cn(
+                    c.realizedPnl !== null &&
+                      (c.realizedPnl < 0
+                        ? "text-destructive"
+                        : "text-positive"),
+                  )}
+                >
+                  {c.realizedPnl === null
+                    ? "PnL —"
+                    : liveUsd(c.realizedPnl, true)}
+                </span>
+                {c.leftoverQty !== null &&
+                  c.leftoverUsd !== null &&
+                  ` · ${liveLeftoverText({ qty: c.leftoverQty, asset: c.symbol.replace(/USDT$/, ""), usd: c.leftoverUsd })} (в PnL не входит)`}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       <p className="text-sm text-muted-foreground">
         Дневной лимит — реализованный убыток эксперимента за сутки UTC −$
