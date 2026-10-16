@@ -73,11 +73,11 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -t ed25519 "$VM_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-      # --delete: на VM остаётся ровно бандл; права 750/640, группа — сервиса (setgid каталога);
-      # .next/cache — ссылка на /var/lib/<проект>/cache (запись сервиса).
+      # --delete: на VM остаётся ровно бандл. Код открытый (секреты — в /etc/<проект>/app.env), поэтому права 755/644:
+      # deploy не в группе проекта и не может отдать файлы группе сервиса. .next/cache — ссылка на /var/lib/<проект>/cache.
       - name: Копирование на VM
         run: |
-          rsync -rlptz --delete --chmod=D2750,F640 --exclude '.next/cache' \
+          rsync -rlptz --delete --chmod=D755,F644 --exclude '.next/cache' \
             .next/standalone/ "$VM_USER@$VM_HOST:/srv/$PROJECT/app/"
           ssh "$VM_USER@$VM_HOST" "ln -sfn /var/lib/$PROJECT/cache /srv/$PROJECT/app/.next/cache"
 

@@ -31,6 +31,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ "$WEB" = 0 ] || [[ "$PORT" =~ ^[0-9]{4,5}$ ]] || fail "для сайта нужен --port"
+case "$NAME" in root | ubuntu | claude | aleksandr | deploy | caddy | www-data | nobody) fail "имя $NAME занято служебным пользователем" ;; esac
+[[ "$MEMORY" =~ ^[0-9]+[KMG]$ ]] || fail "--memory: число с K/M/G, например 300M"
+[ -z "$HEAP" ] || [[ "$HEAP" =~ ^[0-9]+$ ]] || fail "--heap: число мегабайт"
+[[ "$EXEC" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$EXEC" != *..* ]] || fail "--exec: путь внутри каталога кода"
+[ -z "$DOMAIN" ] || [[ "$DOMAIN" =~ ^[a-z0-9.-]+$ ]] || fail "--domain: только имя хоста"
 id deploy >/dev/null 2>&1 || fail "нет пользователя deploy — сначала bootstrap.sh"
 
 APP=/srv/$NAME/app
@@ -42,8 +47,8 @@ id "$NAME" >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --shell /usr/s
 
 # Код кладёт deploy (выкатка из CI), сервис только читает; данные — только у сервиса.
 install -d -m 755 "/srv/$NAME"
-# setgid: файлы выкатки наследуют группу сервиса (rsync --chmod=D2750,F640 в deploy.yml).
-install -d -m 2750 -o deploy -g "$NAME" "$APP"
+# Код открытый и читается всеми (секретов в нём нет, они в $ETC): deploy не в группе проекта, иначе он прочитал бы app.env.
+install -d -m 755 -o deploy -g "$NAME" "$APP"
 install -d -m 700 -o "$NAME" -g "$NAME" "$DATA"
 install -d -m 750 -o root -g "$NAME" "$ETC"
 [ -f "$ETC/app.env" ] || install -m 640 -o root -g "$NAME" /dev/null "$ETC/app.env"

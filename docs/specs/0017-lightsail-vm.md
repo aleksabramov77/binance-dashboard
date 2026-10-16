@@ -28,14 +28,15 @@ VM общая для нескольких личных проектов (поз�
   - `claude`: sudo, вход по ключу `claude@apps-tokyo`.
   - `aleksandr`: sudo, вход по ключу владельца с Mac.
   - `deploy`: вход для GitHub Actions по отдельному ключу. Ему разрешено только скопировать бандл в каталог
-    проекта и выполнить `systemctl restart|status <проект>` (sudoers).
+    проекта и выполнить `systemctl enable|restart <проект>`, `systemctl status <проект> --no-pager`,
+    `journalctl -u <проект> -n 80 --no-pager` (sudoers, точные команды).
   - `binance`: системный, без входа, от него работает сервис.
   - В `sshd`: `PermitRootLogin no`, `PasswordAuthentication no`. Встроенный `ubuntu` заблокирован после проверки
     входа под `claude`.
 - [ ] AC2. **Пакеты и защита.** Node 22 (как в CI), Caddy, `sqlite3`, swap 2 ГБ, `unattended-upgrades` (обновления
   безопасности), `fail2ban` для SSH. Повторный запуск `bootstrap.sh` ничего не ломает.
 - [ ] AC3. **Проект `binance`.**
-  - Каталоги: код — `/srv/binance/app` (владелец `deploy`, читает `binance`), данные — `/var/lib/binance/`
+  - Каталоги: код — `/srv/binance/app` (владелец `deploy`, 755/644 — код открытый), данные — `/var/lib/binance/`
     (владелец `binance`, 700).
   - Секреты — `/etc/binance/app.env`: root:binance, 640, не в git.
   - `binance.service`: `MemoryMax`, `Restart=always`, слушает только 127.0.0.1.
