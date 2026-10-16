@@ -8,19 +8,18 @@ import {
   existsSync,
   mkdirSync,
   openSync,
-  renameSync,
   rmSync,
   statSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import Database from "better-sqlite3";
 import {
   dbPullConfig,
   parseDbPullArgs,
   remoteBackupCommand,
   sshArgs,
 } from "./lib/dbPull";
+import { installSnapshot } from "./lib/dbSnapshot";
 import { PROD_SNAPSHOT_PATH } from "./lib/dbTarget";
 
 function fail(message: string): never {
@@ -51,26 +50,14 @@ function main() {
     );
   }
 
-  const check = new Database(part, { readonly: true });
-  let ok: unknown;
-  let experiments: unknown;
+  let experiments: number;
   try {
-    ok = check.pragma("quick_check", { simple: true });
-    experiments = check.prepare("select count(*) as n from experiments").get();
-  } finally {
-    check.close();
+    ({ experiments } = installSnapshot(part, out));
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
   }
-  if (ok !== "ok") {
-    rmSync(part, { force: true });
-    fail(
-      `снимок повреждён (quick_check: ${String(ok)}) — прежний ${out} не тронут`,
-    );
-  }
-  for (const f of [out, `${out}-wal`, `${out}-shm`]) rmSync(f, { force: true });
-  renameSync(part, out);
-  const n = (experiments as { n?: number } | undefined)?.n ?? 0;
   console.log(
-    `Снимок прод-базы: ${out}, ${(statSync(out).size / 1024 / 1024).toFixed(1)} МБ, экспериментов ${n}, за ${((Date.now() - started) / 1000).toFixed(1)} с`,
+    `Снимок прод-базы: ${out}, ${(statSync(out).size / 1024 / 1024).toFixed(1)} МБ, экспериментов ${experiments}, за ${((Date.now() - started) / 1000).toFixed(1)} с`,
   );
 }
 

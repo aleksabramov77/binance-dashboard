@@ -313,6 +313,58 @@ describe("отдельный сброс paper-капитала эксперим�
   });
 });
 
+describe("откат сбросов эксперимента и группы (транзакция SQLite)", () => {
+  it("resetExperimentRun: сбой после закрытия сделки — сделка открыта, reset_at не поставлен", async () => {
+    const { runId, store } = await setup();
+    await expect(
+      resetExperimentRun(db, {
+        runId,
+        experimentId: "F01",
+        closes: [{ id: "open-1", close: manual(5, 105), noPrice: false }],
+        // Метка свечи пишется последней; BigInt не сериализуется в JSON — сбой.
+        bar: BigInt(1) as unknown as number,
+        barsKey: "bars",
+      }),
+    ).rejects.toThrow(/BigInt/);
+    expect((await store.openTrades(runId)).map((t) => t.id)).toEqual([
+      "open-1",
+      "open-2",
+    ]);
+    const [f01] = await db
+      .select()
+      .from(experimentsTable)
+      .where(eq(experimentsTable.id, "F01"));
+    expect(f01?.resetAt).toBeNull();
+    expect(await store.realizedPnl(runId)).toEqual({ F01: 3.9 });
+  });
+
+  it("resetGroupRun: сбой после закрытий — сделки открыты, бюджеты и reset_at прежние", async () => {
+    const { runId, store } = await setup();
+    await expect(
+      resetGroupRun(db, {
+        runId,
+        market: "usdm",
+        closes: [
+          { id: "open-1", close: manual(5, 105), noPrice: false },
+          { id: "open-2", close: manual(0, 100), noPrice: true },
+        ],
+        initialBudget: 20_000,
+        bars: { F01: BigInt(1) as unknown as number },
+        barsKey: "bars",
+      }),
+    ).rejects.toThrow(/BigInt/);
+    expect((await store.openTrades(runId)).map((t) => t.id)).toEqual([
+      "open-1",
+      "open-2",
+    ]);
+    const rows = await db.select().from(experimentsTable);
+    expect(rows.map((e) => [e.initialBudget, e.resetAt])).toEqual([
+      [10_000, null],
+      [10_000, null],
+    ]);
+  });
+});
+
 describe("сброс Paper группы активов (spec 0038)", () => {
   /** F01, F02 (usdm; F02 выключен) и S01 (spot) — у каждого открытая сделка и закрытая с PnL. */
   async function groups() {
