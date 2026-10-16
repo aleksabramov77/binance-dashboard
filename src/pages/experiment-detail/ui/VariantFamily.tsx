@@ -35,9 +35,12 @@ const memberTitle = (m: FamilyMember) =>
 function FamilyMetrics({
   members,
   current,
+  runQuery,
 }: {
   members: FamilyMember[];
   current: string;
+  /** `?run=…` выбранного периода — переход к соседу по группе его не сбрасывает; "" — текущая эпоха. */
+  runQuery: string;
 }) {
   return (
     <Table>
@@ -65,7 +68,7 @@ function FamilyMetrics({
                     <span className="font-mono text-xs">{m.id}</span>
                   ) : (
                     <Link
-                      href={`/experiments/${encodeURIComponent(m.id)}`}
+                      href={`/experiments/${encodeURIComponent(m.id)}${runQuery}`}
                       className="font-mono text-xs underline-offset-4 hover:underline"
                     >
                       {m.id}
@@ -159,11 +162,14 @@ export function VariantFamily({
   experiment,
   family,
   period,
+  runQuery,
 }: {
   experiment: Experiment;
   family: { control: FamilyMember; variants: FamilyMember[] };
   /** Подпись периода метрик: «Эпоха №2 (текущая) с …», «Все эпохи …». */
   period: string;
+  /** `?run=…` выбранного периода для ссылок на контрольный и варианты; "" — текущая эпоха. */
+  runQuery: string;
 }) {
   const { control, variants } = family;
   const self = variants.find((v) => v.id === experiment.id);
@@ -175,7 +181,7 @@ export function VariantFamily({
           <CardTitle>
             Вариант {self.letter} от{" "}
             <Link
-              href={`/experiments/${encodeURIComponent(control.id)}`}
+              href={`/experiments/${encodeURIComponent(control.id)}${runQuery}`}
               className="underline-offset-4 hover:underline"
             >
               {control.id} · {control.name}
@@ -192,7 +198,11 @@ export function VariantFamily({
             <span className="text-xs text-muted-foreground">
               Сравнение с контрольным · {period}
             </span>
-            <FamilyMetrics members={[control, self]} current={experiment.id} />
+            <FamilyMetrics
+              runQuery={runQuery}
+              members={[control, self]}
+              current={experiment.id}
+            />
           </div>
         </CardContent>
       </Card>
@@ -208,6 +218,7 @@ export function VariantFamily({
           Контрольный и его варианты рядом · {period}
         </span>
         <FamilyMetrics
+          runQuery={runQuery}
           members={[control, ...variants]}
           current={experiment.id}
         />

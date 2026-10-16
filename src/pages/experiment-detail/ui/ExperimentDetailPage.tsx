@@ -385,11 +385,13 @@ export function ExperimentDetailPage({ id }: { id: string }) {
   const all = data?.scope === "all";
   const current = !!data && data.scope === data.runs[0]?.id;
   const period = data ? describeRunView(data) : "";
+  // Переходы со страницы сохраняют выбранный период (?run=).
+  const runQuery = run === null ? "" : `?run=${run}`;
 
   return (
     <div className="flex flex-col gap-6">
       <Link
-        href="/experiments"
+        href={`/experiments${runQuery}`}
         className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" aria-hidden />
@@ -467,6 +469,7 @@ export function ExperimentDetailPage({ id }: { id: string }) {
               experiment={data.experiment}
               family={data.family}
               period={period}
+              runQuery={runQuery}
             />
           )}
 
