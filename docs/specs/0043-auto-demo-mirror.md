@@ -133,3 +133,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-16 | ТЗ утверждено пользователем |
+| 2026-10-16 | Реализация в `feature/0043-auto-demo-mirror`: колонки `demo_mirror_mode/since/advice/auto` (drizzle 0009), правило `entities/experiment/lib/decideMirrorAuto.ts`, композиция `src/app/server/mirrorAuto.ts`, `POST /api/cron/mirror-auto`, pg_cron `mirror-auto`, переключатель «Выкл · Авто · Вкл», `lab:apply --mirror-auto`, резерв `MIRROR.minFreeUsd` в зеркале |
