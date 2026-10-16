@@ -168,6 +168,54 @@ export const getLogAnalysisModel = (
   env: Record<string, string | undefined> = process.env,
 ): string => env.LOG_ANALYSIS_MODEL?.trim() || "anthropic/claude-haiku-5.5";
 
+const DEFAULT_GITHUB_ALERTS_REPO = "aleksabramov77/binance-dashboard-private";
+const DEFAULT_ALERT_AUTOFIX_PER_DAY = 3;
+
+export interface GithubAlertsConfig {
+  token: string;
+  owner: string;
+  repo: string;
+  /** Сколько задач за 24 ч запускают Claude; сверх — в очередь (spec 0037). */
+  autofixPerDay: number;
+  /** Имена переменных с нераспознанным значением (тогда — значение по умолчанию). */
+  invalid: string[];
+}
+
+/**
+ * Задачи по тревогам монитора в приватном репозитории (spec 0037). null — GITHUB_ALERTS_TOKEN не задан:
+ * монитор работает как раньше, только Telegram.
+ */
+export function getGithubAlertsConfig(
+  env: Record<string, string | undefined> = process.env,
+): GithubAlertsConfig | null {
+  const token = env.GITHUB_ALERTS_TOKEN?.trim();
+  if (!token) return null;
+  const invalid: string[] = [];
+
+  const rawRepo = env.GITHUB_ALERTS_REPO?.trim();
+  const repoOk = !rawRepo || /^[\w.-]+\/[\w.-]+$/.test(rawRepo);
+  if (!repoOk) invalid.push("GITHUB_ALERTS_REPO");
+  const [owner, repo] = (
+    rawRepo && repoOk ? rawRepo : DEFAULT_GITHUB_ALERTS_REPO
+  ).split("/");
+
+  const rawPerDay = env.ALERT_AUTOFIX_PER_DAY?.trim();
+  const perDay = z.coerce
+    .number()
+    .int()
+    .min(0)
+    .safeParse(rawPerDay || DEFAULT_ALERT_AUTOFIX_PER_DAY);
+  if (!perDay.success) invalid.push("ALERT_AUTOFIX_PER_DAY");
+
+  return {
+    token,
+    owner,
+    repo,
+    autofixPerDay: perDay.success ? perDay.data : DEFAULT_ALERT_AUTOFIX_PER_DAY,
+    invalid,
+  };
+}
+
 /** Секрет для /api/cron/* (тик, снимок Earn, монитор логов). null — не задан. */
 export const getCronSecret = (
   env: Record<string, string | undefined> = process.env,
