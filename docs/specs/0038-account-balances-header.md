@@ -118,3 +118,4 @@ Real в шапке нет, хотя read-only ключ уже есть. Сбро
 | Дата | Событие |
 |---|---|
 | 2026-10-16 | ТЗ утверждено (решения 1–5), ветка `feature/0038-account-balances-header` |
+| 2026-10-16 | Реализация (developer): `fetchDemoEquity` (+ `demo-dapi`), `walletsByMarket`, `GET /api/accounts/balances` (кэш 60 с), `entities/account-balance`, «Счета» в шапке (чипы и поповер — внутри `widgets/app-header`: отдельный виджет нельзя импортировать из соседнего виджета по FSD), `resetGroupRun` / `resetGroupCapital` / `resetGroupDemo`, `POST /api/experiments/reset/group`, карточка «Сбросы по группам» (`/settings#groups`), глоссарий. `MarketBudgets` удалён (заменён чипами). Тесты: PGlite (группа, регрессия AC9), моки биржи (демо-сброс, кэш остатков). |
