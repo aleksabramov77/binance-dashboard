@@ -264,7 +264,8 @@
 **Приватные эксперименты ✅** (задача 0015, [spec 0015](specs/0015-private-strategy-catalog.md), решения
 пользователя 2026-10-15) — репозиторий публичный, но новые эксперименты лаборатории, их параметры и анализы
 `/flow lab` — в приватном репозитории `binance-dashboard-private` (клон в игнорируемой `private/`).
-Эксперимент — JSON в `private/experiments.json` (id `PS..`/`PF..`/`PC..`), в БД — командой `pnpm lab:private --prod` (без флага в Postgres не пишет);
+Эксперимент — JSON в `private/experiments.json` (id `PS..`/`PF..`/`PC..`), в БД — командой `pnpm lab:private --prod` (с [spec 0059](specs/0059-sqlite.md) прод — SQLite на VM, и запись туда из
+скриптов отказывает до задачи 25 очереди; без флага — локальная база);
 дальше он виден и торгует как любой эксперимент каталога. Шифрование в публичном репо отклонено.
 **Счета и группы активов ([spec 0016](specs/0016-glossary-ag-demo-columns.md), решение пользователя 2026-10-15)** —
 статистика собирается на трёх счетах (Paper, Demo, позже Real) и в трёх группах активов Binance — **AG** (Asset Group):
@@ -324,7 +325,8 @@ bStocks, но публичного торгового API для них не н�
 до draft PR.
 
 **Свободное место в базе** ✅ (запрос пользователя 2026-10-15, [spec 0021](specs/0021-db-space-bot.md)):
-бот отвечает владельцу на `/db` — размер базы, лимит (`DB_SIZE_LIMIT_MB`, Supabase Free — 500 МБ), свободно МБ
+бот отвечает владельцу на `/db` — размер базы, лимит (с [spec 0059](specs/0059-sqlite.md) — файл SQLite с WAL и свободное
+место диска VM; до неё `DB_SIZE_LIMIT_MB`, Supabase Free — 500 МБ), свободно МБ
 и %, самые большие таблицы. Монитор раз в 15 мин присылает одно сообщение при прохождении порога свободного места
 50/40/30/20/10/5 %. Если место освободилось (больше порога на 2 п.п.), порог срабатывает снова. Команды
 приходят через webhook Telegram (`/api/telegram/webhook`, секрет `TELEGRAM_WEBHOOK_SECRET`), бот отвечает
@@ -384,8 +386,9 @@ bStocks, но публичного торгового API для них не н�
 | `ANALYSIS_MODEL` | модель разбора (по умолчанию `anthropic/claude-haiku-5.5`) | — |
 | `AUTH_SECRET`, `AUTH_GITHUB_ID/SECRET`, `AUTH_ALLOWED_GITHUB_LOGINS` | вход через GitHub только для владельца (spec 006) | в production обязательны |
 | `CRON_SECRET` | Bearer-секрет внешнего крона `POST /api/cron/tick` | — |
-| `DATABASE_URL` | Postgres лаборатории (Supabase); пусто — локальный PGlite в `PGLITE_DIR` | — |
-| `DB_SIZE_LIMIT_MB` | лимит базы для `/db` и порогов свободного места (по умолчанию 500 — Supabase Free) | — |
+| `DATABASE_PATH` | файл базы SQLite (spec 0059): на VM `/var/lib/binance/app.db`, по умолчанию `data/app.db` | — |
+| `DATABASE_URL` | Postgres Supabase — только для `pnpm db:import-pg` и `pnpm *:supabase` до отключения Supabase; приложение не читает | — |
+| `APPS_TOKYO_HOST`, `APPS_TOKYO_SSH_USER`, `APPS_TOKYO_SSH_KEY_FILE` | SSH к VM для `pnpm db:pull` / `lab:report --prod` (локально) | — |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | бот уведомлений и чат владельца | — |
 | `TELEGRAM_WEBHOOK_SECRET` | секрет webhook бота (команды `/db`, `/help`); регистрация — `pnpm telegram:setup` | — |
 | `APP_HOST` | `vm` на своей VM (spec 0017): источник журнала `vm`, хостинг «облако»; на Vercel и Mac не задаётся | — |
@@ -498,6 +501,7 @@ bStocks, но публичного торгового API для них не н�
 | 22 | Ключ реального аккаунта в базе в зашифрованном виде (AES-GCM, решение 2026-10-15) | «Портфель» и Earn на VM | lightsail-migration | ⏭ |
 | 23 | Бэкапы SQLite: ночной `.backup` (7 дней) + снимки Lightsail | сохранность данных | lightsail-migration | ⏭ |
 | 24 | Отключение Supabase и Vercel после недели на VM — только с согласия владельца (деньги, удаление) | экономия | lightsail-migration | ⏭ |
+| 25 | Запись в прод-базу из скриптов лаборатории (`lab:apply`, `lab:private --prod`) после SQLite ([spec 0059](specs/0059-sqlite.md): сейчас отказывают с подсказкой, тумблеры — на сайте) | `/flow lab` применяет решения и заводит приватные эксперименты без ручных тумблеров | lightsail-migration | ⏭ |
 
 ## 6. Открытые вопросы
 - Таймфрейм и горизонт сделок — по умолчанию 1h/4h, удержание до 72 ч.
@@ -534,7 +538,7 @@ label `ai-approved`) → ⏸ **мержит пользователь** кома�
 **Номер задачи** (решение пользователя 2026-10-15): сквозной `NNNN` на фичи, баги, hotfix и chore; ветки
 `<тип>/NNNN-slug`, коммиты `NNNN: что сделано`; история задач — `docs/HISTORY.md` (в контекст не подключается).
 **Лаборатория как процесс** (решение пользователя 2026-10-15): разбор экспериментов и новые гипотезы — `/flow lab`
-(`.config/flows/lab.yaml`): отчёт по сделкам эпохи `pnpm lab:report` → субагент `quant` (скилл `trading-lab`) →
+(`.config/flows/lab.yaml`): отчёт по сделкам эпохи `pnpm lab:report --prod` (снимок прод-базы, spec 0059) → субагент `quant` (скилл `trading-lab`) →
 ⏸ решения → `pnpm lab:apply` только подтверждённое → карточки гипотез ⏸ → выбранные — в `private/experiments.json`
-(`pnpm lab:private --prod`) → журнал и прогоны в `private/lab/` (приватный репозиторий, задача 0025); публичный PR —
+(`pnpm lab:private --prod`; до задачи 25 очереди запись в прод отказывает) → журнал и прогоны в `private/lab/` (приватный репозиторий, задача 0025); публичный PR —
 только строка задачи; новый строительный блок ядра — `/flow feature`. Решения и критерии остановки записываются до того, как появятся данные.

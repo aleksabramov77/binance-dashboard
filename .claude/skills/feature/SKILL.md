@@ -31,7 +31,7 @@ argument-hint: <требование своими словами>
 Если Developer вернул вопросы — задай их пользователю, ответы допиши в spec, вызови снова.
 
 ## 3. Локальный сервер и Tester
-В worktree: `pnpm check && pnpm build` зелёные, затем `pnpm wt serve` — локальный сервер этого worktree (своя PGlite,
+В worktree: `pnpm check && pnpm build` зелёные, затем `pnpm wt serve` — локальный сервер этого worktree (своя SQLite,
 вход выключен, прод не трогается); адрес — из вывода.
 Вызови субагента `tester` с путём к spec, путём к worktree и адресом сервера. Свой сервер он не запускает.
 - FAIL → снова `developer` (через SendMessage тому же агенту, если доступен) с отчётом Tester → `pnpm check` →
