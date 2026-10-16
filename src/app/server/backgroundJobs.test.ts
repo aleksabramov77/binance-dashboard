@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type BackgroundJob,
   backgroundJobs,
+  createJobsState,
   type JobGate,
   type JobLog,
   runBackgroundJob,
 } from "./backgroundJobs";
-import type { BackgroundJobId } from "./backgroundSchedule";
 
 // Гейт фоновых задач VM (spec 0048) на фейках: без БД, биржи и таймеров.
 const fakeLog = (): JobLog => ({
@@ -32,7 +32,7 @@ const job = (over: Partial<BackgroundJob> = {}): BackgroundJob => ({
   ...over,
 });
 
-const running = () => new Set<BackgroundJobId>();
+const running = createJobsState;
 
 describe("runBackgroundJob", () => {
   it("все условия выполнены — задача идёт, успех пишется событием роута", async () => {
@@ -47,7 +47,7 @@ describe("runBackgroundJob", () => {
       expect.objectContaining({ job: "earn-snapshot", offers: 3 }),
     );
     expect(log.debug).not.toHaveBeenCalled();
-    expect(r.size).toBe(0);
+    expect(r.running.size).toBe(0);
   });
 
   it("quiet-задача: успех в журнал не пишется", async () => {
@@ -98,7 +98,7 @@ describe("runBackgroundJob", () => {
     );
     expect(log.info).not.toHaveBeenCalled();
     expect(log.error).not.toHaveBeenCalled();
-    expect(r.size).toBe(0);
+    expect(r.running.size).toBe(0);
   });
 
   it("прошлый запуск ещё идёт — второй пропускается, после окончания — снова идёт", async () => {
@@ -129,7 +129,7 @@ describe("runBackgroundJob", () => {
 
   it("идущая задача не блокирует другую", async () => {
     const r = running();
-    r.add("demo-mirror");
+    r.running.add("demo-mirror");
     expect(await runBackgroundJob(job(), r, gate(), fakeLog())).toBe("done");
   });
 
@@ -149,7 +149,7 @@ describe("runBackgroundJob", () => {
       expect.objectContaining({ job: "mirror-auto" }),
       boom,
     );
-    expect(r.size).toBe(0);
+    expect(r.running.size).toBe(0);
     expect(await runBackgroundJob(j, r, gate(), log)).toBe("done");
   });
 
@@ -169,6 +169,83 @@ describe("runBackgroundJob", () => {
     expect(outcome).toBe("failed");
     expect(j.run).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalledOnce();
+  });
+});
+
+describe("runBackgroundJob — строки пропуска только при смене состояния", () => {
+  it("два пропуска подряд — одна строка; снова запустилась — одна строка; новый пропуск — снова строка", async () => {
+    const j = job({ id: "demo-mirror", event: "cron.mirror", quiet: true });
+    const log = fakeLog();
+    const s = createJobsState();
+    let dbRunner: "oracle" | "supabase" = "supabase";
+    const g = gate({ dbRunner: async () => dbRunner });
+
+    expect(await runBackgroundJob(j, s, g, log)).toBe("skipped-runner");
+    expect(await runBackgroundJob(j, s, g, log)).toBe("skipped-runner");
+    expect(log.debug).toHaveBeenCalledOnce();
+    expect(log.debug).toHaveBeenLastCalledWith(
+      "cron.mirror",
+      expect.stringContaining("другой раннер"),
+      expect.objectContaining({ reason: "skipped-runner" }),
+    );
+
+    dbRunner = "oracle";
+    expect(await runBackgroundJob(j, s, g, log)).toBe("done");
+    expect(await runBackgroundJob(j, s, g, log)).toBe("done");
+    expect(log.debug).toHaveBeenCalledTimes(2);
+    expect(log.debug).toHaveBeenLastCalledWith(
+      "cron.mirror",
+      expect.stringContaining("снова выполняется"),
+      expect.anything(),
+    );
+
+    dbRunner = "supabase";
+    expect(await runBackgroundJob(j, s, g, log)).toBe("skipped-runner");
+    expect(log.debug).toHaveBeenCalledTimes(3);
+  });
+
+  it("«прошлый запуск ещё идёт» — тоже одна строка на серию", async () => {
+    const j = job();
+    const log = fakeLog();
+    const s = createJobsState();
+    s.running.add(j.id);
+    expect(await runBackgroundJob(j, s, gate(), log)).toBe("skipped-running");
+    expect(await runBackgroundJob(j, s, gate(), log)).toBe("skipped-running");
+    expect(log.debug).toHaveBeenCalledOnce();
+    expect(log.debug).toHaveBeenCalledWith(
+      "cron.earn",
+      expect.stringContaining("ещё идёт"),
+      expect.objectContaining({ reason: "skipped-running" }),
+    );
+  });
+
+  it("смена причины пропуска — новая строка", async () => {
+    const j = job();
+    const log = fakeLog();
+    const s = createJobsState();
+    await runBackgroundJob(
+      j,
+      s,
+      gate({ dbRunner: async () => "supabase" }),
+      log,
+    );
+    s.running.add(j.id);
+    await runBackgroundJob(j, s, gate(), log);
+    expect(log.debug).toHaveBeenCalledTimes(2);
+  });
+
+  it("состояние у каждой задачи своё", async () => {
+    const log = fakeLog();
+    const s = createJobsState();
+    const g = gate({ dbRunner: async () => "supabase" });
+    await runBackgroundJob(job(), s, g, log);
+    await runBackgroundJob(
+      job({ id: "mirror-auto", event: "cron.mirror_auto" }),
+      s,
+      g,
+      log,
+    );
+    expect(log.debug).toHaveBeenCalledTimes(2);
   });
 });
 

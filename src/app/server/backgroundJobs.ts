@@ -60,37 +60,57 @@ const SKIP_TEXT = {
   "skipped-running": "прошлый запуск ещё идёт",
   "skipped-runner": "задачи выполняет другой раннер",
 } as const;
+type SkipOutcome = keyof typeof SKIP_TEXT;
+
+/** Состояние задач процесса: идущие запуски и последняя причина пропуска (строка — только при её смене). */
+export interface JobsState {
+  running: Set<BackgroundJobId>;
+  skipped: Map<BackgroundJobId, SkipOutcome>;
+}
+
+export const createJobsState = (): JobsState => ({
+  running: new Set(),
+  skipped: new Map(),
+});
 
 /**
- * Один запуск задачи. Пропуск — одна запись debug (в БД не пишется); сбой — запись error с событием роута,
- * наружу не бросает: процесс и другие задачи продолжают работу. running — задачи, идущие в этом процессе.
+ * Один запуск задачи. Пропуск — запись debug (в БД не пишется) только при смене состояния: первый пропуск после
+ * старта или запуска, смена причины; снова запустилась после пропусков — одна строка. Сбой — запись error с событием
+ * роута, наружу не бросает: процесс и другие задачи продолжают работу.
  */
 export async function runBackgroundJob(
   job: BackgroundJob,
-  running: Set<BackgroundJobId>,
+  state: JobsState,
   gate: JobGate,
   logger: JobLog,
   now: () => number = Date.now,
 ): Promise<JobOutcome> {
-  const skip = (
-    outcome: keyof typeof SKIP_TEXT,
-    data?: Record<string, unknown>,
-  ) => {
-    logger.debug(job.event, `${job.id}: пропуск — ${SKIP_TEXT[outcome]}`, {
-      job: job.id,
-      ...data,
-    });
+  const skip = (outcome: SkipOutcome, data?: Record<string, unknown>) => {
+    if (state.skipped.get(job.id) !== outcome)
+      logger.debug(
+        job.event,
+        `${job.id}: пропуск — ${SKIP_TEXT[outcome]} (дальше без повторов, до смены состояния)`,
+        { job: job.id, reason: outcome, ...data },
+      );
+    state.skipped.set(job.id, outcome);
     return outcome;
   };
+  const resumed = () => {
+    if (!state.skipped.delete(job.id)) return;
+    logger.debug(job.event, `${job.id}: задача снова выполняется`, {
+      job: job.id,
+    });
+  };
   if (gate.serverless()) return skip("skipped-serverless");
-  if (running.has(job.id)) return skip("skipped-running");
-  running.add(job.id);
+  if (state.running.has(job.id)) return skip("skipped-running");
+  state.running.add(job.id);
   const started = now();
   try {
     const processRunner = gate.processRunner();
     const dbRunner = await gate.dbRunner();
     if (dbRunner !== processRunner)
       return skip("skipped-runner", { processRunner, dbRunner });
+    resumed();
     const summary = await job.run();
     if (!job.quiet)
       logger.info(job.event, `${job.id}: выполнено за ${now() - started} мс`, {
@@ -108,7 +128,7 @@ export async function runBackgroundJob(
     );
     return "failed";
   } finally {
-    running.delete(job.id);
+    state.running.delete(job.id);
   }
 }
 
@@ -156,7 +176,7 @@ const realLog: JobLog = {
 
 interface JobsProcess {
   timers: Map<BackgroundJobId, ReturnType<typeof setTimeout>>;
-  running: Set<BackgroundJobId>;
+  state: JobsState;
 }
 
 // Одни таймеры на процесс: в dev instrumentation и роуты — разные бандлы, поэтому состояние в globalThis.
@@ -164,7 +184,7 @@ const key = Symbol.for("binance-dashboard.backgroundJobs");
 const g = globalThis as typeof globalThis & { [key]?: JobsProcess };
 
 function jobsProcess(): JobsProcess {
-  g[key] ??= { timers: new Map(), running: new Set() };
+  g[key] ??= { timers: new Map(), state: createJobsState() };
   return g[key];
 }
 
@@ -175,7 +195,7 @@ function schedule(p: JobsProcess, job: BackgroundJob, after: number) {
     () => {
       // Таймер мог сработать чуть раньше цели — следующий считаем от неё, чтобы не повторить тот же слот.
       schedule(p, job, Math.max(Date.now(), target));
-      void runBackgroundJob(job, p.running, realGate, realLog);
+      void runBackgroundJob(job, p.state, realGate, realLog);
     },
     Math.max(0, target - Date.now()),
   );
