@@ -1,7 +1,7 @@
 # 0046 · Лаборатория: вся история, причина выключения и варианты эксперимента
 
 - **Тип:** feature
-- **Статус:** approved
+- **Статус:** done
 - **Раздел PRD:** §3.4 Авто-бот → «Лаборатория: вся история, причины выключения и варианты»
 - **Дата:** 2026-10-16
 
@@ -117,3 +117,4 @@
 |---|---|
 | 2026-10-16 | ТЗ утверждено пользователем |
 | 2026-10-16 | Developer, ветка `feature/0046-lab-history-variants`: миграция 0009 (идемпотентная) — `parent_id`, `variant_note`, `disabled_*`; `experimentSchema` — `parentId`/`variantNote`; период страниц (`?run=<эпоха>\|all`, `resolveScope`/`scopeTrades` в `readModel`, демо — `mirrorSummaries(scope)`), неизвестная эпоха — текущая и `missingRun`; причина выключения (`DISABLE_REASONS`, API 400/409, окно в `/settings`, бейдж `DisabledBadge`); варианты под контрольным (`arrangeVariants`, сворачивание в localStorage), блок «Вариант X от …» / «Варианты» (`diffExperimentConfig`); `lab:apply --reason/--note/--force-control`, `lab:private` с `parentId`/`variantNote` и проверкой родителя; правило лаборатории в скилле `trading-lab`, агенте `quant`, `/flow lab`. AC12 (backfill прода) — после выкатки. |
+| 2026-10-16 | PR #85. Тесты: 1 круг — 10/11 AC PASS, AC10 (README `private/`) дописан оркестратором; слияние с main (0044). Ревью: 1 круг — APPROVED (`ai-approved`), nit «ссылки контрольный ↔ вариант теряют `?run=`» исправлен; остальные nit — на будущее. AC12 (причины и связи на проде) — после выкатки |
