@@ -69,3 +69,4 @@
 |---|---|
 | 2026-10-16 | Требование пользователя; решения: тумблер в шапке и в `/settings` → Paper, напоминание — не сейчас |
 | 2026-10-16 | ТЗ утверждено |
+| 2026-10-16 | Реализация в ветке `feature/0044-engine-toggle-confirm`: модалки подтверждения в `EngineToggle` (шапка и карточка «Автоторговля» в `/settings` → Paper), без оптимистичного переключения; `GET /api/experiments/engine/exposure` (`readEngineExposure`); `setEngineEnabled` пишет `engine.toggle` (кто — `nextAuth.auth()`), Telegram — через `after()`, сбой — warn `engine.toggle.notify`. Отступление от AC7: источник в данных записи — `origin: "ui"`, а не `source` — поле `source` в `/logs` занято платформой (`local`/`vercel`) и перезаписывается при чтении. Граф импортов Edge Function `engine-tick` не изменён |
