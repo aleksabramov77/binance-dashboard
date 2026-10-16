@@ -22,6 +22,7 @@ import {
 } from "./backgroundSchedule";
 import { checkDbSpaceSafe } from "./dbSpace";
 import { runDemoMirror } from "./demoMirror";
+import { runLiveAuto } from "./liveAuto";
 import { runLogMonitor } from "./logMonitor";
 import { runMirrorAuto } from "./mirrorAuto";
 
@@ -166,9 +167,25 @@ const RUNS: Record<BackgroundJobId, BackgroundJob["run"]> = {
     await runDemoMirror();
     return undefined;
   },
+  // Следом — режимы реального счёта (spec 0053), как в роуте: сбой одной проверки не отменяет другую; сбой
+  // авто-зеркала — ошибка таймера уже после проверки реального счёта.
   "mirror-auto": async () => {
-    const r = await runMirrorAuto();
-    return { checked: r.checked, changes: r.changes.length };
+    const mirror = await runMirrorAuto().then(
+      (r) => ({ ok: true as const, r }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    const live = await runLiveAuto().then(
+      (l) => ({ checked: l.checked, changes: l.changes.length }),
+      (error: unknown) => ({
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    if (!mirror.ok) throw mirror.error;
+    return {
+      checked: mirror.r.checked,
+      changes: mirror.r.changes.length,
+      live,
+    };
   },
 };
 

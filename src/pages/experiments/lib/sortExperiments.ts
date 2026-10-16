@@ -59,8 +59,8 @@ function sortValue(e: ExperimentSummary, key: SortKey): number | null {
     case "equity":
       return s.equity;
     case "live":
-      // Сначала торгующие на реальном счёте.
-      return e.liveMirror ? 1 : 0;
+      // Сначала торгующие на реальном счёте, потом ждущие «Авто».
+      return e.liveMirror ? 2 : e.liveMirrorMode === "off" ? 0 : 1;
     case "demo":
       // Сначала торгующие на демо, среди них — по числу демо-сделок.
       return (e.demoMirror ? 1e6 : 0) + e.demo.trades;

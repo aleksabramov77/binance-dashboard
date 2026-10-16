@@ -111,6 +111,8 @@ export const spotOrderQuerySchema = z
     status: z.string(),
     executedQty: decimal,
     cummulativeQuoteQty: decimal,
+    // Цена срабатывания стопа (STOP_LOSS*); у других типов — 0.
+    stopPrice: decimal.catch(0),
   })
   .loose();
 
@@ -267,6 +269,8 @@ export const algoOrderQuerySchema = z
     actualPrice: decimal.catch(0),
     // Исполненный объём сработавшего ордера; поле есть только после исполнения — иначе 0.
     actualQty: decimal.catch(0),
+    // Цена срабатывания (стоп/тейк); нет поля — 0.
+    triggerPrice: decimal.catch(0),
   })
   .loose();
 export type AlgoOrderQuery = z.infer<typeof algoOrderQuerySchema>;

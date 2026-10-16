@@ -55,8 +55,30 @@ export const experimentsTable = pgTable("experiments", {
   liveMirror: boolean("live_mirror").notNull().default(false),
   /** Когда «Реальный счёт» последний раз включали или выключали. */
   liveMirrorSince: timestamp("live_mirror_since", { withTimezone: true }),
-  /** Кто переключил (логин GitHub; локально — «local»). */
+  /** Кто переключил (логин GitHub; локально — «local»; автомат — «автомат»). */
   liveMirrorBy: text("live_mirror_by"),
+  /**
+   * Положение переключателя «Реальный счёт» (spec 0053): `off`, `auto` (live_mirror ставит автомат по демо и порогам),
+   * `on` (ручное, автомат только подсказывает), `on_autooff` (ручное, выключается по порогам). Флаг live_mirror
+   * по-прежнему читают воркер и захват.
+   */
+  liveMirrorMode: text("live_mirror_mode")
+    .$type<"off" | "auto" | "on" | "on_autooff">()
+    .notNull()
+    .default("off"),
+  /** Порог автовыключения: убыток эксперимента с момента включения (live_mirror_since), $. */
+  liveLossLimitUsd: doublePrecision("live_loss_limit_usd")
+    .notNull()
+    .default(15),
+  /** Порог автовыключения: убыточных реальных сделок подряд. */
+  liveLossStreak: integer("live_loss_streak").notNull().default(5),
+  /** Последнее автовыключение: когда и почему (пометка у «Выкл»); ручное переключение очищает. */
+  liveAutoOffAt: timestamp("live_auto_off_at", { withTimezone: true }),
+  liveAutoOffReason: text("live_auto_off_reason"),
+  /** Последняя подсказка ручному «Вкл» (`loss` / `streak`) — без повторов, пока условие держится; null — нет. */
+  liveMirrorAdvice: text("live_mirror_advice").$type<"loss" | "streak">(),
+  /** Последняя проверка «Авто» (liveAutoSnapshotSchema); null — ещё не проверял. */
+  liveMirrorAuto: jsonb("live_mirror_auto").$type<Json>(),
   /** Сброс демо-статистики эксперимента: в учёт идут зеркала, созданные не раньше. */
   demoResetAt: timestamp("demo_reset_at", { withTimezone: true }),
   /**
