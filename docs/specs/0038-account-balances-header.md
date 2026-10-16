@@ -1,7 +1,7 @@
 # 0038 · Остатки Paper | Demo | Real по группам в шапке и сбросы по группе («эра группы»)
 
 - **Тип:** feature (задача B из плана [spec 0016](0016-glossary-ag-demo-columns.md); D часть 1 — [0023](0023-coinm-asset-group.md))
-- **Статус:** approved
+- **Статус:** done
 - **Раздел PRD:** §3.4 Авто-бот → «Счета и группы активов»; «Очередь задач», строка 10
 - **Дата:** 2026-10-16
 
@@ -120,3 +120,5 @@ Real в шапке нет, хотя read-only ключ уже есть. Сбро
 | 2026-10-16 | ТЗ утверждено (решения 1–5), ветка `feature/0038-account-balances-header` |
 | 2026-10-16 | Реализация (developer): `fetchDemoEquity` (+ `demo-dapi`), `walletsByMarket`, `GET /api/accounts/balances` (кэш 60 с), `entities/account-balance`, «Счета» в шапке (чипы и поповер — внутри `widgets/app-header`: отдельный виджет нельзя импортировать из соседнего виджета по FSD), `resetGroupRun` / `resetGroupCapital` / `resetGroupDemo`, `POST /api/experiments/reset/group`, карточка «Сбросы по группам» (`/settings#groups`), глоссарий. `MarketBudgets` удалён (заменён чипами). Тесты: PGlite (группа, регрессия AC9), моки биржи (демо-сброс, кэш остатков). |
 | 2026-10-16 | Отклонения от ТЗ: (1) «Счета» — внутри слайса `widgets/app-header` (`ui/AccountBalances.tsx`, `lib/describe.ts`), а не отдельный `widgets/account-balances`: виджет не может импортировать соседний виджет (FSD, Steiger); (2) Demo USDⓈ-M — `/fapi/v3/account` (walletBalance + unrealizedProfit), а не `/fapi/v3/balance`: у него `crossUnPnl` без изолированных позиций, а зеркало открывает изолированные; (3) `fetchDemoEquity(creds, price)` — цену передаёт композиция. Решение по нагрузке (AC5): оценка Demo в $ берёт цены spot из общего кэша `src/app/server/tickerPrices.ts` (TTL 20 с, тот же, что у бюджетов лаборатории) — шапка не делает второй `ticker/price` к api.binance.com. |
+| 2026-10-16 | Tester: PASS 10/10 (скриншоты `0038-account-balances-header/screens/`); пользователь подтвердил приёмку. PR #75 |
+| 2026-10-16 | Ревью: круг 1 — CHANGES REQUESTED (конфликт с main; закрытия чужой группы в `resetGroupRun`; текст бюджета) → исправлено, tester повторно PASS 10/10; круг 2 — только конфликт с main (#76) → влит; круг 3 — APPROVED, `ai-approved`. Сессия lab-experiment-review: эпоха 2 не стартовала, возражений против мержа до окна нет (глобальные сбросы не изменены). |
