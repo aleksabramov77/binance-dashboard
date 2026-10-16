@@ -1,6 +1,13 @@
-# Деплой: Supabase + Vercel (основной вариант)
+# Деплой: Supabase + Vercel (до переключения на VM)
 
-**Сейчас:** https://binance-dashboard-gold.vercel.app — Vercel-проект `binance-dashboard` (команда `aleksabramov77s-projects`), функции в `hnd1`.
+> **После переключения прода на VM (spec 0055)** Supabase — только база Postgres: тик движка (Edge Function
+> `engine-tick`) и все задания pg_cron (`engine-tick-every-minute`, `earn-snapshot`, `log-monitor`, `demo-mirror`,
+> `mirror-auto`) сняты, `engine_state.runner = oracle`, тик и фоновые задачи выполняет VM
+> ([deploy-lightsail.md](deploy-lightsail.md)). Vercel новых выкаток не получает (`vercel.json` → `"main": false`) и неделю
+> остаётся резервом с последней выкаткой и той же базой; бот Telegram отвечает с VM. Разделы ниже описывают прежнюю схему
+> и нужны для отката — [«Откат»](deploy-lightsail.md#откат).
+
+**Было:** https://binance-dashboard-gold.vercel.app — Vercel-проект `binance-dashboard` (команда `aleksabramov77s-projects`), функции в `hnd1`.
 Прод-секреты (`AUTH_SECRET`, `CRON_SECRET`, OAuth prod-App) — копия на Mac владельца: `~/.config/vercel/binance-dashboard-prod.env` (chmod 600); токен Vercel — `~/.config/vercel/claude-mac.token`.
 
 Решение владельца 2026-10-10: основной хостинг — Supabase + Vercel. С 2026-10-15 идёт переезд на свою VM AWS Lightsail ([deploy-lightsail.md](deploy-lightsail.md), spec 0017); роль раннера `oracle` = «свой постоянный процесс» (Mac или VM).
@@ -13,12 +20,12 @@
 | Интерфейс | Vercel Hobby, регион функций `hnd1` (Tokyo, `vercel.json`) | страницы и API по запросу; фоновых задач нет |
 | Вход | GitHub OAuth App → Auth.js (spec 006) | пускает только `aleksabramov77` |
 
-Автодеплой: Vercel сам собирает только push в `main` (production). Превью веток задач выключены в `vercel.json`
-(`git.deploymentEnabled`: `"**": false`, `"main": true`) — бесплатный тариф упирался в дневной лимит сборок
-(задача 0034, 2026-10-16); задачу проверяют на локальном сервере worktree, код PR — GitHub Actions.
+Автодеплой: выключен с переключения на VM (spec 0055, `vercel.json` → `git.deploymentEnabled`: `"**": false`,
+`"main": false`); до него Vercel собирал только push в `main`, превью веток были выключены (задача 0034, 2026-10-16).
+Выкатку прода из `main` делает `.github/workflows/deploy.yml` на VM после зелёного CI.
 
-**Ключи Binance в облако не кладём:** ни ключ реального аккаунта, ни demo-ключи (demo — только по
-отдельному решению владельца). На Vercel блоки «Портфель» и «Сделка в демо» показывают «не настроено».
+**Ключи Binance на Vercel не кладём:** ни ключ реального аккаунта, ни demo-ключи. На Vercel блоки «Портфель» и
+«Сделка в демо» показывают «не настроено». Demo-ключи — только на VM (решение владельца 2026-10-17, spec 0055).
 
 ## Кто что делает
 - **Владелец (iPhone)** — нажатия в Vercel и GitHub: шаги 2, 3 и 5.

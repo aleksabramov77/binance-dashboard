@@ -234,7 +234,12 @@
 **Лаборатория экспериментов ✅** (запрос пользователя 2026-10-10, [spec 003](specs/003-experiments-lab.md)) —
 40 paper-экспериментов (20 Spot + 20 Futures) со своими бюджетами и учётом, статистика по эксперименту/
 рынку/монете/направлению, бюджет $10 000 на каждый эксперимент, сделки по $50 (решение 2026-10-10, раньше — риск 0,5%), сброс капиталов, БД Postgres (Supabase),
-запуск 24/7 на **Supabase (Tokyo: БД + тик в Edge Function) + Vercel (интерфейс)** — основной вариант до переезда на свою VM AWS Lightsail `apps-tokyo` (Tokyo; решение 2026-10-15, [spec 0017](specs/0017-lightsail-vm.md), [deploy-lightsail.md](ai/deploy-lightsail.md)) ([spec 007b](specs/007b-supabase-hosting.md)); вход только через GitHub. Решения пользователя: paper +
+запуск 24/7 — на своей VM AWS Lightsail `apps-tokyo` (Tokyo; решение 2026-10-15, [spec 0017](specs/0017-lightsail-vm.md),
+[deploy-lightsail.md](ai/deploy-lightsail.md)): с переключения ([spec 0055](specs/0055-cutover-to-vm.md)) VM — сайт, API,
+тик движка, фоновые задачи, бот Telegram и демо-зеркало (demo-ключи на VM — решение владельца 2026-10-17), выкатка VM после
+зелёного CI на `main`; Supabase — только база Postgres (pg_cron и Edge Function выключены), Vercel — резерв без выкаток
+на неделю. До этого — **Supabase (Tokyo: БД + тик в Edge Function) + Vercel (интерфейс)** ([spec 007b](specs/007b-supabase-hosting.md));
+откат — runbook в deploy-lightsail.md. Вход только через GitHub. Решения пользователя: paper +
 лучшие в демо; ключ реального аккаунта на сервер не кладём.
 Сброс тестовых капиталов (`/settings`, задача 3d) — новая эпоха `runs`: открытые сделки закрываются по
 последней цене (нет цены — по цене входа, PnL 0, пометка `resetWithoutPrice`), старые сделки остаются

@@ -2,8 +2,10 @@
 
 Решение владельца 2026-10-15: прод переезжает с Vercel + Supabase на свою VM ([spec 0017](../specs/0017-lightsail-vm.md),
 план — шаги 0–6). Причины: свой IP, поэтому весь лимит Binance только наш (14.10 Binance банил общий IP Vercel, spec 0014);
-постоянный процесс; дешевле Supabase Pro. До шага «переключение» прод остаётся на Vercel + Supabase
-([deploy-supabase.md](deploy-supabase.md)), VM работает рядом с той же базой, тик на ней — no-op.
+постоянный процесс; дешевле Supabase Pro. С шага «переключение» ([spec 0055](../specs/0055-cutover-to-vm.md), раздел
+[«Переключение прода на VM»](#переключение-прода-на-vm)) прод — VM: сайт, API, тик движка, фоновые задачи и бот Telegram.
+Supabase — только база Postgres ([deploy-supabase.md](deploy-supabase.md)); Vercel новых выкаток не получает и неделю
+остаётся резервом с той же базой (тик там не идёт). До переключения VM работала рядом с той же базой, тик на ней — no-op.
 
 Репозиторий публичный: IP VM, ключи и секреты сюда не пишем. Они в секретах GitHub Actions и в
 `/etc/<проект>/app.env` на VM. Ниже `<ip>` — static IP инстанса (Lightsail → Networking).
@@ -15,9 +17,9 @@
 | VM | Lightsail `apps-tokyo`: Tokyo, Ubuntu 24.04, $5 (512 МБ, 2 vCPU, 20 ГБ), static IP `apps-tokyo-ip`, порты 22/80/443, ежедневные снимки (00:00 UTC) |
 | Общая настройка | `scripts/server/bootstrap.sh`: пользователи, Node 22, Caddy, sqlite3, swap 2 ГБ, unattended-upgrades, fail2ban, SSH только по ключам |
 | Проекты | `scripts/server/add-project.sh`: свой Linux-пользователь, `/srv/<проект>/app` (код), `/var/lib/<проект>` (данные), `/etc/<проект>/app.env` (секреты, 640), `<проект>.service` с `MemoryMax`, сайт `/etc/caddy/sites/<проект>.caddy` |
-| binance | сайт `https://binance.<ip>.sslip.io` → 127.0.0.1:5000, `MemoryMax=300M` |
-| binance-live | фоновый `live-worker.mjs` эпика «Реальные деньги» (spec 0047): без порта и Caddy, `MemoryMax=128M` |
-| Выкатка | `.github/workflows/deploy.yml` (вручную, с выбором ветки): `next build` (`output: "standalone"`) в CI → rsync бандла под `deploy` → `systemctl restart` → проверка ответа |
+| binance | сайт `https://binance.<ip>.sslip.io` → 127.0.0.1:5000, `MemoryMax=300M`, `--stop-timeout 30` |
+| binance-live | фоновый `live-worker.mjs` эпика «Реальные деньги» (spec 0047): без порта и Caddy, `MemoryMax=128M`, `--stop-timeout 120` |
+| Выкатка | `.github/workflows/deploy.yml`: сама после зелёного CI на `main` (`workflow_run`, коммит, который проверил CI) и вручную с выбором ветки или коммита. `next build` (`output: "standalone"`) в CI → rsync бандла под `deploy` → `systemctl restart` → проверка ответа. Vercel из `main` не выкатывается (`vercel.json` → `git.deploymentEnabled`, spec 0055) |
 
 Пользователи VM:
 - `claude` — администратор (sudo), через него работает AI, ключ `~/.ssh/lightsail_apps_tokyo` на Mac владельца;
@@ -32,19 +34,29 @@
 Переменные `binance` (`/etc/binance/app.env`): `APP_HOST=vm` (источник журнала `vm`, хостинг «облако»),
 `ENGINE_RUNNER=oracle` (роль «свой постоянный процесс»), `AUTH_URL`, `AUTH_GITHUB_ID/SECRET` (отдельное OAuth App под
 адрес VM), `AUTH_SECRET`, `AUTH_ALLOWED_GITHUB_LOGINS`, `DATABASE_URL`, `CRON_SECRET`, `OPENROUTER_API_KEY`,
-`ANALYSIS_MODEL`, `TELEGRAM_*`. Demo-ключей и ключа реального аккаунта Binance на VM нет (решения владельца 2026-10-15;
-ключ реального аккаунта позже — в базе в зашифрованном виде).
+`ANALYSIS_MODEL`, `TELEGRAM_*` (в т.ч. `TELEGRAM_WEBHOOK_SECRET` — тот же, что на Vercel), `LOG_DIR=/var/lib/binance/logs`
+(файловый журнал `app-YYYY-MM-DD.jsonl` с debug: каталог кода только для чтения, писать можно только в `/var/lib/binance`;
+без `LOG_DIR` файл не пишется), с переключения — `BINANCE_DEMO_API_KEY` / `BINANCE_DEMO_API_SECRET` (демо-зеркало,
+решение владельца 2026-10-17). Ключа реального аккаунта Binance на VM нет (решение владельца 2026-10-15; позже — в базе
+в зашифрованном виде); «Портфель» и сложные продукты Earn на VM показывают «ключ не настроен».
+
+Остановка сервиса: `add-project.sh --stop-timeout <сек>` задаёт в unit `KillSignal=SIGTERM` и `TimeoutStopSec=<сек>` —
+сколько systemd ждёт выхода после SIGTERM до SIGKILL (без параметра — 90 с по умолчанию). Значение — с запасом над
+замеренным временем остановки: `binance` — 30 (тик и прогон зеркала успевают закончиться), `binance-live` — 120 (воркер
+дожидается ответа биржи по открытым заявкам, просьба сессии 0047). Замер: `time sudo systemctl stop binance` и
+`sudo journalctl -u binance -n 20 --no-pager | grep -E "stop-sigterm|SIGKILL"` — строк быть не должно. Повторный
+`add-project.sh` перезаписывает unit и перезапускает сервис, секреты и данные не трогает.
 
 ## Фоновые задачи
 
 Кто и когда запускает (spec 0048):
 
-| Задача | Расписание (UTC) | Пока `engine_state.runner = supabase` | После переключения (`runner = oracle`, задача 0049) |
+| Задача | Расписание (UTC) | До переключения (`engine_state.runner = supabase`) | После переключения (`runner = oracle`, spec 0055) |
 |---|---|---|---|
 | Тик лаборатории | каждую минуту, +5 с | Edge Function Supabase (pg_cron) | таймер VM (`experimentEngine.ts`) |
 | Снимок Earn | `0 3,15 * * *` | pg_cron → Vercel `/api/cron/earn-snapshot` | таймер VM |
 | Монитор журнала и места в базе | `*/15 * * * *` | pg_cron → Vercel `/api/cron/log-monitor` | таймер VM |
-| Демо-зеркало | `* * * * *`, +20 с | pg_cron → Vercel `/api/cron/demo-mirror` | таймер VM (без demo-ключей отвечает «не настроено») |
+| Демо-зеркало | `* * * * *`, +20 с | pg_cron → Vercel `/api/cron/demo-mirror` | таймер VM (demo-ключи в `/etc/binance/app.env`) |
 | Авто-зеркало | `0 7 * * *` | pg_cron → Vercel `/api/cron/mirror-auto` | таймер VM |
 
 Таймеры (`src/app/server/backgroundJobs.ts`) стартуют вместе с сервером только при `APP_HOST=vm` и перед каждым
@@ -54,10 +66,13 @@
 раннер …`; демо-зеркало — в первую минуту, монитор — в ближайшую четверть часа, Earn и авто-зеркало — в своё время),
 дальше пропуски молча. Когда задача снова выполняется — одна строка `<задача>: задача снова выполняется`; смена причины
 пропуска (например, «прошлый запуск ещё идёт») — новая строка. В журнале БД записей этих задач с `source = vm` нет.
+Не удалось прочитать `engine_state.runner` (БД недоступна) — отдельный пропуск «раннер неизвестен»: одна запись `warn`
+на серию (`<задача>: пропуск — раннер неизвестен …`, с текстом ошибки), не `error` каждую минуту — монитор считает
+всплески только по `error` и тревогу на это не шлёт. БД вернулась — строка «задача снова выполняется».
 Проверка после выкатки:
 `ssh claude@<ip> 'sudo journalctl -u binance --since "-5 min" --no-pager | grep -E "jobs.start|пропуск"'`.
-При переключении задания pg_cron нужно выключить (0049): после смены runner Vercel-роуты ещё работают, а таймеры VM
-уже выполняют задачи.
+При переключении задания pg_cron снимаются той же серией, что и смена runner (spec 0055): роуты `/api/cron/*` на Vercel
+runner не проверяют, и без снятия заданий задачи выполнялись бы дважды.
 
 ## Шаги владельца (MacBook)
 
@@ -87,12 +102,78 @@ Homepage `https://binance.<ip>.sslip.io`, callback `https://binance.<ip>.sslip.i
 
 | Задача | Команда |
 |---|---|
+| Выкатить `main` | само после зелёного CI на `main`; повторить — `gh workflow run deploy.yml -f ref=main` |
 | Выкатить ветку | `gh workflow run deploy.yml -f ref=<ветка>` (или Actions → Deploy → Run workflow) |
 | Журнал сервиса | `ssh claude@<ip> 'sudo journalctl -u binance -n 100 --no-pager'` |
 | Рестарт | `ssh claude@<ip> 'sudo systemctl restart binance'` |
 | Секреты | `ssh claude@<ip> 'sudoedit /etc/binance/app.env'` → рестарт |
-| Новый проект (сайт) | `sudo bash add-project.sh <имя> --port <порт>` → `https://<имя>.<ip>.sslip.io` |
-| Новый фоновый сервис | `sudo bash add-project.sh <имя> --no-web --exec <файл> --memory 128M --heap 96` |
+| Новый проект (сайт) | `sudo bash add-project.sh <имя> --port <порт> [--stop-timeout <сек>]` → `https://<имя>.<ip>.sslip.io` |
+| Новый фоновый сервис | `sudo bash add-project.sh <имя> --no-web --exec <файл> --memory 128M --heap 96 [--stop-timeout <сек>]` |
+| Таймаут остановки binance | `sudo bash ~claude/server-scripts/add-project.sh binance --port 5000 --stop-timeout 30` (скрипт на VM — обновить копию из `scripts/server/`) |
 | Повторить общую настройку | `sudo CLAUDE_KEY=… DEPLOY_KEY=… [OWNER_KEY=…] bash bootstrap.sh` (повторный запуск сам держит `ubuntu` закрытым) |
 
 Скрипты лежат в `scripts/server/`; на VM их копия — `~claude/server-scripts/`.
+
+## Переключение прода на VM
+
+Spec 0055. Выполняет Claude после мержа PR 0055 и успешной автовыкатки VM из CI (Actions → Deploy по `workflow_run`).
+Пауза торговли ≈ 1 мин. Команды `pnpm *:supabase` и `telegram:setup` — на Mac из основного checkout (`.env.local`:
+`DATABASE_URL`, `TELEGRAM_*`); `ssh` — под `claude`. Значения секретов не выводить.
+
+1. **Таймаут остановки и журнал.** Обновить копию скриптов на VM (`scp scripts/server/add-project.sh claude@<ip>:server-scripts/`)
+   и применить таймаут: `ssh claude@<ip> 'sudo bash server-scripts/add-project.sh binance --port 5000 --stop-timeout 30'`
+   (значение уточняется замером, см. «Остановка сервиса» выше). В `/etc/binance/app.env` (`sudoedit`) добавить
+   `LOG_DIR=/var/lib/binance/logs`.
+2. **Demo-ключи.** В тот же `/etc/binance/app.env` — `BINANCE_DEMO_API_KEY=…` и `BINANCE_DEMO_API_SECRET=…` (значения из
+   `.env.local` владельца; не печатать, не передавать через аргументы командной строки — `sudoedit` или
+   `ssh … 'sudo tee -a /etc/binance/app.env >/dev/null' < файл`). Права файла остаются `640 root:binance`:
+   `ssh claude@<ip> 'sudo stat -c "%a %U:%G" /etc/binance/app.env'` → `640 root:binance`.
+3. **Рестарт VM-сервиса:** `ssh claude@<ip> 'sudo systemctl restart binance'`; ответ —
+   `curl -s -o /dev/null -w '%{http_code}' https://binance.<ip>.sslip.io/` (2xx–3xx).
+4. **Смена раннера и снятие заданий pg_cron — одной серией** (окно между ними — секунды, иначе задачи выполнятся дважды
+   или ни разу):
+   ```sh
+   pnpm engine:supabase runner oracle && \
+   pnpm engine:supabase cron-remove && \
+   pnpm earn:supabase cron-remove && \
+   pnpm monitor:supabase cron-remove && \
+   pnpm mirror:supabase cron-remove && \
+   pnpm mirror:supabase cron-remove-auto
+   ```
+   `runner oracle` ждёт конца текущего тика. Edge Function `engine-tick` при `runner = oracle` — no-op, её задание
+   (`engine-tick-every-minute`) тоже снимается.
+5. **Бот Telegram на VM:** `SITE_URL=https://binance.<ip>.sslip.io pnpm telegram:setup` (webhook
+   `/api/telegram/webhook` с `TELEGRAM_WEBHOOK_SECRET` и меню команд).
+
+Проверки (через 2–3 мин):
+- `pnpm engine:supabase status` — `runner = oracle`, последний тик свежий (раз в минуту), заданий pg_cron нет;
+- `pnpm mirror:supabase status` — заданий `demo-mirror` и `mirror-auto` нет; в `cron.job` Supabase нет активных заданий;
+- `/logs` на сайте VM — записи `source = vm`: тик, сделки, прогон демо-зеркала без ошибок;
+- `ssh claude@<ip> 'sudo journalctl -u binance --since "-5 min" --no-pager | grep -E "jobs.start|пропуск|снова"'` —
+  пропусков «другой раннер» и «раннер неизвестен» нет;
+- `ssh claude@<ip> 'sudo ls -l /var/lib/binance/logs'` — файл журнала за сегодня растёт;
+- `/db` в Telegram отвечает; монитор (ближайшая четверть часа) не шлёт ложных тревог;
+- `https://binance.<ip>.sslip.io` открывается со входом через GitHub.
+
+## Откат
+
+Если после переключения что-то не так — вернуть прод на Vercel + Supabase (база та же, данные не теряются):
+
+1. Одной серией:
+   ```sh
+   pnpm engine:supabase runner supabase && \
+   pnpm engine:supabase cron-install && \
+   pnpm earn:supabase cron-install && \
+   pnpm monitor:supabase cron-install && \
+   pnpm mirror:supabase cron-install && \
+   pnpm mirror:supabase cron-install-auto
+   ```
+   Задания pg_cron по умолчанию вызывают роуты Vercel (`https://binance-dashboard-gold.vercel.app`); таймеры VM
+   при `runner = supabase` пропускают работу сами.
+2. Бот Telegram — обратно на Vercel: `pnpm telegram:setup` (без `SITE_URL` — адрес Vercel).
+3. Если нужна выкатка нового кода на Vercel — PR, который возвращает в `vercel.json` `"main": true`; автовыкатку VM из
+   `deploy.yml` при этом можно оставить (VM с `runner = supabase` ничего не исполняет).
+4. Проверки: `pnpm engine:supabase status` (раннер `supabase`, задание активно, тики идут), `pnpm mirror:supabase status`,
+   `/db` в Telegram, `/logs` — свежие тики идут с Supabase (Edge Function), задачи по расписанию — с Vercel.
+
+Demo-ключи на VM при откате можно оставить: при `runner = supabase` VM в демо не торгует.

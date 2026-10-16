@@ -69,3 +69,4 @@
 |---|---|
 | 2026-10-17 | ТЗ заведено (уход с Vercel, шаг 2); demo-ключи на VM — решение владельца |
 | 2026-10-17 | ТЗ утверждено владельцем |
+| 2026-10-17 | Код (ветка `feature/0055-cutover-to-vm`): автовыкатка VM по `workflow_run` после CI на `main`, `vercel.json` `main: false` (AC1); «раннер неизвестен» — `warn` раз на серию, `ms` один раз, `scheduleJobs` при старте, тесты (AC2); `add-project.sh --stop-timeout`, `LOG_DIR` в `.env.example` (AC3); runbook переключения и отката, PRD, architecture, deploy-supabase (AC4). Переключение (AC5–AC6) — после мержа |
