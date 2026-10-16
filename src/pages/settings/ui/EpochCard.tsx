@@ -7,15 +7,15 @@ import {
   useResetCapitals,
 } from "@/entities/experiment";
 import { formatDateTime, formatUsd } from "@/shared/lib";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/shared/ui/card";
-import { Input } from "@/shared/ui/input";
+} from "@/shared/ui/Card";
+import { Input } from "@/shared/ui/Input";
 
 /** Текущая эпоха и «Сбросить все Paper» (новая эпоха) с подтверждением вводом слова. */
 export function EpochCard({ settings }: { settings: LabSettings }) {

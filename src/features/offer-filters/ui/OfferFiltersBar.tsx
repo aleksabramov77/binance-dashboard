@@ -1,9 +1,9 @@
 "use client";
 
 import { useId } from "react";
-import { Input } from "@/shared/ui/input";
-import { Switch } from "@/shared/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+import { Input } from "@/shared/ui/Input";
+import { Switch } from "@/shared/ui/Switch";
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
 import {
   OFFER_TYPES,
   type OfferTypeFilter,

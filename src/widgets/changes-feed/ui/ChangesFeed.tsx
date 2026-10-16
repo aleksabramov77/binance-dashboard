@@ -4,8 +4,8 @@ import {
   TierSummary,
 } from "@/entities/earn-offer";
 import { formatDateTime, formatPercent, formatPpDelta } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Badge } from "@/shared/ui/Badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 
 const MAX_ITEMS = 60;
 

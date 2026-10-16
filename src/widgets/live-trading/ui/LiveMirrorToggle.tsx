@@ -17,7 +17,7 @@ import {
   useLiveAccount,
 } from "@/entities/live-account";
 import { cn, formatDateTime } from "@/shared/lib";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import {
   Dialog,
   DialogContent,
@@ -25,8 +25,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/shared/ui/dialog";
-import { Input } from "@/shared/ui/input";
+} from "@/shared/ui/Dialog";
+import { Input } from "@/shared/ui/Input";
 import { dailyLimitNote, keyBlockReason, LIMIT_LINES } from "../lib/describe";
 import { LIVE_STOP_HREF } from "./LiveTradingStrip";
 

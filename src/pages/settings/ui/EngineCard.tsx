@@ -7,7 +7,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/shared/ui/card";
+} from "@/shared/ui/Card";
 
 /** Тумблер «Автоторговля» (движок лаборатории) с пояснением — тот же, что в шапке (spec 0044). */
 export function EngineCard() {

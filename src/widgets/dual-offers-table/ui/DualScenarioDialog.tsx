@@ -18,7 +18,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/shared/ui/dialog";
+} from "@/shared/ui/Dialog";
 
 const money = (amount: number, asset: string) =>
   `${formatAmount(amount)} ${asset}`;

@@ -1,7 +1,7 @@
 import { type Holding, holdingValueUsd, type Wallet } from "@/entities/holding";
 import type { GroupPlan } from "@/features/portfolio-advice";
 import { formatPercent, formatUsd } from "@/shared/lib";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 
 interface PortfolioSummaryProps {
   holdings: Holding[];

@@ -6,7 +6,7 @@ import {
   experimentsQueryKey,
   useSetExperimentEnabled,
 } from "@/entities/experiment";
-import { Switch } from "@/shared/ui/switch";
+import { Switch } from "@/shared/ui/Switch";
 import { DisableExperimentDialog } from "./DisableExperimentDialog";
 
 /**

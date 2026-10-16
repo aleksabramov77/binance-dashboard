@@ -31,8 +31,8 @@ import {
   type SortHeadProps,
   useTableSort,
 } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { SortableHead } from "@/shared/ui/sortable-head";
+import { Badge } from "@/shared/ui/Badge";
+import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
   TableBody,
@@ -40,8 +40,8 @@ import {
   TableFrame,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+} from "@/shared/ui/Table";
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
 import { LiveMirrorToggle, LiveTradingStrip } from "@/widgets/live-trading";
 import {
   arrangeVariants,

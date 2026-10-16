@@ -14,8 +14,8 @@ import {
   type TradeResult,
 } from "@/entities/trade";
 import { cn, formatUsd } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { Button } from "@/shared/ui/button";
+import { Badge } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
 import {
   Dialog,
   DialogContent,
@@ -24,8 +24,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/shared/ui/dialog";
-import { Input } from "@/shared/ui/input";
+} from "@/shared/ui/Dialog";
+import { Input } from "@/shared/ui/Input";
 import { usePlaceTrade } from "../api/usePlaceTrade";
 import { rescaleQuantity } from "../lib/rescaleQuantity";
 

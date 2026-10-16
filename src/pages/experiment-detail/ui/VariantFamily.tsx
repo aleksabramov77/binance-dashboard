@@ -15,7 +15,7 @@ import {
   pnlTone,
 } from "@/entities/experiment";
 import { cn } from "@/shared/lib";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 import {
   Table,
   TableBody,
@@ -23,7 +23,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
 
 // Контрольный и варианты на странице эксперимента (spec 0046, AC9): у варианта — что изменено, отличия настроек и
 // метрики рядом с контрольным; у контрольного — список вариантов с теми же метриками. Период — как у страницы.

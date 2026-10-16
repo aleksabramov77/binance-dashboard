@@ -1,7 +1,7 @@
 "use client";
 
 import { useLiveAccount, useLiveHalt } from "@/entities/live-account";
-import { ConfirmAction } from "@/shared/ui/confirm-action";
+import { ConfirmAction } from "@/shared/ui/ConfirmAction";
 
 /**
  * Аварийный стоп реального счёта (spec 0049, AC6): «Стоп входов» (или «Возобновить», пока стоп включён) и «Закрыть

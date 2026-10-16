@@ -1,8 +1,8 @@
 "use client";
 
 import { cn, formatDateTime } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { Badge } from "@/shared/ui/Badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/Popover";
 import { DISABLE_REASONS, type DisabledInfo } from "../model/disable";
 
 /** Текст подсказки: категория, текст и дата выключения. */

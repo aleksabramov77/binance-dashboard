@@ -2,7 +2,7 @@
 
 import type * as React from "react";
 import { useState } from "react";
-import { Button } from "./button";
+import { Button } from "../Button";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "./dialog";
+} from "../Dialog";
 
 /**
  * Кнопка действия с подтверждением в модалке. onConfirm получает close — вызвать после успеха.

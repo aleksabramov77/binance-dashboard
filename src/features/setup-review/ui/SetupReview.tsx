@@ -3,7 +3,7 @@
 import { Sparkles } from "lucide-react";
 import type { Setup, SetupAnalysis } from "@/entities/market-signal";
 import { cn } from "@/shared/lib";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import { AnalysisRequestError, useAnalyzeSetup } from "../api/useAnalyzeSetup";
 
 const VERDICT: Record<

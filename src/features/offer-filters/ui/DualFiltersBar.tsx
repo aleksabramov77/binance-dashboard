@@ -1,8 +1,8 @@
 "use client";
 
 import { useId } from "react";
-import { Input } from "@/shared/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+import { Input } from "@/shared/ui/Input";
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
 import {
   DUAL_SIDE_FILTERS,
   type DualSideFilter,

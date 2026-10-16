@@ -2,7 +2,7 @@
 
 import { useId } from "react";
 import { formatUsd } from "@/shared/lib";
-import { Input } from "@/shared/ui/input";
+import { Input } from "@/shared/ui/Input";
 import { MAX_LEVERAGE } from "../lib/sizePosition";
 import { MAX_RISK_PCT, useRiskSettings } from "../model/useRiskSettings";
 

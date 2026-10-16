@@ -5,7 +5,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import type * as React from "react";
 import { cn } from "@/shared/lib/utils";
 
-import { Button } from "@/shared/ui/button";
+import { Button } from "../Button";
 
 function Dialog({
   ...props
@@ -51,12 +51,15 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  container,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
+  /** Куда рендерить модалку; по умолчанию — в body. Сетка состояний в Storybook кладёт её в свою ячейку. */
+  container?: HTMLElement | null;
 }) {
   return (
-    <DialogPortal data-slot="dialog-portal">
+    <DialogPortal data-slot="dialog-portal" container={container}>
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
