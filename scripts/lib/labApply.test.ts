@@ -2,9 +2,27 @@ import { describe, expect, it } from "vitest";
 import { diffApply, planApply, renderApplyMarkdown } from "./labApply";
 
 const current = [
-  { id: "F17", name: "Скальп", enabled: true, demoMirror: false },
-  { id: "F11", name: "MACD", enabled: true, demoMirror: false },
-  { id: "S05", name: "EMA трейлинг", enabled: false, demoMirror: false },
+  {
+    id: "F17",
+    name: "Скальп",
+    enabled: true,
+    demoMirror: false,
+    demoMirrorMode: "auto" as const,
+  },
+  {
+    id: "F11",
+    name: "MACD",
+    enabled: true,
+    demoMirror: false,
+    demoMirrorMode: "auto" as const,
+  },
+  {
+    id: "S05",
+    name: "EMA трейлинг",
+    enabled: false,
+    demoMirror: true,
+    demoMirrorMode: "on" as const,
+  },
 ];
 
 describe("planApply", () => {
@@ -16,6 +34,7 @@ describe("planApply", () => {
       enable: [],
       mirrorOn: ["F11"],
       mirrorOff: [],
+      mirrorAuto: [],
       dryRun: false,
       local: false,
       out: undefined,
@@ -47,6 +66,9 @@ describe("planApply", () => {
     expect(() => planApply({ disable: ["F17"], enable: ["F17"] })).toThrow(
       /противоречие/,
     );
+    expect(() =>
+      planApply({ "mirror-auto": ["F17"], "mirror-off": ["f17"] }),
+    ).toThrow(/два положения демо-зеркала/);
   });
 });
 
@@ -55,7 +77,38 @@ describe("diffApply", () => {
     const plan = planApply({ disable: ["F17", "S05"], "mirror-on": ["F11"] });
     expect(diffApply(plan, current)).toEqual([
       { id: "F17", name: "Скальп", field: "enabled", from: true, to: false },
-      { id: "F11", name: "MACD", field: "demoMirror", from: false, to: true },
+      {
+        id: "F11",
+        name: "MACD",
+        field: "demoMirrorMode",
+        from: "auto",
+        to: "on",
+        demoMirror: false,
+      },
+    ]);
+  });
+  it("положение зеркала (spec 0043): ручное «Выкл», «Авто»; то же положение — пропуск", () => {
+    const plan = planApply({
+      "mirror-off": ["F17"],
+      "mirror-auto": ["S05", "F11"],
+    });
+    expect(diffApply(plan, current)).toEqual([
+      {
+        id: "F17",
+        name: "Скальп",
+        field: "demoMirrorMode",
+        from: "auto",
+        to: "off",
+        demoMirror: false,
+      },
+      {
+        id: "S05",
+        name: "EMA трейлинг",
+        field: "demoMirrorMode",
+        from: "on",
+        to: "auto",
+        demoMirror: true,
+      },
     ]);
   });
   it("неизвестный id — ошибка до записи", () => {
@@ -76,6 +129,27 @@ describe("renderApplyMarkdown", () => {
     expect(md).toContain("(dry-run, не применено)");
     expect(md).toContain("БД: Postgres db.example:6543/postgres.");
     expect(md).toContain("| F17 | Скальп | эксперимент | включён | выключен |");
+  });
+  it("положение зеркала и решение автомата после перевода в «Авто»", () => {
+    const md = renderApplyMarkdown(
+      "t",
+      "x",
+      diffApply(
+        planApply({ "mirror-off": ["F17"], "mirror-auto": ["S05"] }),
+        current,
+      ),
+      false,
+      ["S05 → демо-зеркало выключено: эксперимент выключен"],
+    );
+    expect(md).toContain(
+      "| F17 | Скальп | демо-зеркало | Авто · выкл | Выкл (вручную) |",
+    );
+    expect(md).toContain(
+      "| S05 | EMA трейлинг | демо-зеркало | Вкл (вручную) | Авто (решит автомат) |",
+    );
+    expect(md).toContain(
+      "- S05 → демо-зеркало выключено: эксперимент выключен",
+    );
   });
   it("без изменений — так и пишет", () => {
     expect(renderApplyMarkdown("t", "x", [], false)).toContain("Изменений нет");

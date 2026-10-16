@@ -1,12 +1,15 @@
 // План применения решений лаборатории (`pnpm lab:apply`): разбор аргументов и проверка, что изменения не
 // противоречат друг другу. Сами записи в БД — scripts/lab-apply.ts через public API entities/experiment.
+import type { DemoMirrorMode } from "@/entities/experiment";
 import { PRIVATE_ID_PATTERN } from "./labPrivate";
 
 export interface ApplyPlan {
   disable: string[];
   enable: string[];
+  /** Положение демо-зеркала (spec 0043): ручные «Вкл» / «Выкл» и «Авто». */
   mirrorOn: string[];
   mirrorOff: string[];
+  mirrorAuto: string[];
   dryRun: boolean;
   /** Разрешить запись в локальную PGlite (без DATABASE_URL); иначе скрипт отказывается — это не прод. */
   local: boolean;
@@ -19,15 +22,20 @@ export interface ApplyFlags {
   name: string;
   enabled: boolean;
   demoMirror: boolean;
+  demoMirrorMode: DemoMirrorMode;
 }
 
-export interface ApplyChange {
-  id: string;
-  name: string;
-  field: "enabled" | "demoMirror";
-  from: boolean;
-  to: boolean;
-}
+export type ApplyChange =
+  | { id: string; name: string; field: "enabled"; from: boolean; to: boolean }
+  | {
+      id: string;
+      name: string;
+      field: "demoMirrorMode";
+      from: DemoMirrorMode;
+      to: DemoMirrorMode;
+      /** Зеркало сейчас — для «Было» у «Авто» (вкл / выкл). */
+      demoMirror: boolean;
+    };
 
 /** id каталога (S01…, F01…); приватные (PS01, PF01, PC01) — формат lab:private, общий PRIVATE_ID_PATTERN. */
 const CATALOG_ID = /^[SF]\d{2}$/;
@@ -52,6 +60,7 @@ export function planApply(values: {
   enable?: string[];
   "mirror-on"?: string[];
   "mirror-off"?: string[];
+  "mirror-auto"?: string[];
   "dry-run"?: boolean;
   local?: boolean;
   out?: string;
@@ -61,6 +70,7 @@ export function planApply(values: {
     enable: normalize(values.enable, "--enable"),
     mirrorOn: normalize(values["mirror-on"], "--mirror-on"),
     mirrorOff: normalize(values["mirror-off"], "--mirror-off"),
+    mirrorAuto: normalize(values["mirror-auto"], "--mirror-auto"),
     dryRun: values["dry-run"] ?? false,
     local: values.local ?? false,
     out: values.out,
@@ -71,14 +81,23 @@ export function planApply(values: {
   ];
   if (both.length)
     throw new Error(`противоречие: ${both.join(", ")} и включить, и выключить`);
+  const twoModes = [
+    ...overlap(plan.mirrorAuto, plan.mirrorOn),
+    ...overlap(plan.mirrorAuto, plan.mirrorOff),
+  ];
+  if (twoModes.length)
+    throw new Error(
+      `противоречие: ${twoModes.join(", ")} — два положения демо-зеркала сразу`,
+    );
   if (
     !plan.disable.length &&
     !plan.enable.length &&
     !plan.mirrorOn.length &&
-    !plan.mirrorOff.length
+    !plan.mirrorOff.length &&
+    !plan.mirrorAuto.length
   )
     throw new Error(
-      "нечего применять: --disable, --enable, --mirror-on или --mirror-off <id>",
+      "нечего применять: --disable, --enable, --mirror-on, --mirror-off или --mirror-auto <id>",
     );
   return plan;
 }
@@ -89,41 +108,75 @@ export function diffApply(
   current: ApplyFlags[],
 ): ApplyChange[] {
   const byId = new Map(current.map((e) => [e.id, e]));
+  const find = (id: string) => {
+    const e = byId.get(id);
+    if (!e) throw new Error(`эксперимента ${id} нет в БД`);
+    return e;
+  };
   const changes: ApplyChange[] = [];
-  const want = (ids: string[], field: ApplyChange["field"], to: boolean) => {
+  const enabled = (ids: string[], to: boolean) => {
     for (const id of ids) {
-      const e = byId.get(id);
-      if (!e) throw new Error(`эксперимента ${id} нет в БД`);
-      const from = e[field];
-      if (from !== to) changes.push({ id, name: e.name, field, from, to });
+      const e = find(id);
+      if (e.enabled !== to)
+        changes.push({
+          id,
+          name: e.name,
+          field: "enabled",
+          from: e.enabled,
+          to,
+        });
     }
   };
-  want(plan.disable, "enabled", false);
-  want(plan.enable, "enabled", true);
-  want(plan.mirrorOff, "demoMirror", false);
-  want(plan.mirrorOn, "demoMirror", true);
+  const mode = (ids: string[], to: DemoMirrorMode) => {
+    for (const id of ids) {
+      const e = find(id);
+      if (e.demoMirrorMode !== to)
+        changes.push({
+          id,
+          name: e.name,
+          field: "demoMirrorMode",
+          from: e.demoMirrorMode,
+          to,
+          demoMirror: e.demoMirror,
+        });
+    }
+  };
+  enabled(plan.disable, false);
+  enabled(plan.enable, true);
+  mode(plan.mirrorOff, "off");
+  mode(plan.mirrorOn, "on");
+  mode(plan.mirrorAuto, "auto");
   return changes;
 }
 
-const FIELD_LABEL: Record<ApplyChange["field"], string> = {
-  enabled: "эксперимент",
-  demoMirror: "демо-зеркало",
+const MODE_LABEL: Record<DemoMirrorMode, string> = {
+  off: "Выкл (вручную)",
+  auto: "Авто",
+  on: "Вкл (вручную)",
 };
 
-const state = (c: ApplyChange, v: boolean) =>
+const cells = (c: ApplyChange): [string, string, string] =>
   c.field === "enabled"
-    ? v
-      ? "включён"
-      : "выключен"
-    : v
-      ? "включено"
-      : "выключено";
+    ? [
+        "эксперимент",
+        c.from ? "включён" : "выключен",
+        c.to ? "включён" : "выключен",
+      ]
+    : [
+        "демо-зеркало",
+        c.from === "auto"
+          ? `Авто · ${c.demoMirror ? "вкл" : "выкл"}`
+          : MODE_LABEL[c.from],
+        c.to === "auto" ? "Авто (решит автомат)" : MODE_LABEL[c.to],
+      ];
 
+/** notes — что сразу решил автомат для переведённых в «Авто» (строки как в журнале). */
 export function renderApplyMarkdown(
   at: string,
   database: string,
   changes: ApplyChange[],
   dryRun: boolean,
+  notes: string[] = [],
 ): string {
   const title = `## ${at}${dryRun ? " (dry-run, не применено)" : ""}`;
   const head = [title, "", `БД: ${database}.`, ""];
@@ -135,10 +188,15 @@ export function renderApplyMarkdown(
     ...head,
     "| id | Эксперимент | Что | Было | Стало |",
     "|---|---|---|---|---|",
-    ...changes.map(
-      (c) =>
-        `| ${c.id} | ${c.name} | ${FIELD_LABEL[c.field]} | ${state(c, c.from)} | ${state(c, c.to)} |`,
-    ),
+    ...changes.map((c) => `| ${c.id} | ${c.name} | ${cells(c).join(" | ")} |`),
     "",
+    ...(notes.length
+      ? [
+          "Авто-зеркало сразу после перевода в «Авто»:",
+          "",
+          ...notes.map((n) => `- ${n}`),
+          "",
+        ]
+      : []),
   ].join("\n");
 }

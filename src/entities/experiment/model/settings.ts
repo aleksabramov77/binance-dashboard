@@ -1,5 +1,6 @@
 import { marketSchema } from "@binance-dashboard/trading-core";
 import { z } from "zod";
+import { demoMirrorModeSchema, mirrorAutoSnapshotSchema } from "./mirrorAuto";
 import { demoSummarySchema } from "./view";
 // Контракт /settings лаборатории (spec 003, задача 3d): эпоха, стартовый бюджет, тумблеры экспериментов.
 
@@ -71,6 +72,9 @@ export const labSettingsSchema = z.object({
       hypothesis: z.string(),
       enabled: z.boolean(),
       demoMirror: z.boolean(),
+      /** Положение переключателя «Выкл · Авто · Вкл» и последнее решение авто-зеркала (spec 0043). */
+      demoMirrorMode: demoMirrorModeSchema,
+      demoMirrorAuto: mirrorAutoSnapshotSchema.nullable(),
       initialBudget: z.number(),
       /** Paper-счёт эксперимента в текущей эпохе (с учётом отдельного сброса). */
       paper: z.object({

@@ -1,6 +1,15 @@
 // Серверная подсистема движка (хранилище, блокировка тика, таблицы, схемы) — отдельный вход для Deno.
 
 export { loadBudgetInputs } from "./api/budgetsStore";
+// Авто-зеркало (spec 0043): положение переключателя, данные для решения автомата, запись решения (только сервер).
+export {
+  type MirrorAutoPatch,
+  type MirrorAutoRow,
+  type MirrorAutoTrade,
+  readMirrorAutoRows,
+  saveMirrorAuto,
+  setExperimentMirrorMode,
+} from "./api/mirrorAutoDb";
 // Demo-зеркало (spec 008): какие сделки повторить на Binance Demo и какие закрыть (только сервер).
 export {
   type ActiveMirrorRow,
@@ -70,17 +79,28 @@ export {
   useResetDemo,
   useResetExperimentPaper,
   useResetGroup,
-  useSetExperimentDemoMirror,
   useSetExperimentEnabled,
+  useSetExperimentMirrorMode,
   useSetNextBudget,
 } from "./api/useLabSettings";
 export { tradeStatsQueryKey, useTradeStats } from "./api/useTradeStats";
+// Авто-зеркало (spec 0043): правило — чистая функция, тексты (Telegram, журнал, подсказка у переключателя).
+export { MIN_TRADES, R_THRESHOLD } from "./config/mirrorAuto";
 export * from "./engine.ts";
 export {
   type BudgetInputs,
   computeMarketBudgets,
   type PriceLookup,
 } from "./lib/budgets";
+export {
+  decideMirrorAuto,
+  type MirrorAutoInput,
+  type MirrorAutoPlan,
+  type MirrorAutoVerdict,
+  mirrorAutoVerdict,
+  mirrorWindowR,
+  mirrorWindowStart,
+} from "./lib/decideMirrorAuto";
 // Агрегаты по сделкам и конфиг человеческим текстом — для страниц и разрезов /stats.
 export {
   type ConfigLine,
@@ -97,6 +117,11 @@ export {
   formatSignedUsd,
   pnlTone,
 } from "./lib/formatStats";
+export { describeMirrorAuto, formatAvgR, tradesLabel } from "./lib/mirrorAuto";
+export {
+  mirrorAdviceMessage,
+  mirrorChangeMessage,
+} from "./lib/mirrorAutoMessages";
 export {
   blacklistCandidates,
   filterTrades,
@@ -150,6 +175,19 @@ export {
   mirrorStatusSchema,
   OPEN_MIRROR_STATUSES,
 } from "./model/mirror";
+export {
+  DEMO_MIRROR_MODES,
+  type DemoMirrorMode,
+  demoMirrorModeSchema,
+  type ExperimentMirrorMode,
+  experimentMirrorModeSchema,
+  type MirrorAdvice,
+  type MirrorAutoDecision,
+  type MirrorAutoSnapshot,
+  mirrorAdviceSchema,
+  mirrorAutoDecisionSchema,
+  mirrorAutoSnapshotSchema,
+} from "./model/mirrorAuto";
 export type {
   InvalidExperimentRow,
   OnInvalidExperiment,

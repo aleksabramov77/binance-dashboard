@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { z } from "zod";
-import type { ExperimentDemoMirror } from "../model/mirror";
+import type { ExperimentMirrorMode } from "../model/mirrorAuto";
 import {
   type BudgetForm,
   type DemoResetRequest,
@@ -96,10 +96,10 @@ export function useSetExperimentEnabled() {
   });
 }
 
-/** Demo-зеркало эксперимента (spec 008): новые paper-сделки повторяются на Binance Demo. */
-export function useSetExperimentDemoMirror() {
+/** Положение демо-зеркала эксперимента «Выкл · Авто · Вкл» (spec 008, 0043): «Авто» сразу решает автомат. */
+export function useSetExperimentMirrorMode() {
   const queryClient = useQueryClient();
-  return useMutation<LabSettings, Error, ExperimentDemoMirror>({
+  return useMutation<LabSettings, Error, ExperimentMirrorMode>({
     mutationFn: (body) =>
       request("/api/experiments/settings/mirror", labSettingsSchema, {
         method: "POST",
