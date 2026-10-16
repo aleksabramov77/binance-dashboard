@@ -158,8 +158,13 @@ export async function placeTrade(
         "rejected",
         `${req.symbol} нет в ${venue.kind === "demo" ? "Binance Demo Trading" : "Binance"} (${MARKET_NAME[req.market]}).`,
       );
-    price = await fetchDemoPrice(req.market, req.symbol, venue);
-    availableUsd = await availableFunds(venue, req, rules, price);
+    // Цена и деньги — параллельно; у COIN-M свободное — в монете, в $ — по цене контракта.
+    const [demoPrice, free] = await Promise.all([
+      fetchDemoPrice(req.market, req.symbol, venue),
+      availableFunds(venue, req, rules),
+    ]);
+    price = demoPrice;
+    availableUsd = req.market === "coinm" ? free * price : free;
   } catch (error) {
     // Сеть, а не отсутствие символа: ничего не отправлено, можно повторить.
     return finish(
@@ -220,21 +225,17 @@ const MARKET_NAME: Record<TradeRequest["market"], string> = {
 };
 
 /**
- * Свободные деньги кошелька сделки, $: USDT Spot / USDⓈ-M; COIN-M — свободная маржа в монете контракта (у каждой
- * монеты свой кошелёк, spec 0056) × цена контракта (у бессрочного …USD_PERP она и есть цена монеты в $).
+ * Свободные деньги кошелька сделки: USDT Spot / USDⓈ-M; COIN-M — свободная маржа в монете контракта (у каждой монеты
+ * свой кошелёк, spec 0056) — в $ её переводит вызывающий по цене контракта (у …USD_PERP это цена монеты в $).
  */
 async function availableFunds(
   venue: TradeVenue,
   req: TradeRequest,
   rules: SymbolRules,
-  price: number,
 ): Promise<number> {
   if (req.market === "coinm") {
     const coin = rules.contract?.marginAsset;
-    const free = coin
-      ? ((await fetchDemoCoinmAvailable(venue)).get(coin) ?? 0)
-      : 0;
-    return free * price;
+    return coin ? ((await fetchDemoCoinmAvailable(venue)).get(coin) ?? 0) : 0;
   }
   return (await fetchDemoUsdtBalances(venue))[req.market];
 }

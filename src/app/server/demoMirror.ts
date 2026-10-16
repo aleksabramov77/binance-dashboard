@@ -72,6 +72,14 @@ export async function runDemoMirror(): Promise<MirrorRunResult> {
   return emptyMirrorRunResult(getDemoTradingConfig() !== null, true);
 }
 
+/**
+ * Монета маржи контракта COIN-M — из exchangeInfo demo-dapi (marginAsset), как у проверки заявки (spec 0056): резерв и
+ * вход смотрят в один кошелёк. Справочник кэшируется на 10 минут; нет символа — базовая монета.
+ */
+const coinmMarginAsset = async (symbol: string) =>
+  (await fetchDemoSymbolRules("coinm", symbol, DEMO_PUBLIC_VENUE))?.contract
+    ?.marginAsset ?? coinmMarginCoin(symbol);
+
 async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
   // Кандидаты прогона — чтобы claim знал поля сделки по id.
   const byId = new Map<string, MirrorCandidate>();
@@ -116,13 +124,14 @@ async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
       }
       // COIN-M: свободная маржа монеты контракта × цена контракта (…USD_PERP — цена монеты в $).
       coinmMargin ??= fetchDemoCoinmAvailable(venue).catch(balanceFailed);
-      const coin = coinmMarginCoin(symbol);
+      const coin = await coinmMarginAsset(symbol);
       const [margin, price] = await Promise.all([
         coinmMargin,
         fetchDemoPrice("coinm", symbol, DEMO_PUBLIC_VENUE),
       ]);
       return (margin.get(coin) ?? 0) * price;
     },
+    coinmMarginAsset,
     claim: async (tradeId) => {
       const c = byId.get(tradeId);
       return c ? claimMirror(db, c) : false;

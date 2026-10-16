@@ -97,7 +97,14 @@ async function sweepMarket(
     const refs = m.protectRefs;
     if (refs.market === "spot") continue;
     const at = protectMarketOf(market, m.symbol);
-    const candidate = orphanLegCandidate(refs, openAlgos);
+    // COIN-M: открытые ордера всего счёта dapi, algoId — orderId; уникальность orderId между символами Binance не
+    // обещает — свои ноги ищем среди ордеров своего символа.
+    const candidate = orphanLegCandidate(
+      refs,
+      market === "coinm"
+        ? openAlgos.filter((a) => a.symbol === m.symbol)
+        : openAlgos,
+    );
     if (!candidate) continue;
     const remaining = candidate.remaining;
     const missingRef = refs[candidate.missing];

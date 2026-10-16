@@ -73,6 +73,11 @@ export interface MirrorDeps<
    */
   freeUsd: (market: MirrorMarket, symbol: string) => Promise<number>;
   /**
+   * Монета маржи контракта COIN-M — кошелёк резерва (spec 0056). Тот же источник, что у проверки заявки (exchangeInfo,
+   * marginAsset); нет — базовая монета символа (BTCUSD_PERP → BTC).
+   */
+  coinmMarginAsset?: (symbol: string) => Promise<string>;
+  /**
    * Захват сделки (вставка pending). false — её уже взял другой прогон. kind — что будет дальше: вход или пропуск
    * (реальное зеркало пишет пропуск одной вставкой в markSkipped, spec 0049; демо kind не читает).
    */
@@ -234,7 +239,7 @@ export async function runMirror<
     const r = await deps.open(step.request);
     if (r.status !== "rejected") {
       if (deps.gate) deps.gate.spend(step);
-      else reserve.spend(step.request, notional.get(step.tradeId) ?? 0);
+      else await reserve.spend(step.request, notional.get(step.tradeId) ?? 0);
     }
     await deps.saveOpen(step.tradeId, r);
     result.opened.push({
@@ -246,10 +251,6 @@ export async function runMirror<
   return result;
 }
 
-/** Кошелёк резерва: Spot и USDⓈ-M — свой рынок, COIN-M — монета маржи контракта (spec 0056). */
-const walletOf = (r: Pick<MirrorOrderRequest, "market" | "symbol">) =>
-  r.market === "coinm" ? `coinm:${coinmMarginCoin(r.symbol)}` : r.market;
-
 /** $0,30 — копейки видны: у COIN-M свободной маржи монеты бывает меньше доллара. */
 const cents = (usd: number) => `$${usd.toFixed(2).replace(".", ",")}`;
 
@@ -258,10 +259,28 @@ const cents = (usd: number) => `$${usd.toFixed(2).replace(".", ",")}`;
  * только при первом входе, каждый вход прогона вычитает свой объём (paper-объём, ~$50). Остаток не прочитался — входы
  * идут как раньше.
  */
-function freeFunds(deps: Pick<MirrorDeps, "freeUsd">) {
+function freeFunds(deps: Pick<MirrorDeps, "freeUsd" | "coinmMarginAsset">) {
   const left = new Map<string, Promise<number | null>>();
-  const read = (r: MirrorOrderRequest) => {
-    const key = walletOf(r);
+  // Монета маржи COIN-M по символу — из зависимости (exchangeInfo); сбой — базовая монета символа.
+  const coins = new Map<string, Promise<string>>();
+  const coinOf = (symbol: string) => {
+    let coin = coins.get(symbol);
+    if (!coin) {
+      const ask = deps.coinmMarginAsset;
+      coin = ask
+        ? Promise.resolve()
+            .then(() => ask(symbol))
+            .catch(() => coinmMarginCoin(symbol))
+        : Promise.resolve(coinmMarginCoin(symbol));
+      coins.set(symbol, coin);
+    }
+    return coin;
+  };
+  /** Кошелёк резерва: Spot и USDⓈ-M — свой рынок, COIN-M — монета маржи контракта (spec 0056). */
+  const walletOf = async (r: MirrorOrderRequest) =>
+    r.market === "coinm" ? `coinm:${await coinOf(r.symbol)}` : r.market;
+  const read = async (r: MirrorOrderRequest) => {
+    const key = await walletOf(r);
     let value = left.get(key);
     if (!value) {
       value = Promise.resolve()
@@ -286,13 +305,13 @@ function freeFunds(deps: Pick<MirrorDeps, "freeUsd">) {
         kind: "skip",
         reason: coinm
           ? // Монета, её свободная маржа и что нужно: резерв + маржа входа (плечо 1 — объём входа).
-            `мало свободной маржи ${coinmMarginCoin(d.request.symbol)} на демо: ${cents(free)} < резерв $${reserve} + вход ~${cents(cost)}`
+            `мало свободной маржи ${await coinOf(d.request.symbol)} на демо: ${cents(free)} < резерв $${reserve} + вход ~${cents(cost)}`
           : // Остаток после входа; свободных меньше объёма входа — $0, а не отрицательная сумма.
             `мало свободных средств на демо: $${Math.max(0, Math.round(free - cost))} < резерв $${reserve}`,
       };
     },
-    spend(r: MirrorOrderRequest, cost: number) {
-      const key = walletOf(r);
+    async spend(r: MirrorOrderRequest, cost: number) {
+      const key = await walletOf(r);
       const value = left.get(key);
       if (value)
         left.set(

@@ -525,6 +525,19 @@ describe("runMirror: COIN-M (spec 0056)", () => {
     );
   });
 
+  it("монета маржи — из зависимости (exchangeInfo, как у проверки заявки): кошелёк и причина по ней", async () => {
+    const d = deps({
+      coinmMarginAsset: async () => "USDX",
+      freeUsd: async () => 10,
+      listCandidates: async () => [coinm({ tradeId: "a" })],
+    });
+    await runMirror(d);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "a",
+      expect.stringMatching(/^мало свободной маржи USDX на демо/),
+    );
+  });
+
   it("режим позиций — свой у COIN-M: спрашивается по рынку кандидатов", async () => {
     const positionMode = vi.fn(async () => "hedge" as const);
     await runMirror(

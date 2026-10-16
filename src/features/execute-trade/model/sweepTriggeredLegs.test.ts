@@ -174,7 +174,13 @@ describe("sweepTriggeredLegs: COIN-M (spec 0056)", () => {
   it("сработал тейк — стоп снимается по ордеру символа, строка закрыта биржей", async () => {
     // Демо 2026-10-17: тейк FILLED, соседний стоп остался NEW.
     api.fetchDemoOpenAlgoOrders.mockImplementation(async (_v, market) =>
-      market === "coinm" ? [{ algoId: 41, clientAlgoId: "bdc1-S" }] : [],
+      market === "coinm"
+        ? [
+            { algoId: 41, clientAlgoId: "bdc1-S", symbol: "BTCUSD_PERP" },
+            // Тот же номер ордера у другого символа — не своя нога (orderId dapi не уникален между символами).
+            { algoId: 42, clientAlgoId: "x-T", symbol: "ETHUSD_PERP" },
+          ]
+        : [],
     );
     api.fetchDemoAlgoOrder.mockResolvedValue({
       algoId: 42,

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { LiveMirrorState, LiveToClose } from "@/entities/experiment";
+import {
+  type LiveMirrorState,
+  type LiveToClose,
+  liveMirrorStateSchema,
+} from "@/entities/experiment";
 import type { TradeRequest, TradeResult } from "@/entities/trade";
 import { sizeEntry } from "@/features/execute-trade";
 import {
@@ -194,6 +198,39 @@ describe("runLiveMirror: вход", () => {
         },
       }),
     );
+  });
+
+  it("COIN-M (spec 0056, AC9): контракт API не пропускает кандидата, а если он всё же пришёл — пропуск без биржи", async () => {
+    const coinm = {
+      ...candidate("c1"),
+      market: "coinm",
+      symbol: "BTCUSD_PERP",
+    };
+    expect(
+      liveMirrorStateSchema.safeParse({ ...state(), candidates: [coinm] })
+        .success,
+    ).toBe(false);
+    // В обход контракта (страховка воркера): Object.assign сохраняет тип кандидата, а значение — COIN-M.
+    const api = fakeApi(
+      state({
+        candidates: [
+          Object.assign(candidate("c1"), {
+            market: "coinm",
+            symbol: "BTCUSD_PERP",
+          }),
+        ],
+      }),
+    );
+    const ex = fakeExchange();
+    await run(api, ex);
+    expect(api.skip).toHaveBeenCalledWith(
+      "c1",
+      "BTCUSD_PERP: нет на реальных фьючерсах COIN-M.",
+    );
+    expect(api.claim).not.toHaveBeenCalled();
+    expect(ex.symbolRules).not.toHaveBeenCalled();
+    expect(ex.balances).not.toHaveBeenCalled();
+    expect(ex.placeTrade).not.toHaveBeenCalled();
   });
 
   it("стоп входов — пропуск без захвата и без биржи", async () => {
