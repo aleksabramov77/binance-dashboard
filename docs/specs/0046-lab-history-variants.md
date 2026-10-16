@@ -116,3 +116,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-16 | ТЗ утверждено пользователем |
+| 2026-10-16 | Developer, ветка `feature/0046-lab-history-variants`: миграция 0009 (идемпотентная) — `parent_id`, `variant_note`, `disabled_*`; `experimentSchema` — `parentId`/`variantNote`; период страниц (`?run=<эпоха>\|all`, `resolveScope`/`scopeTrades` в `readModel`, демо — `mirrorSummaries(scope)`), неизвестная эпоха — текущая и `missingRun`; причина выключения (`DISABLE_REASONS`, API 400/409, окно в `/settings`, бейдж `DisabledBadge`); варианты под контрольным (`arrangeVariants`, сворачивание в localStorage), блок «Вариант X от …» / «Варианты» (`diffExperimentConfig`); `lab:apply --reason/--note/--force-control`, `lab:private` с `parentId`/`variantNote` и проверкой родителя; правило лаборатории в скилле `trading-lab`, агенте `quant`, `/flow lab`. AC12 (backfill прода) — после выкатки. |
