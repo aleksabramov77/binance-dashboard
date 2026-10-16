@@ -1,4 +1,9 @@
-import { ASSET_GROUPS, type ExperimentSummary } from "@/entities/experiment";
+import {
+  ASSET_GROUPS,
+  controlOf,
+  type ExperimentSummary,
+  variantLetters,
+} from "@/entities/experiment";
 import type { SortDir } from "@/shared/lib";
 import type { MarketFilter } from "../model/useExperimentsView";
 
@@ -86,4 +91,52 @@ export function sortExperiments(
         return va === vb ? a.id.localeCompare(b.id) : va === null ? 1 : -1;
       return va === vb ? a.id.localeCompare(b.id) : sign * (va < vb ? -1 : 1);
     });
+}
+
+/** Строка таблицы /experiments: эксперимент и его место в группе «контрольный + варианты» (spec 0046). */
+export interface ExperimentRowView {
+  e: ExperimentSummary;
+  /** Контрольный, под которым стоит строка; null — строка верхнего уровня. */
+  variantOf: string | null;
+  /** Буква варианта (по порядку id среди вариантов контрольного во всём списке). */
+  letter: string | null;
+  /** Сколько вариантов показано под строкой (для шеврона контрольного). */
+  variants: number;
+}
+
+/**
+ * Группы вариантов поверх отсортированного списка (spec 0046, AC8): группы идут в порядке строки контрольного,
+ * варианты стоят сразу под ним в том же порядке сортировки. Вариант, контрольного которого нет в списке (фильтр AG,
+ * контрольный не в БД), — обычной строкой на своём месте. all — все эксперименты (буквы и связи — по нему).
+ */
+export function arrangeVariants(
+  sorted: readonly ExperimentSummary[],
+  all: readonly ExperimentSummary[],
+): ExperimentRowView[] {
+  const byId = new Map(all.map((e) => [e.id, e]));
+  const letters = variantLetters(all);
+  const shown = new Set(sorted.map((e) => e.id));
+  const children = new Map<string, ExperimentSummary[]>();
+  const nested = new Set<string>();
+  for (const e of sorted) {
+    const control = controlOf(e, byId);
+    if (!control || !shown.has(control.id)) continue;
+    nested.add(e.id);
+    const list = children.get(control.id);
+    if (list) list.push(e);
+    else children.set(control.id, [e]);
+  }
+  return sorted.flatMap((e) => {
+    if (nested.has(e.id)) return [];
+    const variants = children.get(e.id) ?? [];
+    return [
+      { e, variantOf: null, letter: null, variants: variants.length },
+      ...variants.map((v) => ({
+        e: v,
+        variantOf: e.id,
+        letter: letters.get(v.id) ?? null,
+        variants: 0,
+      })),
+    ];
+  });
 }

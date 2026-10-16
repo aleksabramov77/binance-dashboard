@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import {
   assetGroupOf,
+  DisabledBadge,
+  enabledVariantsOf,
   formatSignedUsd,
   type LabSettings,
   pnlTone,
@@ -35,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
+import { DisableExperimentDialog } from "./DisableExperimentDialog";
 
 type Experiment = LabSettings["experiments"][number];
 
@@ -64,7 +68,7 @@ const HELP: Record<SortKey, string> = {
   id: "Код эксперимента: S — Spot (только покупки), F — USDⓈ-M (лонг и шорт).",
   name: "Название и гипотеза эксперимента.",
   enabled:
-    "Включённый эксперимент открывает новые paper-сделки. Выключенный новых не открывает, а открытые доводит до выхода.",
+    "Включённый эксперимент открывает новые paper-сделки. Выключенный новых не открывает, а открытые доводит до выхода. Выключение — с причиной (окно); контрольный, у которого идут варианты, — только с подтверждением.",
   equity:
     "Paper-капитал эксперимента: стартовый бюджет + реализованный PnL с начала эпохи или с отдельного сброса.",
   pnl: "Реализованный paper-PnL после комиссий с начала эпохи или с отдельного сброса.",
@@ -114,6 +118,8 @@ export function PaperAccountsCard({
   experiments: LabSettings["experiments"];
 }) {
   const toggle = useSetExperimentEnabled();
+  // Эксперимент, для которого открыто окно выключения (spec 0046).
+  const [disabling, setDisabling] = useState<Experiment | null>(null);
   const enabled = experiments.filter((e) => e.enabled).length;
   const { sort, head } = useTableSort(SORT_TABLE);
   const rows = sort
@@ -193,6 +199,13 @@ export function PaperAccountsCard({
                     <span className="text-xs font-normal text-muted-foreground">
                       {assetGroupOf(e.market).label}
                     </span>
+                    {e.parentId && (
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {" "}
+                        · вариант {e.parentId}
+                      </span>
+                    )}{" "}
+                    {!e.enabled && <DisabledBadge disabled={e.disabled} />}
                   </div>
                   {/* contain-inline-size: гипотеза не участвует в ширине колонки, только обрезается многоточием. */}
                   <div className="line-clamp-1 text-xs text-muted-foreground contain-inline-size">
@@ -205,7 +218,9 @@ export function PaperAccountsCard({
                     disabled={toggle.isPending && toggle.variables?.id === e.id}
                     aria-label={`Эксперимент ${e.id}`}
                     onCheckedChange={(checked) =>
-                      toggle.mutate({ id: e.id, enabled: checked })
+                      checked
+                        ? toggle.mutate({ id: e.id, enabled: true })
+                        : setDisabling(e)
                     }
                   />
                 </TableCell>
@@ -239,6 +254,13 @@ export function PaperAccountsCard({
             ))}
           </TableBody>
         </Table>
+        {disabling && (
+          <DisableExperimentDialog
+            experiment={disabling}
+            variants={enabledVariantsOf(experiments, disabling.id)}
+            onClose={() => setDisabling(null)}
+          />
+        )}
       </CardContent>
     </Card>
   );
