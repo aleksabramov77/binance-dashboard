@@ -1,5 +1,5 @@
 // Next.js вызывает register() один раз при старте сервера: подключаем журнал к БД, применяем миграции и запускаем
-// таймер движка лаборатории (spec 003, engine_state.enabled; по умолчанию выключен).
+// таймер движка лаборатории (spec 003, engine_state.enabled; по умолчанию выключен) и фоновых задач (spec 0048).
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.NEXT_PHASE === "phase-production-build") return;
@@ -21,4 +21,8 @@ export async function register() {
     "@/app/server/experimentEngine"
   );
   startExperimentEngine();
+  // Снимок Earn, монитор журнала, демо- и авто-зеркало — таймерами процесса (spec 0048), только на VM (APP_HOST=vm);
+  // выполняются, только когда engine_state.runner = ENGINE_RUNNER, пока runner = supabase их запускает pg_cron.
+  const { startBackgroundJobs } = await import("@/app/server/backgroundJobs");
+  startBackgroundJobs();
 }

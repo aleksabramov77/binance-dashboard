@@ -4,7 +4,17 @@ import {
   type DemoSummary,
   type ExperimentSummary,
 } from "@/entities/experiment";
-import { arrangeVariants, sortExperiments } from "./sortExperiments";
+import type { SortDir } from "@/shared/lib";
+import type { MarketFilter } from "../model/useExperimentsView";
+import {
+  arrangeVariants,
+  type ExperimentRowView,
+  hideCollapsed,
+  isGroupedSort,
+  SORT_KEYS,
+  type SortKey,
+  sortExperiments,
+} from "./sortExperiments";
 
 /** Демо-сводка: по умолчанию демо-сделок нет. */
 const demo = (d: Partial<DemoSummary> = {}): DemoSummary => ({
@@ -75,6 +85,31 @@ describe("sortExperiments", () => {
     expect(
       sortExperiments(list, "all", "pnl", "desc").map((e) => e.id),
     ).toEqual(["F01", "S02", "S01"]);
+  });
+
+  it("без закрытых сделок (в ячейке «—») — в конце при любом направлении, а не между плюсом и минусом", () => {
+    const rows = [
+      summary("F96", "usdm", []),
+      summary("F97", "usdm", [20]),
+      summary("F98", "usdm", [-8]),
+    ];
+    expect(
+      sortExperiments(rows, "all", "pnl", "desc").map((e) => e.id),
+    ).toEqual(["F97", "F98", "F96"]);
+    expect(sortExperiments(rows, "all", "pnl", "asc").map((e) => e.id)).toEqual(
+      ["F98", "F97", "F96"],
+    );
+    for (const key of [
+      "winRate",
+      "pnl",
+      "profitFactor",
+      "maxDrawdown",
+    ] as const)
+      for (const dir of ["asc", "desc"] as const)
+        expect(
+          sortExperiments(rows, "all", key, dir).at(-1)?.id,
+          `${key} ${dir}`,
+        ).toBe("F96");
   });
 
   it("пустые значения (нет закрытых сделок) — в конце при любом направлении", () => {
@@ -182,8 +217,9 @@ describe("sortExperiments", () => {
   });
 });
 
-describe("arrangeVariants (spec 0046)", () => {
-  // Контрольный F96 и варианты F97 (usdm) и PS99 (spot) — фиктивные id.
+describe("раскладка строк: группы вариантов и плоский вид (spec 0046, 0052)", () => {
+  // Смешанный список: контрольный F96, его варианты F97 (usdm) и PS99 (spot), обычный F01 и F98 — вариант
+  // контрольного, которого нет в БД. Id фиктивные.
   const family = [
     summary("F96", "usdm", [5]),
     {
@@ -193,30 +229,42 @@ describe("arrangeVariants (spec 0046)", () => {
     },
     { ...summary("PS99", "spot", [-20]), parentId: "F96", variantNote: "spot" },
     summary("F01", "usdm", [10]),
-    // Контрольного нет в БД — обычная строка.
     { ...summary("F98", "usdm", [1]), parentId: "F90" },
   ];
-  const view = (rows: ReturnType<typeof arrangeVariants>) =>
-    rows.map((r) => [r.e.id, r.variantOf, r.letter, r.variants]);
+  /** Раскладка, как на странице: сортировка → вид по колонке → свёрнутые. */
+  const layout = (
+    key: SortKey,
+    dir: SortDir,
+    {
+      market = "all",
+      collapsed = [],
+    }: { market?: MarketFilter; collapsed?: string[] } = {},
+  ) =>
+    hideCollapsed(
+      arrangeVariants(
+        sortExperiments(family, market, key, dir),
+        family,
+        isGroupedSort(key),
+      ),
+      new Set(collapsed),
+    );
+  const view = (rows: ExperimentRowView[]) =>
+    rows.map((r) => [r.e.id, r.variantOf, r.letter, r.nested, r.variants]);
+  const ids = (rows: ExperimentRowView[]) => rows.map((r) => r.e.id);
 
-  it("варианты под контрольным, группы — по строке контрольного, внутри — тем же столбцом", () => {
-    const sorted = sortExperiments(family, "all", "pnl", "desc");
-    expect(sorted.map((e) => e.id)).toEqual([
-      "F97",
-      "F01",
-      "F96",
-      "F98",
-      "PS99",
+  it("групповой вид — только при сортировке по «Эксперимент»", () => {
+    expect(SORT_KEYS.filter(isGroupedSort)).toEqual(["id"]);
+  });
+
+  it("сортировка по «Эксперимент»: варианты под контрольным в том же порядке, шеврон у контрольного", () => {
+    expect(view(layout("id", "asc"))).toEqual([
+      ["F01", null, null, false, 0],
+      ["F96", null, null, false, 2],
+      ["F97", "F96", "A", true, 0],
+      ["PS99", "F96", "B", true, 0],
+      ["F98", null, null, false, 0],
     ]);
-    expect(view(arrangeVariants(sorted, family))).toEqual([
-      ["F01", null, null, 0],
-      ["F96", null, null, 2],
-      ["F97", "F96", "A", 0],
-      ["PS99", "F96", "B", 0],
-      ["F98", null, null, 0],
-    ]);
-    const asc = sortExperiments(family, "all", "pnl", "asc");
-    expect(view(arrangeVariants(asc, family)).map((r) => r[0])).toEqual([
+    expect(ids(layout("id", "desc"))).toEqual([
       "F98",
       "F96",
       "PS99",
@@ -225,10 +273,58 @@ describe("arrangeVariants (spec 0046)", () => {
     ]);
   });
 
-  it("контрольного нет под фильтром AG — вариант обычной строкой, буква не теряется у остальных", () => {
-    const spot = sortExperiments(family, "spot", "id", "asc");
-    expect(view(arrangeVariants(spot, family))).toEqual([
-      ["PS99", null, null, 0],
+  it("сортировка по PnL: плоский порядок строго по значению, варианты не прижаты к контрольному", () => {
+    const rows = layout("pnl", "desc");
+    expect(ids(rows)).toEqual(["F97", "F01", "F96", "F98", "PS99"]);
+    const pnl = rows.map((r) => r.e.stats.realizedPnl);
+    expect(pnl).toEqual([...pnl].sort((a, b) => b - a));
+    expect(ids(layout("pnl", "asc"))).toEqual([
+      "PS99",
+      "F98",
+      "F96",
+      "F01",
+      "F97",
     ]);
+  });
+
+  it("любая колонка, кроме «Эксперимент», не переставляет строки отсортированного списка", () => {
+    for (const key of SORT_KEYS.filter((k) => k !== "id"))
+      for (const dir of ["asc", "desc"] as const)
+        expect(ids(layout(key, dir)), `${key} ${dir}`).toEqual(
+          sortExperiments(family, "all", key, dir).map((e) => e.id),
+        );
+  });
+
+  it("плоский вид: у варианта — контрольный и буква как в групповом, без вложенности и шеврона", () => {
+    expect(view(layout("pnl", "desc"))).toEqual([
+      ["F97", "F96", "A", false, 0],
+      ["F01", null, null, false, 0],
+      ["F96", null, null, false, 0],
+      // Контрольного нет в БД — ни метки, ни буквы.
+      ["F98", null, null, false, 0],
+      ["PS99", "F96", "B", false, 0],
+    ]);
+  });
+
+  it("свёрнутый контрольный прячет варианты только в групповом виде", () => {
+    expect(view(layout("id", "asc", { collapsed: ["F96"] }))).toEqual([
+      ["F01", null, null, false, 0],
+      ["F96", null, null, false, 2],
+      ["F98", null, null, false, 0],
+    ]);
+    expect(ids(layout("pnl", "desc", { collapsed: ["F96"] }))).toEqual([
+      "F97",
+      "F01",
+      "F96",
+      "F98",
+      "PS99",
+    ]);
+  });
+
+  it("контрольный скрыт фильтром AG — вариант обычной строкой с меткой в обоих видах", () => {
+    for (const key of ["id", "pnl"] as const)
+      expect(view(layout(key, "desc", { market: "spot" })), key).toEqual([
+        ["PS99", "F96", "B", false, 0],
+      ]);
   });
 });
