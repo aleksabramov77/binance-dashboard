@@ -1,6 +1,8 @@
 // Серверная подсистема движка (хранилище, блокировка тика, таблицы, схемы) — отдельный вход для Deno.
 
 export { loadBudgetInputs } from "./api/budgetsStore";
+// Что останется без проверки при выключении «Автоторговли» (spec 0044): подсчёт (сервер), хук модалки.
+export { readEngineExposure } from "./api/exposureDb";
 // Авто-зеркало (spec 0043): положение переключателя, данные для решения автомата, запись решения (только сервер).
 export {
   type MirrorAutoPatch,
@@ -10,8 +12,6 @@ export {
   saveMirrorAuto,
   setExperimentMirrorMode,
 } from "./api/mirrorAutoDb";
-// Что останется без проверки при выключении «Автоторговли» (spec 0044): подсчёт (сервер), хук модалки.
-export { readEngineExposure } from "./api/exposureDb";
 // Demo-зеркало (spec 008): какие сделки повторить на Binance Demo и какие закрыть (только сервер).
 export {
   type ActiveMirrorRow,
