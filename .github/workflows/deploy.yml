@@ -1,50 +1,99 @@
 name: Deploy
 
-# Деплой на VM (Oracle Cloud, docs/ai/deploy.md) после зелёного CI на main. Можно запустить вручную.
+# Выкатка на свою VM apps-tokyo (AWS Lightsail, spec 0017, docs/ai/deploy-lightsail.md).
+# На 512 МБ VM `next build` не помещается: собираем здесь (output: "standalone") и копируем готовый бандл.
+# Пока прод на Vercel, запуск только вручную — с любой ветки (проверка ветки на VM до переключения).
+# Автовыкатка после зелёного CI на main включается на шаге «переключение» плана переезда.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Ветка или коммит для выкатки
+        required: true
+        default: main
 
-# Деплои идут строго по очереди, новый не отменяет начатый.
+# Выкатки идут строго по очереди, новая не отменяет начатую.
 concurrency:
-  group: deploy-production
+  group: deploy-apps-tokyo
   cancel-in-progress: false
 
 permissions:
   contents: read
 
+env:
+  PROJECT: binance # /srv/binance/app, binance.service (scripts/server/add-project.sh)
+  PORT: 5000
+
 jobs:
   deploy:
-    name: ssh → deploy.sh
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    name: build → rsync → restart
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      VM_HOST: ${{ secrets.VM_HOST }}
-      VM_USER: ${{ secrets.VM_USER }}
-      VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+      VM_HOST: ${{ secrets.APPS_TOKYO_HOST }}
+      VM_USER: ${{ secrets.APPS_TOKYO_USER }}
+      VM_SSH_KEY: ${{ secrets.APPS_TOKYO_SSH_KEY }}
     steps:
       - name: Секреты заданы?
-        id: secrets
         run: |
           if [ -z "$VM_HOST" ] || [ -z "$VM_USER" ] || [ -z "$VM_SSH_KEY" ]; then
-            echo "::notice::VM ещё не настроена (нет секретов VM_HOST/VM_USER/VM_SSH_KEY) — деплой пропущен."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Нет секретов APPS_TOKYO_HOST / APPS_TOKYO_USER / APPS_TOKYO_SSH_KEY (docs/ai/deploy-lightsail.md)."
+            exit 1
           fi
 
-      - name: SSH-ключ
-        if: steps.secrets.outputs.ready == 'true'
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          BUILD_STANDALONE: "1" # output: "standalone" (next.config.ts) — только для VM
+
+      # server.js + трассированные node_modules + миграции drizzle/; static и public standalone не копирует сам.
+      - name: Бандл
+        run: |
+          cp -R .next/static .next/standalone/.next/static
+          cp -R public .next/standalone/public
+          du -sh .next/standalone
+
+      - name: SSH
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -t ed25519 "$VM_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Деплой
-        if: steps.secrets.outputs.ready == 'true'
-        run: ssh -o BatchMode=yes "$VM_USER@$VM_HOST" 'bash /opt/binance-dashboard/scripts/deploy/deploy.sh'
+      # --delete: на VM остаётся ровно бандл. Код открытый (секреты — в /etc/<проект>/app.env), поэтому права 755/644:
+      # deploy не в группе проекта и не может отдать файлы группе сервиса. .next/cache — ссылка на /var/lib/<проект>/cache.
+      - name: Копирование на VM
+        run: |
+          rsync -rlptz --delete --chmod=D755,F644 --exclude '.next/cache' \
+            .next/standalone/ "$VM_USER@$VM_HOST:/srv/$PROJECT/app/"
+          ssh "$VM_USER@$VM_HOST" "ln -sfn /var/lib/$PROJECT/cache /srv/$PROJECT/app/.next/cache"
+
+      - name: Перезапуск и проверка
+        run: |
+          ssh "$VM_USER@$VM_HOST" bash -s <<EOF
+          set -e
+          sudo /usr/bin/systemctl enable $PROJECT
+          sudo /usr/bin/systemctl restart $PROJECT
+          for i in \$(seq 1 60); do
+            code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:$PORT/ || true)
+            # 2xx–4xx (в т.ч. редирект на вход) — сервер жив; 5xx — сбой (например, вход не настроен).
+            if [ "\$code" -ge 200 ] && [ "\$code" -lt 500 ]; then echo "OK: 127.0.0.1:$PORT → \$code"; exit 0; fi
+            sleep 2
+          done
+          sudo /usr/bin/journalctl -u $PROJECT -n 80 --no-pager
+          echo "::error::$PROJECT не ответил 2xx–4xx за 2 минуты (последний код: \$code)"
+          exit 1
+          EOF

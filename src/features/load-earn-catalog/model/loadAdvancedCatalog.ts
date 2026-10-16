@@ -20,8 +20,8 @@ import {
 import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import {
   type BinanceCredentials,
+  getAppHost,
   getBinanceCredentials,
-  isServerless,
 } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { DUAL_COINS, DUAL_STABLES } from "../config/dualUniverse";
@@ -42,7 +42,7 @@ export interface CatalogDeps {
 
 const defaultDeps: CatalogDeps = {
   credentials: getBinanceCredentials,
-  hosting: () => (isServerless() ? "cloud" : "local"),
+  hosting: () => (getAppHost() === "local" ? "local" : "cloud"),
   prices: fetchTickerPrices,
   dual: fetchDualProducts,
   onchain: fetchOnchainYieldsProducts,

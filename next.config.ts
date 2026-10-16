@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Своя VM (spec 0017): server.js + только нужные node_modules — бандл собирается в CI (deploy.yml задаёт
+  // BUILD_STANDALONE=1), на VM зависимости не ставим. Сборку Vercel не меняем, пока прод на нём.
+  output: process.env.BUILD_STANDALONE === "1" ? "standalone" : undefined,
   // Торговое ядро — TS-исходники workspace-пакета, Next их транспилирует.
   transpilePackages: ["@binance-dashboard/trading-core"],
   cacheComponents: true,

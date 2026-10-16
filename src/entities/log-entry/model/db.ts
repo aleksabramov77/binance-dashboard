@@ -20,7 +20,7 @@ export const appLogsTable = pgTable(
     message: text("message").notNull(),
     data: jsonb("data").$type<Record<string, unknown>>(),
     error: jsonb("error").$type<Record<string, unknown>>(),
-    /** Где записано: vercel | local. */
+    /** Где записано: vercel | vm | local. */
     source: text("source").notNull(),
   },
   (t) => [

@@ -11,7 +11,8 @@
 | [`workflow.md`](workflow.md) | AI-конвейер: `/feature`, `/bug`, `/merge`, процессы `/flow`, worktree на задачу, роли агентов |
 | [`glossary.md`](glossary.md) | Глоссарий терминов и сокращений (AG, Paper/Demo/Real, эпоха, PF…) — источник истины для `/help` (`pnpm glossary`) |
 | [`deploy-supabase.md`](deploy-supabase.md) | **Основной деплой:** Supabase (БД, тик) + Vercel (интерфейс, регион Tokyo) |
-| [`deploy.md`](deploy.md) | Резервный деплой на Oracle Cloud (Dubai): VM, HTTPS, Supabase, GitHub OAuth, автодеплой, ключи на сервере |
+| [`deploy-lightsail.md`](deploy-lightsail.md) | **Своя VM** AWS Lightsail `apps-tokyo` (Tokyo): пользователи, проекты, выкатка из CI, runbook — переезд с Vercel + Supabase (spec 0017) |
+| [`deploy.md`](deploy.md) | Устарело: Oracle Cloud (VM не создавалась) |
 | [`../specs/`](../specs/) | ТЗ на каждую фичу и баг (`NNNN-slug.md`) + шаблоны |
 | [`../lab/`](../lab/) | Указатель: память лаборатории (журнал, гипотезы, прогоны) — в приватном репозитории `private/lab/` |
 

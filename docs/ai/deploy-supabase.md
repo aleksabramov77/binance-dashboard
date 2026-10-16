@@ -3,7 +3,7 @@
 **Сейчас:** https://binance-dashboard-gold.vercel.app — Vercel-проект `binance-dashboard` (команда `aleksabramov77s-projects`), функции в `hnd1`.
 Прод-секреты (`AUTH_SECRET`, `CRON_SECRET`, OAuth prod-App) — копия на Mac владельца: `~/.config/vercel/binance-dashboard-prod.env` (chmod 600); токен Vercel — `~/.config/vercel/claude-mac.token`.
 
-Решение владельца 2026-10-10: основной хостинг — Supabase + Vercel, резерв — Oracle VM ([deploy.md](deploy.md)).
+Решение владельца 2026-10-10: основной хостинг — Supabase + Vercel. С 2026-10-15 идёт переезд на свою VM AWS Lightsail ([deploy-lightsail.md](deploy-lightsail.md), spec 0017); роль раннера `oracle` = «свой постоянный процесс» (Mac или VM).
 Требования и критерии — [spec 007b](../specs/007b-supabase-hosting.md).
 
 | Узел | Где | Что делает |

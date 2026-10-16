@@ -12,8 +12,8 @@ import {
 import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import {
   type BinanceCredentials,
+  getAppHost,
   getBinanceCredentials,
-  isServerless,
 } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { createKeyedCache } from "./keyedCache";
@@ -61,7 +61,7 @@ export async function loadPortfolio(): Promise<Portfolio> {
   if (!creds)
     return {
       status: "not-configured",
-      hosting: isServerless() ? "cloud" : "local",
+      hosting: getAppHost() === "local" ? "local" : "cloud",
     };
 
   try {
