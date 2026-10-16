@@ -3,9 +3,11 @@
 // Edge Function Supabase (spec 007b). Только сервер.
 import {
   createDbExperimentStore,
+  type EngineExposure,
   type EngineStatus,
   engineTickSchema,
   type OnInvalidExperiment,
+  readEngineExposure,
   readExperimentDetail,
   readExperimentsOverview,
   readTradeStats,
@@ -28,18 +30,24 @@ import {
   fetchKlines,
   fetchPerpetuals,
 } from "@/shared/api/binance/public.server";
+import { sendTelegramMessage } from "@/shared/api/telegram";
 import {
   getDemoTradingConfig,
   getRunnerRole,
+  getTelegramConfig,
 } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
-import { log } from "@/shared/lib/logger.server";
+import { flushLogs, log } from "@/shared/lib/logger.server";
 import {
   createPerpetualsSources,
   type EngineTickEnv,
   prepareEngineDb,
   runEngineTick,
 } from "./engineTick";
+import {
+  announceEngineToggle,
+  type EngineToggleActor,
+} from "./engineToggleNotice";
 
 const MINUTE = 60_000;
 /** Тик — через несколько секунд после начала минуты: Binance успевает закрыть свечу. */
@@ -232,15 +240,56 @@ export async function getEngineStatus(): Promise<EngineStatus> {
   };
 }
 
-/** Тумблер «Автоторговля» лаборатории. Включили — первый тик сразу, не дожидаясь минуты. */
+/** Отложенная работа после ответа; вне запроса Next — сразу. */
+export type Defer = (task: () => Promise<void>) => void;
+const runNow: Defer = (task) => {
+  void task();
+};
+
+/** Открытые paper-сделки и демо-позиции — для модалки выключения «Автоторговли» (spec 0044). */
+export async function getEngineExposure(): Promise<EngineExposure> {
+  return readEngineExposure(getDb());
+}
+
+function telegramSender(): ((text: string) => Promise<void>) | null {
+  const telegram = getTelegramConfig();
+  const chatId = telegram?.chatId;
+  if (!telegram || !chatId) return null;
+  return (text) => sendTelegramMessage(telegram.token, chatId, text);
+}
+
+/**
+ * Тумблер «Автоторговля» лаборатории. Включили — первый тик сразу, не дожидаясь минуты.
+ * Каждое переключение — запись engine.toggle (кто, сколько позиций осталось без проверки) и
+ * уведомление в Telegram после ответа (spec 0044); сбой подсчёта или Telegram тумблер не роняет.
+ */
 export async function setEngineEnabled(
   enabled: boolean,
+  actor: EngineToggleActor,
+  defer: Defer = runNow,
 ): Promise<EngineStatus> {
   await ensureEngineReady();
   await store().setState(ENGINE_KEYS.enabled, enabled);
-  log.info(
-    "engine.toggle",
-    enabled ? "Движок лаборатории включён" : "Движок лаборатории выключен",
+  const exposure = enabled
+    ? null
+    : await getEngineExposure().catch((error: unknown) => {
+        log.warn(
+          "engine.toggle",
+          "Не удалось посчитать открытые сделки для журнала",
+          undefined,
+          error,
+        );
+        return null;
+      });
+  announceEngineToggle(
+    { enabled, ...actor, at: new Date(), exposure },
+    {
+      info: (event, message, data) => log.info(event, message, data),
+      warn: (event, message, data) => log.warn(event, message, data),
+      send: telegramSender(),
+      // warn о сбое Telegram появляется уже после ответа — дописываем журнал сами.
+      defer: (task) => defer(() => task().then(flushLogs)),
+    },
   );
   if (enabled)
     tickExperimentEngine().catch((error) =>

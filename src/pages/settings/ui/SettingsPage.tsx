@@ -3,6 +3,7 @@
 import { useLabSettings } from "@/entities/experiment";
 import { BudgetCard } from "./BudgetCard";
 import { DemoAccountsCard } from "./DemoAccountsCard";
+import { EngineCard } from "./EngineCard";
 import { EpochCard } from "./EpochCard";
 import { GroupResetsCard } from "./GroupResetsCard";
 import { PaperAccountsCard } from "./PaperAccountsCard";
@@ -30,6 +31,7 @@ export function SettingsPage() {
       {settings.data && (
         <>
           <h2 className="text-lg font-semibold">Paper — симуляция</h2>
+          <EngineCard />
           <div className="grid gap-6 lg:grid-cols-2">
             <EpochCard settings={settings.data} />
             <BudgetCard settings={settings.data} />

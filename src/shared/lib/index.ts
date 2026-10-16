@@ -30,6 +30,7 @@ export {
   formatPpDelta,
   formatPrice,
   formatUsd,
+  pluralRu,
 } from "./format";
 export {
   type Glossary,
