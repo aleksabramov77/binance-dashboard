@@ -9,9 +9,9 @@ import {
   RiskDots,
 } from "@/entities/earn-product";
 import { DIVERSIFICATION_RULES } from "@/features/allocation-advice";
-import { Badge } from "@/shared/ui/badge";
-import { Button } from "@/shared/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Badge } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 
 const TAB_LINKS: Record<KindTab, string> = {
   simple: "Открыть Simple Earn",

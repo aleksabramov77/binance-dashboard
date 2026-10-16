@@ -14,7 +14,7 @@ import {
   useExperimentBudgets,
 } from "@/entities/experiment";
 import { cn, formatDateTime, formatUsd } from "@/shared/lib";
-import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/Popover";
 import {
   Table,
   TableBody,
@@ -23,7 +23,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
 import {
   balanceNotes,
   chipTitle,

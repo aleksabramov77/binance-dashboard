@@ -9,14 +9,14 @@ import {
 } from "@/entities/live-account";
 import { LIVE_FLAG_RULES, LIVE_KEY_FLAGS } from "@/shared/api/binance";
 import { cn, formatDateTime, formatUsd } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
+import { Badge } from "@/shared/ui/Badge";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/shared/ui/card";
+} from "@/shared/ui/Card";
 
 // Карточка «Реальный счёт» (spec 0047, AC5): состояние торгового ключа субсчёта по последнему пульсу воркера.
 // Ключа у веб-приложения нет — всё, что здесь видно, прислал воркер с VM. Сделок пока нет.

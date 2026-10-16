@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { Input } from "@/shared/ui/input";
+import { Input } from "@/shared/ui/Input";
 import { useOfferFilters } from "../model/useOfferFilters";
 
 /** Поле «Сумма, USD» — общий `?amount` всех вкладок /earn. */

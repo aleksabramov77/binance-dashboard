@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { LogEntry } from "@/entities/log-entry";
 import { cn } from "@/shared/lib";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 
 const LEVEL_TONE: Record<LogEntry["level"], string> = {
   debug: "text-muted-foreground",

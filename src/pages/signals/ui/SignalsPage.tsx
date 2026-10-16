@@ -9,7 +9,7 @@ import {
   useEffectiveRiskSettings,
 } from "@/features/position-sizing";
 import { formatDateTime } from "@/shared/lib";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import { MarketMovers } from "@/widgets/market-movers";
 import { SetupCards } from "@/widgets/setup-cards";
 import { SignalsHelp } from "@/widgets/signals-help";

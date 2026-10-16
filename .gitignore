@@ -61,3 +61,7 @@ supabase/functions/**/deno.lock
 
 # Лаборатория: прогоны /flow lab живут только в private/lab/ (spec 0015) — случайный прогон в docs/lab/runs не коммитить
 docs/lab/runs/
+
+# storybook (задача 0051): pnpm build-storybook
+/storybook-static
+*storybook.log

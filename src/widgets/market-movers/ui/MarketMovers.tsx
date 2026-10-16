@@ -10,15 +10,15 @@ import {
   sortRows,
   useTableSort,
 } from "@/shared/lib";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
-import { SortableHead } from "@/shared/ui/sortable-head";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
+import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
   TableBody,
   TableCell,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
 
 function rsiTone(value: number | undefined) {
   if (value === undefined) return "text-muted-foreground";

@@ -2,7 +2,7 @@
 
 import { LogOut } from "lucide-react";
 import { signOut } from "next-auth/react";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import { useSession } from "../api/useSession";
 
 /** Аватар и логин GitHub + «Выйти». Локально без настроек входа — пометка «вход отключён». */

@@ -36,9 +36,9 @@ import {
   sortRows,
   useTableSort,
 } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
-import { SortableHead } from "@/shared/ui/sortable-head";
+import { Badge } from "@/shared/ui/Badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
+import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
   TableBody,
@@ -46,7 +46,7 @@ import {
   TableFrame,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
 import { enabledFamilyVariants } from "../lib/familyVariants";
 import { useDetailView } from "../model/useDetailView";
 import { VariantFamily } from "./VariantFamily";

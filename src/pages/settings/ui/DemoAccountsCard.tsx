@@ -26,9 +26,9 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/shared/ui/card";
-import { ConfirmAction } from "@/shared/ui/confirm-action";
-import { SortableHead } from "@/shared/ui/sortable-head";
+} from "@/shared/ui/Card";
+import { ConfirmAction } from "@/shared/ui/ConfirmAction";
+import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
   TableBody,
@@ -36,7 +36,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
 
 type Experiment = LabSettings["experiments"][number];
 

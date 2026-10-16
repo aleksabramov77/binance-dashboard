@@ -8,7 +8,7 @@ import {
   useEngineStatus,
 } from "@/entities/experiment";
 import { cn, formatDateTime } from "@/shared/lib";
-import { Button } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/Button";
 import {
   Dialog,
   DialogContent,
@@ -16,8 +16,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/shared/ui/dialog";
-import { Switch } from "@/shared/ui/switch";
+} from "@/shared/ui/Dialog";
+import { Switch } from "@/shared/ui/Switch";
 import { useToggleEngine } from "../api/useToggleEngine";
 
 function describe(status: EngineStatus | undefined): string {

@@ -7,7 +7,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/shared/ui/select";
+} from "@/shared/ui/Select";
 import { ALL_RUNS_LABEL, toRunParam } from "../lib/runView";
 import type { RunParam, RunView } from "../model/view";
 

@@ -12,8 +12,8 @@ import {
   sortRows,
   useTableSort,
 } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { SortableHead } from "@/shared/ui/sortable-head";
+import { Badge } from "@/shared/ui/Badge";
+import { SortableHead } from "@/shared/ui/SortableHead";
 import {
   Table,
   TableBody,
@@ -21,7 +21,7 @@ import {
   TableFrame,
   TableHeader,
   TableRow,
-} from "@/shared/ui/table";
+} from "@/shared/ui/Table";
 
 const MAX_ROWS = 200;
 

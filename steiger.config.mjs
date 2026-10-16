@@ -30,7 +30,7 @@ export default defineConfig([
   {
     files: ["./src/shared/**"],
     rules: {
-      // Сегменты shared/api и shared/ui отдают модули по отдельности (binance, openrouter, button…).
+      // Сегменты shared/api и shared/ui отдают модули по отдельности (binance, openrouter, Button…).
       "fsd/public-api": "off",
     },
   },

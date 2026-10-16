@@ -3,8 +3,8 @@ import { OfferName } from "@/entities/earn-offer";
 import { PLACE_LABELS } from "@/entities/holding";
 import type { GroupPlan } from "@/features/portfolio-advice";
 import { formatAmount, formatPercent, formatUsd } from "@/shared/lib";
-import { Badge } from "@/shared/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Badge } from "@/shared/ui/Badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 
 function GroupCard({ plan }: { plan: GroupPlan }) {
   const gain = plan.targetIncomeUsd - plan.currentIncomeUsd;

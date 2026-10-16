@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
 import { EARN_TABS, type EarnTab, useEarnView } from "../model/useEarnView";
 import { DualTab } from "./DualTab";
 import { GuideTab } from "./GuideTab";

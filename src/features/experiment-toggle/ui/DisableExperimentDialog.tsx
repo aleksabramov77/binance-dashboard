@@ -12,8 +12,8 @@ import {
   LabSettingsError,
   useSetExperimentEnabled,
 } from "@/entities/experiment";
-import { Button } from "@/shared/ui/button";
-import { Checkbox } from "@/shared/ui/checkbox";
+import { Button } from "@/shared/ui/Button";
+import { Checkbox } from "@/shared/ui/Checkbox";
 import {
   Dialog,
   DialogContent,
@@ -21,15 +21,15 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/shared/ui/dialog";
-import { Input } from "@/shared/ui/input";
+} from "@/shared/ui/Dialog";
+import { Input } from "@/shared/ui/Input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/shared/ui/select";
+} from "@/shared/ui/Select";
 import { variantsToConfirm } from "../lib/variantsToConfirm";
 
 /**
