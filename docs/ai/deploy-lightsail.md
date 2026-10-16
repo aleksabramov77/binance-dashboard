@@ -142,6 +142,12 @@ Spec 0055. Выполняет Claude после мержа PR 0055 и успеш
    ```
    `runner oracle` ждёт конца текущего тика. Edge Function `engine-tick` при `runner = oracle` — no-op, её задание
    (`engine-tick-every-minute`) тоже снимается.
+   - **Когда запускать:** на 25–50-й секунде минуты — мимо тика (+5 с) и прогона демо-зеркала (+20 с).
+   - **Если серия оборвалась после `runner oracle`** (упал какой-то `cron-remove`): сразу повторить ВСЕ `cron-remove`
+     ещё раз (они идемпотентны — снимают задание, только если оно есть). Роуты Vercel `runner` не проверяют: пока
+     задание pg_cron живо, задача выполняется дважды (демо-зеркало — две сделки). Не снялось за минуту — «Откат».
+   - **После серии** убедиться, что заданий не осталось: `pnpm engine:supabase status` и `pnpm mirror:supabase status`
+     (в `cron.job` пусто).
 5. **Бот Telegram на VM:** `SITE_URL=https://binance.<ip>.sslip.io pnpm telegram:setup` (webhook
    `/api/telegram/webhook` с `TELEGRAM_WEBHOOK_SECRET` и меню команд).
 
@@ -161,13 +167,16 @@ Spec 0055. Выполняет Claude после мержа PR 0055 и успеш
 
 1. Одной серией:
    ```sh
-   pnpm engine:supabase runner supabase && \
    pnpm engine:supabase cron-install && \
+   pnpm engine:supabase runner supabase && \
    pnpm earn:supabase cron-install && \
    pnpm monitor:supabase cron-install && \
    pnpm mirror:supabase cron-install && \
    pnpm mirror:supabase cron-install-auto
    ```
+   Сначала задание тика: это самая хрупкая команда (Management API), а при `runner = oracle` Edge Function — no-op,
+   так что ставить его раньше безопасно; если оно упадёт, тик продолжает идти на VM. Только потом `runner supabase`.
+   Серия оборвалась — повторить оставшиеся `cron-install` (они идемпотентны) и проверить `status`, чтобы тик не встал нигде.
    Задания pg_cron по умолчанию вызывают роуты Vercel (`https://binance-dashboard-gold.vercel.app`); таймеры VM
    при `runner = supabase` пропускают работу сами.
 2. Бот Telegram — обратно на Vercel: `pnpm telegram:setup` (без `SITE_URL` — адрес Vercel).
