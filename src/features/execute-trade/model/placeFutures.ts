@@ -43,6 +43,7 @@ import {
   afterFuturesTakeProfit,
   afterStopBeforeEntry,
   DEADLINE_BEFORE_ENTRY,
+  UNCONFIRMED_ENTRY,
 } from "../lib/tradeOutcome";
 import { floorToStep, type ValidatedTrade } from "../lib/validateTrade";
 import { futuresFillPrice } from "./futuresFillPrice";
@@ -241,6 +242,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   const entryLabel = `${req.direction === "long" ? "Лонг" : "Шорт"} по рынку`;
   let entryPrice: number;
   let filled: number;
+  let unconfirmed = false;
   const sentAt = Date.now();
   try {
     const order = await demoFuturesMarketOrder(
@@ -354,15 +356,21 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
       }
       filled = checked.protect.amount;
       entryPrice = checked.protect.entryPrice || price;
+      unconfirmed = checked.unconfirmed === true;
       steps.push({
         label: "Проверка позиции",
         ok: true,
-        detail: `Позиция открыта: ${filled} по ${entryPrice} — ставлю защиту`,
+        detail: unconfirmed
+          ? `Свой ордер не найден, но на пустой до входа стороне появилась позиция ${filled} по ${entryPrice} — ставлю защиту, итог: не подтверждён`
+          : `Позиция открыта: ${filled} по ${entryPrice} — ставлю защиту`,
       });
     }
   }
   // Защита — на свой исполненный объём (без closePosition): у каждого зеркала свои TP/SL.
   const protectQty = floorToStep(filled, rules.stepSize);
+  // Вход не подтверждён биржей — защита ставится, но «protected» не объявляем (PR 2e).
+  const doneEntry: Done = (o, e, f) =>
+    done(unconfirmed && o.status === "protected" ? UNCONFIRMED_ENTRY : o, e, f);
 
   if (!stopFirst) {
     // Сначала стоп: не встал — позиция без защиты не остаётся, сразу закрываем её по рынку (AC5).
@@ -390,12 +398,13 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
         steps,
         done,
       });
-    if (afterStop !== "takeProfit") return done(afterStop, entryPrice, filled);
+    if (afterStop !== "takeProfit")
+      return doneEntry(afterStop, entryPrice, filled);
   } else {
     // Стоп «до входа» уже стоит; без тейка (stopOnly) — готово.
     const afterStop = afterFuturesStop(true, req.stopOnly === true);
     if (typeof afterStop !== "string")
-      return done(afterStop, entryPrice, filled);
+      return doneEntry(afterStop, entryPrice, filled);
   }
 
   // Тейк после общего срока не ставим: стоп стоит, выход — вместе с paper-сделкой.
@@ -405,7 +414,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
       ok: false,
       detail: "Не выставлялся — истёк срок сделки (биржа долго отвечала)",
     });
-    return done(afterFuturesTakeProfit(false), entryPrice, filled);
+    return doneEntry(afterFuturesTakeProfit(false), entryPrice, filled);
   }
   // Тейк с неизвестным исходом: protected (стоп стоит), но ссылка по clientAlgoId остаётся —
   // закрытие снимет висящий тейк.
@@ -417,7 +426,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
     ids.takeProfit,
   );
   futuresRefs.takeProfit = tp.ref;
-  return done(afterFuturesTakeProfit(tp.placed), entryPrice, filled);
+  return doneEntry(afterFuturesTakeProfit(tp.placed), entryPrice, filled);
 }
 
 /** Снять свой algo-ордер (стоп «до входа» сделки, которая не открылась). Ошибку — только в шаги. */

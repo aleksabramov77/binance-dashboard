@@ -13,8 +13,15 @@ import {
   markDemoReset,
   markMirrorClosedByExchange,
   updateMirror,
+  withMirrorRunLock,
 } from "@/entities/experiment";
-import { mirrorLogEntry, runMirror } from "@/features/demo-mirror";
+import {
+  emptyMirrorRunResult,
+  MIRROR,
+  type MirrorRunResult,
+  mirrorLogEntry,
+  runMirror,
+} from "@/features/demo-mirror";
 import {
   closeDemoPosition,
   placeTrade,
@@ -25,15 +32,35 @@ import {
   fetchDemoSymbolRules,
 } from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
-import { getDb } from "@/shared/db/client.server";
+import { type Db, getDb, getDbKind } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { getLabSettings } from "./experimentSettings";
 
 const writeMirrorLog = (e: ReturnType<typeof mirrorLogEntry>) =>
   log[e.level](e.event, e.message, e.data);
 
-export async function runDemoMirror() {
+/**
+ * Прогон зеркала под блокировкой (PR 2e): бюджет прогона 200 с больше минуты крона — второй прогон,
+ * пока идёт первый, сразу выходит с `locked: true` (открыл бы тот же вход дважды или закрыл чужое).
+ */
+export async function runDemoMirror(): Promise<MirrorRunResult> {
   const db = getDb();
+  const run = await withMirrorRunLock(
+    db,
+    () => runDemoMirrorUnlocked(db),
+    getDbKind() === "postgres",
+    MIRROR.lockIdleTimeoutS,
+  );
+  if (run.acquired) return run.value;
+  log.info(
+    "mirror.locked",
+    "Зеркало: предыдущий прогон ещё идёт — этот пропущен",
+    {},
+  );
+  return emptyMirrorRunResult(getDemoTradingConfig() !== null, true);
+}
+
+async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
   // Кандидаты прогона — чтобы claim знал поля сделки по id.
   const byId = new Map<string, MirrorCandidate>();
   const result = await runMirror({
