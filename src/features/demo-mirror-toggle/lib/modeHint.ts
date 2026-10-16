@@ -19,8 +19,10 @@ export function mirrorModeHint(
   auto: MirrorAutoSnapshot | null,
 ): string {
   if (mode !== "auto") return MODE_MEANING[mode];
-  const last = auto
-    ? `Последнее решение (${formatDateTime(auto.at)}): ${describeMirrorAuto(auto)}.`
-    : "Автомат ещё не решал.";
-  return `${MODE_MEANING.auto}\n${last}`;
+  if (!auto) return `${MODE_MEANING.auto}\nАвтомат ещё не решал.`;
+  const change = auto.change
+    ? `Последнее изменение (${formatDateTime(auto.change.at)}): ${describeMirrorAuto(auto.change)}.`
+    : "Автомат ещё не менял зеркало.";
+  const check = `Последняя проверка (${formatDateTime(auto.checkedAt)}): ${describeMirrorAuto(auto.check)}.`;
+  return [MODE_MEANING.auto, change, check].join("\n");
 }

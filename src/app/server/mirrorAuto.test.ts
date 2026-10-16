@@ -177,6 +177,16 @@ describe("runMirrorAuto", () => {
     expect(again.changes).toEqual([]);
     expect(again.advice).toEqual([]);
     expect(sendTelegramMessage).not.toHaveBeenCalled();
+
+    // «Оставил включённым» не затирает, почему автомат включил: последнее изменение — прежнее, проверка — новая.
+    const [s98] = await db
+      .select({ auto: experimentsTable.demoMirrorAuto })
+      .from(experimentsTable)
+      .where(eq(experimentsTable.id, "S98"));
+    expect(s98.auto).toMatchObject({
+      check: { decision: "keep", demoMirror: true, trades: 0, avgR: null },
+      change: { decision: "enable", demoMirror: true, trades: 30 },
+    });
   });
 
   it("не production — только журнал; сбой Telegram не отменяет изменения (warn)", async () => {

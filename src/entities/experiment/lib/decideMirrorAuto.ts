@@ -4,6 +4,7 @@ import type {
   DemoMirrorMode,
   MirrorAdvice,
   MirrorAutoDecision,
+  MirrorAutoSnapshot,
 } from "../model/mirrorAuto";
 
 // Правило авто-зеркала (spec 0043) — чистая функция: эксперимент с положением и окном сделок → изменение зеркала
@@ -134,5 +135,24 @@ export function decideMirrorAuto(
     change: null,
     sendAdvice: fresh ? action : null,
     adviceState: action === e.advice ? undefined : action,
+  };
+}
+
+/**
+ * Снимок после проверки «Авто»: последняя проверка — всегда новая, последнее изменение — только если автомат поменял
+ * зеркало (change), иначе прежнее: «оставил» не затирает, почему зеркало включено или выключено.
+ */
+export function nextMirrorAutoSnapshot(
+  prev: MirrorAutoSnapshot | null,
+  verdict: MirrorAutoVerdict,
+  demoMirror: boolean,
+  changed: boolean,
+  at: string,
+): MirrorAutoSnapshot {
+  const check = { ...verdict, demoMirror };
+  return {
+    checkedAt: at,
+    check,
+    change: changed ? { at, ...check } : (prev?.change ?? null),
   };
 }

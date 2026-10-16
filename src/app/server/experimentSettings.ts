@@ -146,6 +146,9 @@ export async function toggleExperiment(
   return getLabSettings();
 }
 
+const DEMO_KEY_MISSING =
+  "На сервере не задан ключ Binance Demo (BINANCE_DEMO_API_KEY / SECRET) — включить торговлю на демо-счёте нельзя.";
+
 const MODE_LABEL: Record<DemoMirrorMode, string> = {
   off: "Выкл (вручную)",
   auto: "Авто",
@@ -154,7 +157,8 @@ const MODE_LABEL: Record<DemoMirrorMode, string> = {
 
 /**
  * Положение демо-зеркала эксперимента «Выкл · Авто · Вкл» (spec 008, 0043); null — эксперимента нет, { blocked } —
- * группа не умеет зеркало (COIN-M, spec 0023: «Демо-зеркало COIN-M — позже»). Открытые зеркала не трогаем.
+ * группа не умеет зеркало (COIN-M, spec 0023: «Демо-зеркало COIN-M — позже») или «Вкл» без ключа Binance Demo.
+ * Открытые зеркала не трогаем.
  * «Авто» сразу применяет правило автомата к эксперименту (AC7) — без ожидания суточной проверки.
  */
 export async function setDemoMirrorMode(
@@ -171,6 +175,9 @@ export async function setDemoMirrorMode(
   const group = ASSET_GROUPS[row.market as ExperimentMarket];
   if (mode !== "off" && group?.demoMirrorBlocked)
     return { blocked: group.demoMirrorBlocked };
+  // Как в UI и lab:apply: без ключа Binance Demo ручное «Вкл» бессмысленно — зеркало не сможет торговать.
+  if (mode === "on" && getDemoTradingConfig() === null)
+    return { blocked: DEMO_KEY_MISSING };
   if (!(await setExperimentMirrorMode(db, id, mode))) return null;
   log.info("experiments.mirror", `${id}: демо-зеркало — ${MODE_LABEL[mode]}`, {
     experimentId: id,

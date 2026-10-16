@@ -1,4 +1,4 @@
-import type { MirrorAutoSnapshot } from "../model/mirrorAuto";
+import type { MirrorAutoStep } from "../model/mirrorAuto";
 
 // Тексты авто-зеркала (spec 0043): Telegram, журнал и подсказка у переключателя — одни и те же слова.
 
@@ -21,7 +21,7 @@ export function tradesLabel(n: number): string {
   return `${n} ${word}`;
 }
 
-const DECISION_TEXT: Record<MirrorAutoSnapshot["decision"], string> = {
+const DECISION_TEXT: Record<MirrorAutoStep["decision"], string> = {
   enable: "включил",
   disable_loss: "выключил по обратному порогу",
   disable_off: "выключил: эксперимент выключен",
@@ -30,7 +30,7 @@ const DECISION_TEXT: Record<MirrorAutoSnapshot["decision"], string> = {
 };
 
 /** «включил: 34 сделки, средний R +0.21» — без даты (её добавляет место показа). */
-export function describeMirrorAuto(s: MirrorAutoSnapshot): string {
+export function describeMirrorAuto(s: MirrorAutoStep): string {
   const action =
     s.decision === "keep"
       ? `оставил ${s.demoMirror ? "включённым" : "выключенным"}`

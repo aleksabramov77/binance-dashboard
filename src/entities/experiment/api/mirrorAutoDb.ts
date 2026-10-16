@@ -3,10 +3,11 @@ import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { DEMO_MIRROR_MARKETS, type Market } from "../model/assetGroup";
 import { experimentsTable, paperTradesTable, runsTable } from "../model/db";
-import type {
-  DemoMirrorMode,
-  MirrorAdvice,
-  MirrorAutoSnapshot,
+import {
+  type DemoMirrorMode,
+  type MirrorAdvice,
+  type MirrorAutoSnapshot,
+  mirrorAutoSnapshotSchema,
 } from "../model/mirrorAuto";
 
 // Авто-зеркало в БД (spec 0043): положение переключателя, данные для решения автомата и запись решения.
@@ -28,10 +29,17 @@ export interface MirrorAutoRow {
   demoMirror: boolean;
   mode: DemoMirrorMode;
   advice: MirrorAdvice | null;
+  /** Прежний снимок авто-зеркала (последнее изменение переносится в новый); null — нет или битый. */
+  auto: MirrorAutoSnapshot | null;
   resetAt: Date | null;
   since: Date | null;
   trades: MirrorAutoTrade[];
 }
+
+const parseSnapshot = (raw: unknown): MirrorAutoSnapshot | null => {
+  const parsed = mirrorAutoSnapshotSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+};
 
 /**
  * Эксперименты групп с демо-зеркалом (COIN-M автомат не трогает) и их закрытые сделки текущей эпохи с R.
@@ -93,6 +101,7 @@ export async function readMirrorAutoRows(
       demoMirror: e.demoMirror,
       mode: e.demoMirrorMode,
       advice: e.demoMirrorAdvice ?? null,
+      auto: parseSnapshot(e.demoMirrorAuto),
       resetAt: e.resetAt,
       since: e.demoMirrorSince,
       trades: byExperiment.get(e.id) ?? [],

@@ -100,6 +100,7 @@ export {
   mirrorAutoVerdict,
   mirrorWindowR,
   mirrorWindowStart,
+  nextMirrorAutoSnapshot,
 } from "./lib/decideMirrorAuto";
 // Агрегаты по сделкам и конфиг человеческим текстом — для страниц и разрезов /stats.
 export {
@@ -184,9 +185,11 @@ export {
   type MirrorAdvice,
   type MirrorAutoDecision,
   type MirrorAutoSnapshot,
+  type MirrorAutoStep,
   mirrorAdviceSchema,
   mirrorAutoDecisionSchema,
   mirrorAutoSnapshotSchema,
+  mirrorAutoStepSchema,
 } from "./model/mirrorAuto";
 export type {
   InvalidExperimentRow,

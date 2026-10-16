@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { mirrorAutoSnapshotSchema } from "../model/mirrorAuto";
 import {
   decideMirrorAuto,
   type MirrorAutoInput,
   mirrorWindowR,
   mirrorWindowStart,
+  nextMirrorAutoSnapshot,
 } from "./decideMirrorAuto";
 import { mirrorAdviceMessage, mirrorChangeMessage } from "./mirrorAutoMessages";
 
@@ -266,5 +268,59 @@ describe("тексты", () => {
     expect(under && mirrorAdviceMessage(under)).toBe(
       "💡 S98 — демо-зеркало выключено вручную, а похоже недооценено: 34 сделки, средний R +0.21. Авто бы включил",
     );
+  });
+});
+
+describe("снимок авто-зеркала для подсказки в UI", () => {
+  const enable = {
+    decision: "enable" as const,
+    trades: 32,
+    avgR: 0.2,
+  };
+  const keep = { decision: "keep" as const, trades: 0, avgR: null };
+
+  it("изменение запоминается; следующая проверка «оставил» его не затирает", () => {
+    const first = nextMirrorAutoSnapshot(null, enable, true, true, "d1");
+    expect(first).toEqual({
+      checkedAt: "d1",
+      check: { ...enable, demoMirror: true },
+      change: { at: "d1", ...enable, demoMirror: true },
+    });
+    const next = nextMirrorAutoSnapshot(first, keep, true, false, "d2");
+    expect(next).toEqual({
+      checkedAt: "d2",
+      check: { ...keep, demoMirror: true },
+      change: { at: "d1", ...enable, demoMirror: true },
+    });
+  });
+
+  it("без изменений с самого начала — change null", () => {
+    expect(
+      nextMirrorAutoSnapshot(null, keep, false, false, "d1").change,
+    ).toBeNull();
+  });
+
+  it("снимок первой версии читается: решение-изменение становится последним изменением", () => {
+    const legacy = {
+      at: "d1",
+      decision: "enable",
+      demoMirror: true,
+      trades: 32,
+      avgR: 0.2,
+    };
+    expect(mirrorAutoSnapshotSchema.parse(legacy)).toEqual({
+      checkedAt: "d1",
+      check: { decision: "enable", demoMirror: true, trades: 32, avgR: 0.2 },
+      change: {
+        at: "d1",
+        decision: "enable",
+        demoMirror: true,
+        trades: 32,
+        avgR: 0.2,
+      },
+    });
+    expect(
+      mirrorAutoSnapshotSchema.parse({ ...legacy, decision: "keep" }).change,
+    ).toBeNull();
   });
 });

@@ -2,7 +2,7 @@
 //   pnpm mirror:supabase cron-install  — Vault (demo_mirror_url, monitor_cron_secret) + задание demo-mirror
 //   pnpm mirror:supabase cron-remove   — снять задание (зеркало перестанет открывать и закрывать позиции)
 //   pnpm mirror:supabase run           — прогон зеркала сейчас (на Vercel)
-//   pnpm mirror:supabase status        — последние запуски задания
+//   pnpm mirror:supabase status        — последние запуски заданий demo-mirror и mirror-auto, положения зеркал
 // Авто-зеркало (spec 0043): pg_cron раз в сутки (07:00 UTC) → POST /api/cron/mirror-auto.
 //   pnpm mirror:supabase cron-install-auto — Vault (mirror_auto_url, monitor_cron_secret) + задание mirror-auto
 //   pnpm mirror:supabase cron-remove-auto  — снять задание (автомат перестанет включать и выключать зеркала)
@@ -135,11 +135,17 @@ async function post(target: string) {
 async function status() {
   const sql = db();
   try {
-    const runs = await sql`
-      select d.status, d.return_message, d.start_time
-      from cron.job_run_details d join cron.job j using (jobid)
-      where j.jobname = ${JOB} order by d.start_time desc limit 5`;
-    console.log(runs.length ? runs : `Запусков ${JOB} ещё не было`);
+    for (const job of [JOB, AUTO_JOB]) {
+      const runs = await sql`
+        select d.status, d.return_message, d.start_time
+        from cron.job_run_details d join cron.job j using (jobid)
+        where j.jobname = ${job} order by d.start_time desc limit 5`;
+      console.log(`${job}:`, runs.length ? runs : "запусков ещё не было");
+    }
+    const modes = await sql`
+      select demo_mirror_mode as mode, demo_mirror as mirror, count(*)::int as n
+      from experiments group by 1, 2 order by 1, 2`;
+    console.log("Положения демо-зеркала:", modes);
     const mirrors = await sql`
       select status, count(*)::int as n from demo_mirror_orders group by status`;
     console.log("Зеркала по статусам:", mirrors);

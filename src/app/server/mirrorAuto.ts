@@ -9,6 +9,7 @@ import {
   mirrorChangeMessage,
   mirrorWindowR,
   mirrorWindowStart,
+  nextMirrorAutoSnapshot,
   readMirrorAutoRows,
   saveMirrorAuto,
 } from "@/entities/experiment";
@@ -90,7 +91,13 @@ export async function runMirrorAuto(
       if (!dryRun) {
         const applied = await saveMirrorAuto(db, row.id, row.mode, {
           demoMirror: plan.change,
-          snapshot: { at, ...verdict, demoMirror: plan.change },
+          snapshot: nextMirrorAutoSnapshot(
+            row.auto,
+            verdict,
+            plan.change,
+            true,
+            at,
+          ),
           ...(plan.adviceState !== undefined && { advice: plan.adviceState }),
         });
         // Переключатель сменили, пока шла проверка, — решение устарело.
@@ -113,7 +120,13 @@ export async function runMirrorAuto(
       // «Авто» — снимок решения для подсказки в UI каждый прогон; ручные — только смена последней подсказки.
       const patch: MirrorAutoPatch = {};
       if (row.mode === "auto")
-        patch.snapshot = { at, ...verdict, demoMirror: row.demoMirror };
+        patch.snapshot = nextMirrorAutoSnapshot(
+          row.auto,
+          verdict,
+          row.demoMirror,
+          false,
+          at,
+        );
       if (plan.adviceState !== undefined) patch.advice = plan.adviceState;
       if (patch.snapshot || patch.advice !== undefined)
         await saveMirrorAuto(db, row.id, row.mode, patch);

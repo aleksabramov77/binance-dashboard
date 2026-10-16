@@ -121,12 +121,16 @@ describe("авто-зеркало в БД (spec 0043)", () => {
 
   it("решение автомата пишется, только пока положение то же", async () => {
     await seedExperiments(db, [exp("S98")]);
-    const snapshot = {
-      at: "2026-10-16T07:00:00.000Z",
+    const step = {
       decision: "enable" as const,
       demoMirror: true,
       trades: 34,
       avgR: 0.21,
+    };
+    const snapshot = {
+      checkedAt: "2026-10-16T07:00:00.000Z",
+      check: step,
+      change: { at: "2026-10-16T07:00:00.000Z", ...step },
     };
     expect(
       await saveMirrorAuto(db, "S98", "on", { demoMirror: true, snapshot }),
@@ -168,6 +172,7 @@ describe("авто-зеркало в БД (spec 0043)", () => {
     expect(data?.rows[0]).toMatchObject({
       mode: "auto",
       advice: null,
+      auto: null,
       demoMirror: false,
     });
     expect((await readMirrorAutoRows(db, ["PC99"]))?.rows).toEqual([]);

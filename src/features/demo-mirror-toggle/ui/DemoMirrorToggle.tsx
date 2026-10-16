@@ -65,10 +65,13 @@ export function DemoMirrorToggle({
       { onSuccess: () => setConfirmOn(false) },
     );
 
+  // У «Авто» — ещё и последнее изменение и проверка автомата: браузер показывает title кнопки под курсором.
   const segmentTitle = (m: DemoMirrorMode) => {
     if (m === "on" && !demoConfigured)
       return "На сервере не задан ключ Binance Demo — включить торговлю на демо-счёте нельзя.";
-    return MODE_MEANING[m];
+    return m === "auto"
+      ? mirrorModeHint("auto", experiment.demoMirrorAuto)
+      : MODE_MEANING[m];
   };
 
   return (
