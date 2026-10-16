@@ -492,9 +492,9 @@ bStocks, но публичного торгового API для них не н�
 | 16.1 | Реальный счёт, задача 3, часть 2: режимы «Авто» (≥ 30 сделок демо-зеркала, средний R > 0; выкл по демо R < 0 и порогам) и «Вкл + автовыкл» (−$15 с момента включения или 5 убытков подряд, настраиваются у эксперимента); после автовыключения — «Выкл» ([spec 0053](specs/0053-live-auto.md)) | допуск без ручного решения и автостоп убыточных | real-money-binance-subaccount | ✅ 0053, #95 |
 | 17 | Реальный счёт, задача 4: колонки Real в `/experiments` и статистика по счетам (вместе с п. 12) | сравнение Paper / Demo / Real | real-money-binance-subaccount | ⏭ после п. 16 |
 | 18 | Фоновые задачи на своей VM таймерами вместо pg_cron (Earn, монитор и место в БД, демо- и авто-зеркало), только при `runner = oracle` | уход с Vercel, шаг 1 | lightsail-migration | ✅ 0048, #92 |
-| 19 | Переключение прода на VM apps-tokyo: `runner → oracle`, задания pg_cron выкл., webhook Telegram на VM, автовыкатка VM после CI на `main`, автодеплой Vercel выкл. | уход с Vercel | lightsail-migration | 🚧 0055 |
+| 19 | Переключение прода на VM apps-tokyo: `runner → oracle`, задания pg_cron выкл., webhook Telegram на VM, автовыкатка VM после CI на `main`, автодеплой Vercel выкл. | уход с Vercel | lightsail-migration | ✅ 0055, #93 |
 | 20 | Выкатка `binance-live` из CI (`pnpm live:build` → VM); сервис не запускать до секретов владельца | «Реальные деньги» на VM | lightsail-migration | ⏭ |
-| 21 | SQLite вместо Supabase Postgres + перенос данных (пауза ~5 мин) | уход с Supabase ($25) | lightsail-migration | ⏭ |
+| 21 | SQLite вместо Supabase Postgres + перенос данных (пауза ~5 мин) ([spec 0059](specs/0059-sqlite.md)) | уход с Supabase ($25) | lightsail-migration | 🚧 0059 |
 | 22 | Ключ реального аккаунта в базе в зашифрованном виде (AES-GCM, решение 2026-10-15) | «Портфель» и Earn на VM | lightsail-migration | ⏭ |
 | 23 | Бэкапы SQLite: ночной `.backup` (7 дней) + снимки Lightsail | сохранность данных | lightsail-migration | ⏭ |
 | 24 | Отключение Supabase и Vercel после недели на VM — только с согласия владельца (деньги, удаление) | экономия | lightsail-migration | ⏭ |
