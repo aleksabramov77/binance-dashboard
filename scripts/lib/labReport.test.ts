@@ -564,7 +564,8 @@ describe("buildLabReport", () => {
     expect(md).toContain("### S04 · EMA 9/21, 15m, TP 2R");
     expect(md).toContain("**Причина выхода**");
     expect(md).toContain("Подсказки: rare-signal.");
-    expect(md).toContain("Закрытых сделок нет (открыто 0).");
+    expect(md).toContain("Закрытых сделок нет.");
+    expect(md).toContain("Открытых позиций на конец периода нет.");
     expect(
       renderLabReport(buildLabReport(data, { now: NOW, market: null })),
     ).toContain("Контекст рынка не загружен");
@@ -1105,5 +1106,18 @@ describe("открытые позиции по последней цене (ба
     expect(renderLabReport(without)).toContain(
       "Открытые позиции по последней цене не оценены.",
     );
+    // Без закрытых и с --since, отрезавшим вход: одно число открытых — на конец периода.
+    const onlyOpen = renderLabReport(
+      buildLabReport(
+        dataset(
+          [experiment("S04")],
+          [open("S04", { openedAt: new Date(START).toISOString() })],
+        ),
+        { now: NOW, since },
+      ),
+    );
+    expect(onlyOpen).toContain("Закрытых сделок нет.");
+    expect(onlyOpen).toContain("Открыто на конец периода: 1,");
+    expect(onlyOpen).not.toContain("открыто 0");
   });
 });

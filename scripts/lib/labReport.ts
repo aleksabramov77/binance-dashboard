@@ -437,7 +437,8 @@ export const LEGEND =
   "unrealized — открытые на конец периода позиции (все открытые эпохи, без учёта --since), оценённые по последней " +
   "цене (openPricing — источник и момент; null — не оценивались): open — открыто, priced — из них с ценой, pnl — USD, " +
   "если закрыть по рынку сейчас (слиппедж выхода, комиссии входа и выхода), sumR — сумма R оценённых со стопом " +
-  "(withStop), maxAgeDays — дней с входа старейшей. В stats, r, returnPct и другие метрики закрытых сделок не входит.";
+  "(withStop), maxAgeDays — дней с входа старейшей. В stats, r, returnPct и другие метрики закрытых сделок не входит. " +
+  "Бэктест с --split: в частях (split.train, split.test) unrealized — позиции, открытые на конец всего периода, без оценки по цене.";
 
 type ClosedTrade = PaperTrade & { closedAt: string; pnl: number };
 
@@ -1237,7 +1238,9 @@ export function buildLabReport(
   const openOf = new Map<string, PaperTrade[]>();
   for (const t of data.trades) {
     if (t.closedAt !== null) continue;
-    openOf.set(t.experimentId, [...(openOf.get(t.experimentId) ?? []), t]);
+    const list = openOf.get(t.experimentId);
+    if (list) list.push(t);
+    else openOf.set(t.experimentId, [t]);
   }
   const skippedOf = new Map<string, SkippedSignal[]>();
   for (const s of data.skipped ?? []) {
@@ -1540,8 +1543,9 @@ function experimentSection(e: ExperimentReport): string[] {
       "",
       `Гипотеза: ${e.hypothesis}`,
       "",
-      `Архетип: ${ARCHETYPE_LABEL[e.archetype]}. Закрытых сделок нет (открыто ${s.open}).${accounted ? ` ${accounted}` : ""}`,
-      ...(e.unrealized.open ? [unrealizedLine(e)] : []),
+      `Архетип: ${ARCHETYPE_LABEL[e.archetype]}. Закрытых сделок нет.${accounted ? ` ${accounted}` : ""}`,
+      // Открытые — одно число на конец периода (unrealized), а не открытые после --since.
+      unrealizedLine(e),
       ...(e.skipped.total ? [skippedLine(e)] : []),
       "",
     ];
@@ -1554,7 +1558,7 @@ function experimentSection(e: ExperimentReport): string[] {
     ...e.config.map((c) => `- ${c.label}: ${c.value}`),
     "",
     ...(accounted ? [accounted] : []),
-    `Выборка: ${s.closed} закрытых (${SAMPLE_LABEL[e.sample]}), открыто ${s.open}; ${num(e.tradesPerDay, 1)} сделок/день; до 30 — ${days(e.daysTo.preliminary)}, до 100 — ${days(e.daysTo.decidable)}.`,
+    `Выборка: ${s.closed} закрытых (${SAMPLE_LABEL[e.sample]}), открыто ${e.unrealized.open}; ${num(e.tradesPerDay, 1)} сделок/день; до 30 — ${days(e.daysTo.preliminary)}, до 100 — ${days(e.daysTo.decidable)}.`,
     `Результат: PnL ${usd(s.realizedPnl)} $ (до комиссий ${usd(e.pnlBeforeFees)} $), win rate ${pct(s.winRate)}, PF ${num(s.profitFactor)}, payoff ${num(e.payoff)}, просадка ${pct(s.maxDrawdownPct, 1)}.`,
     `Ожидание: R ${num(e.r.mean)} (sd ${num(e.r.sd)}, t ${num(e.r.t)}, n ${e.r.n}); доходность ${signedPct(e.returnPct.mean)}% (t ${num(e.returnPct.t)}); к случайному входу рынка ${e.vsRandomPct === null ? "—" : `${signedPct(e.vsRandomPct)} п. п.`}`,
     costLine(e),
