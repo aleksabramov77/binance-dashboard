@@ -58,6 +58,7 @@ import {
   reduceParams,
 } from "./positionMode";
 import { BinanceApiError, type SignedParams, signedRequest } from "./signed";
+import { DEMO_PUBLIC, DEMO_URL, type TradeVenue } from "./venue.server";
 import {
   sumUsd,
   type UsdPrice,
@@ -65,27 +66,32 @@ import {
   type WalletEquityResult,
 } from "./walletEquity";
 
-/**
- * Binance Demo Trading — виртуальные деньги, реальные котировки. Хосты: spot, фьючерсы USDⓈ-M и COIN-M
- * (demo-dapi — пока только чтение баланса, spec 0038; демо-зеркала COIN-M нет).
- */
-const DEMO_URL = {
-  spot: "https://demo-api.binance.com",
-  futures: "https://demo-fapi.binance.com",
-  coinm: "https://demo-dapi.binance.com",
-} as const;
-const DEMO_HOST: Record<Market, string> = {
-  spot: DEMO_URL.spot,
-  usdm: DEMO_URL.futures,
-};
+// Функции ордеров и чтения принимают площадку (spec 0049): демо — demoVenue(creds), реальный счёт — liveVenue.
+// Имена с «Demo» исторические; адреса и подпись — у площадки (venue.server.ts). Equity демо-счёта (COIN-M) — только демо.
 const PREFIX: Record<Market, string> = { spot: "/api/v3", usdm: "/fapi/v1" };
 const RULES_TTL_MS = 10 * 60_000;
 
-/** Справочник демо-фьючерсов (~900 КБ) — грузим редко, держим последнюю удачную копию. */
-let futuresRules: { at: number; bySymbol: Map<string, SymbolRules> } | null =
-  null;
+/**
+ * Справочник фьючерсов площадки (~900 КБ) — грузим редко, держим последнюю удачную копию. Свой у каждого адреса:
+ * у демо и реального рынка свои символы и шаги.
+ */
+const futuresRules = new Map<
+  string,
+  { at: number; bySymbol: Map<string, SymbolRules> }
+>();
 
-const getJson = (url: string) => getJsonWithRetry(url, "Binance Demo");
+/**
+ * Публичная часть площадки: адреса справочников и цен. Обязательный параметр — чтобы код реального счёта не взял
+ * по ошибке демо-цены; демо передаёт DEMO_PUBLIC_VENUE.
+ */
+export type PublicVenue = Pick<TradeVenue, "kind" | "publicUrl">;
+export const DEMO_PUBLIC_VENUE: PublicVenue = {
+  kind: "demo",
+  publicUrl: DEMO_PUBLIC,
+};
+
+const getJson = (url: string, venue: PublicVenue) =>
+  getJsonWithRetry(url, venue.kind === "demo" ? "Binance Demo" : "Binance");
 
 /** Binance: -1121 Invalid symbol. */
 const isInvalidSymbol = (error: unknown) =>
@@ -103,17 +109,19 @@ function indexRules(market: Market, raw: unknown): Map<string, SymbolRules> {
 }
 
 /**
- * Правила округления символа на демо; null — символа точно нет в Demo Trading.
+ * Правила округления символа на площадке; null — символа точно нет на её рынке.
  * Сетевой сбой — исключение NetworkError, а не null.
  */
 export async function fetchDemoSymbolRules(
   market: Market,
   symbol: string,
+  venue: PublicVenue,
 ): Promise<SymbolRules | null> {
   if (market === "spot") {
     try {
       const raw = await getJson(
-        `${DEMO_URL.spot}${PREFIX.spot}/exchangeInfo?symbol=${symbol}`,
+        `${venue.publicUrl.spot}${PREFIX.spot}/exchangeInfo?symbol=${symbol}`,
+        venue,
       );
       return indexRules("spot", raw).get(symbol) ?? null;
     } catch (error) {
@@ -122,53 +130,42 @@ export async function fetchDemoSymbolRules(
     }
   }
 
-  if (!futuresRules || Date.now() - futuresRules.at > RULES_TTL_MS) {
+  const url = `${venue.publicUrl.usdm}${PREFIX.usdm}/exchangeInfo`;
+  let cached = futuresRules.get(url);
+  if (!cached || Date.now() - cached.at > RULES_TTL_MS) {
     try {
-      const raw = await getJson(
-        `${DEMO_URL.futures}${PREFIX.usdm}/exchangeInfo`,
-      );
-      futuresRules = {
-        at: Date.now(),
-        bySymbol: indexRules("usdm", raw),
-      };
+      const raw = await getJson(url, venue);
+      cached = { at: Date.now(), bySymbol: indexRules("usdm", raw) };
+      futuresRules.set(url, cached);
     } catch (error) {
       // Устаревший справочник лучше, чем никакого: шаги цены меняются редко.
-      if (!futuresRules) throw error;
+      if (!cached) throw error;
     }
   }
-  return futuresRules?.bySymbol.get(symbol) ?? null;
+  return cached.bySymbol.get(symbol) ?? null;
 }
 
 export async function fetchDemoPrice(
   market: Market,
   symbol: string,
+  venue: PublicVenue,
 ): Promise<number> {
   const raw = await getJson(
-    `${DEMO_HOST[market]}${PREFIX[market]}/ticker/price?symbol=${symbol}`,
+    `${venue.publicUrl[market]}${PREFIX[market]}/ticker/price?symbol=${symbol}`,
+    venue,
   );
   return priceSchema.parse(raw).price;
 }
 
 /** Свободные USDT на демо-споте и демо-фьючерсах. */
 export async function fetchDemoUsdtBalances(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
 ): Promise<{ spot: number; usdm: number }> {
   const [spot, futures] = await Promise.all([
-    signedRequest(
-      DEMO_URL.spot,
-      creds,
-      "GET",
-      "/api/v3/account",
-      spotAccountBalancesSchema,
-      { omitZeroBalances: true },
-    ),
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
-      "GET",
-      "/fapi/v3/balance",
-      futuresBalancesSchema,
-    ),
+    venue.signed("spot", "GET", "/api/v3/account", spotAccountBalancesSchema, {
+      omitZeroBalances: true,
+    }),
+    venue.signed("usdm", "GET", "/fapi/v3/balance", futuresBalancesSchema),
   ]);
   return {
     spot: spot.balances.find((b) => b.asset === "USDT")?.free ?? 0,
@@ -250,68 +247,53 @@ export async function fetchDemoEquity(
 
 /** clientOrderId — свой id ордера: по нему перечитываем ордер, если исход заявки неизвестен. */
 export async function demoSpotMarketOrder(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   side: "BUY" | "SELL",
   quantity: string,
   clientOrderId?: string,
 ): Promise<SpotOrder> {
-  return signedRequest(
-    DEMO_URL.spot,
-    creds,
-    "POST",
-    "/api/v3/order",
-    spotOrderSchema,
-    {
-      symbol,
-      side,
-      type: "MARKET",
-      quantity,
-      newOrderRespType: "FULL",
-      recvWindow: ORDER_RECV_WINDOW_MS,
-      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
-    },
-  );
+  return venue.signed("spot", "POST", "/api/v3/order", spotOrderSchema, {
+    symbol,
+    side,
+    type: "MARKET",
+    quantity,
+    newOrderRespType: "FULL",
+    recvWindow: ORDER_RECV_WINDOW_MS,
+    ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
+  });
 }
 
 /** Стоп на продажу (STOP_LOSS — по рынку при касании stopPrice), без тейка. */
 export async function demoSpotStopLossSell(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   quantity: string,
   stopPrice: string,
   clientOrderId?: string,
 ): Promise<SpotOrder> {
-  return signedRequest(
-    DEMO_URL.spot,
-    creds,
-    "POST",
-    "/api/v3/order",
-    spotOrderSchema,
-    {
-      symbol,
-      side: "SELL",
-      type: "STOP_LOSS",
-      quantity,
-      stopPrice,
-      newOrderRespType: "RESULT",
-      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
-    },
-  );
+  return venue.signed("spot", "POST", "/api/v3/order", spotOrderSchema, {
+    symbol,
+    side: "SELL",
+    type: "STOP_LOSS",
+    quantity,
+    stopPrice,
+    newOrderRespType: "RESULT",
+    ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
+  });
 }
 
 /** OCO на продажу: лимитный тейк выше рынка + стоп-маркет ниже. ids — свои clientOrderId. */
 export async function demoSpotOcoSell(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   quantity: string,
   takeProfit: string,
   stopLoss: string,
   ids?: { list: string; stop: string; takeProfit: string },
 ) {
-  return signedRequest(
-    DEMO_URL.spot,
-    creds,
+  return venue.signed(
+    "spot",
     "POST",
     "/api/v3/orderList/oco",
     orderListSchema,
@@ -339,30 +321,25 @@ export async function demoSpotOcoSell(
  * Биржа проверяет все три ордера сразу: стоп за фильтром цены — отказ всей заявки, монеты не куплены.
  */
 export async function demoSpotBuyProtected(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   p: SpotEntryListParams,
 ): Promise<SpotEntryListResult> {
   const { path, params } = spotEntryListRequest(p);
-  const res = await signedRequest(
-    DEMO_URL.spot,
-    creds,
-    "POST",
-    path,
-    orderListReportsSchema,
-    { ...params, recvWindow: ORDER_RECV_WINDOW_MS },
-  );
+  const res = await venue.signed("spot", "POST", path, orderListReportsSchema, {
+    ...params,
+    recvWindow: ORDER_RECV_WINDOW_MS,
+  });
   return summarizeSpotEntryList(res, p.symbol.replace(/USDT$/, ""));
 }
 
 /** Статус ордера спота (NEW, FILLED, EXPIRED…). */
 export async function fetchDemoSpotOrderStatus(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   orderId: number,
 ): Promise<string> {
-  const order = await signedRequest(
-    DEMO_URL.spot,
-    creds,
+  const order = await venue.signed(
+    "spot",
     "GET",
     "/api/v3/order",
     spotOrderStatusSchema,
@@ -376,14 +353,13 @@ export async function fetchDemoSpotOrderStatus(
  * Нужен, когда исход заявки неизвестен (-1007, 5xx, обрыв сети): дошла ли она до биржи.
  */
 export async function fetchDemoSpotOrderByClientId(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   clientOrderId: string,
 ): Promise<SpotOrderQuery | null> {
   try {
-    return await signedRequest(
-      DEMO_URL.spot,
-      creds,
+    return await venue.signed(
+      "spot",
       "GET",
       "/api/v3/order",
       spotOrderQuerySchema,
@@ -400,22 +376,15 @@ export async function fetchDemoSpotOrderByClientId(
  * список. false — отменять нечего: ордера нет или он уже исполнен/снят (-2011, -2013).
  */
 export async function demoSpotCancelByClientId(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   clientOrderId: string,
 ): Promise<boolean> {
   try {
-    await signedRequest(
-      DEMO_URL.spot,
-      creds,
-      "DELETE",
-      "/api/v3/order",
-      anySchema,
-      {
-        symbol,
-        origClientOrderId: clientOrderId,
-      },
-    );
+    await venue.signed("spot", "DELETE", "/api/v3/order", anySchema, {
+      symbol,
+      origClientOrderId: clientOrderId,
+    });
     return true;
   } catch (error) {
     if (isNoSuchOrder(error)) return false;
@@ -429,20 +398,16 @@ export async function demoSpotCancelByClientId(
  * вход идёт с тем, что есть — "kept". Плечо меняется и при открытой позиции.
  */
 export async function demoFuturesPrepare(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   leverage: number,
 ): Promise<"isolated" | "kept"> {
   let margin: "isolated" | "kept" = "isolated";
   try {
-    await signedRequest(
-      DEMO_URL.futures,
-      creds,
-      "POST",
-      "/fapi/v1/marginType",
-      anySchema,
-      { symbol, marginType: "ISOLATED" },
-    );
+    await venue.signed("usdm", "POST", "/fapi/v1/marginType", anySchema, {
+      symbol,
+      marginType: "ISOLATED",
+    });
   } catch (error) {
     const code = error instanceof BinanceApiError ? error.code : undefined;
     // Демо на marginType при открытых ордерах отвечает -4067 (проверено 2026-10-15), по документации — -4047.
@@ -450,39 +415,40 @@ export async function demoFuturesPrepare(
       margin = "kept";
     else if (code !== -4046) throw error;
   }
-  await signedRequest(
-    DEMO_URL.futures,
-    creds,
-    "POST",
-    "/fapi/v1/leverage",
-    anySchema,
-    { symbol, leverage },
-  );
+  await venue.signed("usdm", "POST", "/fapi/v1/leverage", anySchema, {
+    symbol,
+    leverage,
+  });
   return margin;
 }
 
 /** Кэш режима позиций: меняется редко (только на пустом счёте), а спрашиваем перед каждым входом. */
 const POSITION_MODE_TTL_MS = 30_000;
-let positionModeCache: { at: number; mode: PositionMode } | null = null;
+/** Кэш режима позиций — свой у каждой площадки (демо и реальный счёт на одном процессе не смешиваются). */
+const positionModeCaches = new Map<
+  string,
+  { at: number; mode: PositionMode } | null
+>();
+const modeKey = (venue: TradeVenue) => `${venue.kind}:${venue.publicUrl.usdm}`;
 
 /** Режим позиций демо-фьючерсов (GET /fapi/v1/positionSide/dual): Hedge или One-way. */
 export async function fetchDemoPositionMode(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
 ): Promise<PositionMode> {
+  const positionModeCache = positionModeCaches.get(modeKey(venue)) ?? null;
   if (
     positionModeCache &&
     Date.now() - positionModeCache.at < POSITION_MODE_TTL_MS
   )
     return positionModeCache.mode;
-  const res = await signedRequest(
-    DEMO_URL.futures,
-    creds,
+  const res = await venue.signed(
+    "usdm",
     "GET",
     "/fapi/v1/positionSide/dual",
     positionModeSchema,
   );
   const mode: PositionMode = res.dualSidePosition ? "hedge" : "oneway";
-  positionModeCache = { at: Date.now(), mode };
+  positionModeCaches.set(modeKey(venue), { at: Date.now(), mode });
   return mode;
 }
 
@@ -491,55 +457,66 @@ export async function fetchDemoPositionMode(
  * исключение, вызывающий остаётся в One-way). Уже включён (-4059) — не ошибка.
  */
 export async function demoEnableHedgeMode(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
 ): Promise<"switched" | "already"> {
   try {
-    await signedRequest(
-      DEMO_URL.futures,
-      creds,
+    await venue.signed(
+      "usdm",
       "POST",
       "/fapi/v1/positionSide/dual",
       anySchema,
       { dualSidePosition: "true" },
     );
-    positionModeCache = { at: Date.now(), mode: "hedge" };
+    positionModeCaches.set(modeKey(venue), { at: Date.now(), mode: "hedge" });
     return "switched";
   } catch (error) {
     if (error instanceof BinanceApiError && error.code === -4059) {
-      positionModeCache = { at: Date.now(), mode: "hedge" };
+      positionModeCaches.set(modeKey(venue), { at: Date.now(), mode: "hedge" });
       return "already";
     }
-    positionModeCache = null;
+    positionModeCaches.set(modeKey(venue), null);
+    throw error;
+  }
+}
+
+/**
+ * Включить One-way mode (spec 0049, реальный счёт: одна позиция на монету). Биржа переключает только без позиций и
+ * ордеров на счёте (-4067/-4068 — исключение, счёт остаётся в Hedge). Уже One-way (-4059) — не ошибка.
+ */
+export async function enableOnewayMode(
+  venue: TradeVenue,
+): Promise<"switched" | "already"> {
+  try {
+    await venue.signed(
+      "usdm",
+      "POST",
+      "/fapi/v1/positionSide/dual",
+      anySchema,
+      { dualSidePosition: "false" },
+    );
+    positionModeCaches.set(modeKey(venue), { at: Date.now(), mode: "oneway" });
+    return "switched";
+  } catch (error) {
+    if (error instanceof BinanceApiError && error.code === -4059) {
+      positionModeCaches.set(modeKey(venue), {
+        at: Date.now(),
+        mode: "oneway",
+      });
+      return "already";
+    }
+    positionModeCaches.set(modeKey(venue), null);
     throw error;
   }
 }
 
 /** Есть ли на демо-фьючерсах хоть одна позиция или открытый ордер (обычный или algo) — по всему счёту. */
 export async function fetchDemoFuturesAccountBusy(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
 ): Promise<boolean> {
   const [positions, orders, algos] = await Promise.all([
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
-      "GET",
-      "/fapi/v3/positionRisk",
-      positionRiskSchema,
-    ),
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
-      "GET",
-      "/fapi/v1/openOrders",
-      symbolRowsSchema,
-    ),
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
-      "GET",
-      "/fapi/v1/openAlgoOrders",
-      symbolRowsSchema,
-    ),
+    venue.signed("usdm", "GET", "/fapi/v3/positionRisk", positionRiskSchema),
+    venue.signed("usdm", "GET", "/fapi/v1/openOrders", symbolRowsSchema),
+    venue.signed("usdm", "GET", "/fapi/v1/openAlgoOrders", symbolRowsSchema),
   ]);
   return (
     positions.some((p) => p.positionAmt !== 0) ||
@@ -550,29 +527,22 @@ export async function fetchDemoFuturesAccountBusy(
 
 /** Позиции, открытые обычные и algo-ордера символа — для проверки своей стороны и закрытия старых строк. */
 export async function fetchDemoFuturesSymbolState(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
 ): Promise<FuturesSymbolState> {
   const [positions, orders, algos] = await Promise.all([
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
-      "GET",
-      "/fapi/v3/positionRisk",
-      positionRiskSchema,
-      { symbol },
-    ),
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
+    venue.signed("usdm", "GET", "/fapi/v3/positionRisk", positionRiskSchema, {
+      symbol,
+    }),
+    venue.signed(
+      "usdm",
       "GET",
       "/fapi/v1/openOrders",
       futuresOpenOrdersSchema,
       { symbol },
     ),
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
+    venue.signed(
+      "usdm",
       "GET",
       "/fapi/v1/openAlgoOrders",
       futuresOpenAlgoOrdersSchema,
@@ -595,11 +565,10 @@ export async function fetchDemoFuturesSymbolState(
  * зеркал за прогон (spec 0012, PR 2d).
  */
 export async function fetchDemoOpenAlgoOrders(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
 ): Promise<FuturesSymbolState["algos"]> {
-  return signedRequest(
-    DEMO_URL.futures,
-    creds,
+  return venue.signed(
+    "usdm",
     "GET",
     "/fapi/v1/openAlgoOrders",
     futuresOpenAlgoOrdersSchema,
@@ -608,22 +577,15 @@ export async function fetchDemoOpenAlgoOrders(
 
 /** Отменить обычный ордер фьючерсов. false — отменять нечего (-2011). */
 export async function demoFuturesCancelOrder(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   orderId: number,
 ): Promise<boolean> {
   try {
-    await signedRequest(
-      DEMO_URL.futures,
-      creds,
-      "DELETE",
-      "/fapi/v1/order",
-      anySchema,
-      {
-        symbol,
-        orderId,
-      },
-    );
+    await venue.signed("usdm", "DELETE", "/fapi/v1/order", anySchema, {
+      symbol,
+      orderId,
+    });
     return true;
   } catch (error) {
     if (isNoSuchOrder(error)) return false;
@@ -633,30 +595,23 @@ export async function demoFuturesCancelOrder(
 
 /** Вход по рынку. clientOrderId — свой id: по нему перечитываем вход, если исход неизвестен. */
 export async function demoFuturesMarketOrder(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   side: "BUY" | "SELL",
   quantity: string,
   clientOrderId: string | undefined,
   pos: FuturesSide,
 ): Promise<FuturesOrder> {
-  return signedRequest(
-    DEMO_URL.futures,
-    creds,
-    "POST",
-    "/fapi/v1/order",
-    futuresOrderSchema,
-    {
-      symbol,
-      side,
-      type: "MARKET",
-      quantity,
-      newOrderRespType: "RESULT",
-      recvWindow: ORDER_RECV_WINDOW_MS,
-      ...entryParams(pos),
-      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
-    },
-  );
+  return venue.signed("usdm", "POST", "/fapi/v1/order", futuresOrderSchema, {
+    symbol,
+    side,
+    type: "MARKET",
+    quantity,
+    newOrderRespType: "RESULT",
+    recvWindow: ORDER_RECV_WINDOW_MS,
+    ...entryParams(pos),
+    ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
+  });
 }
 
 /**
@@ -664,14 +619,13 @@ export async function demoFuturesMarketOrder(
  * Нужен для фактической цены входа (в ответе MARKET avgPrice бывает 0) и сверки неизвестного исхода.
  */
 export async function fetchDemoFuturesOrder(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   ref: { orderId: number } | { clientOrderId: string },
 ): Promise<FuturesOrder | null> {
   try {
-    return await signedRequest(
-      DEMO_URL.futures,
-      creds,
+    return await venue.signed(
+      "usdm",
       "GET",
       "/fapi/v1/order",
       futuresOrderSchema,
@@ -690,7 +644,7 @@ export async function fetchDemoFuturesOrder(
  * closePosition — сработавший не закроет объём других зеркал. One-way — reduceOnly, Hedge — positionSide.
  */
 export async function demoFuturesProtect(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   side: "BUY" | "SELL",
   type: "STOP_MARKET" | "TAKE_PROFIT_MARKET",
@@ -699,26 +653,19 @@ export async function demoFuturesProtect(
   pos: FuturesSide,
   clientAlgoId?: string,
 ) {
-  return signedRequest(
-    DEMO_URL.futures,
-    creds,
-    "POST",
-    "/fapi/v1/algoOrder",
-    algoOrderSchema,
-    {
-      algoType: "CONDITIONAL",
-      symbol,
-      side,
-      type,
-      triggerPrice,
-      ...protectParams(pos, quantity),
-      workingType: "MARK_PRICE",
-      priceProtect: true,
-      // Короткое окно — дедлайн перечитывания при неизвестном исходе (как у входа).
-      recvWindow: ORDER_RECV_WINDOW_MS,
-      ...(clientAlgoId ? { clientAlgoId } : {}),
-    },
-  );
+  return venue.signed("usdm", "POST", "/fapi/v1/algoOrder", algoOrderSchema, {
+    algoType: "CONDITIONAL",
+    symbol,
+    side,
+    type,
+    triggerPrice,
+    ...protectParams(pos, quantity),
+    workingType: "MARK_PRICE",
+    priceProtect: true,
+    // Короткое окно — дедлайн перечитывания при неизвестном исходе (как у входа).
+    recvWindow: ORDER_RECV_WINDOW_MS,
+    ...(clientAlgoId ? { clientAlgoId } : {}),
+  });
 }
 
 /** Свой algo-ордер: по algoId, а если его нет (исход постановки был неизвестен) — по clientAlgoId. */
@@ -729,13 +676,12 @@ const algoParams = (ref: AlgoRef): SignedParams =>
 
 /** Свой algo-ордер (стоп/тейк); null — не найден (снятые без исполнения хранятся 3 дня). */
 export async function fetchDemoAlgoOrder(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   ref: AlgoRef,
 ): Promise<AlgoOrderQuery | null> {
   try {
-    return await signedRequest(
-      DEMO_URL.futures,
-      creds,
+    return await venue.signed(
+      "usdm",
       "GET",
       "/fapi/v1/algoOrder",
       algoOrderQuerySchema,
@@ -749,13 +695,12 @@ export async function fetchDemoAlgoOrder(
 
 /** Отменить свой algo-ордер. false — отменять нечего (уже сработал, снят или не найден). */
 export async function demoCancelAlgoOrder(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   ref: AlgoRef,
 ): Promise<boolean> {
   try {
-    await signedRequest(
-      DEMO_URL.futures,
-      creds,
+    await venue.signed(
+      "usdm",
       "DELETE",
       "/fapi/v1/algoOrder",
       anySchema,
@@ -773,30 +718,23 @@ export async function demoCancelAlgoOrder(
  * positionSide своей стороны.
  */
 export async function demoFuturesReduceMarket(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   side: "BUY" | "SELL",
   quantity: string,
   pos: FuturesSide,
   clientOrderId?: string,
 ): Promise<FuturesOrder> {
-  return signedRequest(
-    DEMO_URL.futures,
-    creds,
-    "POST",
-    "/fapi/v1/order",
-    futuresOrderSchema,
-    {
-      symbol,
-      side,
-      type: "MARKET",
-      quantity,
-      ...reduceParams(pos),
-      newOrderRespType: "RESULT",
-      // Свой id закрытия — сделка в истории «Демо-сделки» не смешается с соседними по монете.
-      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
-    },
-  );
+  return venue.signed("usdm", "POST", "/fapi/v1/order", futuresOrderSchema, {
+    symbol,
+    side,
+    type: "MARKET",
+    quantity,
+    ...reduceParams(pos),
+    newOrderRespType: "RESULT",
+    // Свой id закрытия — сделка в истории «Демо-сделки» не смешается с соседними по монете.
+    ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
+  });
 }
 
 /** Binance: -2011 (отмена: ордер неизвестен/уже не активен), -2013 (запрос: ордера нет). */
@@ -806,12 +744,11 @@ const isNoSuchOrder = (error: unknown) =>
 
 /** Открытые ордера спота по символу — для закрытия старых строк (снимаются только свои стороны). */
 export async function fetchDemoSpotOpenOrders(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
 ): Promise<SpotOpenOrder[]> {
-  return signedRequest(
-    DEMO_URL.spot,
-    creds,
+  return venue.signed(
+    "spot",
     "GET",
     "/api/v3/openOrders",
     spotOpenOrdersSchema,
@@ -823,22 +760,15 @@ export async function fetchDemoSpotOpenOrders(
 
 /** Отменить ордер спота по orderId (ордер из списка снимает весь список). false — отменять нечего. */
 export async function demoSpotCancelOrder(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
   orderId: number,
 ): Promise<boolean> {
   try {
-    await signedRequest(
-      DEMO_URL.spot,
-      creds,
-      "DELETE",
-      "/api/v3/order",
-      anySchema,
-      {
-        symbol,
-        orderId,
-      },
-    );
+    await venue.signed("spot", "DELETE", "/api/v3/order", anySchema, {
+      symbol,
+      orderId,
+    });
     return true;
   } catch (error) {
     if (isNoSuchOrder(error)) return false;
@@ -851,12 +781,11 @@ export async function demoSpotCancelOrder(
  * минус — шорт), Hedge — LONG и SHORT отдельно. Своя сторона — lib/futuresMode → ownPosition.
  */
 export async function demoFuturesPositions(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol: string,
 ): Promise<FuturesSymbolState["positions"]> {
-  const rows = await signedRequest(
-    DEMO_URL.futures,
-    creds,
+  const rows = await venue.signed(
+    "usdm",
     "GET",
     "/fapi/v3/positionRisk",
     positionRiskSchema,
@@ -907,26 +836,19 @@ export interface DemoTradeSnapshot {
  * Futures: income-история (комиссии и PnL), позиции, открытые и algo-ордера.
  */
 export async function fetchDemoTradedSymbols(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
 ): Promise<DemoTradeSnapshot> {
   const spot = (path: string, params = {}) =>
-    signedRequest(DEMO_URL.spot, creds, "GET", path, symbolRowsSchema, params);
+    venue.signed("spot", "GET", path, symbolRowsSchema, params);
   const futures = (path: string, params = {}) =>
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
-      "GET",
-      path,
-      symbolRowsSchema,
-      params,
-    );
+    venue.signed("usdm", "GET", path, symbolRowsSchema, params);
   const [orderLists, spotOpen, holdings, income, positions, futOpen, algoOpen] =
     await Promise.all([
       spot("/api/v3/allOrderList", { limit: 1000 }),
       spot("/api/v3/openOrders"),
-      fetchDemoSpotHoldings(creds),
+      fetchDemoSpotHoldings(venue),
       futures("/fapi/v1/income", { limit: 1000 }),
-      fetchDemoFuturesPositions(creds),
+      fetchDemoFuturesPositions(venue),
       futures("/fapi/v1/openOrders"),
       futures("/fapi/v1/openAlgoOrders"),
     ]);
@@ -957,32 +879,18 @@ export async function fetchDemoTradedSymbols(
  * С `symbol` проверяет только его (фьючерсы) — так дешевле по весу запросов.
  */
 export async function fetchDemoOpenSymbols(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   symbol?: string,
 ): Promise<Record<Market, string[]>> {
   const params: Record<string, string> = symbol ? { symbol } : {};
   const futures = (path: string) =>
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
-      "GET",
-      path,
-      symbolRowsSchema,
-      params,
-    );
+    venue.signed("usdm", "GET", path, symbolRowsSchema, params);
   const [spotOpen, positions, futOpen, algoOpen] = await Promise.all([
     symbol
       ? []
-      : signedRequest(
-          DEMO_URL.spot,
-          creds,
-          "GET",
-          "/api/v3/openOrders",
-          symbolRowsSchema,
-        ),
-    signedRequest(
-      DEMO_URL.futures,
-      creds,
+      : venue.signed("spot", "GET", "/api/v3/openOrders", symbolRowsSchema),
+    venue.signed(
+      "usdm",
       "GET",
       "/fapi/v3/positionRisk",
       positionRiskSchema,
@@ -1005,16 +913,15 @@ export async function fetchDemoOpenSymbols(
 
 /** Последние исполнения по символу (Binance отдаёт старые сверху). Нет пары — пусто. */
 export async function fetchDemoFills(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   market: Market,
   symbol: string,
   limit = 100,
 ): Promise<DemoFill[]> {
   try {
     if (market === "spot") {
-      const rows = await signedRequest(
-        DEMO_URL.spot,
-        creds,
+      const rows = await venue.signed(
+        "spot",
         "GET",
         "/api/v3/myTrades",
         spotMyTradesSchema,
@@ -1035,9 +942,8 @@ export async function fetchDemoFills(
         positionSide: "BOTH",
       }));
     }
-    const rows = await signedRequest(
-      DEMO_URL.futures,
-      creds,
+    const rows = await venue.signed(
+      "usdm",
       "GET",
       "/fapi/v1/userTrades",
       futuresUserTradesSchema,
@@ -1069,16 +975,15 @@ export async function fetchDemoFills(
  * Символа нет на демо — пустой результат.
  */
 export async function fetchDemoSymbolOrders(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
   market: Market,
   symbol: string,
 ): Promise<DemoSymbolOrders> {
   try {
     if (market === "spot")
       return toSpotSymbolOrders(
-        await signedRequest(
-          DEMO_URL.spot,
-          creds,
+        await venue.signed(
+          "spot",
           "GET",
           "/api/v3/allOrders",
           spotAllOrdersSchema,
@@ -1086,17 +991,11 @@ export async function fetchDemoSymbolOrders(
         ),
       );
     const [algos, orders] = await Promise.all([
-      signedRequest(
-        DEMO_URL.futures,
-        creds,
-        "GET",
-        "/fapi/v1/allAlgoOrders",
-        algoHistorySchema,
-        { symbol },
-      ),
-      signedRequest(
-        DEMO_URL.futures,
-        creds,
+      venue.signed("usdm", "GET", "/fapi/v1/allAlgoOrders", algoHistorySchema, {
+        symbol,
+      }),
+      venue.signed(
+        "usdm",
         "GET",
         "/fapi/v1/allOrders",
         futuresAllOrdersSchema,
@@ -1127,11 +1026,10 @@ export interface DemoPosition {
 
 /** Открытые позиции демо-фьючерсов по символам. */
 export async function fetchDemoFuturesPositions(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
 ): Promise<Map<string, DemoPosition>> {
-  const rows = await signedRequest(
-    DEMO_URL.futures,
-    creds,
+  const rows = await venue.signed(
+    "usdm",
     "GET",
     "/fapi/v3/positionRisk",
     positionRiskSchema,
@@ -1152,11 +1050,10 @@ export async function fetchDemoFuturesPositions(
 
 /** Монеты на демо-споте: актив → free + locked. */
 export async function fetchDemoSpotHoldings(
-  creds: BinanceCredentials,
+  venue: TradeVenue,
 ): Promise<Map<string, number>> {
-  const account = await signedRequest(
-    DEMO_URL.spot,
-    creds,
+  const account = await venue.signed(
+    "spot",
     "GET",
     "/api/v3/account",
     spotAccountBalancesSchema,

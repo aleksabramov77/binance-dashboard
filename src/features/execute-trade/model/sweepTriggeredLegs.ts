@@ -6,7 +6,7 @@ import {
   fetchDemoFuturesOrder,
   fetchDemoOpenAlgoOrders,
 } from "@/shared/api/binance/demo.server";
-import { getDemoTradingConfig } from "@/shared/config/env.server";
+import type { TradeVenue } from "@/shared/api/binance/venue.server";
 import { log } from "@/shared/lib/logger.server";
 import {
   afterTriggeredLeg,
@@ -15,6 +15,7 @@ import {
   orphanLegCandidate,
 } from "../lib/closePlan";
 import { errorText } from "./tradeSteps";
+import { demoTradeContext } from "./tradeVenue";
 
 export interface OpenMirrorLegs {
   tradeId: string;
@@ -51,19 +52,18 @@ const LEG = { stop: "стоп", takeProfit: "тейк" } as const;
 export async function sweepTriggeredLegs(
   mirrors: OpenMirrorLegs[],
   overBudget: () => boolean = () => false,
+  venue: TradeVenue | null = demoTradeContext()?.venue ?? null,
 ): Promise<SweptMirror[]> {
-  const config = getDemoTradingConfig();
   // Зеркала с хотя бы одной своей ногой; одна нога (stopOnly) — сработала: строка закрыта, снимать нечего.
   const futures = mirrors.filter(
     (m) =>
       m.protectRefs.market === "usdm" &&
       (m.protectRefs.stop || m.protectRefs.takeProfit),
   );
-  if (!config || futures.length === 0) return [];
-  const creds = config.credentials;
+  if (!venue || futures.length === 0) return [];
   let openAlgos: Awaited<ReturnType<typeof fetchDemoOpenAlgoOrders>>;
   try {
-    openAlgos = await fetchDemoOpenAlgoOrders(creds);
+    openAlgos = await fetchDemoOpenAlgoOrders(venue);
   } catch (error) {
     log.warn(
       "mirror.legs",
@@ -87,7 +87,7 @@ export async function sweepTriggeredLegs(
     if (!missingLookup || (remaining && !remainingLookup)) continue;
     const steps: TradeStep[] = [];
     try {
-      const q = await fetchDemoAlgoOrder(creds, missingLookup);
+      const q = await fetchDemoAlgoOrder(venue, missingLookup);
       // Нога снята не срабатыванием (вручную, истекла) — не наше дело: закроется по paper-сделке.
       if (!q || !algoLeg(q).triggered) continue;
       // Сколько исполнила нога: 0 — сработала раньше входа (стоп до входа), позиция без стопа.
@@ -96,7 +96,7 @@ export async function sweepTriggeredLegs(
           ? q.actualQty
           : q.actualOrderId !== null
             ? ((
-                await fetchDemoFuturesOrder(creds, m.symbol, {
+                await fetchDemoFuturesOrder(venue, m.symbol, {
                   orderId: q.actualOrderId,
                 })
               )?.executedQty ?? 0)
@@ -126,7 +126,7 @@ export async function sweepTriggeredLegs(
         detail: `${q?.algoStatus}, ордер #${q?.actualOrderId}, ~${q?.actualPrice || "—"}`,
       });
       if (remaining && remainingLookup) {
-        const cancelled = await demoCancelAlgoOrder(creds, remainingLookup);
+        const cancelled = await demoCancelAlgoOrder(venue, remainingLookup);
         steps.push({
           label: `Снять свой ${LEG[remaining]}`,
           ok: true,

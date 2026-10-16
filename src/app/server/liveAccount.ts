@@ -92,6 +92,33 @@ function telegramSkip(fixture: LiveHeartbeat["fixture"]): string | null {
   return getTelegramConfig()?.chatId ? null : "Telegram не настроен";
 }
 
+/**
+ * Сообщение о реальном счёте в Telegram (пульс 0047, реальное зеркало 0049): только production и не фикстуры.
+ * Возвращает итог для записи журнала: «отправлен» / «не отправлен: причина».
+ */
+export async function notifyLive(
+  text: string,
+  fixture: LiveHeartbeat["fixture"] = null,
+  anchor = "live",
+): Promise<string> {
+  const skip = telegramSkip(fixture);
+  const config = getTelegramConfig();
+  if (skip || !config?.chatId) return `не отправлен: ${skip}`;
+  try {
+    await sendTelegramMessage(
+      config.token,
+      config.chatId,
+      `Binance Dashboard · ${text}\n${getSiteUrl()}/settings#${anchor}`,
+    );
+    return "отправлен";
+  } catch (error) {
+    log.warn("live.telegram", "Сообщение о реальном счёте не отправлено", {
+      error: message(error),
+    });
+    return `не отправлен: ${message(error)}`;
+  }
+}
+
 async function emit(events: LiveEvent[], heartbeat: LiveHeartbeat) {
   const data = {
     verdict: heartbeat.verdict,
@@ -100,30 +127,9 @@ async function emit(events: LiveEvent[], heartbeat: LiveHeartbeat) {
     version: heartbeat.version,
   };
   for (const event of events) {
-    let telegram: string | undefined;
-    if (event.notify) {
-      const skip = telegramSkip(heartbeat.fixture);
-      const config = getTelegramConfig();
-      if (skip || !config?.chatId) telegram = `не отправлен: ${skip}`;
-      else
-        try {
-          await sendTelegramMessage(
-            config.token,
-            config.chatId,
-            `Binance Dashboard · ${event.message}\n${getSiteUrl()}/settings#live`,
-          );
-          telegram = "отправлен";
-        } catch (error) {
-          telegram = `не отправлен: ${message(error)}`;
-          log.warn(
-            "live.telegram",
-            "Сообщение о реальном счёте не отправлено",
-            {
-              error: message(error),
-            },
-          );
-        }
-    }
+    const telegram = event.notify
+      ? await notifyLive(event.message, heartbeat.fixture)
+      : undefined;
     log[event.level]("live.status", event.message, { ...data, telegram });
   }
 }
@@ -148,7 +154,11 @@ export async function ingestHeartbeat(
   if (next) await saveLiveState(db, next);
   await emit(events, heartbeat);
   const reply: LiveHeartbeatReply = { ok: true, verdict: heartbeat.verdict };
-  if (heartbeat.fixture === null && heartbeat.verdict !== "no-key")
+  // UID основного нужен настоящему воркеру и «площадке демо» (у неё тоже идёт UID-проверка); готовым фикстурам — нет.
+  if (
+    (heartbeat.fixture === null || heartbeat.fixture === "demo-venue") &&
+    heartbeat.verdict !== "no-key"
+  )
     reply.mainAccount = await getMainAccountUid(now);
   return reply;
 }
@@ -183,7 +193,7 @@ export function loadLastLiveState(): Promise<LiveState | null> {
 /** Данные карточки «Реальный счёт» (GET /api/live/status). */
 export async function getLiveStatusView(
   now = Date.now(),
-): Promise<LiveStatusResponse> {
+): Promise<Omit<LiveStatusResponse, "trading">> {
   const state = await loadLastLiveState();
   const silentAfterMs = getLiveSilentAfterMs();
   return {

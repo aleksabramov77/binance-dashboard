@@ -44,6 +44,7 @@ const MIN = 60_000;
 
 const pulse = (over: Partial<LiveHeartbeat> = {}): LiveHeartbeat => ({
   version: "test",
+  handshake: false,
   sentAt: new Date(T0).toISOString(),
   fixture: null,
   verdict: "ok",
@@ -166,6 +167,7 @@ describe("ingestHeartbeat", () => {
     vi.clearAllMocks();
     vi.mocked(fetchAccountUid).mockResolvedValue(777);
     const handshake = pulse({
+      handshake: true,
       verdict: "blocked",
       reasons: [MAIN_UID_PENDING_REASON],
       uid: { status: "pending", note: MAIN_UID_PENDING_REASON },

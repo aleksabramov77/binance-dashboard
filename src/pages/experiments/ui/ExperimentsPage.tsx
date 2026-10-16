@@ -42,6 +42,7 @@ import {
   TableRow,
 } from "@/shared/ui/Table";
 import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
+import { LiveMirrorToggle, LiveTradingStrip } from "@/widgets/live-trading";
 import {
   arrangeVariants,
   type ExperimentRowView,
@@ -133,6 +134,13 @@ const COLUMNS: {
     description: "Капитал эксперимента: стартовый бюджет + реализованный PnL.",
   },
   {
+    key: "live",
+    label: "Реальный счёт",
+    numeric: false,
+    description:
+      "Переключатель «Выкл / Вкл» — повторяет ли эксперимент свежие входы на торговом субсчёте Binance реальными деньгами: $10 на сделку (минимум биржи — до $50), не больше 5 позиций на субсчёт, −$15 за сутки у эксперимента → его входы до 00:00 UTC. «Вкл» — с подтверждением словом «РЕАЛ» и только при годном ключе (карточка «Реальный счёт» в /settings). COIN-M — недоступно.",
+  },
+  {
     key: "demo",
     label: "Демо: торговля",
     numeric: false,
@@ -201,7 +209,10 @@ function ColumnHead({
     <SortableHead
       className={cn(
         column.numeric && "text-right",
-        (column.key === "demo" || column.key === "enabled") && "text-center",
+        (column.key === "demo" ||
+          column.key === "live" ||
+          column.key === "enabled") &&
+          "text-center",
         isDemoColumn(column.key) && DEMO_HEAD_TONE,
       )}
       {...head}
@@ -391,6 +402,9 @@ function ExperimentRow({
       <TableCell className="text-right font-mono tabular-nums">
         {formatUsd(s.equity)}
       </TableCell>
+      <TableCell className="text-center">
+        <LiveMirrorToggle experiment={e} />
+      </TableCell>
       <DemoCells e={e} demoConfigured={demoConfigured} />
     </TableRow>
   );
@@ -461,6 +475,7 @@ function ExperimentsDashboard() {
       {data && (
         <MissingRunNotice view={data} onReset={() => setView({ run: null })} />
       )}
+      {data && <LiveTradingStrip />}
 
       {data && total === 0 && (
         <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">

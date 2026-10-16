@@ -102,6 +102,8 @@ export const experimentSummarySchema = experimentSchema
     /** Положение переключателя «Выкл · Авто · Вкл» и последнее решение авто-зеркала (spec 0043). */
     demoMirrorMode: demoMirrorModeSchema,
     demoMirrorAuto: mirrorAutoSnapshotSchema.nullable(),
+    /** «Реальный счёт» включён (spec 0049): свежие входы повторяются на торговом субсчёте. */
+    liveMirror: z.boolean(),
     stats: tradeStatsSchema,
     demo: demoSummarySchema,
     /** Контрольный эксперимент варианта (spec 0046); null — не вариант. */

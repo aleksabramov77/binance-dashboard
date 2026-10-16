@@ -1,13 +1,18 @@
 import { connection } from "next/server";
 import { getLiveStatusView } from "@/app/server/liveAccount";
+import { getLiveTradingView } from "@/app/server/liveMirror";
 import { withLogging } from "@/shared/lib/route.server";
 
-// Последний пульс воркера реального счёта — карточка «Реальный счёт» на /settings (spec 0047, AC5).
+// Реальный счёт: последний пульс воркера (spec 0047) и торговля — стоп, позиции, дневные лимиты (spec 0049).
 export const GET = withLogging(
   "live.status",
   async () => {
     await connection();
-    return Response.json(await getLiveStatusView());
+    const [status, trading] = await Promise.all([
+      getLiveStatusView(),
+      getLiveTradingView(),
+    ]);
+    return Response.json({ ...status, trading });
   },
   { quiet: true },
 );

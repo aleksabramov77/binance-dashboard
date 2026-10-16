@@ -4,7 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { build } from "esbuild";
+import { build, type Plugin } from "esbuild";
 
 const root = process.cwd();
 
@@ -28,6 +28,36 @@ function packageOf(input: string): string | null {
   return rest[0].startsWith("@") ? `${rest[0]}/${rest[1]}` : rest[0];
 }
 const outfile = path.join(root, "dist", "live-worker.mjs");
+
+/**
+ * Модули кода проекта (src/, packages/) — без побочных эффектов при импорте: public API слайсов (index.ts) отдаёт и
+ * UI, и схемы, а воркеру нужны только схемы и серверные функции. С этой пометкой esbuild выбрасывает неиспользуемые
+ * модули целиком (React-компоненты сущностей и с ними react), а не только их неиспользуемые экспорты. Код проекта
+ * при импорте ничего не делает (журнал без файлов включает сам воркер вызовом disableLogFiles).
+ */
+const projectSideEffectFree: Plugin = {
+  name: "project-side-effect-free",
+  setup(b) {
+    b.onResolve({ filter: /^(@\/|\.{1,2}\/)/ }, async (args) => {
+      if (args.pluginData === "inner") return undefined;
+      const resolved = await b.resolve(args.path, {
+        kind: args.kind,
+        importer: args.importer,
+        resolveDir: args.resolveDir,
+        pluginData: "inner",
+      });
+      if (resolved.errors.length) return { errors: resolved.errors };
+      const own =
+        !resolved.path.includes(`${path.sep}node_modules${path.sep}`) &&
+        (resolved.path.startsWith(path.join(root, "src")) ||
+          resolved.path.startsWith(path.join(root, "packages")));
+      return own &&
+        resolved.path !== path.join(root, "scripts", "live-worker.ts")
+        ? { ...resolved, sideEffects: false }
+        : resolved;
+    });
+  },
+};
 
 function gitShortSha(): string {
   try {
@@ -63,6 +93,7 @@ async function main() {
     },
     legalComments: "none",
     metafile: true,
+    plugins: [projectSideEffectFree],
     logLevel: "warning",
   });
   const output = Object.values(result.metafile.outputs)[0];

@@ -13,6 +13,7 @@ afterAll(() => close());
 const state: LiveState = {
   heartbeat: {
     version: "test",
+    handshake: false,
     sentAt: "2026-10-16T12:00:00.000Z",
     fixture: "ok",
     verdict: "ok",
