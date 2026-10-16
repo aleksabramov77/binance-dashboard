@@ -22,6 +22,7 @@ import {
   renderTradesCsv,
   sampleLevel,
   tradeCosts,
+  unrealizedStats,
 } from "./labReport";
 
 const HOUR = 3_600_000;
@@ -992,5 +993,117 @@ describe("buildLabReport: spec 0030", () => {
     const md = renderLabReport(report);
     expect(md).toContain("**После выхода**");
     expect(md).toContain("Грубый исход по свечам ТФ");
+  });
+});
+
+describe("открытые позиции по последней цене (баг 0041)", () => {
+  /** Открытая long-сделка: вход 100, 0,5 шт., стоп 99 (1R = 0,5 $). */
+  const open = (
+    experimentId: string,
+    over: Partial<PaperTrade> = {},
+  ): PaperTrade =>
+    trade(experimentId, 0, {
+      closedAt: null,
+      exitPrice: null,
+      exitReason: null,
+      pnl: null,
+      rMultiple: null,
+      ...over,
+    });
+  // Spot, выход по рынку 110 × (1 − 0,05 %) = 109,945; комиссии 0,1 % × 0,5 × (100 + 109,945).
+  const exit110 = 110 * (1 - 0.0005);
+  const pnl110 = (exit110 - 100) * 0.5 - 0.001 * 0.5 * (100 + exit110);
+
+  it("PnL и R как при закрытии по рынку: слиппедж выхода, комиссии обеих сторон; без цены — не оценена", () => {
+    const u = unrealizedStats(
+      [
+        open("S04", { openedAt: new Date(START).toISOString() }),
+        open("S04", { initialStop: null, symbol: "ETHUSDT" }),
+        open("S04", { symbol: "NOPRICEUSDT" }),
+      ],
+      { "spot:BTCUSDT": 110, "spot:ETHUSDT": 110 },
+      NOW,
+    );
+    expect(u.open).toBe(3);
+    expect(u.priced).toBe(2);
+    expect(u.pnl).toBeCloseTo(2 * pnl110, 10);
+    expect(u.withStop).toBe(1);
+    expect(u.sumR).toBeCloseTo(pnl110 / 0.5, 10);
+    expect(u.maxAgeDays).toBeCloseTo(10, 10);
+  });
+
+  it("short: рост цены — убыток; нет цен — открытые считаются, но не оцениваются", () => {
+    const short = open("F04", { direction: "short", initialStop: 101 });
+    const u = unrealizedStats([short], { "usdm:BTCUSDT": 105 }, NOW);
+    const exit = 105 * (1 + 0.0005);
+    expect(u.pnl).toBeCloseTo(
+      (100 - exit) * 0.5 - 0.0005 * 0.5 * (100 + exit),
+      10,
+    );
+    expect(unrealizedStats([short], null, NOW)).toMatchObject({
+      open: 1,
+      priced: 0,
+      pnl: null,
+      sumR: null,
+    });
+    expect(unrealizedStats([], null, NOW)).toEqual({
+      open: 0,
+      priced: 0,
+      pnl: null,
+      sumR: null,
+      withStop: 0,
+      maxAgeDays: null,
+    });
+  });
+
+  it("отчёт: открытые всей эпохи (без учёта --since) в unrealized и сводке; метрики закрытых не меняются", () => {
+    const closed = [2, -1].map((r) => trade("S04", r));
+    const data = dataset(
+      [experiment("S04")],
+      [...closed, open("S04", { openedAt: new Date(START).toISOString() })],
+    );
+    const since = Date.parse("2026-10-05T00:00:00Z");
+    const without = buildLabReport(data, { now: NOW });
+    const report = buildLabReport(data, {
+      now: NOW,
+      openPricing: {
+        prices: { "spot:BTCUSDT": 110 },
+        source: "тест",
+        at: "2026-10-11T00:00:00.000Z",
+      },
+    });
+    const [s04] = report.experiments;
+    expect(report.openPricing).toEqual({
+      source: "тест",
+      at: "2026-10-11T00:00:00.000Z",
+    });
+    expect(s04.unrealized).toMatchObject({ open: 1, priced: 1 });
+    expect(s04.unrealized.pnl).toBeCloseTo(pnl110, 10);
+    const { unrealized: _a, ...rest } = s04;
+    const { unrealized: _b, ...restWithout } = without.experiments[0];
+    expect(rest).toEqual(restWithout);
+    expect(without.openPricing).toBeNull();
+    expect(without.experiments[0].unrealized).toMatchObject({
+      open: 1,
+      pnl: null,
+    });
+    // --since отрезает открытую по времени входа, но на конец периода она всё равно открыта.
+    expect(
+      buildLabReport(data, { now: NOW, since }).experiments[0].unrealized.open,
+    ).toBe(1);
+    expect(report.legend).toContain("unrealized");
+
+    const md = renderLabReport(report);
+    expect(md).toContain("| Откр. | Нереализ. R / $ |");
+    expect(md).toContain(
+      `| 1 | ${(pnl110 / 0.5).toFixed(2)} / +${pnl110.toFixed(2)} |`,
+    );
+    expect(md).toContain("Открытые позиции оценены по последней цене (тест");
+    expect(md).toContain(
+      `Открыто на конец периода: 1, старейшая — 10.0 дн. Если закрыть по рынку сейчас: +${pnl110.toFixed(2)} $, сумма ${(pnl110 / 0.5).toFixed(2)}R (со стопом 1).`,
+    );
+    expect(renderLabReport(without)).toContain(
+      "Открытые позиции по последней цене не оценены.",
+    );
   });
 });
