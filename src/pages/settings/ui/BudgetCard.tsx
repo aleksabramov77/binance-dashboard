@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useId } from "react";
 import { useForm } from "react-hook-form";
 import {
+  ASSET_GROUPS,
   type BudgetForm,
   budgetFormSchema,
   type LabSettings,
@@ -22,7 +23,13 @@ import {
 } from "@/shared/ui/card";
 import { Input } from "@/shared/ui/input";
 
-/** Стартовый бюджет на эксперимент: сохраняется сразу, к экспериментам применяется при сбросе. */
+type GroupBudget = LabSettings["groupBudgets"][number];
+
+/** «SPOT 10 000 $»; разные бюджеты внутри группы — диапазоном. */
+const formatGroupBudget = (g: GroupBudget) =>
+  `${ASSET_GROUPS[g.market].code} ${g.min === g.max ? formatUsd(g.min) : `${formatUsd(g.min)}–${formatUsd(g.max)}`}`;
+
+/** Стартовый бюджет на эксперимент: сохраняется сразу, к экспериментам применяется при сбросе (всех или группы). */
 export function BudgetCard({ settings }: { settings: LabSettings }) {
   const inputId = useId();
   const save = useSetNextBudget();
@@ -36,7 +43,11 @@ export function BudgetCard({ settings }: { settings: LabSettings }) {
   }, [reset, settings.nextBudget]);
 
   const error = form.formState.errors.initialBudget?.message;
-  const pending = settings.nextBudget !== settings.currentBudget;
+  const groups = settings.groupBudgets.filter((g) => g.experiments > 0);
+  // Ждёт сброса, если хоть у одной группы бюджет экспериментов не равен сохранённому.
+  const pending = groups.some(
+    (g) => g.min !== settings.nextBudget || g.max !== settings.nextBudget,
+  );
 
   return (
     <Card>
@@ -69,9 +80,11 @@ export function BudgetCard({ settings }: { settings: LabSettings }) {
             <p className="text-sm text-destructive">{save.error.message}</p>
           )}
           <p className="text-sm text-muted-foreground">
-            Текущая эпоха идёт с бюджетом {formatUsd(settings.currentBudget)}.
-            Изменение вступит в силу после сброса тестовых капиталов — с новой
-            эпохи.
+            Сейчас на эксперимент:{" "}
+            {groups.map(formatGroupBudget).join(" · ") || "—"}. Сохранённый
+            бюджет применяется при сбросе: «Сбросить все Paper» — всем
+            экспериментам (новая эпоха), «Сбросить Paper» группы — экспериментам
+            этой группы.
             {pending &&
               ` Сохранено: ${formatUsd(settings.nextBudget)} — ждёт сброса.`}
           </p>

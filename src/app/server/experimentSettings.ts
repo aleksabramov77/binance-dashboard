@@ -13,6 +13,7 @@ import {
   type GroupResetResult,
   getEpoch,
   type LabSettings,
+  MARKETS,
   type ResetRequest,
   type ResetResult,
   readExperimentsOverview,
@@ -74,7 +75,17 @@ export async function getLabSettings(): Promise<LabSettings> {
   const summaries = new Map(overview.experiments.map((e) => [e.id, e]));
   return {
     epoch,
-    currentBudget: Math.max(0, ...rows.map((e) => e.initialBudget)),
+    groupBudgets: MARKETS.map((market) => {
+      const budgets = rows
+        .filter((e) => e.market === market)
+        .map((e) => e.initialBudget);
+      return {
+        market,
+        experiments: budgets.length,
+        min: budgets.length ? Math.min(...budgets) : 0,
+        max: budgets.length ? Math.max(...budgets) : 0,
+      };
+    }),
     nextBudget,
     demoConfigured,
     demoBalances,

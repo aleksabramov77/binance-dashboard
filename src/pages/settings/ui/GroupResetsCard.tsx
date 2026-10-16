@@ -48,12 +48,14 @@ function groupRows(settings: LabSettings): GroupRow[] {
   return MARKETS.map((market) => {
     const list = settings.experiments.filter((e) => e.market === market);
     const group = ASSET_GROUPS[market];
+    // Число экспериментов — все строки группы в БД, как их сбрасывает resetGroupRun (в т.ч. не прочитанные в сводку).
+    const budget = settings.groupBudgets.find((g) => g.market === market);
     return {
       market,
       code: group.code,
       label: group.label,
       demoBlocked: group.demoMirrorBlocked,
-      experiments: list.length,
+      experiments: budget?.experiments ?? list.length,
       paperOpen: list.reduce((n, e) => n + e.paper.open, 0),
       demoOpen: list.reduce((n, e) => n + e.demo.open, 0),
     };

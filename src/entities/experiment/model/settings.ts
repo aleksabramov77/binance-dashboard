@@ -46,8 +46,19 @@ export type Epoch = z.infer<typeof epochSchema>;
 
 export const labSettingsSchema = z.object({
   epoch: epochSchema,
-  /** Бюджет, с которым идёт текущая эпоха (по экспериментам; разный — максимум). */
-  currentBudget: z.number(),
+  /**
+   * Стартовые бюджеты по группам активов (spec 0038): сброс группы меняет бюджет только её экспериментов, поэтому
+   * один «текущий бюджет» на всех не годится. experiments — все строки группы (их сбрасывает сброс группы); min/max —
+   * разброс бюджета внутри группы (0 — экспериментов нет).
+   */
+  groupBudgets: z.array(
+    z.object({
+      market: marketSchema,
+      experiments: z.number().int(),
+      min: z.number(),
+      max: z.number(),
+    }),
+  ),
   /** Бюджет для следующей эпохи — вступит после сброса. */
   nextBudget: z.number(),
   /** На сервере задан ключ Binance Demo — без него зеркало не может торговать (spec 008). */
