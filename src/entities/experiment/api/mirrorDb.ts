@@ -307,15 +307,19 @@ export async function claimMirrorToClose(
 /**
  * Открытые фьючерсные зеркала со своими ссылками — для сверки ног (своя нога сработала — снять вторую).
  */
-export async function listOpenMirrorLegs(
-  db: Db,
-): Promise<
-  { tradeId: string; symbol: string; protectRefs: MirrorProtectRefs }[]
+export async function listOpenMirrorLegs(db: Db): Promise<
+  {
+    tradeId: string;
+    symbol: string;
+    status: MirrorStatus;
+    protectRefs: MirrorProtectRefs;
+  }[]
 > {
   const rows = await db
     .select({
       tradeId: demoMirrorOrdersTable.tradeId,
       symbol: demoMirrorOrdersTable.symbol,
+      status: demoMirrorOrdersTable.status,
       protectRefs: demoMirrorOrdersTable.protectRefs,
     })
     .from(demoMirrorOrdersTable)
@@ -329,7 +333,14 @@ export async function listOpenMirrorLegs(
   return rows.flatMap((r) => {
     const protectRefs = parseProtectRefs(r.protectRefs);
     return protectRefs
-      ? [{ tradeId: r.tradeId, symbol: r.symbol, protectRefs }]
+      ? [
+          {
+            tradeId: r.tradeId,
+            symbol: r.symbol,
+            status: r.status as MirrorStatus,
+            protectRefs,
+          },
+        ]
       : [];
   });
 }
@@ -353,6 +364,34 @@ export async function markMirrorClosedByExchange(
       exitPrice: patch.exitPrice,
       updatedAt: sql`now()`,
       closedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(demoMirrorOrdersTable.tradeId, tradeId),
+        inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
+      ),
+    )
+    .returning({ tradeId: demoMirrorOrdersTable.tradeId });
+  return rows.length > 0;
+}
+
+/**
+ * Своя нога сработала раньше, чем исполнился вход (объём 0): позиция открыта без стопа — строка
+ * unprotected. Только из открытых статусов: «Сбросить Demo» и ручное закрытие идут мимо замка прогона
+ * и могли уже перевести строку в closing/closed. false — строка уже не открыта.
+ */
+export async function markMirrorUnprotected(
+  db: Db,
+  tradeId: string,
+  patch: { message: string; steps: unknown[] },
+): Promise<boolean> {
+  const rows = await db
+    .update(demoMirrorOrdersTable)
+    .set({
+      status: "unprotected" satisfies MirrorStatus,
+      message: patch.message,
+      steps: patch.steps,
+      updatedAt: sql`now()`,
     })
     .where(
       and(

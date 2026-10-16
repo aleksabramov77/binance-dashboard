@@ -18,6 +18,7 @@ export {
   type MirrorToClose,
   markDemoReset,
   markMirrorClosedByExchange,
+  markMirrorUnprotected,
   setExperimentDemoMirror,
   toDemoSummary,
   updateMirror,

@@ -206,3 +206,12 @@ export function orphanLegCandidate(
     ? { missing: "takeProfit", remaining: "stop" }
     : { missing: "stop", remaining: "takeProfit" };
 }
+
+/**
+ * Своя нога сработала — чем это кончилось для позиции (ревью #80): исполнила объём — позицию закрыла
+ * биржа; 0 — нога сработала раньше, чем исполнился вход («стоп до входа», доли секунды): позиция
+ * открыта и без стопа — unprotected, вторую ногу (тейк) не снимаем.
+ */
+export const afterTriggeredLeg = (
+  executedQty: number,
+): "closed" | "unprotected" => (executedQty > 0 ? "closed" : "unprotected");

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  afterEarlyStopDrop,
   afterEntryError,
   afterFuturesOrderCheck,
   afterFuturesPositionCheck,
   afterFuturesRollback,
   afterFuturesStop,
   afterFuturesTakeProfit,
+  afterPartialEntryRestop,
   afterPending,
   afterProtect,
   afterSell,
@@ -293,6 +295,30 @@ describe("фьючерсы: «стоп до входа» (AC10)", () => {
       status: "rejected",
       message: "Стоп не принят биржей — вход не отправлялся.",
       withEntry: false,
+    });
+  });
+});
+
+describe("стоп до входа: вход не прошёл или исполнился частично (ревью #80)", () => {
+  const rejected = afterEntryError("rejected", "futures");
+  if (rejected === "recheck") throw new Error("unexpected");
+  it("стоп снят или уже не активен — исход как есть (rejected)", () => {
+    for (const drop of ["cancelled", "inactive", "none"] as const)
+      expect(afterEarlyStopDrop(rejected, drop)).toBe(rejected);
+  });
+  it("снять стоп не удалось — unprotected без цены и объёма (ссылка на стоп остаётся)", () => {
+    expect(afterEarlyStopDrop(rejected, "error")).toMatchObject({
+      status: "unprotected",
+      withEntry: false,
+    });
+  });
+  it("частичный вход: стоп переставлен — дальше; новый не встал — откат; старый не снят — unprotected", () => {
+    expect(afterPartialEntryRestop("cancelled", true)).toBe("continue");
+    expect(afterPartialEntryRestop("inactive", true)).toBe("continue");
+    expect(afterPartialEntryRestop("cancelled", false)).toBe("rollback");
+    expect(afterPartialEntryRestop("error", null)).toMatchObject({
+      status: "unprotected",
+      withEntry: true,
     });
   });
 });

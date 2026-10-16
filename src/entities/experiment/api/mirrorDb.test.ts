@@ -16,6 +16,7 @@ import {
   type MirrorCandidate,
   markDemoReset,
   markMirrorClosedByExchange,
+  markMirrorUnprotected,
   mirrorStatuses,
   mirrorSummaries,
   setExperimentDemoMirror,
@@ -344,6 +345,36 @@ describe("data-fix drizzle/0005 (spec 0012, AC2)", () => {
 });
 
 describe("protect_refs", () => {
+  it("нога сработала раньше входа: unprotected только из открытых статусов (сброс мог закрыть строку)", async () => {
+    await setup();
+    await setExperimentDemoMirror(db, "F01", true);
+    const [c] = await listMirrorCandidates(db, SINCE);
+    await claimMirror(db, c);
+    await updateMirror(db, "a", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      quantity: 0.5,
+    });
+    expect(
+      await markMirrorUnprotected(db, "a", { message: "без стопа", steps: [] }),
+    ).toBe(true);
+    expect(await mirrorStatuses(db, ["a"])).toEqual(
+      new Map([["a", { status: "unprotected", message: "без стопа" }]]),
+    );
+    // «Сбросить Demo» закрыл строку мимо замка — sweep её уже не трогает.
+    await updateMirror(db, "a", {
+      status: "closed",
+      message: "Демо-сброс",
+      steps: [],
+      closed: true,
+    });
+    expect(
+      await markMirrorUnprotected(db, "a", { message: "x", steps: [] }),
+    ).toBe(false);
+    expect((await mirrorStatuses(db, ["a"])).get("a")?.status).toBe("closed");
+  });
+
   it("фьючерсы 2b (ссылки без legs: «quantity» — ноги с closePosition) — legacy: монета занята", async () => {
     await setup();
     await setExperimentDemoMirror(db, "F01", true);
@@ -420,7 +451,7 @@ describe("protect_refs", () => {
       protectRefs,
     });
     expect(await listOpenMirrorLegs(db)).toEqual([
-      { tradeId: "a", symbol: "ETHUSDT", protectRefs },
+      { tradeId: "a", symbol: "ETHUSDT", status: "protected", protectRefs },
     ]);
     expect(
       await markMirrorClosedByExchange(db, "a", {

@@ -3,22 +3,35 @@ import {
   type DemoProtectRefs,
   demoCancelAlgoOrder,
   fetchDemoAlgoOrder,
+  fetchDemoFuturesOrder,
   fetchDemoOpenAlgoOrders,
 } from "@/shared/api/binance/demo.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
-import { algoLeg, algoLookup, orphanLegCandidate } from "../lib/closePlan";
+import {
+  afterTriggeredLeg,
+  algoLeg,
+  algoLookup,
+  orphanLegCandidate,
+} from "../lib/closePlan";
 import { errorText } from "./tradeSteps";
 
 export interface OpenMirrorLegs {
   tradeId: string;
   symbol: string;
+  /** Статус строки: уже unprotected — повторно не сообщаем. */
+  status?: string;
   protectRefs: DemoProtectRefs;
 }
 
 export interface SweptMirror {
   tradeId: string;
   symbol: string;
+  /**
+   * closed — позицию закрыла биржа своей ногой; unprotected — нога сработала раньше, чем исполнился
+   * вход (объём 0): позиция открыта без стопа.
+   */
+  status: "closed" | "unprotected";
   /** Чем закрыла биржа: свой стоп или тейк. */
   closedBy: "stop" | "takeProfit";
   /** Средняя цена исполнения сработавшей ноги; неизвестна — null. */
@@ -76,7 +89,37 @@ export async function sweepTriggeredLegs(
     try {
       const q = await fetchDemoAlgoOrder(creds, missingLookup);
       // Нога снята не срабатыванием (вручную, истекла) — не наше дело: закроется по paper-сделке.
-      if (!algoLeg(q).triggered) continue;
+      if (!q || !algoLeg(q).triggered) continue;
+      // Сколько исполнила нога: 0 — сработала раньше входа (стоп до входа), позиция без стопа.
+      const executed =
+        q.actualQty > 0
+          ? q.actualQty
+          : q.actualOrderId !== null
+            ? ((
+                await fetchDemoFuturesOrder(creds, m.symbol, {
+                  orderId: q.actualOrderId,
+                })
+              )?.executedQty ?? 0)
+            : 0;
+      if (afterTriggeredLeg(executed) === "unprotected") {
+        if (m.status === "unprotected") continue;
+        swept.push({
+          tradeId: m.tradeId,
+          symbol: m.symbol,
+          status: "unprotected",
+          closedBy: candidate.missing,
+          exitPrice: null,
+          message: `Свой ${LEG[candidate.missing]} сработал раньше, чем исполнился вход (объём 0) — позиция открыта без стопа, проверьте на demo.binance.com.`,
+          steps: [
+            {
+              label: `Сработал свой ${LEG[candidate.missing]}`,
+              ok: false,
+              detail: `${q.algoStatus}, ордер #${q.actualOrderId}, исполнено 0`,
+            },
+          ],
+        });
+        continue;
+      }
       steps.push({
         label: `Сработал свой ${LEG[candidate.missing]}`,
         ok: true,
@@ -93,6 +136,7 @@ export async function sweepTriggeredLegs(
       swept.push({
         tradeId: m.tradeId,
         symbol: m.symbol,
+        status: "closed",
         closedBy: candidate.missing,
         exitPrice: q && q.actualPrice > 0 ? q.actualPrice : null,
         message: remaining
