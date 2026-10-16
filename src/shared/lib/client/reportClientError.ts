@@ -1,3 +1,5 @@
+import { getPageVersion } from "./appVersion";
+
 /** Отправляет ошибку из браузера в серверный журнал. Никогда не бросает исключений. */
 export function reportClientError(
   source: string,
@@ -19,6 +21,8 @@ export function reportClientError(
         stack: err.stack,
         url: window.location.pathname + window.location.search,
         context,
+        // Сервер по версии отличает ошибки вкладки со старой сборкой от ошибок прода.
+        version: getPageVersion() ?? undefined,
       }),
       keepalive: true,
     }).catch(() => {});

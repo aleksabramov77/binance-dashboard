@@ -168,6 +168,15 @@ export const getLogAnalysisModel = (
   env: Record<string, string | undefined> = process.env,
 ): string => env.LOG_ANALYSIS_MODEL?.trim() || "anthropic/claude-haiku-5.5";
 
+/**
+ * Версия сборки сервера — та же, что deploymentId в next.config.ts: NEXT_DEPLOYMENT_ID (если задан),
+ * иначе VERCEL_DEPLOYMENT_ID (id деплоя, задаёт Vercel). null — не задана (локально).
+ */
+export const getDeploymentVersion = (
+  env: Record<string, string | undefined> = process.env,
+): string | null =>
+  env.NEXT_DEPLOYMENT_ID?.trim() || env.VERCEL_DEPLOYMENT_ID?.trim() || null;
+
 const DEFAULT_GITHUB_ALERTS_REPO = "aleksabramov77/binance-dashboard-private";
 const DEFAULT_ALERT_AUTOFIX_PER_DAY = 3;
 
