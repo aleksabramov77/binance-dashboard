@@ -1,7 +1,7 @@
 # 0055 · Переключение прода на свою VM apps-tokyo, уход с Vercel
 
 - **Тип:** feature
-- **Статус:** approved
+- **Статус:** done
 - **Раздел PRD:** §3.4 Авто-бот (хостинг)
 - **Дата:** 2026-10-17
 
@@ -21,19 +21,19 @@
 
 ## Критерии приёмки
 Код (PR):
-- [ ] AC1. `.github/workflows/deploy.yml` выкатывает VM автоматически после зелёного CI на `main` (`workflow_run`),
+- [x] AC1. `.github/workflows/deploy.yml` выкатывает VM автоматически после зелёного CI на `main` (`workflow_run`),
   ручной запуск с выбором ветки остаётся. `vercel.json` выключает выкатки Vercel из `main` (`deploymentEnabled`).
-- [ ] AC2. Правки по ревью 0048:
+- [x] AC2. Правки по ревью 0048:
   - сбой чтения `engine_state.runner` в фоновых задачах — отдельный исход «раннер неизвестен»; одна строка `warn`
     при смене состояния, без тревог монитора на каждую минуту;
   - `ms` прогона считается один раз;
   - расписания разбираются один раз при старте.
   Тесты на всё.
-- [ ] AC3. `scripts/server/add-project.sh` получает `--stop-timeout <сек>`, это `TimeoutStopSec` и `KillSignal=SIGTERM`.
+- [x] AC3. `scripts/server/add-project.sh` получает `--stop-timeout <сек>`, это `TimeoutStopSec` и `KillSignal=SIGTERM`.
   Для `binance` нужен таймаут, при котором сервис останавливается без SIGKILL (сейчас бывает «stop-sigterm timed out»).
   Значение выбирается замером времени остановки. В `app.env` VM добавляется `LOG_DIR` в `/var/lib/binance/logs`
   (сейчас файловый журнал на VM не пишется).
-- [ ] AC4. `docs/ai/deploy-lightsail.md` — runbook переключения и отката (ниже), PRD, `architecture.md`,
+- [x] AC4. `docs/ai/deploy-lightsail.md` — runbook переключения и отката (ниже), PRD, `architecture.md`,
   `deploy-supabase.md` (Supabase — только база, тик и кроны выключены).
 
 Переключение (выполняет Claude после мержа, пауза торговли ≈ 1 мин):
@@ -49,7 +49,7 @@
   - `/db` в Telegram отвечает;
   - монитор с VM не шлёт ложных тревог;
   - сайт на VM открывается со входом.
-- [ ] AC7. `pnpm check`, `pnpm build` зелёные, выкатка VM из CI после мержа прошла.
+- [x] AC7. `pnpm check`, `pnpm build` зелёные, выкатка VM из CI после мержа прошла.
 
 ## Вне scope
 - SQLite и отключение Supabase — задача 4 очереди.
@@ -70,3 +70,4 @@
 | 2026-10-17 | ТЗ заведено (уход с Vercel, шаг 2); demo-ключи на VM — решение владельца |
 | 2026-10-17 | ТЗ утверждено владельцем |
 | 2026-10-17 | Код (ветка `feature/0055-cutover-to-vm`): автовыкатка VM по `workflow_run` после CI на `main`, `vercel.json` `main: false` (AC1); «раннер неизвестен» — `warn` раз на серию, `ms` один раз, `scheduleJobs` при старте, тесты (AC2); `add-project.sh --stop-timeout`, `LOG_DIR` в `.env.example` (AC3); runbook переключения и отката, PRD, architecture, deploy-supabase (AC4). Переключение (AC5–AC6) — после мержа |
+| 2026-10-17 | Код: тестер PASS (AC1–4, 7), владелец принял; PR #93, ревью 2 круга (runbook: повтор cron-remove, порядок отката), APPROVED. AC5–AC6 — переключение сразу после мержа, итог — в журнале следующей задачи и в «Очереди задач» |
