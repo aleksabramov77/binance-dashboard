@@ -41,7 +41,7 @@ https://binance-dashboard-gold.vercel.app/settings#live
   следующее сообщение бота ведёт на VM.
 
 ## Вне scope
-- `scripts/mirror-supabase.ts`, `scripts/monitor-supabase.ts` — скрипты режима отката на Supabase, они вызывают
+- `scripts/mirror-supabase.ts`, `scripts/monitor-supabase.ts`, `scripts/earn-supabase.ts` — скрипты режима отката на Supabase, они вызывают
   роуты Vercel и остаются как есть.
 - Прошлые сообщения в Telegram не правятся.
 
