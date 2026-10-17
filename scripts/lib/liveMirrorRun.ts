@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import type { z } from "zod";
 import {
   type LiveCloseRequest,
+  type LiveFilledRequest,
   type LiveLegsRequest,
   type LiveMirrorState,
   type LiveOpenRequest,
@@ -77,6 +78,8 @@ export function mirrorApi(post: MirrorPost) {
       post("/api/live/mirror/claim", { tradeId }, liveClaimReplySchema),
     skip: (tradeId: string, reason: string) =>
       post("/api/live/mirror/skip", { tradeId, reason }, liveOkSchema),
+    filled: (body: LiveFilledRequest) =>
+      post("/api/live/mirror/filled", body, liveOkSchema),
     open: (body: LiveOpenRequest) =>
       post("/api/live/mirror/open", body, liveOkSchema),
     claimClose: async (tradeId: string) =>
@@ -178,8 +181,15 @@ export async function flushOutbox(
 
 /** Биржа реального счёта для прогона (площадка Live): ордера — общая логика execute-trade. */
 export interface LiveExchange {
-  /** Вход: seed — основа своих clientOrderId (liveOrderSeed из id paper-сделки). */
-  placeTrade: (req: TradeRequest, seed: string) => Promise<TradeResult>;
+  /**
+   * Вход: seed — основа своих clientOrderId (liveOrderSeed из id paper-сделки); onFilled — вход исполнен, защита ещё
+   * ставится (spec 0068, B1).
+   */
+  placeTrade: (
+    req: TradeRequest,
+    seed: string,
+    onFilled?: (fill: { entryPrice: number; filledQuantity: number }) => void,
+  ) => Promise<TradeResult>;
   /** Свой ордер спота по clientOrderId; null — такого нет. */
   spotOrder: (
     symbol: string,
@@ -728,6 +738,9 @@ export async function runLiveMirror(
   const closes = new Map<string, LiveCloseRequest>();
   // Вход → его сделка: open получает только заявку, seed своих clientOrderId — из id paper-сделки.
   const tradeOfRequest = new Map<object, string>();
+  // «Вход исполнен» (карточка ⏳, spec 0068, B1): отправка не задерживает защиту; итог входа ждёт её, чтобы карточки
+  // пришли по порядку. Потерялся — не беда: итог входа даст правильную карточку, в outbox не кладём.
+  const fillReports = new Map<string, Promise<void>>();
   const gate = createLiveGate({
     halted: state.halt.stopped,
     openCount: state.active.length,
@@ -792,12 +805,34 @@ export async function runLiveMirror(
     open: (req) => {
       const tradeId = tradeOfRequest.get(req);
       if (!tradeId) throw new Error("вход без сделки — так не бывает");
-      return ex.placeTrade(req, liveOrderSeed(tradeId));
+      const size = requests.get(tradeId)?.size;
+      const raised = size?.ok ? size.raised : null;
+      return ex.placeTrade(req, liveOrderSeed(tradeId), (fill) => {
+        fillReports.set(
+          tradeId,
+          api
+            .filled({
+              tradeId,
+              entryPrice: fill.entryPrice,
+              quantity: fill.filledQuantity,
+              order: {
+                stopLoss: req.stopLoss,
+                takeProfit: req.stopOnly ? null : req.takeProfit,
+                raised,
+              },
+            })
+            .then(
+              () => {},
+              () => {},
+            ),
+        );
+      });
     },
     markSkipped: async (tradeId, reason) => {
       await api.skip(tradeId, reason);
     },
     saveOpen: async (tradeId, r) => {
+      await fillReports.get(tradeId);
       const sent = requests.get(tradeId);
       const size = sent?.size;
       const body: LiveOpenRequest = {

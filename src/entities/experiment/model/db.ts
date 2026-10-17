@@ -308,11 +308,17 @@ export const liveMirrorOrdersTable = sqliteTable(
       .default([]),
     /** Свои защитные ордера (как protect_refs демо-зеркала). */
     protectRefs: text("protect_refs", { mode: "json" }),
+    /** TP заявки входа (spec 0068): строка TP в карточке сделки; null — без тейка или не известен. */
+    takeProfit: real("take_profit"),
+    /** Почему объём выше $10 (sizeEntry: minNotional | minQty | spotStop); null — не поднят. */
+    sizeRaised: text("size_raised"),
+    /** Когда воркер сообщил «вход исполнен, ставлю SL/TP» (карточка ⏳, spec 0068, B1); null — не сообщал. */
+    filledAt: integer("filled_at", { mode: "timestamp_ms" }),
     /**
-     * Ключ уведомления о входе (spec 0068): итог и тревоги этой сделки уходят ответом на него. Непрозрачен — его
-     * вернул канал уведомлений; null — вход не отправлялся или сделка открыта до 0068.
+     * Ключ текущей карточки сделки в уведомлениях (spec 0068, вариант B): новая карточка заменяет её. Непрозрачен —
+     * его вернул канал; null — карточки ещё не было или сделка открыта до 0068.
      */
-    entryNotifyRef: text("entry_notify_ref", { mode: "json" }).$type<
+    cardNotifyRef: text("card_notify_ref", { mode: "json" }).$type<
       Record<string, unknown>
     >(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })

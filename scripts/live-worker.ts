@@ -228,7 +228,8 @@ const exchange: LiveExchange | null = venue
         autoHedge: false,
       };
       return {
-        placeTrade: (req, seed) => placeTrade(req, ctx, { tradeId: seed }),
+        placeTrade: (req, seed, onFilled) =>
+          placeTrade(req, ctx, { tradeId: seed, onFilled }),
         spotOrder: (symbol, clientOrderId) =>
           fetchDemoSpotOrderByClientId(venue, symbol, clientOrderId),
         futuresOrder: (symbol, clientOrderId) =>

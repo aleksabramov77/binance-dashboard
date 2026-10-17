@@ -43,18 +43,11 @@ describe("каналы приложения: log.notify → Bot API", () => {
         const body = JSON.parse(String(init?.body));
         bodies.push(body);
         methods.push(String(url).split("/").at(-1) ?? "");
-        // sendMessage — номер нового сообщения (100 + порядковый); ответ — с reply_to_message.
+        // sendMessage — номер нового сообщения (100 + порядковый).
         return new Response(
           JSON.stringify({
             ok: true,
-            result: {
-              message_id: 100 + bodies.length,
-              ...(body.reply_parameters && {
-                reply_to_message: {
-                  message_id: body.reply_parameters.message_id,
-                },
-              }),
-            },
+            result: { message_id: 100 + bodies.length },
           }),
         );
       }),
@@ -133,63 +126,41 @@ describe("каналы приложения: log.notify → Bot API", () => {
     });
   });
 
-  it("итог сделки — ответ на вход, правка входа и реакция через Bot API (spec 0068)", async () => {
+  it("карточка сделки: новая — sendMessage, потом прежняя — deleteMessage (spec 0068, B2)", async () => {
     vi.stubEnv("TELEGRAM_TOPIC_TRADES", "12");
-    const entry = await log.notify({
+    const first = await log.notify({
+      level: "info",
+      event: "live.filled",
+      message: "⏳ Вход исполнен",
+      category: "trades",
+      replaces: { ref: null, label: "карточка" },
+    });
+    const second = await log.notify({
       level: "info",
       event: "live.entry",
-      message: "🟡 Вход",
+      message: "🟡 Открыта",
       category: "trades",
-      link: "https://binance.example.test/experiments/S98",
+      replaces: { ref: first.ref, label: "карточка" },
     });
-    const exit = await log.notify({
-      level: "info",
-      event: "live.exit",
-      message: "🟢 +$0,84",
-      category: "trades",
-      urgent: true,
-      thread: {
-        ref: entry.ref,
-        label: "сообщение о входе",
-        reply: true,
-        append: "Итог: 🟢 +$0,84 (TP)",
-        mark: "good",
-      },
-    });
-    expect(methods).toEqual([
-      "sendMessage",
-      "sendMessage",
-      "editMessageText",
-      "setMessageReaction",
-    ]);
+    expect(methods).toEqual(["sendMessage", "sendMessage", "deleteMessage"]);
     expect(bodies.slice(1)).toEqual([
       {
         chat_id: "-1001234",
         message_thread_id: 12,
-        text: "🟢 +$0,84",
-        reply_parameters: {
-          message_id: 101,
-          allow_sending_without_reply: true,
-        },
+        text: "🟡 Открыта",
+        disable_notification: true,
         link_preview_options: { is_disabled: true },
       },
-      {
-        chat_id: "-1001234",
-        message_id: 101,
-        text: "🟡 Вход\nhttps://binance.example.test/experiments/S98\nИтог: 🟢 +$0,84 (TP)",
-        link_preview_options: { is_disabled: true },
-      },
-      {
-        chat_id: "-1001234",
-        message_id: 101,
-        reaction: [{ type: "emoji", emoji: "👍" }],
-      },
+      { chat_id: "-1001234", message_id: 101 },
     ]);
-    expect(exit.channels[0]).toMatchObject({
-      status: "sent",
-      reply: "ответ на сообщение о входе",
-      amend: "дописано, отметка 👍",
+    expect(first.channels[0]).toMatchObject({
+      replaced: "карточка новая — прежней нет",
     });
+    expect(second.channels[0]).toMatchObject({
+      status: "sent",
+      replaced: "карточка заменена",
+    });
+    expect(second.ref).toMatchObject({ telegram: { messageId: 102 } });
   });
 
   it("темы не настроены — всё в TELEGRAM_CHAT_ID без темы, но рутина — тихо (сценарий 5)", async () => {

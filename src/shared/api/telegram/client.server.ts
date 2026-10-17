@@ -36,28 +36,19 @@ export interface TelegramSendOptions {
   messageThreadId?: number | null;
   /** Без звука (disable_notification): «сообщение придёт без звука». */
   silent?: boolean;
-  /**
-   * Ответить на сообщение этого чата (reply_parameters). Сообщения нет (удалено) — отправится обычным
-   * (allow_sending_without_reply), а не ошибкой.
-   */
-  replyTo?: number | null;
 }
 
 /** Сколько символов текста отправляем и правим (лимит Telegram — 4096). */
 export const TELEGRAM_TEXT_LIMIT = 4000;
 
-const sentMessageSchema = z.object({
-  message_id: z.number().int(),
-  reply_to_message: z.unknown().optional(),
-});
+const sentMessageSchema = z.object({ message_id: z.number().int() });
 
-/** Отправленное сообщение: номер (null — Telegram не вернул) и ушло ли ответом. */
+/** Отправленное сообщение: номер (null — Telegram не вернул). */
 export interface TelegramSentMessage {
   messageId: number | null;
-  replied: boolean;
 }
 
-/** Отправить сообщение в чат (обычный текст, без разметки), в тему, без звука и ответом — по options. */
+/** Отправить сообщение в чат (обычный текст, без разметки), в тему и без звука — по options. */
 export async function sendTelegramMessage(
   token: string,
   chatId: string,
@@ -71,27 +62,13 @@ export async function sendTelegramMessage(
     }),
     text: text.slice(0, TELEGRAM_TEXT_LIMIT),
     ...(options.silent && { disable_notification: true }),
-    ...(options.replyTo != null && {
-      reply_parameters: {
-        message_id: options.replyTo,
-        allow_sending_without_reply: true,
-      },
-    }),
     link_preview_options: { is_disabled: true },
   });
   const sent = sentMessageSchema.safeParse(result);
-  return sent.success
-    ? {
-        messageId: sent.data.message_id,
-        replied: sent.data.reply_to_message != null,
-      }
-    : { messageId: null, replied: false };
+  return { messageId: sent.success ? sent.data.message_id : null };
 }
 
-/**
- * Заменить текст своего сообщения (editMessageText). Бот правит только свои сообщения; удалённое или слишком старое
- * — ошибка Telegram.
- */
+/** Заменить текст своего сообщения (editMessageText); удалённое — ошибка Telegram. */
 export async function editTelegramMessageText(
   token: string,
   chatId: string,
@@ -106,17 +83,18 @@ export async function editTelegramMessageText(
   });
 }
 
-/** Поставить реакцию бота на сообщение (setMessageReaction): одно стандартное эмодзи; уведомления она не даёт. */
-export async function setTelegramMessageReaction(
+/**
+ * Удалить своё сообщение (deleteMessage). Бот удаляет свои сообщения не старше 48 ч; сообщения уже нет, старше 48 ч,
+ * нет прав — ошибка Telegram с описанием.
+ */
+export async function deleteTelegramMessage(
   token: string,
   chatId: string,
   messageId: number,
-  emoji: string,
 ): Promise<void> {
-  await callTelegram(token, "setMessageReaction", {
+  await callTelegram(token, "deleteMessage", {
     chat_id: chatId,
     message_id: messageId,
-    reaction: [{ type: "emoji", emoji }],
   });
 }
 

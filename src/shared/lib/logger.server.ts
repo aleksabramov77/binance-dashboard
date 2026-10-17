@@ -212,26 +212,20 @@ const errorText = (error: unknown) =>
 type Delivered = { delivery: ChannelDelivery; ref: unknown };
 
 /**
- * Каждому каналу — своё уведомление: в связи с прошлым сообщением — его собственный ключ (thread.ref[канал]).
+ * Каждому каналу — своё уведомление: при замене прошлого сообщения — его собственный ключ (replaces.ref[канал]).
  * Исключение канала — итог failed, остальные каналы не ждут его.
  */
 function deliverAll(
-  n: Omit<Notification, "thread">,
-  thread: NotifyInput["thread"],
+  n: Omit<Notification, "replaces">,
+  replaces: NotifyInput["replaces"],
   channels: readonly NotifyChannel[],
 ): Promise<Delivered[]> {
   return Promise.all(
     channels.map(async (channel): Promise<Delivered> => {
       const own: Notification = {
         ...n,
-        thread: thread
-          ? {
-              ref: thread.ref?.[channel.name] ?? null,
-              label: thread.label,
-              reply: thread.reply ?? false,
-              append: thread.append ?? null,
-              mark: thread.mark ?? null,
-            }
+        replaces: replaces
+          ? { ref: replaces.ref?.[channel.name] ?? null, label: replaces.label }
           : null,
       };
       try {
@@ -263,12 +257,12 @@ function refOf(delivered: Delivered[]): NotifyRef | null {
 /**
  * Уведомление и запись одним вызовом (spec 0067): запись — после доставки, итог (поле notify) в ней и в ответе.
  * Сбой канала — ещё warn notify.failed, доставка не туда, куда просили (тема не найдена), — warn notify.fallback,
- * не дописано или не отмечено прошлое сообщение (spec 0068) — warn notify.amend. Ответ — ещё ключ отправленного
+ * прежнее сообщение не убрано при замене (spec 0068) — warn notify.replace. Ответ — ещё ключ отправленного
  * сообщения (ref) для связи следующих уведомлений с ним. Не бросает: уведомление не должно ронять сценарий.
  */
 async function notify(input: NotifyInput): Promise<NotifyResult> {
   const urgent = input.urgent ?? false;
-  const n: Omit<Notification, "thread"> = {
+  const n: Omit<Notification, "replaces"> = {
     category: input.category,
     urgent,
     text: input.text ?? input.message,
@@ -280,7 +274,7 @@ async function notify(input: NotifyInput): Promise<NotifyResult> {
   };
   const delivered =
     input.skip === undefined
-      ? await deliverAll(n, input.thread, state().channels)
+      ? await deliverAll(n, input.replaces, state().channels)
       : [];
   const deliveries = delivered.map((d) => d.delivery);
   const record = summarizeNotify(
@@ -315,11 +309,11 @@ async function notify(input: NotifyInput): Promise<NotifyResult> {
         `Уведомление ${input.event} (${d.channel}): ${d.note}`,
         where,
       );
-    if (d.amendError)
+    if (d.replaceError)
       emit(
         "warn",
-        "notify.amend",
-        `Уведомление ${input.event} (${d.channel}): ${input.thread?.label ?? "прошлое сообщение"} не изменено — ${d.amendError}`,
+        "notify.replace",
+        `Уведомление ${input.event} (${d.channel}): ${d.replaceError}`,
         where,
       );
   }
@@ -353,8 +347,8 @@ export const log = {
   /**
    * Запись журнала и уведомление (spec 0067): `await log.notify({ level, event, message, data?, error?, category,
    * urgent?, text?, link? })`. Место вызова называет категорию и срочность, а не канал; итог доставки — в поле notify
-   * записи и в ответе (sent / failed / skipped с причиной). thread — ответ на прошлое сообщение, дописать к нему и
-   * отметить итог (spec 0068); ref ответа — ключ этого сообщения для следующих вызовов.
+   * записи и в ответе (sent / failed / skipped с причиной). replaces — заменить прошлое сообщение этим (spec 0068);
+   * ref ответа — ключ этого сообщения для следующих вызовов.
    */
   notify: (input: NotifyInput): Promise<NotifyResult> => notify(input),
 };

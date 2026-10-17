@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { nextUtcMidnight, utcDayStart } from "./liveDay";
 import {
-  liveCloseFailedText,
+  type LiveCardEntry,
+  type LiveCardExit,
+  liveCardText,
+  liveCardUrgent,
   liveDailyLimitText,
-  liveEntryText,
-  liveExitText,
   liveHeldText,
-  liveOutcomeLine,
-  liveOutcomeMark,
-  liveUnprotectedText,
 } from "./liveMessages";
 import { livePrice } from "./money";
 
@@ -20,49 +18,62 @@ const s = {
 };
 
 // Intl ru-RU разделяет разряды неразрывным пробелом.
-const nb = (text: string) => text.replaceAll(" ", "\u00a0");
+const nb = (text: string) => text.replaceAll(" ", " ");
 
-describe("вход (spec 0068, AC1–AC2)", () => {
-  const entry = {
-    notionalUsd: 50,
-    raised: "minNotional" as const,
-    entryPrice: 80030,
-    stopLoss: 78429.4,
-    takeProfit: 83231.2,
-  };
+const entry: LiveCardEntry = {
+  notionalUsd: 50,
+  raised: "minNotional",
+  entryPrice: 80030,
+  stopLoss: 78429.4,
+  takeProfit: 83231.2,
+  openedAt: "2026-10-18T10:25:31.000Z",
+};
 
-  it("🟡 и по строке: заголовок с рынком, объём с причиной, цена входа, SL и TP с процентом от входа", () => {
-    expect(liveEntryText(s, entry)).toBe(
+/** Строки входа — одинаковые во всех статусах карточки. */
+const entryLines = [
+  "Объём: $50,00 (минимум биржи)",
+  `Цена входа: ${nb("80 030")}`,
+  `SL: ${nb("78 429,4")} (−2,0 %)`,
+  `TP: ${nb("83 231,2")} (+4,0 %)`,
+];
+
+describe("карточка сделки: ход входа (spec 0068, вариант B)", () => {
+  it("⏳ вход исполнен, ставлю SL/TP — данные входа и время входа, тихо", () => {
+    const status = { kind: "filled" } as const;
+    expect(liveCardText(s, entry, status)).toBe(
       [
-        "🟡 Вход · S98 BTCUSDT long · USDⓈ-M",
-        "Объём: $50,00 (минимум биржи)",
-        `Цена входа: ${nb("80 030")}`,
-        `SL: ${nb("78 429,4")} (−2,0 %)`,
-        `TP: ${nb("83 231,2")} (+4,0 %)`,
+        "⏳ Вход исполнен, ставлю SL/TP · S98 BTCUSDT long · USDⓈ-M",
+        ...entryLines,
+        "Вход: 18.10 10:25 UTC",
       ].join("\n"),
     );
+    expect(liveCardUrgent(status)).toBe(false);
   });
 
-  it("без TP — без строки TP; объём не поднят — без причины; Spot — в заголовке", () => {
-    const text = liveEntryText(
+  it("🟡 защищена — начинается с 🟡 (AC1), тихо; без TP — «SL стоит» и без строки TP", () => {
+    expect(liveCardText(s, entry, { kind: "protected" })).toMatch(
+      /^🟡 Открыта, SL\/TP стоят · S98 BTCUSDT long · USDⓈ-M\n/,
+    );
+    expect(liveCardUrgent({ kind: "protected" })).toBe(false);
+    const text = liveCardText(
       { ...s, market: "spot" },
-      { ...entry, raised: null, takeProfit: null },
+      { ...entry, takeProfit: null, raised: null },
+      { kind: "protected" },
     );
-    expect(text.split("\n")).toHaveLength(4);
-    expect(text).not.toMatch(/TP|минимум/);
-    expect(text).toMatch(
-      /^🟡 Вход · S98 BTCUSDT long · Spot\nОбъём: \$50,00\n/,
-    );
+    expect(text).toMatch(/^🟡 Открыта, SL стоит · S98 BTCUSDT long · Spot\n/);
+    expect(text).not.toMatch(/TP:|минимум/);
   });
 
   it("причина объёма: «минимум биржи» — только для minNotional", () => {
-    expect(liveEntryText(s, { ...entry, raised: "spotStop" })).toMatch(
+    expect(
+      liveCardText(s, { ...entry, raised: "spotStop" }, { kind: "protected" }),
+    ).toMatch(
       /Объём: \$50,00 \(стоп после комиссии должен пройти минимум ордера\)/,
     );
   });
 
   it("цены — без хвостов float, 6 значащих цифр (AC2)", () => {
-    const text = liveEntryText(
+    const text = liveCardText(
       { ...s, symbol: "XUSDT" },
       {
         ...entry,
@@ -70,75 +81,77 @@ describe("вход (spec 0068, AC1–AC2)", () => {
         stopLoss: 80.02897007822772,
         takeProfit: null,
       },
+      { kind: "protected" },
     );
-    expect(text).toMatch(/Цена входа: 81,6622\n/);
-    expect(text).toMatch(/SL: 80,029 \(−2,0 %\)$/);
+    expect(text).toMatch(/\nЦена входа: 81,6622\n/);
+    expect(text).toMatch(/\nSL: 80,029 \(−2,0 %\)\n/);
     expect(livePrice(0.0000123456789)).toBe("0,0000123457");
   });
 
-  it("цена входа не известна — «нет данных», проценты не считаются", () => {
-    const text = liveEntryText(s, { ...entry, entryPrice: null });
+  it("цена входа и объём не известны — «нет данных», проценты не считаются; стопа нет — «SL: нет»", () => {
+    const text = liveCardText(
+      s,
+      { ...entry, entryPrice: null, notionalUsd: null, stopLoss: null },
+      { kind: "protected" },
+    );
+    expect(text).toMatch(/Объём: нет данных/);
     expect(text).toMatch(/Цена входа: нет данных/);
+    expect(text).toMatch(/\nSL: нет\n/);
     expect(text).not.toMatch(/%/);
   });
 });
 
-describe("итог (spec 0068, AC3)", () => {
-  const exit = {
+describe("карточка сделки: закрыта (spec 0068, AC3)", () => {
+  const exit: LiveCardExit = {
     realizedPnl: 0.84,
     closedBy: "tp",
-    entryPrice: 80030,
     exitPrice: 83230,
     feesUsd: 0.05,
     heldMs: (2 * 60 + 15) * 60_000,
     balance: { usd: 512.4, asOf: null },
   };
+  const closed = (over: Partial<LiveCardExit> = {}) =>
+    liveCardText(s, entry, { kind: "closed", exit: { ...exit, ...over } });
 
-  it("прибыль — 🟢 +$X, причина и цены, комиссии и время, баланс", () => {
-    expect(liveExitText(s, exit)).toBe(
+  it("прибыль — 🟢 +$X, данные входа, причина и цены, комиссии и время, баланс, время входа; со звуком", () => {
+    expect(closed()).toBe(
       [
         "🟢 +$0,84 · S98 BTCUSDT long · USDⓈ-M",
+        ...entryLines,
         `Закрыта по TP: ${nb("80 030")} → ${nb("83 230")}`,
         "Комиссии: $0,05 · в сделке 2 ч 15 мин",
         "Баланс субсчёта: $512,40",
+        "Вход: 18.10 10:25 UTC",
       ].join("\n"),
     );
+    expect(liveCardUrgent({ kind: "closed", exit })).toBe(true);
   });
 
   it("убыток — 🔴 −$X по SL; «Закрыть всё» и paper-сделка — своими словами", () => {
-    expect(
-      liveExitText(s, { ...exit, realizedPnl: -1.02, closedBy: "sl" }),
-    ).toMatch(/^🔴 −\$1,02 · S98 BTCUSDT long · USDⓈ-M\nЗакрыта по SL: /);
-    expect(liveExitText(s, { ...exit, closedBy: "close_all" })).toMatch(
+    expect(closed({ realizedPnl: -1.02, closedBy: "sl" })).toMatch(
+      /^🔴 −\$1,02 · S98 BTCUSDT long · USDⓈ-M\n[\s\S]*\nЗакрыта по SL: /,
+    );
+    expect(closed({ closedBy: "close_all" })).toMatch(
       /\nЗакрыта по «Закрыть всё»: /,
     );
-    expect(liveExitText(s, { ...exit, closedBy: "mirror" })).toMatch(
+    expect(closed({ closedBy: "mirror" })).toMatch(
       /\nЗакрыта вслед за paper-сделкой: /,
     );
   });
 
-  it("PnL неизвестен — ⚪ и пояснение про пороги автовыключения своей строкой", () => {
-    const text = liveExitText(s, {
-      ...exit,
-      realizedPnl: null,
-      exitPrice: null,
-      feesUsd: null,
-    });
+  it("PnL неизвестен — ⚪ и пояснение про пороги автовыключения своей строкой; PnL 0 — тоже ⚪", () => {
+    const text = closed({ realizedPnl: null, exitPrice: null, feesUsd: null });
     expect(text).toMatch(/^⚪ PnL неизвестен · /);
     expect(text).toMatch(/: [^\n]+ → нет данных\n/);
     expect(text).toMatch(/\nКомиссии: нет данных · /);
     expect(text).toMatch(
-      /\n⚠️ Исполнения и цена не прочитаны — в порогах автовыключения сделка считается убыточной$/,
+      /\n⚠️ Исполнения и цена не прочитаны — в порогах автовыключения сделка считается убыточной\n/,
     );
-    // PnL ровно 0 — тоже ⚪.
-    expect(liveExitText(s, { ...exit, realizedPnl: 0 })).toMatch(
-      /^⚪ \$0,00 · /,
-    );
+    expect(closed({ realizedPnl: 0 })).toMatch(/^⚪ \$0,00 · /);
   });
 
   it("оценка, остаток монеты и «после N попыток» — каждая своей строкой", () => {
-    const text = liveExitText(s, {
-      ...exit,
+    const text = closed({
       realizedPnl: -2.5,
       closedBy: "mirror",
       pnlEstimated: true,
@@ -146,29 +159,19 @@ describe("итог (spec 0068, AC3)", () => {
       attempts: 3,
     });
     expect(text).toMatch(/^🔴 ≈ −\$2,50 · /);
-    expect(text.split("\n").slice(4)).toEqual([
+    expect(text.split("\n").slice(-4)).toEqual([
       "≈ PnL — оценка по ценам входа и выхода (исполнения не прочитаны)",
       "Остаток 0.00000986 BTC ≈ $0,81 на субсчёте, в PnL не входит",
       "Закрыта после 3 попыток",
+      "Вход: 18.10 10:25 UTC",
     ]);
   });
 
-  it("заголовок итога всегда полный, с рынком: ответ может уйти без цитаты (вход удалён, AC6)", () => {
-    expect(liveExitText(s, exit)).toMatch(
-      /^🟢 \+\$0,84 · S98 BTCUSDT long · USDⓈ-M\n/,
-    );
-    expect(liveExitText({ ...s, market: "spot" }, exit)).toMatch(
-      /^🟢 \+\$0,84 · S98 BTCUSDT long · Spot\n/,
-    );
-  });
-
   it("баланс — по пульсу со временем; нет — «Баланс: нет данных» (AC4)", () => {
-    expect(
-      liveExitText(s, { ...exit, balance: { usd: 30, asOf: "12:40 UTC" } }),
-    ).toMatch(/\nБаланс субсчёта: \$30,00 \(на 12:40 UTC\)/);
-    expect(liveExitText(s, { ...exit, balance: null })).toMatch(
-      /\nБаланс: нет данных/,
+    expect(closed({ balance: { usd: 30, asOf: "12:40 UTC" } })).toMatch(
+      /\nБаланс субсчёта: \$30,00 \(на 12:40 UTC\)\n/,
     );
+    expect(closed({ balance: null })).toMatch(/\nБаланс: нет данных\n/);
   });
 
   it("время в сделке", () => {
@@ -177,45 +180,50 @@ describe("итог (spec 0068, AC3)", () => {
     expect(liveHeldText(3 * 3_600_000)).toBe("3 ч");
     expect(liveHeldText(27 * 3_600_000 + 60_000)).toBe("1 д 3 ч");
   });
-
-  it("строка «Итог» для сообщения о входе и отметка (AC5)", () => {
-    expect(liveOutcomeLine({ realizedPnl: 0.84, closedBy: "tp" })).toBe(
-      "Итог: 🟢 +$0,84 (TP)",
-    );
-    expect(
-      liveOutcomeLine({
-        realizedPnl: -1.02,
-        closedBy: "sl",
-        pnlEstimated: true,
-      }),
-    ).toBe("Итог: 🔴 ≈ −$1,02 (SL)");
-    expect(liveOutcomeLine({ realizedPnl: null, closedBy: "mirror" })).toBe(
-      "Итог: ⚪ PnL неизвестен (закрыта paper-сделка)",
-    );
-    expect(liveOutcomeMark(0.84)).toBe("good");
-    expect(liveOutcomeMark(-1)).toBe("bad");
-    expect(liveOutcomeMark(0)).toBeNull();
-    expect(liveOutcomeMark(null)).toBeNull();
-  });
 });
 
-describe("тревоги сделки (spec 0068, AC7)", () => {
-  it("без защиты — что случилось и что сделать своими строками", () => {
-    expect(liveUnprotectedText(s, "Стоп не поставлен.")).toBe(
+describe("карточка сделки: проблемы (spec 0068, AC7)", () => {
+  it("⚠️ без защиты — что случилось и что сделать своими строками, со звуком", () => {
+    const status = {
+      kind: "unprotected",
+      message: "Стоп не поставлен.",
+    } as const;
+    expect(liveCardText(s, entry, status)).toBe(
       [
-        "⚠️ Реальная сделка без защиты · S98 BTCUSDT long · USDⓈ-M",
+        "⚠️ Без защиты · S98 BTCUSDT long · USDⓈ-M",
+        ...entryLines,
         "Что случилось: Стоп не поставлен.",
         "Что сделать: закройте позицию на Binance вручную или нажмите «Закрыть всё».",
+        "Вход: 18.10 10:25 UTC",
       ].join("\n"),
     );
+    expect(liveCardUrgent(status)).toBe(true);
   });
 
-  it("не закрылась — что случилось и что дальше", () => {
-    expect(liveCloseFailedText(s, "-1021 Timestamp.").split("\n")).toEqual([
-      "⚠️ Реальная позиция не закрылась · S98 BTCUSDT long · USDⓈ-M",
+  it("⚠️ не закрылась — что случилось и что дальше", () => {
+    expect(
+      liveCardText(s, entry, {
+        kind: "close_failed",
+        message: "-1021 Timestamp.",
+      }).split("\n"),
+    ).toEqual([
+      "⚠️ Не закрылась · S98 BTCUSDT long · USDⓈ-M",
+      ...entryLines,
       "Что случилось: -1021 Timestamp.",
-      "Закрытие повторяется каждый прогон воркера, пока позиция не закроется.",
+      "Что дальше: закрытие повторяется каждый прогон воркера, пока позиция не закроется.",
+      "Вход: 18.10 10:25 UTC",
     ]);
+  });
+
+  it("⚪ вход отменён (после ⏳ позиции нет) — что случилось", () => {
+    expect(
+      liveCardText(s, entry, {
+        kind: "cancelled",
+        message: "Стоп не встал — позиция закрыта.",
+      }),
+    ).toMatch(
+      /^⚪ Вход отменён · [\s\S]*\nЧто случилось: Стоп не встал — позиция закрыта\.\nВход: /,
+    );
   });
 });
 

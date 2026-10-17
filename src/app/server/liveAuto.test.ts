@@ -475,7 +475,7 @@ describe("автовыключение по порогам при закрыти
     expect((await experiment("S97")).liveMirror).toBe(true);
     expect(telegramTexts().some((t) => /PnL неизвестен/.test(t))).toBe(true);
     expect(logEvents("warn")).toContain("live.advice");
-    // Итог сделки — со звуком всегда (spec 0068): звук даёт только ответ на сообщение о входе.
+    // Итог сделки — карточка со звуком (spec 0068, вариант B).
     expect(notices().find((n) => n.event === "live.exit")?.urgent).toBe(true);
     await liveTrade("S97", -0.2);
     expect(await experiment("S97")).toMatchObject({

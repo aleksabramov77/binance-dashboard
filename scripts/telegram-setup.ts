@@ -7,8 +7,8 @@
 //   pnpm telegram:setup --test    — по одному тихому пробному сообщению в каждую тему (вместе с --topics — и в только
 //                                   что созданные); явная проверка — отправляется и вне production
 //   pnpm telegram:setup --test-trade
-//                                 — пробная пара в тему «Сделки» (spec 0068): тихий вход и итог ответом на него со
-//                                   звуком, вход дописан строкой итога и отмечен 👍; числа вымышленные
+//                                 — пробная карточка сделки в тему «Сделки» (spec 0068): ⏳ → 🟡 → 🟢, каждая новая
+//                                   заменяет прежнюю (отправить, потом удалить); числа вымышленные
 // Env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_OWNER_ID, TELEGRAM_TOPIC_*, TELEGRAM_WEBHOOK_SECRET (тот же, что
 // у прода), SITE_URL (адрес прода, обязателен для setWebhook). Берутся из .env.local и
 // ~/.config/vercel/binance-dashboard-prod.env; заданные в окружении — главнее. Значения секретов не печатаем.
@@ -37,12 +37,13 @@ import {
   type TelegramConfig,
 } from "@/shared/config/env.server";
 import { log, setNotifyChannels } from "@/shared/lib/logger.server";
+import type { NotifyRef } from "@/shared/notify";
 import {
   forumProblems,
   ownerWarnings,
   parseSetupArgs,
   planTopics,
-  testTradeMessages,
+  testTradeCards,
   topicEnvLines,
 } from "./lib/telegramSetup";
 
@@ -123,53 +124,38 @@ async function sendTests(): Promise<boolean> {
 }
 
 /**
- * Пробная пара в тему «Сделки» (spec 0068, AC11) — тем же каналом и той же связью сообщений, что у реальных сделок:
- * вход тихо, итог ответом со звуком, вход дописан и отмечен. Явная проверка — отправляется и вне production.
+ * Пробная цепочка карточек в тему «Сделки» (spec 0068, B7) — тем же каналом и той же заменой, что у реальных сделок:
+ * ⏳ и 🟡 тихо, 🟢 со звуком, каждая следующая заменяет прежнюю. Явная проверка — отправляется и вне production.
  */
 async function sendTestTrade(): Promise<boolean> {
   setNotifyChannels(createNotifyChannels());
-  const m = testTradeMessages();
   const link = getSiteLink("/experiments");
-  const entry = await log.notify({
-    level: "info",
-    event: "telegram.test",
-    message: "Пробный вход в тему «Сделки»",
-    category: "trades",
-    test: true,
-    text: m.entry,
-    link,
-  });
-  console.log(
-    entry.status === "sent"
-      ? "✅ Пробный вход: отправлено"
-      : `✖ Пробный вход: не отправлено — ${entry.reason}`,
-  );
-  if (entry.status !== "sent") return false;
-  const exit = await log.notify({
-    level: "info",
-    event: "telegram.test",
-    message: "Пробный итог в тему «Сделки»",
-    category: "trades",
-    urgent: true,
-    test: true,
-    text: m.exit,
-    link,
-    thread: {
-      ref: entry.ref,
-      label: "сообщение о входе",
-      reply: true,
-      append: m.append,
-      mark: m.mark,
-    },
-  });
-  const c = exit.channels[0];
-  console.log(
-    exit.status === "sent"
-      ? `✅ Пробный итог: отправлено (${[c?.reply, c?.amend].filter(Boolean).join("; ")})`
-      : `✖ Пробный итог: не отправлено — ${exit.reason}`,
-  );
-  if (c?.amendError) console.log(`⚠️ Вход не изменён: ${c.amendError}`);
-  return exit.status === "sent" && !c?.amendError;
+  let ref: NotifyRef | null = null;
+  let ok = true;
+  for (const card of testTradeCards()) {
+    const r = await log.notify({
+      level: "info",
+      event: "telegram.test",
+      message: `Пробная карточка сделки: ${card.label}`,
+      category: "trades",
+      urgent: card.urgent,
+      test: true,
+      text: card.text,
+      link,
+      replaces: { ref, label: "карточка" },
+    });
+    const c = r.channels[0];
+    console.log(
+      r.status === "sent"
+        ? `✅ ${card.label}: отправлено${c?.replaced ? ` (${c.replaced})` : ""}`
+        : `✖ ${card.label}: не отправлено — ${r.reason}`,
+    );
+    if (c?.replaceError) console.log(`⚠️ ${c.replaceError}`);
+    if (r.status !== "sent") return false;
+    if (c?.replaceError) ok = false;
+    ref = r.ref;
+  }
+  return ok;
 }
 
 async function main() {
@@ -203,7 +189,7 @@ async function main() {
     if (mode.test && !(await sendTests()))
       fail("не все пробные сообщения отправлены");
     if (mode.testTrade && !(await sendTestTrade()))
-      fail("пробная пара в тему «Сделки» отправлена не полностью");
+      fail("пробная цепочка карточек в тему «Сделки» прошла не полностью");
     return;
   }
 

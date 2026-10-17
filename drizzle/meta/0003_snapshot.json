@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "885f1b17-84ae-40dc-89c0-fac83bce8c78",
+  "id": "0bcceba2-566b-409d-9ddb-1cddc78a947c",
   "prevId": "1321817c-941f-4af8-b473-52c9a63b87b0",
   "tables": {
     "account_keys": {
@@ -679,8 +679,29 @@
           "notNull": false,
           "autoincrement": false
         },
-        "entry_notify_ref": {
-          "name": "entry_notify_ref",
+        "take_profit": {
+          "name": "take_profit",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "size_raised": {
+          "name": "size_raised",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "filled_at": {
+          "name": "filled_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "card_notify_ref": {
+          "name": "card_notify_ref",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

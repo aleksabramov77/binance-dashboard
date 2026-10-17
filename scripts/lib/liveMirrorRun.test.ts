@@ -59,6 +59,7 @@ function fakeApi(s: LiveMirrorState, closeItems: LiveToClose[] = []) {
     state: vi.fn(async () => s),
     claim: vi.fn(async () => ({ claimed: true, reason: null })),
     skip: vi.fn(async () => ({ ok: true as const })),
+    filled: vi.fn(async () => ({ ok: true as const })),
     open: vi.fn(async () => ({ ok: true as const })),
     claimClose: vi.fn(
       async (id: string) => closeItems.find((c) => c.tradeId === id) ?? null,
@@ -168,6 +169,67 @@ const run = (
     keyAccepted: over.keyAccepted ?? true,
   });
 
+describe("runLiveMirror: «вход исполнен» до защиты (spec 0068, B1)", () => {
+  /** Биржа сообщает об исполнении между входом и защитой — как placeFutures. */
+  const fillingExchange = () =>
+    fakeExchange({
+      placeTrade: vi.fn(
+        async (
+          req: TradeRequest,
+          _seed: string,
+          onFilled?: (f: {
+            entryPrice: number;
+            filledQuantity: number;
+          }) => void,
+        ) => {
+          onFilled?.({ entryPrice: 2000, filledQuantity: req.quantity });
+          return result(req);
+        },
+      ),
+    });
+
+  it("исполнение — в API с ценой, объёмом и уровнями заявки; итог входа — после него", async () => {
+    const api = fakeApi(state());
+    const order: string[] = [];
+    api.filled.mockImplementation(async () => {
+      order.push("filled");
+      return { ok: true as const };
+    });
+    api.open.mockImplementation(async () => {
+      order.push("open");
+      return { ok: true as const };
+    });
+    await run(api, fillingExchange());
+    expect(api.filled).toHaveBeenCalledWith({
+      tradeId: "t1",
+      entryPrice: 2000,
+      quantity: expect.any(Number),
+      order: {
+        stopLoss: expect.any(Number),
+        takeProfit: expect.anything(),
+        raised: null,
+      },
+    });
+    expect(order).toEqual(["filled", "open"]);
+  });
+
+  it("сообщение об исполнении не дошло — итог входа всё равно уходит, в outbox его нет", async () => {
+    const api = fakeApi(state());
+    api.filled.mockRejectedValue(new Error("502"));
+    const outbox: OutboxItem[] = [];
+    await runLiveMirror({
+      api,
+      ex: fillingExchange(),
+      now: () => NOW,
+      verdictOk: true,
+      keyAccepted: true,
+      outbox,
+    });
+    expect(api.open).toHaveBeenCalledTimes(1);
+    expect(outbox).toEqual([]);
+  });
+});
+
 describe("runLiveMirror: вход", () => {
   it("вход на $10 по шагу символа, без повторного подъёма; итог — в API с уровнями и объёмом", async () => {
     const api = fakeApi(state());
@@ -186,6 +248,7 @@ describe("runLiveMirror: вход", () => {
         takeProfit: 2200,
       }),
       liveOrderSeed("t1"),
+      expect.any(Function),
     );
     expect(api.claim).toHaveBeenCalledWith("t1");
     expect(api.open).toHaveBeenCalledWith(
@@ -265,6 +328,7 @@ describe("runLiveMirror: вход", () => {
     expect(ex.placeTrade).toHaveBeenCalledWith(
       expect.objectContaining({ symbol: "SOLUSDT" }),
       liveOrderSeed("b"),
+      expect.any(Function),
     );
   });
 

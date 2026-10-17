@@ -9,6 +9,7 @@ export {
 } from "./channel.server";
 export {
   createTelegramForumTopic,
+  deleteTelegramMessage,
   deleteTelegramWebhook,
   editTelegramMessageText,
   fetchTelegramChats,
@@ -17,7 +18,6 @@ export {
   getTelegramMe,
   sendTelegramMessage,
   setTelegramCommands,
-  setTelegramMessageReaction,
   setTelegramWebhook,
   type TelegramChat,
   type TelegramChatMember,

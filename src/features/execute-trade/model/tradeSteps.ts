@@ -90,3 +90,23 @@ export type Done = (
   entryPrice?: number,
   filled?: number,
 ) => TradeResult;
+
+/** Вход исполнен, защита ещё не выставлена (spec 0068, B1): цена и объём исполнения. */
+export interface TradeFill {
+  entryPrice: number;
+  filledQuantity: number;
+}
+
+/**
+ * Сообщить об исполнении входа до выставления защиты. Синхронно и без ожидания: защита не ждёт сети; сбой
+ * получателя сделку не ломает.
+ */
+export type OnFilled = (fill: TradeFill) => void;
+
+export function reportFilled(cb: OnFilled | undefined, fill: TradeFill) {
+  try {
+    cb?.(fill);
+  } catch {
+    // Получатель — уведомление о шаге; сделка от него не зависит.
+  }
+}

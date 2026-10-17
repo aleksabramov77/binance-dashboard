@@ -32,14 +32,13 @@ const note = (over: Partial<Notification> = {}): Notification => ({
   event: "engine.toggle",
   fixture: false,
   test: false,
-  thread: null,
+  replaces: null,
   ...over,
 });
 
 function channel(over: Partial<TelegramChannelDeps> = {}) {
   const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(async () => ({
     messageId: null,
-    replied: false,
   }));
   const deps: TelegramChannelDeps = {
     config: () => config,
@@ -179,7 +178,7 @@ describe("Telegram-канал", () => {
           "Telegram sendMessage 400: Bad Request: message thread not found",
         ),
       )
-      .mockResolvedValueOnce({ messageId: null, replied: false });
+      .mockResolvedValueOnce({ messageId: null });
     const { ch } = channel({ send });
     expect(await ch.deliver(note({ urgent: true }))).toEqual({
       status: "sent",
@@ -245,179 +244,183 @@ describe("Telegram-канал", () => {
   });
 });
 
-describe("Telegram-канал: ответ, дописать, отметка (spec 0068)", () => {
+describe("Telegram-канал: замена карточки (spec 0068, вариант B)", () => {
   const trades: TelegramTopicPolicy = {
     title: "💰 Сделки",
     topicId: 5,
     enabled: true,
     sound: "urgent",
   };
-  const entryRef = {
+  const oldRef = {
     chatId: "-1001234",
     messageId: 70,
-    text: "🟡 Вход · S98 BTCUSDT long · USDⓈ-M\nhttps://x.test/experiments/S98",
+    text: "🟡 Открыта · S98 BTCUSDT long · USDⓈ-M\nhttps://x.test/experiments/S98",
   };
-  const exitNote = (thread: Partial<NonNullable<Notification["thread"]>>) =>
+  const card = (ref: unknown = oldRef, over: Partial<Notification> = {}) =>
     note({
       category: "trades",
       urgent: true,
-      text: "🟢 +$0,84 · S98 BTCUSDT long",
+      text: "🟢 +$0,84 · S98 BTCUSDT long · USDⓈ-M",
       event: "live.exit",
-      thread: {
-        ref: entryRef,
-        label: "сообщение о входе",
-        reply: true,
-        append: "Итог: 🟢 +$0,84 (TP)",
-        mark: "good",
-        ...thread,
-      },
+      replaces: { ref, label: "карточка" },
+      ...over,
     });
-  function tradesChannel(over: Partial<TelegramChannelDeps> = {}) {
-    const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(
-      async (_t, _c, _text, o) => ({
-        messageId: 71,
-        replied: o?.replyTo != null,
-      }),
+  function cardChannel(over: Partial<TelegramChannelDeps> = {}) {
+    const calls: string[] = [];
+    const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(async () => {
+      calls.push("send");
+      return { messageId: 71 };
+    });
+    const remove = vi.fn<NonNullable<TelegramChannelDeps["remove"]>>(
+      async () => {
+        calls.push("delete");
+      },
     );
-    const edit = vi.fn<NonNullable<TelegramChannelDeps["edit"]>>(
-      async () => {},
-    );
-    const react = vi.fn<NonNullable<TelegramChannelDeps["react"]>>(
-      async () => {},
-    );
+    const edit = vi.fn<NonNullable<TelegramChannelDeps["edit"]>>(async () => {
+      calls.push("edit");
+    });
     const ch = createTelegramChannel({
       config: () => config,
       policy: () => trades,
       send,
+      remove,
       edit,
-      react,
       host: () => ({ production: true, server: true }),
       ...over,
     });
-    return { ch, send, edit, react };
+    return { ch, send, remove, edit, calls };
   }
 
-  it("итог — ответом на вход; вход дописан строкой итога и отмечен 👍; ключ нового сообщения — в ответе", async () => {
-    const { ch, send, edit, react } = tradesChannel();
-    expect(await ch.deliver(exitNote({}))).toEqual({
+  it("сначала новая карточка, потом удаление прежней; ключ — новой (B2)", async () => {
+    const { ch, remove, edit, calls } = cardChannel();
+    expect(await ch.deliver(card())).toEqual({
       status: "sent",
       target: { topic: "💰 Сделки", topicId: 5, to: "-1001234", silent: false },
-      reply: "ответ на сообщение о входе",
-      amend: "дописано, отметка 👍",
+      replaced: "карточка заменена",
       ref: {
         chatId: "-1001234",
         messageId: 71,
-        text: "🟢 +$0,84 · S98 BTCUSDT long",
+        text: "🟢 +$0,84 · S98 BTCUSDT long · USDⓈ-M",
       },
     });
-    expect(send.mock.calls[0][3]).toEqual({
-      messageThreadId: 5,
-      silent: false,
-      replyTo: 70,
+    expect(calls).toEqual(["send", "delete"]);
+    expect(remove).toHaveBeenCalledWith("bot-token", "-1001234", 70);
+    expect(edit).not.toHaveBeenCalled();
+  });
+
+  it("тихая карточка (⏳/🟡) — disable_notification, замена та же", async () => {
+    const { ch, send, calls } = cardChannel();
+    await ch.deliver(card(oldRef, { urgent: false }));
+    expect(send.mock.calls[0][3]).toEqual({ messageThreadId: 5, silent: true });
+    expect(calls).toEqual(["send", "delete"]);
+  });
+
+  it("прежней уже нет (удалили) — без ошибки: записано, warn не нужен (B3)", async () => {
+    const { ch } = cardChannel({
+      remove: async () => {
+        throw new Error(
+          "Telegram deleteMessage 400: Bad Request: message to delete not found",
+        );
+      },
+    });
+    const r = await ch.deliver(card());
+    expect(r).toMatchObject({
+      status: "sent",
+      replaced: "карточка заменена (прежней уже нет)",
+    });
+    expect(r).not.toHaveProperty("replaceError");
+  });
+
+  it("старше 48 ч — не удалить: к прежней дописано «⤵️ обновлено ниже», причина — в replaceError (B3)", async () => {
+    const { ch, edit } = cardChannel({
+      remove: async () => {
+        throw new Error(
+          "Telegram deleteMessage 400: Bad Request: message can't be deleted",
+        );
+      },
+    });
+    const r = await ch.deliver(card());
+    expect(r).toMatchObject({
+      status: "sent",
+      replaceError:
+        "прежняя карточка не удалена: Telegram deleteMessage 400: Bad Request: message can't be deleted; дописано «⤵️ обновлено ниже»",
     });
     expect(edit).toHaveBeenCalledWith(
       "bot-token",
       "-1001234",
       70,
-      `${entryRef.text}\nИтог: 🟢 +$0,84 (TP)`,
+      `${oldRef.text}\n⤵️ обновлено ниже`,
     );
-    expect(react).toHaveBeenCalledWith("bot-token", "-1001234", 70, "👍");
   });
 
-  it("убыток — отметка 👎; без отметки (PnL неизвестен) — реакции нет", async () => {
-    const bad = tradesChannel();
-    await bad.ch.deliver(exitNote({ mark: "bad" }));
-    expect(bad.react.mock.calls[0][3]).toBe("👎");
-    const none = tradesChannel();
-    expect(await none.ch.deliver(exitNote({ mark: null }))).toMatchObject({
-      amend: "дописано",
-    });
-    expect(none.react).not.toHaveBeenCalled();
-  });
-
-  it("номер входа не известен — обычное сообщение, «без ответа», дописывать нечего (AC6)", async () => {
-    const { ch, send, edit, react } = tradesChannel();
-    const r = await ch.deliver(exitNote({ ref: null }));
-    expect(r).toMatchObject({
-      status: "sent",
-      reply: "без ответа: сообщение о входе не известно",
-    });
-    // Не сбой: warn notify.amend на каждом итоге старых сделок не нужен.
-    expect(r).not.toHaveProperty("amendError");
-    expect(r).not.toHaveProperty("amend");
-    expect(send.mock.calls[0][3]).not.toHaveProperty("replyTo");
-    expect(edit).not.toHaveBeenCalled();
-    expect(react).not.toHaveBeenCalled();
-    // Ключ другого чата или не того формата — тоже не известен.
-    const other = tradesChannel();
-    await other.ch.deliver(exitNote({ ref: { ...entryRef, chatId: "-999" } }));
-    await other.ch.deliver(exitNote({ ref: { message_id: 70 } }));
-    expect(other.send.mock.calls.map((c) => c[3]?.replyTo)).toEqual([
-      undefined,
-      undefined,
-    ]);
-  });
-
-  it("сообщение о входе удалено — Telegram отправил без ответа: так и записано", async () => {
-    const { ch } = tradesChannel({
-      send: async () => ({ messageId: 72, replied: false }),
+  it("старше 48 ч и дописать не вышло — тоже без исключения, новая карточка отправлена", async () => {
+    const { ch } = cardChannel({
+      remove: async () => {
+        throw new Error("Telegram deleteMessage 400: message can't be deleted");
+      },
       edit: async () => {
         throw new Error(
           "Telegram editMessageText 400: message to edit not found",
         );
       },
-      react: async () => {
-        throw new Error("Telegram setMessageReaction 400: message not found");
-      },
     });
-    expect(await ch.deliver(exitNote({}))).toMatchObject({
+    expect(await ch.deliver(card())).toMatchObject({
       status: "sent",
-      reply: "без ответа: сообщение о входе не найдено",
-      amendError:
-        "не дописано: Telegram editMessageText 400: message to edit not found; без отметки 👍: Telegram setMessageReaction 400: message not found",
+      replaceError: expect.stringMatching(
+        /не удалена: .*; «⤵️ обновлено ниже» не дописано: Telegram editMessageText 400/,
+      ),
+      ref: { messageId: 71 },
     });
   });
 
-  it("сбой правки не мешает итогу: отправлено, отметка поставлена, причина — в amendError (AC5)", async () => {
-    const { ch, react } = tradesChannel({
-      edit: async () => {
+  it("нет прав и прочие сбои удаления — replaceError, без правки", async () => {
+    const { ch, edit } = cardChannel({
+      remove: async () => {
         throw new Error(
-          "Telegram editMessageText 400: message can't be edited",
+          "Telegram deleteMessage 403: Forbidden: not enough rights",
         );
       },
     });
-    expect(await ch.deliver(exitNote({}))).toMatchObject({
+    expect(await ch.deliver(card())).toMatchObject({
       status: "sent",
-      reply: "ответ на сообщение о входе",
-      amend: "отметка 👍",
-      amendError:
-        "не дописано: Telegram editMessageText 400: message can't be edited",
+      replaceError:
+        "прежняя карточка не удалена: Telegram deleteMessage 403: Forbidden: not enough rights",
     });
-    expect(react).toHaveBeenCalledTimes(1);
+    expect(edit).not.toHaveBeenCalled();
   });
 
-  it("не production — ничего не шлёт и не правит, но в итоге видно, что это был бы ответ", async () => {
-    const { ch, send, edit, react } = tradesChannel({
+  it("ключа прежней нет (сделка до 0068) или ключ чужой — просто новая карточка (B4)", async () => {
+    for (const ref of [null, { ...oldRef, chatId: "-999" }, { id: 70 }]) {
+      const { ch, remove } = cardChannel();
+      expect(await ch.deliver(card(ref))).toMatchObject({
+        status: "sent",
+        replaced: "карточка новая — прежней нет",
+      });
+      expect(remove).not.toHaveBeenCalled();
+    }
+  });
+
+  it("новая не ушла — прежнюю не трогаем", async () => {
+    const { ch, remove } = cardChannel({
+      send: async () => {
+        throw new Error("Telegram sendMessage 403: Forbidden");
+      },
+    });
+    expect((await ch.deliver(card())).status).toBe("failed");
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("не production — ничего не шлёт и не удаляет, но видно, что заменила бы", async () => {
+    const { ch, send, remove } = cardChannel({
       host: () => ({ production: false, server: false }),
     });
-    expect(await ch.deliver(exitNote({}))).toMatchObject({
+    expect(await ch.deliver(card())).toMatchObject({
       status: "skipped",
       reason: "не production",
-      reply: "ответ на сообщение о входе",
+      replaced: "карточка заменила бы прежнюю",
     });
     expect(send).not.toHaveBeenCalled();
-    expect(edit).not.toHaveBeenCalled();
-    expect(react).not.toHaveBeenCalled();
-  });
-
-  it("только ответ (тревога «не закрылась») — без правки и отметки", async () => {
-    const { ch, edit, react } = tradesChannel();
-    const r = await ch.deliver(exitNote({ append: null, mark: null }));
-    expect(r).toMatchObject({ reply: "ответ на сообщение о входе" });
-    expect(r).not.toHaveProperty("amend");
-    expect(r).not.toHaveProperty("amendError");
-    expect(edit).not.toHaveBeenCalled();
-    expect(react).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
   });
 });
 
@@ -425,17 +428,14 @@ describe("ключ сообщения — отправленный текст (�
   it("длинный текст — в ключе ровно то, что ушло в Telegram", async () => {
     const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(async () => ({
       messageId: 9,
-      replied: false,
     }));
     const { ch } = channel({ send });
-    const long = "x".repeat(5000);
-    const r = await ch.deliver(note({ text: long }));
+    const r = await ch.deliver(note({ text: "x".repeat(5000) }));
     expect(r.ref).toEqual({
       chatId: "-1001234",
       messageId: 9,
       text: "x".repeat(4000),
     });
-    expect(send).toHaveBeenCalledTimes(1);
   });
 });
 

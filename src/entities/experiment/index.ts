@@ -42,8 +42,9 @@ export {
   liveEnabledExperiments,
   liveSummaries,
   markLiveCloseFailed,
+  markLiveFilled,
   recentLiveClosed,
-  setLiveEntryNotifyRef,
+  setLiveCardNotifyRef,
   skipLiveMirror,
   updateLiveMirror,
 } from "./api/liveMirrorDb";
@@ -307,6 +308,7 @@ export {
 export {
   type LiveCandidate,
   type LiveCloseRequest,
+  type LiveFilledRequest,
   type LiveLegsRequest,
   type LiveMirrorState,
   type LiveOpenRequest,
@@ -319,6 +321,7 @@ export {
   liveCloseAllRequestSchema,
   liveCloseRequestSchema,
   liveExitSchema,
+  liveFilledRequestSchema,
   liveLegsRequestSchema,
   liveMirrorStateSchema,
   liveOkSchema,

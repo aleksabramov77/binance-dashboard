@@ -1,11 +1,12 @@
 // Telegram-канал уведомлений (spec 0067): категория → тема закрытой группы (message_thread_id), не срочное — без звука
 // (disable_notification). Политика категории — внедрённая функция-источник: сейчас таблица и env
-// (src/app/server/notify.ts), потом — ручные настройки из базы. Только сервер (токен бота).
+// (src/app/server/notify.ts), потом — ручные настройки из базы. Замена прошлого сообщения (spec 0068) — отправить
+// новое, потом удалить прежнее. Только сервер (токен бота).
 import { z } from "zod";
 import { getAppHost, type TelegramConfig } from "@/shared/config/env.server";
 import {
   type ChannelResult,
-  type NotificationThread,
+  type NotificationReplace,
   type NotifyCategory,
   type NotifyChannel,
   type NotifyHost,
@@ -13,9 +14,9 @@ import {
   notifyGate,
 } from "@/shared/notify";
 import {
+  deleteTelegramMessage,
   editTelegramMessageText,
   sendTelegramMessage,
-  setTelegramMessageReaction,
   TELEGRAM_TEXT_LIMIT,
 } from "./client.server";
 
@@ -40,10 +41,10 @@ export interface TelegramChannelDeps {
   ) => TelegramTopicPolicy | Promise<TelegramTopicPolicy>;
   /** Отправка — подменяется в тестах. */
   send?: typeof sendTelegramMessage;
+  /** Удаление своего сообщения — подменяется в тестах. */
+  remove?: typeof deleteTelegramMessage;
   /** Правка своего сообщения — подменяется в тестах. */
   edit?: typeof editTelegramMessageText;
-  /** Реакция на сообщение — подменяется в тестах. */
-  react?: typeof setTelegramMessageReaction;
   /** Где работает процесс: отправляет только прод-сервер (NODE_ENV=production и APP_HOST=vm). */
   host?: () => NotifyHost;
 }
@@ -55,8 +56,9 @@ const processHost = (): NotifyHost => ({
 });
 
 /**
- * Ключ отправленного сообщения для связи следующих уведомлений с ним (spec 0068): чат, номер и отправленный текст —
- * Bot API не умеет «дописать», только заменить текст целиком. Для места вызова ключ непрозрачен.
+ * Ключ отправленного сообщения (spec 0068): чат, номер и отправленный текст. Его заменит следующее уведомление; если
+ * удалить нельзя (старше 48 ч), к нему дописывается «⤵️ обновлено ниже» — Bot API меняет текст только целиком.
+ * Для места вызова ключ непрозрачен.
  */
 export const telegramMessageRefSchema = z.object({
   chatId: z.string(),
@@ -65,11 +67,15 @@ export const telegramMessageRefSchema = z.object({
 });
 export type TelegramMessageRef = z.infer<typeof telegramMessageRefSchema>;
 
-/** Реакция бота — отметка итога: только стандартные эмодзи-реакции Telegram. */
-const MARK_EMOJI = { good: "👍", bad: "👎" } as const;
+/** Строка к прежнему сообщению, которое не удалить (старше 48 ч): новое — ниже. */
+export const UPDATED_BELOW = "⤵️ обновлено ниже";
 
 /** Bot API: темы с таким номером нет (удалили или номер устарел). */
 const THREAD_GONE = /message thread not found|TOPIC_DELETED/i;
+/** Bot API: удаляемого сообщения уже нет (удалил владелец или кто-то ещё). */
+const MESSAGE_GONE = /message to delete not found|message not found/i;
+/** Bot API: удалить нельзя — старше 48 ч: пробуем дописать «⤵️ обновлено ниже». */
+const CANT_DELETE = /message can't be deleted/i;
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -81,67 +87,58 @@ export const telegramMessageText = (n: { text: string; link: string | null }) =>
 const NOT_CONFIGURED =
   "Telegram не настроен (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)";
 
-/** Ключ прошлого сообщения этого чата; чужой чат или не наш формат — null (обычное сообщение). */
-function threadRef(
-  thread: NotificationThread | null,
+/** Ключ заменяемого сообщения этого чата; чужой чат или не наш формат — null (просто новое сообщение). */
+function replacedRef(
+  replaces: NotificationReplace | null,
   chatId: string | null,
 ): TelegramMessageRef | null {
-  if (!thread) return null;
-  const ref = telegramMessageRefSchema.safeParse(thread.ref);
+  if (!replaces) return null;
+  const ref = telegramMessageRefSchema.safeParse(replaces.ref);
   return ref.success && ref.data.chatId === chatId ? ref.data : null;
 }
 
-/** Для журнала: ответ ли это на прошлое сообщение (до отправки — каким он будет). */
-function replyNote(
-  thread: NotificationThread | null,
-  ref: TelegramMessageRef | null,
-  replied: boolean | null,
-): string | undefined {
-  if (!thread?.reply) return undefined;
-  if (!ref) return `без ответа: ${thread.label} не известно`;
-  if (replied === false) return `без ответа: ${thread.label} не найдено`;
-  return `ответ на ${thread.label}`;
-}
+type ReplaceOutcome = Pick<ChannelResult, "replaced" | "replaceError">;
 
 export function createTelegramChannel(
   deps: TelegramChannelDeps,
 ): NotifyChannel {
   const send = deps.send ?? sendTelegramMessage;
+  const remove = deps.remove ?? deleteTelegramMessage;
   const edit = deps.edit ?? editTelegramMessageText;
-  const react = deps.react ?? setTelegramMessageReaction;
   const host = deps.host ?? processHost;
 
-  /** Дописать строку к прошлому сообщению и отметить итог; сбой не мешает отправленному уведомлению. */
-  async function amend(
+  /**
+   * Убрать прежнее сообщение после отправки нового (spec 0068, B2–B3). Не бросает: уже удалено — так и записано;
+   * старше 48 ч — дописать «⤵️ обновлено ниже»; любой сбой — replaceError (warn), новое сообщение остаётся.
+   */
+  async function removeOld(
     token: string,
-    thread: NotificationThread,
-    ref: TelegramMessageRef | null,
-  ): Promise<Pick<ChannelResult, "amend" | "amendError">> {
-    // Ключа нет — дописывать некуда; это не сбой: в журнале уже «без ответа: … не известно».
-    if (!ref || (!thread.append && !thread.mark)) return {};
-    const done: string[] = [];
-    const errors: string[] = [];
-    if (thread.append)
-      await edit(
-        token,
-        ref.chatId,
-        ref.messageId,
-        `${ref.text}\n${thread.append}`,
-      ).then(
-        () => done.push("дописано"),
-        (e: unknown) => errors.push(`не дописано: ${errorText(e)}`),
-      );
-    if (thread.mark) {
-      const emoji = MARK_EMOJI[thread.mark];
-      await react(token, ref.chatId, ref.messageId, emoji).then(
-        () => done.push(`отметка ${emoji}`),
-        (e: unknown) => errors.push(`без отметки ${emoji}: ${errorText(e)}`),
-      );
+    label: string,
+    ref: TelegramMessageRef,
+  ): Promise<ReplaceOutcome> {
+    try {
+      await remove(token, ref.chatId, ref.messageId);
+      return { replaced: `${label} заменена` };
+    } catch (error) {
+      const reason = errorText(error);
+      if (MESSAGE_GONE.test(reason))
+        return { replaced: `${label} заменена (прежней уже нет)` };
+      const notRemoved = `прежняя ${label} не удалена: ${reason}`;
+      if (!CANT_DELETE.test(reason)) return { replaceError: notRemoved };
+      try {
+        await edit(
+          token,
+          ref.chatId,
+          ref.messageId,
+          `${ref.text}\n${UPDATED_BELOW}`,
+        );
+        return { replaceError: `${notRemoved}; дописано «${UPDATED_BELOW}»` };
+      } catch (editError) {
+        return {
+          replaceError: `${notRemoved}; «${UPDATED_BELOW}» не дописано: ${errorText(editError)}`,
+        };
+      }
     }
-    return {
-      ...(done.length && { amend: done.join(", ") }),
-      ...(errors.length && { amendError: errors.join("; ") }),
-    };
   }
 
   return {
@@ -158,64 +155,64 @@ export function createTelegramChannel(
         to: config?.chatId ?? null,
         silent,
       };
-      const ref = threadRef(n.thread, config?.chatId ?? null);
-      const reply = replyNote(n.thread, ref, null);
-      const asked = { target, ...(reply && { reply }) };
+      const old = replacedRef(n.replaces, config?.chatId ?? null);
+      // Прежнего нет (сделка до 0068, карточки ещё не было) — просто новое сообщение (B4).
+      const noOld: ReplaceOutcome =
+        n.replaces && !old
+          ? { replaced: `${n.replaces.label} новая — прежней нет` }
+          : {};
       const skip = !policy.enabled
         ? "категория выключена"
         : (notifyGate(n, host()) ?? (config?.chatId ? null : NOT_CONFIGURED));
       if (skip || !config?.chatId)
-        return { status: "skipped", reason: skip ?? NOT_CONFIGURED, ...asked };
+        return {
+          status: "skipped",
+          reason: skip ?? NOT_CONFIGURED,
+          target,
+          ...(old && n.replaces
+            ? { replaced: `${n.replaces.label} заменила бы прежнюю` }
+            : noOld),
+        };
       const { token, chatId } = config;
       const text = telegramMessageText(n);
-      const replyTo = n.thread?.reply && ref ? ref.messageId : null;
-      /** Отправлено: ключ нового сообщения, отметка ответа, правка прошлого. */
+      /** Отправлено: прежнее убирается только после успешной отправки нового (B2); ключ — нового. */
       const sent = async (
         message: Awaited<ReturnType<typeof send>>,
         over: Partial<ChannelResult>,
-      ): Promise<ChannelResult> => {
-        const messageId = message.messageId;
-        const note = replyNote(
-          n.thread,
-          ref,
-          replyTo === null ? null : message.replied,
-        );
-        return {
-          status: "sent",
-          target,
-          ...over,
-          ...(note && { reply: note }),
-          ...(n.thread && (await amend(token, n.thread, ref))),
-          ...(messageId !== null && {
-            // Тот текст, что ушёл в Telegram (обрезанный до лимита): дописывание продолжает его.
-            ref: {
-              chatId,
-              messageId,
-              text: text.slice(0, TELEGRAM_TEXT_LIMIT),
-            } satisfies TelegramMessageRef,
-          }),
-        };
-      };
+      ): Promise<ChannelResult> => ({
+        status: "sent",
+        target,
+        ...over,
+        ...(old && n.replaces
+          ? await removeOld(token, n.replaces.label, old)
+          : noOld),
+        ...(message.messageId !== null && {
+          // Тот текст, что ушёл в Telegram (обрезанный до лимита): к нему допишется «⤵️ обновлено ниже».
+          ref: {
+            chatId,
+            messageId: message.messageId,
+            text: text.slice(0, TELEGRAM_TEXT_LIMIT),
+          } satisfies TelegramMessageRef,
+        }),
+      });
       try {
         return await sent(
           await send(token, chatId, text, {
             messageThreadId: policy.topicId,
             silent,
-            ...(replyTo !== null && { replyTo }),
           }),
           {},
         );
       } catch (error) {
         const reason = errorText(error);
         if (policy.topicId === null || !THREAD_GONE.test(reason))
-          return { status: "failed", reason, ...asked };
+          return { status: "failed", reason, target };
         // Тему удалили или номер устарел: один повтор в чат без темы, чтобы срочное (например, «без защиты») не
         // потерялось; логгер отметит это warn notify.fallback.
         const fallback: NotifyTarget = { ...target, topicId: null };
         return send(token, chatId, text, {
           messageThreadId: null,
           silent,
-          ...(replyTo !== null && { replyTo }),
         }).then(
           (message) =>
             sent(message, {
@@ -226,7 +223,6 @@ export function createTelegramChannel(
             status: "failed",
             reason: `${reason}; без темы — ${errorText(retryError)}`,
             target: fallback,
-            ...(reply && { reply }),
           }),
         );
       }

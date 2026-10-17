@@ -276,6 +276,8 @@ export interface LiveMirrorPatch {
   quantity?: number | null;
   notionalUsd?: number | null;
   stopLoss?: number | null;
+  takeProfit?: number | null;
+  sizeRaised?: string | null;
   exitPrice?: number | null;
   feesUsd?: number | null;
   realizedPnl?: number | null;
@@ -328,16 +330,50 @@ export async function updateLiveMirror(
   return updateLiveMirrorSync(db, tradeId, patch, from);
 }
 
-/** Запомнить ключ уведомления о входе (spec 0068): итог и тревоги сделки уйдут ответом на него. */
-export async function setLiveEntryNotifyRef(
+/** Запомнить ключ текущей карточки сделки (spec 0068, вариант B): следующая карточка заменит её. */
+export async function setLiveCardNotifyRef(
   db: Db,
   tradeId: string,
   ref: Record<string, unknown>,
 ): Promise<void> {
   await db
     .update(liveMirrorOrdersTable)
-    .set({ entryNotifyRef: ref })
+    .set({ cardNotifyRef: ref })
     .where(eq(liveMirrorOrdersTable.tradeId, tradeId));
+}
+
+/**
+ * «Вход исполнен, ставлю SL/TP» (spec 0068, B1): цена, объём и уровни заявки — только из pending и один раз. false —
+ * уже сообщено или итог входа пришёл раньше: второй карточки ⏳ не будет.
+ */
+export async function markLiveFilled(
+  db: Db,
+  tradeId: string,
+  fill: {
+    entryPrice: number;
+    quantity: number;
+    stopLoss: number | null;
+    takeProfit: number | null;
+    sizeRaised: string | null;
+  },
+): Promise<boolean> {
+  const rows = await db
+    .update(liveMirrorOrdersTable)
+    .set({
+      ...fill,
+      notionalUsd: fill.entryPrice * fill.quantity,
+      filledAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(liveMirrorOrdersTable.tradeId, tradeId),
+        eq(liveMirrorOrdersTable.status, "pending"),
+        isNull(liveMirrorOrdersTable.filledAt),
+      ),
+    )
+    .returning({ tradeId: liveMirrorOrdersTable.tradeId });
+  return rows.length > 0;
 }
 
 /** Строка по сделке: эксперимент и монета — для журнала и Telegram. */

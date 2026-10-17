@@ -1,10 +1,9 @@
 // Чистая логика `pnpm telegram:setup` (spec 0021, 0067): аргументы, проверка группы с темами, план тем, строки env и
 // предупреждение о владельце. Сеть и печать — scripts/telegram-setup.ts.
 import {
-  liveEntryText,
-  liveExitText,
-  liveOutcomeLine,
-  liveOutcomeMark,
+  type LiveCardStatus,
+  liveCardText,
+  liveCardUrgent,
 } from "@/entities/live-account";
 import type { TelegramChat, TelegramChatMember } from "@/shared/api/telegram";
 import {
@@ -20,7 +19,7 @@ export interface SetupMode {
   topics: boolean;
   /** Пробное сообщение в каждую тему. */
   test: boolean;
-  /** Пробная пара в тему «Сделки»: вход и итог ответом на него (spec 0068). */
+  /** Пробная карточка сделки в тему «Сделки»: ⏳ → 🟡 → 🟢 с заменой прежней (spec 0068, B7). */
   testTrade: boolean;
 }
 
@@ -131,42 +130,55 @@ export function ownerWarnings(config: TelegramConfig): string[] {
 /** Пометка пробной пары: числа вымышленные, сделки нет. */
 const TEST_MARK = "🧪 Пробное сообщение: числа вымышленные, сделки нет";
 
+/** Пробная карточка: текст и звук (как у настоящей сделки с тем же статусом). */
+export interface TestTradeCard {
+  /** Для журнала и вывода: «⏳ вход исполнен». */
+  label: string;
+  text: string;
+  urgent: boolean;
+}
+
 /**
- * Пробная пара для темы «Сделки» (spec 0068, AC11): вход и итог теми же функциями текстов, что у реальных сделок, с
- * вымышленными числами и пометкой «пробное». Итог — ответом на вход, вход дописывается строкой итога и отмечается 👍.
+ * Пробная цепочка карточек для темы «Сделки» (spec 0068, B7): ⏳ вход исполнен → 🟡 защищена → 🟢 закрыта в прибыль —
+ * той же функцией текста, что у реальных сделок, с вымышленными числами и пометкой «пробное». Каждая следующая
+ * заменяет прежнюю (отправить новую, удалить прежнюю).
  */
-export function testTradeMessages(): {
-  entry: string;
-  exit: string;
-  append: string;
-  mark: "good" | "bad" | null;
-} {
+export function testTradeCards(): TestTradeCard[] {
   const subject = {
     experimentId: "S98",
     symbol: "BTCUSDT",
     market: "usdm" as const,
     direction: "long" as const,
   };
-  const outcome = { realizedPnl: 0.84, closedBy: "tp", pnlEstimated: false };
-  const entry = liveEntryText(subject, {
+  const entry = {
     notionalUsd: 50,
-    raised: "minNotional",
+    raised: "minNotional" as const,
     entryPrice: 80030,
     stopLoss: 78430,
     takeProfit: 83230,
-  });
-  const exit = liveExitText(subject, {
-    ...outcome,
-    entryPrice: 80030,
-    exitPrice: 83230,
-    feesUsd: 0.05,
-    heldMs: (2 * 60 + 15) * 60_000,
-    balance: { usd: 512.4, asOf: null },
-  });
-  return {
-    entry: `${entry}\n${TEST_MARK}`,
-    exit: `${exit}\n${TEST_MARK}`,
-    append: liveOutcomeLine(outcome),
-    mark: liveOutcomeMark(outcome.realizedPnl),
+    openedAt: "2026-10-18T10:25:00.000Z",
   };
+  const chain: [string, LiveCardStatus][] = [
+    ["⏳ вход исполнен", { kind: "filled" }],
+    ["🟡 защищена", { kind: "protected" }],
+    [
+      "🟢 закрыта",
+      {
+        kind: "closed",
+        exit: {
+          realizedPnl: 0.84,
+          closedBy: "tp",
+          exitPrice: 83230,
+          feesUsd: 0.05,
+          heldMs: (2 * 60 + 15) * 60_000,
+          balance: { usd: 512.4, asOf: null },
+        },
+      },
+    ],
+  ];
+  return chain.map(([label, status]) => ({
+    label,
+    text: `${liveCardText(subject, entry, status)}\n${TEST_MARK}`,
+    urgent: liveCardUrgent(status),
+  }));
 }

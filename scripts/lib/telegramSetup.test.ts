@@ -5,7 +5,7 @@ import {
   ownerWarnings,
   parseSetupArgs,
   planTopics,
-  testTradeMessages,
+  testTradeCards,
   topicEnvLines,
 } from "./telegramSetup";
 
@@ -49,19 +49,19 @@ describe("parseSetupArgs", () => {
   });
 });
 
-describe("testTradeMessages — пробная пара для темы «Сделки» (spec 0068, AC11)", () => {
-  it("вход и итог как у реальной сделки, с пометкой «пробное»; строка итога и отметка 👍", () => {
-    const m = testTradeMessages();
-    expect(m.entry).toMatch(/^🟡 Вход · S98 BTCUSDT long · USDⓈ-M\n/);
-    expect(m.exit).toMatch(
-      /^🟢 \+\$0,84 · S98 BTCUSDT long · USDⓈ-M\nЗакрыта по TP: /,
-    );
-    for (const text of [m.entry, m.exit])
-      expect(text).toMatch(
+describe("testTradeCards — пробная карточка сделки (spec 0068, B7)", () => {
+  it("цепочка ⏳ → 🟡 → 🟢: тексты как у реальной сделки, пометка «пробное», звук — только у итога", () => {
+    const cards = testTradeCards();
+    expect(cards.map((c) => c.text.split("\n")[0])).toEqual([
+      "⏳ Вход исполнен, ставлю SL/TP · S98 BTCUSDT long · USDⓈ-M",
+      "🟡 Открыта, SL/TP стоят · S98 BTCUSDT long · USDⓈ-M",
+      "🟢 +$0,84 · S98 BTCUSDT long · USDⓈ-M",
+    ]);
+    expect(cards.map((c) => c.urgent)).toEqual([false, false, true]);
+    for (const c of cards)
+      expect(c.text).toMatch(
         /\n🧪 Пробное сообщение: числа вымышленные, сделки нет$/,
       );
-    expect(m.append).toBe("Итог: 🟢 +$0,84 (TP)");
-    expect(m.mark).toBe("good");
   });
 });
 

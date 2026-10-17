@@ -99,6 +99,21 @@ export const liveSkipRequestSchema = liveTradeIdSchema.extend({
   reason: z.string().min(1).max(500),
 });
 
+/**
+ * Вход исполнен, защита ещё ставится (spec 0068, B1): карточка ⏳. Только из pending и один раз; потерялся — итог
+ * входа (open) всё равно даст правильную карточку. Уровни заявки — те же, что потом в open.
+ */
+export const liveFilledRequestSchema = liveTradeIdSchema.extend({
+  entryPrice: z.number().positive(),
+  quantity: z.number().positive(),
+  order: z.object({
+    stopLoss: z.number(),
+    takeProfit: z.number().nullable(),
+    raised: z.enum(["minNotional", "minQty", "spotStop"]).nullable(),
+  }),
+});
+export type LiveFilledRequest = z.infer<typeof liveFilledRequestSchema>;
+
 export const liveOpenRequestSchema = liveTradeIdSchema.extend({
   result: z.object({
     id: z.string(),

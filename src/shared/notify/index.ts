@@ -39,45 +39,35 @@ export interface NotifyInput {
   test?: boolean;
   /** Не отправлять (причина, например «повтор — сообщение было»): запись с итогом skipped, каналы не вызываются. */
   skip?: string;
-  /** Связь с прошлым сообщением (ответ, дописать, отметка итога) — без понятий канала (spec 0068). */
-  thread?: NotifyThread;
+  /**
+   * Заменить прошлое сообщение этим (spec 0068, вариант B — «карточка»): сначала отправить новое, потом убрать прежнее.
+   * Без понятий канала: как убрать, решает канал.
+   */
+  replaces?: NotifyReplace;
 }
 
 /**
  * Ключ отправленного сообщения по каналам: { <канал>: <его ключ> }. Возвращает log.notify (поле ref ответа); место
- * вызова хранит его как есть и передаёт обратно в thread.ref, не разбирая: что внутри, знает только канал.
+ * вызова хранит его как есть и передаёт обратно в replaces.ref, не разбирая: что внутри, знает только канал.
  */
 export type NotifyRef = Record<string, unknown>;
 export const notifyRefSchema = z.record(z.string(), z.unknown());
 
-/** Отметка итога на прошлом сообщении: good — удачно, bad — неудачно. */
-export type NotifyMark = "good" | "bad";
-
 /**
- * Связь нового уведомления с прошлым сообщением (spec 0068): ответить на него, дописать к нему строку, отметить итог.
- * Ключа нет (null) или канал его не знает — уведомление уходит обычным сообщением; сбой дописывания или отметки не
- * мешает отправке — логгер пишет warn notify.amend.
+ * Какое прошлое сообщение заменяет новое. Ключа нет (null) или канал его не знает — просто новое сообщение. Убрать
+ * прежнее не вышло — новое всё равно отправлено, логгер пишет warn notify.replace.
  */
-export interface NotifyThread {
+export interface NotifyReplace {
   /** Ключ прошлого сообщения (ref из ответа log.notify); null — не известен. */
   ref: NotifyRef | null;
-  /** Что это за сообщение — для журнала: «сообщение о входе». */
+  /** Что это за сообщение — для журнала: «карточка». */
   label: string;
-  /** Отправить ответом на прошлое сообщение. */
-  reply?: boolean;
-  /** Дописать строку в конец прошлого сообщения. */
-  append?: string | null;
-  /** Отметить прошлое сообщение итогом. */
-  mark?: NotifyMark | null;
 }
 
-/** Связь с прошлым сообщением, как её получает канал: его собственный ключ (или null). */
-export interface NotificationThread {
+/** Замена, как её получает канал: его собственный ключ (или null). */
+export interface NotificationReplace {
   ref: unknown;
   label: string;
-  reply: boolean;
-  append: string | null;
-  mark: NotifyMark | null;
 }
 
 /** Уведомление, которое получает канал. */
@@ -90,8 +80,8 @@ export interface Notification {
   event: string;
   fixture: boolean;
   test: boolean;
-  /** Связь с прошлым сообщением; null — обычное сообщение. */
-  thread: NotificationThread | null;
+  /** Заменяет прошлое сообщение; null — обычное сообщение. */
+  replaces: NotificationReplace | null;
 }
 
 export const NOTIFY_STATUSES = ["sent", "failed", "skipped"] as const;
@@ -123,12 +113,10 @@ export const channelDeliverySchema = z.object({
   target: notifyTargetSchema.optional(),
   /** Доставлено не так, как просили (тема не найдена — в чат без темы): логгер пишет warn notify.fallback. */
   note: z.string().optional(),
-  /** Ответ ли это на прошлое сообщение: «ответ на сообщение о входе», «без ответа: сообщение о входе не известно». */
-  reply: z.string().optional(),
-  /** Что сделано с прошлым сообщением: «дописано, отметка 👍». */
-  amend: z.string().optional(),
-  /** Дописать или отметить прошлое сообщение не удалось — причина; логгер пишет warn notify.amend. */
-  amendError: z.string().optional(),
+  /** Что стало с заменяемым сообщением: «карточка заменена», «прежней карточки нет», «прежняя карточка уже удалена». */
+  replaced: z.string().optional(),
+  /** Прежнее не убрано — причина: «прежняя карточка не удалена: …»; логгер пишет warn notify.replace. */
+  replaceError: z.string().optional(),
 });
 export type ChannelDelivery = z.infer<typeof channelDeliverySchema>;
 
@@ -143,7 +131,7 @@ export type NotifyRecord = z.infer<typeof notifyRecordSchema>;
 
 /** Ответ log.notify: итог (как в записи журнала) и ключ отправленного сообщения по каналам (в запись не попадает). */
 export type NotifyResult = NotifyRecord & {
-  /** Ключ сообщения для thread.ref следующих уведомлений; null — ни один канал не отправил. */
+  /** Ключ сообщения для replaces.ref следующих уведомлений; null — ни один канал не отправил. */
   ref: NotifyRef | null;
 };
 

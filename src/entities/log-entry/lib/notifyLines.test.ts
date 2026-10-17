@@ -79,51 +79,34 @@ describe("notifyLines — уведомление в деталях записи 
     ]);
   });
 
-  it("ответ на прошлое сообщение и его правка — хвостом строки (spec 0068, AC10)", () => {
+  it("замена карточки — хвостом строки: заменена или почему прежняя не удалена (spec 0068, B6)", () => {
     const target = {
       topic: "💰 Сделки",
       topicId: 5,
       to: "-1001",
       silent: false,
     };
-    expect(
+    const line = (c: Record<string, string>) =>
       notifyLines({
         category: "trades",
         urgent: true,
         status: "sent",
-        channels: [
-          {
-            channel: "telegram",
-            status: "sent",
-            target,
-            reply: "ответ на сообщение о входе",
-            amend: "отметка 👍",
-            amendError: "не дописано: message to edit not found",
-          },
-        ],
-      }),
-    ).toEqual([
-      "telegram: 💰 Сделки (тема 5), со звуком — отправлено · ответ на сообщение о входе; отметка 👍; не изменено: не дописано: message to edit not found",
-    ]);
+        channels: [{ channel: "telegram", status: "sent", target, ...c }],
+      })[0];
+    expect(line({ replaced: "карточка заменена" })).toBe(
+      "telegram: 💰 Сделки (тема 5), со звуком — отправлено · карточка заменена",
+    );
     expect(
-      notifyLines({
-        category: "trades",
-        urgent: true,
-        status: "skipped",
-        reason: "не production",
-        channels: [
-          {
-            channel: "telegram",
-            status: "skipped",
-            reason: "не production",
-            target,
-            reply: "без ответа: сообщение о входе не известно",
-          },
-        ],
+      line({
+        replaceError:
+          "прежняя карточка не удалена: message can't be deleted; дописано «⤵️ обновлено ниже»",
       }),
-    ).toEqual([
-      "telegram: 💰 Сделки (тема 5), со звуком — не отправлено: не production · без ответа: сообщение о входе не известно",
-    ]);
+    ).toBe(
+      "telegram: 💰 Сделки (тема 5), со звуком — отправлено · прежняя карточка не удалена: message can't be deleted; дописано «⤵️ обновлено ниже»",
+    );
+    expect(line({ replaced: "карточка новая — прежней нет" })).toMatch(
+      / · карточка новая — прежней нет$/,
+    );
   });
 
   it("канал не подключён — категория и запрошенный звук", () => {

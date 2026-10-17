@@ -42,9 +42,9 @@ describe("уведомления — только через логгер", () =
     ]);
   });
 
-  it("правка сообщений и реакции (spec 0068) — только Telegram-канал", () => {
+  it("удаление и правка сообщений (spec 0068) — только Telegram-канал", () => {
     expect(
-      using(/\b(editTelegramMessageText|setTelegramMessageReaction)\b/),
+      using(/\b(editTelegramMessageText|deleteTelegramMessage)\b/),
     ).toEqual([
       "src/shared/api/telegram/channel.server.ts",
       "src/shared/api/telegram/client.server.ts",

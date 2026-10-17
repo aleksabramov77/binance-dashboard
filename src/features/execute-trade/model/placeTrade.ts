@@ -53,8 +53,10 @@ import {
   type Done,
   errorText,
   type Finish,
+  type OnFilled,
   type RefsHolder,
   recheckUntil,
+  reportFilled,
   sleep,
 } from "./tradeSteps";
 import { demoTradeContext, type TradeVenueContext } from "./tradeVenue";
@@ -75,6 +77,11 @@ export async function placeTrade(
      * (spec 0049): «потерянный» вход находится на бирже по строке. Демо — случайный, как раньше.
      */
     tradeId?: string;
+    /**
+     * Вход исполнен, защита ещё не выставлена (spec 0068, B1): фьючерсы — между входом по рынку и TP/SL, спот — перед
+     * отдельной защитой купленного (у OTOCO вход и защита — одна заявка, этого шага нет).
+     */
+    onFilled?: OnFilled;
   } = {},
 ): Promise<TradeResult> {
   const steps: TradeStep[] = [];
@@ -199,6 +206,7 @@ export async function placeTrade(
       steps,
       done,
       tradeDeadline,
+      onFilled: opts.onFilled,
     });
 
   return placeFutures({
@@ -215,6 +223,7 @@ export async function placeTrade(
     tradeDeadline,
     autoHedge: ctx.autoHedge,
     market: req.market,
+    onFilled: opts.onFilled,
   });
 }
 
@@ -254,6 +263,7 @@ interface SpotContext {
   done: Done;
   /** Общий срок сделки (config/trade → TRADE_DEADLINE_MS). */
   tradeDeadline: number;
+  onFilled?: OnFilled;
 }
 
 /** Перечитать статусы отложенных ордеров: сразу после входа они PENDING_NEW. */
@@ -602,6 +612,10 @@ async function protectOrSell(
     filled: number;
   },
 ): Promise<TradeResult> {
+  reportFilled(c.onFilled, {
+    entryPrice: bought.entryPrice,
+    filledQuantity: bought.filled,
+  });
   const { venue, req, v, ids, steps, done } = c;
   const { sellQty, entryPrice, filled } = bought;
   const protectLabel = req.stopOnly ? "Стоп" : "OCO: тейк + стоп";
