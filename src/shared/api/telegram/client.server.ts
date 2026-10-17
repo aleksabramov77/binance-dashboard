@@ -1,39 +1,59 @@
-// Telegram Bot API: уведомления владельцу и команды бота. Только сервер (токен бота).
+// Telegram Bot API: уведомления (через канал уведомлений, channel.server.ts), ответы бота на команды и настройка
+// группы с темами (pnpm telegram:setup). Только сервер (токен бота).
+import { z } from "zod";
+
 const API = "https://api.telegram.org";
 
-/** Вызов метода Bot API; ошибка — с описанием от Telegram. */
+const responseSchema = z.object({
+  ok: z.boolean().optional(),
+  description: z.string().optional(),
+  result: z.unknown().optional(),
+});
+
+/** Вызов метода Bot API; ошибка — с описанием от Telegram. Ответ — поле result. */
 async function callTelegram(
   token: string,
   method: string,
   payload: Record<string, unknown>,
-): Promise<void> {
+): Promise<unknown> {
   const res = await fetch(`${API}/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(10_000),
   });
-  const body = (await res.json().catch(() => null)) as {
-    ok?: boolean;
-    description?: string;
-  } | null;
+  const parsed = responseSchema.safeParse(await res.json().catch(() => null));
+  const body = parsed.success ? parsed.data : null;
   if (!res.ok || body?.ok === false)
     throw new Error(
       `Telegram ${method} ${res.status}: ${body?.description ?? res.statusText}`,
     );
+  return body?.result;
 }
 
-/** Отправить сообщение в чат (обычный текст, без разметки). */
-export function sendTelegramMessage(
+export interface TelegramSendOptions {
+  /** Тема группы (message_thread_id); null или не задана — в чат без темы. */
+  messageThreadId?: number | null;
+  /** Без звука (disable_notification): «сообщение придёт без звука». */
+  silent?: boolean;
+}
+
+/** Отправить сообщение в чат (обычный текст, без разметки), в тему и без звука — по options. */
+export async function sendTelegramMessage(
   token: string,
   chatId: string,
   text: string,
+  options: TelegramSendOptions = {},
 ): Promise<void> {
-  return callTelegram(token, "sendMessage", {
+  await callTelegram(token, "sendMessage", {
     chat_id: chatId,
+    ...(options.messageThreadId != null && {
+      message_thread_id: options.messageThreadId,
+    }),
     // Лимит Telegram — 4096 символов.
     text: text.slice(0, 4000),
-    disable_web_page_preview: true,
+    ...(options.silent && { disable_notification: true }),
+    link_preview_options: { is_disabled: true },
   });
 }
 
@@ -41,11 +61,11 @@ export function sendTelegramMessage(
  * Включить webhook: Telegram шлёт сообщения боту POST-запросом на url с секретом в заголовке
  * X-Telegram-Bot-Api-Secret-Token. Пока webhook включён, getUpdates не работает.
  */
-export function setTelegramWebhook(
+export async function setTelegramWebhook(
   token: string,
   input: { url: string; secret: string },
 ): Promise<void> {
-  return callTelegram(token, "setWebhook", {
+  await callTelegram(token, "setWebhook", {
     url: input.url,
     secret_token: input.secret,
     allowed_updates: ["message"],
@@ -53,8 +73,8 @@ export function setTelegramWebhook(
 }
 
 /** Снять webhook — сообщения снова доступны через getUpdates. */
-export function deleteTelegramWebhook(token: string): Promise<void> {
-  return callTelegram(token, "deleteWebhook", {});
+export async function deleteTelegramWebhook(token: string): Promise<void> {
+  await callTelegram(token, "deleteWebhook", {});
 }
 
 export interface TelegramCommand {
@@ -64,11 +84,105 @@ export interface TelegramCommand {
 }
 
 /** Меню команд бота (кнопка «/» в чате). */
-export function setTelegramCommands(
+export async function setTelegramCommands(
   token: string,
   commands: readonly TelegramCommand[],
 ): Promise<void> {
-  return callTelegram(token, "setMyCommands", { commands });
+  await callTelegram(token, "setMyCommands", { commands });
+}
+
+const userSchema = z.object({
+  id: z.number(),
+  username: z.string().optional(),
+});
+
+/** Сам бот (getMe): id нужен, чтобы проверить его права в группе. */
+export async function getTelegramMe(
+  token: string,
+): Promise<{ id: number; username: string | null }> {
+  const me = userSchema.parse(await callTelegram(token, "getMe", {}));
+  return { id: me.id, username: me.username ?? null };
+}
+
+const chatSchema = z.object({
+  id: z.number(),
+  type: z.string(),
+  title: z.string().optional(),
+  is_forum: z.boolean().optional(),
+});
+
+export interface TelegramChat {
+  id: number;
+  /** private, group, supergroup, channel. */
+  type: string;
+  title: string | null;
+  /** Группа с темами (is_forum). */
+  isForum: boolean;
+}
+
+/** Чат (getChat): тип и включены ли темы. */
+export async function getTelegramChat(
+  token: string,
+  chatId: string,
+): Promise<TelegramChat> {
+  const chat = chatSchema.parse(
+    await callTelegram(token, "getChat", { chat_id: chatId }),
+  );
+  return {
+    id: chat.id,
+    type: chat.type,
+    title: chat.title ?? null,
+    isForum: chat.is_forum === true,
+  };
+}
+
+const memberSchema = z.object({
+  status: z.string(),
+  can_manage_topics: z.boolean().optional(),
+});
+
+export interface TelegramChatMember {
+  /** creator, administrator, member, restricted, left, kicked. */
+  status: string;
+  /** Может создавать темы: владелец группы — всегда, админ — с правом can_manage_topics. */
+  canManageTopics: boolean;
+}
+
+/** Участник чата (getChatMember): статус и право управлять темами. */
+export async function getTelegramChatMember(
+  token: string,
+  chatId: string,
+  userId: number,
+): Promise<TelegramChatMember> {
+  const member = memberSchema.parse(
+    await callTelegram(token, "getChatMember", {
+      chat_id: chatId,
+      user_id: userId,
+    }),
+  );
+  return {
+    status: member.status,
+    canManageTopics:
+      member.status === "creator" ||
+      (member.status === "administrator" && member.can_manage_topics === true),
+  };
+}
+
+const topicSchema = z.object({
+  message_thread_id: z.number(),
+  name: z.string(),
+});
+
+/** Создать тему группы (createForumTopic, у бота — админ с can_manage_topics); ответ — номер темы. */
+export async function createTelegramForumTopic(
+  token: string,
+  chatId: string,
+  name: string,
+): Promise<{ id: number; name: string }> {
+  const topic = topicSchema.parse(
+    await callTelegram(token, "createForumTopic", { chat_id: chatId, name }),
+  );
+  return { id: topic.message_thread_id, name: topic.name };
 }
 
 /** Последние чаты, написавшие боту (после /start) — чтобы узнать chat id владельца. */

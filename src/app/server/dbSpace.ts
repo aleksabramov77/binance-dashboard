@@ -1,5 +1,5 @@
-// Свободное место в базе (платформа, spec 0021): замер, пороги без повторов, уведомление в Telegram.
-// Вызывают POST /api/cron/log-monitor (раз в 15 минут) и команда бота /db. Только сервер.
+// Свободное место в базе (платформа, spec 0021): замер, пороги без повторов, уведомление — категория «Сервер»
+// (spec 0067). Вызывают POST /api/cron/log-monitor (раз в 15 минут) и команда бота /db. Только сервер.
 import { statfsSync, statSync } from "node:fs";
 import path from "node:path";
 import { sql } from "drizzle-orm";
@@ -13,8 +13,7 @@ import {
   planSpaceAlerts,
   type SpaceAlertRow,
 } from "@/features/db-space";
-import { sendTelegramMessage } from "@/shared/api/telegram";
-import { getSiteLink, getTelegramConfig } from "@/shared/config/env.server";
+import { getSiteLink } from "@/shared/config/env.server";
 import {
   type Db,
   getDb,
@@ -120,9 +119,9 @@ export interface DbSpaceResult {
   limitBytes: number;
   /** Свободно, % от лимита (2 знака). */
   freePct: number;
-  /** Порог, о котором в этом прогоне сообщение (без Telegram — только отмечен), или null. */
+  /** Порог, о котором в этом прогоне сообщение (не отправлено — только отмечен), или null. */
   notified: number | null;
-  /** Сообщение ушло в Telegram. */
+  /** Уведомление доставлено. */
   sent: boolean;
 }
 
@@ -131,53 +130,55 @@ const toSpaceRow = (r: AlertStateRow): SpaceAlertRow => ({
   status: r.status === "sent" ? "sent" : "cleared",
 });
 
-/** Прогон проверки места: замер → какие пороги пройдены → Telegram → alert_state. */
+/** Прогон проверки места: замер → какие пороги пройдены → запись с уведомлением → alert_state. */
 export async function checkDbSpace(now = Date.now()): Promise<DbSpaceResult> {
   const usage = await getDbUsage();
   const freePct = freePctOf(usage);
   const previous = (await loadAlertState(DB_SPACE.keyPrefix)).map(toSpaceRow);
   const plan = planSpaceAlerts(freePct, previous, now);
   const threshold = plan.notifyThreshold;
-
-  const telegram = getTelegramConfig();
-  const chatId = telegram?.chatId;
-  let sent = false;
-  if (threshold !== null && telegram && chatId) {
-    try {
-      await sendTelegramMessage(
-        telegram.token,
-        chatId,
-        formatSpaceAlert(threshold, usage, getSiteLink("/logs")),
-      );
-      sent = true;
-    } catch (error) {
-      // Не дошло — пройденные пороги не отмечаем, повторим в следующий прогон.
-      await saveAlertState(plan.upserts.filter((r) => r.status === "cleared"));
-      throw error;
-    }
-  }
-  // Без Telegram порог всё равно отмечается (как у монитора журнала), lastSent пустой.
-  await saveAlertState(
-    sent
-      ? plan.upserts
-      : plan.upserts.map((r) =>
-          r.status === "sent" ? { ...r, lastSent: null } : r,
-        ),
-  );
-
   const result: DbSpaceResult = {
     usedBytes: usage.usedBytes,
     limitBytes: usage.limitBytes,
     freePct: Math.round(freePct * 100) / 100,
     notified: threshold,
-    sent,
+    sent: false,
   };
-  if (threshold !== null)
-    log.warn(
-      "monitor.db_space",
-      `Свободного места в базе ≤ ${threshold} % (${result.freePct} %), отправлено ${sent ? "да" : "нет"}`,
-      { ...result },
-    );
+  if (threshold === null) {
+    await saveAlertState(plan.upserts);
+    return result;
+  }
+
+  const notice = await log.notify({
+    level: "warn",
+    event: "monitor.db_space",
+    message: `Свободного места в базе ≤ ${threshold} % (${result.freePct} %)`,
+    data: {
+      usedBytes: result.usedBytes,
+      limitBytes: result.limitBytes,
+      freePct: result.freePct,
+      notified: threshold,
+    },
+    category: "server",
+    // Свободно ≤ 20 % — со звуком; 50 / 40 / 30 % — тихо.
+    urgent: threshold <= DB_SPACE.urgentPct,
+    text: formatSpaceAlert(threshold, usage, getSiteLink("/logs")),
+  });
+  result.sent = notice.status === "sent";
+  if (notice.status === "failed") {
+    // Не дошло — пройденные пороги не отмечаем, повторим в следующий прогон.
+    await saveAlertState(plan.upserts.filter((r) => r.status === "cleared"));
+    return result;
+  }
+  // Не отправлялось (не production, канал не настроен) — порог всё равно отмечается (как у монитора журнала),
+  // lastSent пустой.
+  await saveAlertState(
+    result.sent
+      ? plan.upserts
+      : plan.upserts.map((r) =>
+          r.status === "sent" ? { ...r, lastSent: null } : r,
+        ),
+  );
   return result;
 }
 

@@ -1,0 +1,113 @@
+// Чистая логика `pnpm telegram:setup` (spec 0021, 0067): аргументы, проверка группы с темами, план тем, строки env и
+// предупреждение о владельце. Сеть и печать — scripts/telegram-setup.ts.
+import type { TelegramChat, TelegramChatMember } from "@/shared/api/telegram";
+import {
+  isPrivateChatId,
+  type TelegramConfig,
+  telegramOwnerProblem,
+} from "@/shared/config/env.server";
+
+export interface SetupMode {
+  /** Снять webhook. */
+  delete: boolean;
+  /** Проверить группу, создать недостающие темы, напечатать TELEGRAM_TOPIC_*. */
+  topics: boolean;
+  /** Пробное сообщение в каждую тему. */
+  test: boolean;
+}
+
+const FLAGS: ReadonlySet<string> = new Set(["--delete", "--topics", "--test"]);
+
+export function parseSetupArgs(args: string[]): SetupMode | { error: string } {
+  const unknown = args.filter((a) => !FLAGS.has(a));
+  if (unknown.length)
+    return {
+      error: `неизвестные аргументы: ${unknown.join(" ")}. Есть только ${[...FLAGS].join(", ")}`,
+    };
+  const mode = {
+    delete: args.includes("--delete"),
+    topics: args.includes("--topics"),
+    test: args.includes("--test"),
+  };
+  if (mode.delete && (mode.topics || mode.test))
+    return { error: "--delete — только отдельно, без --topics и --test" };
+  return mode;
+}
+
+/**
+ * Что не так с чатом уведомлений для тем: нужна супергруппа с темами, бот — админ с правом управлять темами. Пусто —
+ * всё в порядке.
+ */
+export function forumProblems(
+  chatId: string,
+  chat: TelegramChat,
+  bot: TelegramChatMember,
+): string[] {
+  const problems: string[] = [];
+  if (chat.type !== "supergroup")
+    problems.push(
+      `TELEGRAM_CHAT_ID (${chatId}) — ${chat.type === "private" ? "личный чат" : `чат типа ${chat.type}`}, а нужна закрытая группа с темами: создайте группу, добавьте бота, включите в настройках группы темы и задайте TELEGRAM_CHAT_ID — id группы`,
+    );
+  else if (!chat.isForum)
+    problems.push(
+      `в группе «${chat.title ?? chatId}» не включены темы: включите их в настройках группы`,
+    );
+  if (bot.status !== "creator" && bot.status !== "administrator")
+    problems.push(
+      "бот не администратор группы: сделайте его администратором с правом управлять темами",
+    );
+  else if (!bot.canManageTopics)
+    problems.push(
+      "у бота нет права управлять темами: включите его в правах администратора бота",
+    );
+  return problems;
+}
+
+export interface TopicSpec {
+  category: string;
+  title: string;
+  env: string;
+}
+
+export interface TopicPlan {
+  /** Уже заданы в env — не пересоздаются. */
+  existing: (TopicSpec & { id: number })[];
+  /** Создать. */
+  missing: TopicSpec[];
+  /** Заданы, но не номер темы — исправить руками (иначе появится вторая тема). */
+  invalid: (TopicSpec & { value: string })[];
+}
+
+export function planTopics(
+  topics: readonly TopicSpec[],
+  env: Record<string, string | undefined>,
+): TopicPlan {
+  const plan: TopicPlan = { existing: [], missing: [], invalid: [] };
+  for (const topic of topics) {
+    const value = env[topic.env]?.trim();
+    if (!value) plan.missing.push(topic);
+    else if (/^[1-9]\d*$/.test(value))
+      plan.existing.push({ ...topic, id: Number(value) });
+    else plan.invalid.push({ ...topic, value });
+  }
+  return plan;
+}
+
+/** Строки для /etc/binance/app.env — в порядке категорий. */
+export const topicEnvLines = (topics: readonly { env: string; id: number }[]) =>
+  topics.map((t) => `${t.env}=${t.id}`);
+
+/**
+ * Предупреждения о владельце: TELEGRAM_OWNER_ID не id пользователя (игнорируется) и чат уведомлений — группа, а
+ * владельца нет — команды в личке бот перестанет принимать (владелец по умолчанию — только личный TELEGRAM_CHAT_ID).
+ */
+export function ownerWarnings(config: TelegramConfig): string[] {
+  const warnings: string[] = [];
+  const problem = telegramOwnerProblem(config);
+  if (problem) warnings.push(problem);
+  if (config.chatId && !isPrivateChatId(config.chatId) && !config.ownerId)
+    warnings.push(
+      `TELEGRAM_CHAT_ID (${config.chatId}) — группа, а TELEGRAM_OWNER_ID не задан или не принят: бот перестанет отвечать на команды в личке. Задайте TELEGRAM_OWNER_ID — ваш id в Telegram (прежний TELEGRAM_CHAT_ID личного чата).`,
+    );
+  return warnings;
+}

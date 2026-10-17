@@ -19,9 +19,10 @@ import {
   seedExperiments,
 } from "@/entities/experiment";
 import { liveWorkerStateTable, saveLiveState } from "@/entities/live-account";
-import { sendTelegramMessage } from "@/shared/api/telegram";
+import { telegramMessageText } from "@/shared/api/telegram";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { log } from "@/shared/lib/logger.server";
+import { log, setNotifyChannels } from "@/shared/lib/logger.server";
+import type { NotifyChannel } from "@/shared/notify";
 import {
   claimLive,
   claimLiveClose,
@@ -36,7 +37,7 @@ import {
   skipLive,
 } from "./liveMirror";
 
-// Хранилище реального зеркала без биржи (spec 0049): SQLite в памяти; Telegram и цены — моки. Id — фиктивные.
+// Хранилище реального зеркала без биржи (spec 0049): SQLite в памяти; канал уведомлений и цены — моки. Id — фиктивные.
 let db: Db;
 let close: () => Promise<void>;
 
@@ -44,13 +45,43 @@ vi.mock("@/shared/db/client.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/shared/db/client.server")>()),
   getDb: () => db,
 }));
-vi.mock("@/shared/api/telegram", () => ({ sendTelegramMessage: vi.fn() }));
 vi.mock("./tickerPrices", () => ({
   cachedTickerPrices: vi.fn(async () => new Map([["ETHUSDT", 110]])),
 }));
-vi.mock("@/shared/lib/logger.server", () => ({
-  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
+// Журнал — моки, уведомление — настоящий log.notify с фиктивным каналом (spec 0067): Telegram не вызывается.
+vi.mock("@/shared/lib/logger.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/shared/lib/logger.server")>();
+  return {
+    ...actual,
+    log: {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      notify: vi.fn(actual.log.notify),
+    },
+  };
+});
+
+const channel = {
+  name: "test",
+  deliver: vi.fn<NotifyChannel["deliver"]>(async () => ({ status: "sent" })),
+};
+/** Тексты, которые получил канал (текст + ссылка — как в Telegram). */
+const sent = () =>
+  channel.deliver.mock.calls.map(([n]) => telegramMessageText(n));
+/** Записи с уведомлением: событие, категория и звук. */
+const notices = () =>
+  vi.mocked(log.notify).mock.calls.map(([n]) => ({
+    event: n.event,
+    category: n.category,
+    urgent: n.urgent ?? false,
+    skip: n.skip,
+  }));
+/** Данные записи с уведомлением по событию. */
+const noticeData = (event: string) =>
+  vi.mocked(log.notify).mock.calls.find(([n]) => n.event === event)?.[0].data;
 
 const exp = (id: string, market: Experiment["market"]): Experiment => ({
   id,
@@ -167,10 +198,12 @@ beforeEach(async () => {
     .set({ liveMirror: false })
     .where(eq(experimentsTable.liveMirror, true));
   await okPulse();
+  setNotifyChannels([channel]);
 });
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.clearAllMocks();
+  setNotifyChannels([]);
 });
 
 const toggleOn = (id: string, confirm = "РЕАЛ") =>
@@ -192,10 +225,16 @@ describe("переключатель «Реальный счёт»", () => {
       mode: "on",
       liveMirror: true,
     });
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(log.info).mock.calls.map((c) => c[0])).toContain(
-      "live.toggle",
-    );
+    expect(channel.deliver).toHaveBeenCalledTimes(1);
+    // Смена режима — «Сделки», тихо.
+    expect(notices()).toEqual([
+      {
+        event: "live.toggle",
+        category: "trades",
+        urgent: false,
+        skip: undefined,
+      },
+    ]);
   });
 
   it("ключ не «✅» (воркер не подключён) — включить нельзя; выключить — можно", async () => {
@@ -232,23 +271,29 @@ describe("захват, стоп и лимиты", () => {
     expect(await claimLive(a)).toEqual({ claimed: false, reason: "disabled" });
   });
 
-  it("пропуск по дневному лимиту — Telegram один раз за сутки на эксперимент", async () => {
+  it("пропуск по дневному лимиту — уведомление со звуком один раз за сутки на эксперимент", async () => {
     await toggleOn("S98");
     vi.clearAllMocks();
     const a = await newTrade("S98", "XRPUSDT");
     const b = await newTrade("S98", "ADAUSDT");
     await skipLive(a, "дневной лимит убытка эксперимента: −$15,20 за сутки");
     await skipLive(b, "дневной лимит убытка эксперимента: −$15,20 за сутки");
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toMatch(
-      /Дневной лимит убытка: S98/,
-    );
+    expect(channel.deliver).toHaveBeenCalledTimes(1);
+    expect(sent()[0]).toMatch(/Дневной лимит убытка: S98/);
+    expect(notices()).toEqual([
+      {
+        event: "live.limit",
+        category: "trades",
+        urgent: true,
+        skip: undefined,
+      },
+    ]);
     // Обычный пропуск — только журнал.
     await skipLive(
       await newTrade("S98", "DOTUSDT"),
       "по монете уже есть реальная позиция",
     );
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(channel.deliver).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -271,7 +316,7 @@ describe("вход, выход и дневной PnL", () => {
       },
       order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: null },
     });
-    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toMatch(
+    expect(sent()[0]).toMatch(
       /🟢 Реальная сделка: S98 LINKUSDT \(USDⓈ-M\) long \$10,00, SL 95, TP 110/,
     );
     let trading = await getLiveTradingView();
@@ -300,17 +345,23 @@ describe("вход, выход и дневной PnL", () => {
       protectionRemoved: false,
     });
     expect((await getLiveMirror(db, a))?.status).toBe("closed");
-    expect(vi.mocked(sendTelegramMessage).mock.calls[1][2]).toMatch(
+    expect(sent()[1]).toMatch(
       /🔴 Закрыта: S98 LINKUSDT .* −\$16,00 \(закрыта paper-сделка\)/,
     );
     expect((await liveMirrorState()).dailyPnl).toEqual({ S98: -16 });
+    // Вход, выход без остатка и подсказка ручному «Вкл» (убыток −$16 ≥ порога $15) — тихо.
+    expect(notices().map((n) => [n.event, n.urgent])).toEqual([
+      ["live.entry", false],
+      ["live.exit", false],
+      ["live.advice", false],
+    ]);
     trading = await getLiveTradingView();
     expect(trading.experiments).toEqual([
       expect.objectContaining({ id: "S98", dailyPnl: -16, limitHit: true }),
     ]);
   });
 
-  it("«Закрыть всё»: стоп входов, захват открытых, итог в журнал и Telegram", async () => {
+  it("«Закрыть всё»: стоп входов, захват открытых, итог в журнал и уведомление", async () => {
     await toggleOn("S98");
     const a = await newTrade("S98", "BNBUSDT");
     await claimLive(a);
@@ -355,6 +406,12 @@ describe("вход, выход и дневной PnL", () => {
       closeAllResult: { closed: 1, failed: 0, errors: [], remaining: 0 },
     });
     expect((await liveMirrorState()).halt.closeAllRequested).toBe(false);
+    // Аварийный стоп — со звуком, «Закрыть всё» выполнено — тихо.
+    expect(
+      notices()
+        .filter((n) => n.event === "live.halt")
+        .map((n) => n.urgent),
+    ).toEqual([true, false]);
   });
 });
 
@@ -394,7 +451,7 @@ describe("повтор закрытий (приёмка 0049)", () => {
       `update live_mirror_orders set updated_at = ${Date.now() - 2 * 60_000} where trade_id = '${id}'`,
     );
 
-  it("сбой закрытия → повтор на следующем прогоне → успех; Telegram о сбое один раз, итог — «после N попыток»", async () => {
+  it("сбой закрытия → повтор на следующем прогоне → успех; уведомление о сбое один раз, итог — «после N попыток»", async () => {
     const a = await openLive("AVAXUSDT");
     await db
       .update(paperTradesTable)
@@ -409,7 +466,7 @@ describe("повтор закрытий (приёмка 0049)", () => {
       protectionRemoved: false,
     });
     expect((await getLiveMirror(db, a))?.status).toBe("close_failed");
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(channel.deliver).toHaveBeenCalledTimes(1);
     // Сразу — пауза; через минуту — снова в очереди.
     expect((await liveMirrorState()).toClose).not.toContain(a);
     await minuteLater(a);
@@ -421,7 +478,7 @@ describe("повтор закрытий (приёмка 0049)", () => {
       exit,
       protectionRemoved: false,
     });
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(channel.deliver).toHaveBeenCalledTimes(1);
     await minuteLater(a);
     expect(await claimLiveClose(a)).not.toBeNull();
     await saveLiveClose({
@@ -438,19 +495,32 @@ describe("повтор закрытий (приёмка 0049)", () => {
       protectionRemoved: false,
     });
     expect((await getLiveMirror(db, a))?.status).toBe("closed");
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(2);
-    const text = vi.mocked(sendTelegramMessage).mock.calls[1][2];
+    expect(channel.deliver).toHaveBeenCalledTimes(2);
+    const text = sent()[1];
     expect(text).toMatch(/закрыта после 3 попыток/);
     expect(text).toMatch(
       /остаток 0\.00000986 AVAX ≈ \$0,00 на субсчёте, в PnL не входит/,
     );
-    const exitLog = vi
-      .mocked(log.info)
-      .mock.calls.find((c) => c[0] === "live.exit");
-    expect(exitLog?.[2]).toMatchObject({
+    expect(noticeData("live.exit")).toMatchObject({
       attempts: 3,
       leftover: { asset: "AVAX" },
     });
+    // Сбой закрытия — со звуком, повтор — запись без отправки, выход с остатком монеты — со звуком.
+    expect(notices()).toEqual([
+      {
+        event: "live.close_failed",
+        category: "trades",
+        urgent: true,
+        skip: undefined,
+      },
+      {
+        event: "live.close_failed",
+        category: "trades",
+        urgent: true,
+        skip: "повтор (сообщение было)",
+      },
+      { event: "live.exit", category: "trades", urgent: true, skip: undefined },
+    ]);
     const trading = await getLiveTradingView();
     expect(trading.recent[0]).toMatchObject({
       tradeId: a,
@@ -458,7 +528,7 @@ describe("повтор закрытий (приёмка 0049)", () => {
     });
   });
 
-  it("защита снята, а выход не прошёл — «без защиты», ⚠️ в Telegram, повтор даже при открытой paper-сделке", async () => {
+  it("защита снята, а выход не прошёл — «без защиты», ⚠️ в уведомлении, повтор даже при открытой paper-сделке", async () => {
     const a = await openLive("DOGEUSDT");
     await liveHaltAction("close_all", actor);
     vi.clearAllMocks();
@@ -472,9 +542,7 @@ describe("повтор закрытий (приёмка 0049)", () => {
       protectionRemoved: true,
     });
     expect((await getLiveMirror(db, a))?.status).toBe("unprotected");
-    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toMatch(
-      /без защиты.*Свои TP\/SL уже сняты/,
-    );
+    expect(sent()[0]).toMatch(/без защиты.*Свои TP\/SL уже сняты/);
     await minuteLater(a);
     expect((await liveMirrorState()).toClose).toContain(a);
   });
@@ -611,7 +679,7 @@ describe("сверка «потерянного» входа (ревью PR #89)
     expect((await getLiveMirror(db, a))?.status).toBe("protected");
   });
 
-  it("ордер найден без стопа — «без защиты», ⚠️ в Telegram, позиция в очереди закрытия", async () => {
+  it("ордер найден без стопа — «без защиты», ⚠️ в уведомлении, позиция в очереди закрытия", async () => {
     const a = await pendingFor("SOLUSDT");
     await age(a, 4);
     vi.clearAllMocks();
@@ -625,8 +693,8 @@ describe("сверка «потерянного» входа (ревью PR #89)
       stopLoss: null,
     });
     expect((await getLiveMirror(db, a))?.status).toBe("unprotected");
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toMatch(/⚠️/);
+    expect(channel.deliver).toHaveBeenCalledTimes(1);
+    expect(sent()[0]).toMatch(/⚠️/);
     // Как после неудачного закрытия: пауза между повторами, затем — в очереди закрытия каждый прогон.
     db.run(
       `update live_mirror_orders set updated_at = ${Date.now() - 2 * 60_000} where trade_id = '${a}'`,
@@ -658,7 +726,7 @@ describe("сверка «потерянного» входа (ревью PR #89)
 });
 
 describe("PnL — оценка (исполнения не прочитаны)", () => {
-  it("оценка идёт в дневной PnL, помечена в карточке и в Telegram", async () => {
+  it("оценка идёт в дневной PnL, помечена в карточке и в уведомлении", async () => {
     await toggleOn("S98");
     const id = await newTrade("S98", "LINKUSDT");
     await claimLive(id);
@@ -704,14 +772,12 @@ describe("PnL — оценка (исполнения не прочитаны)", 
       realizedPnl: -0.51,
       pnlEstimated: true,
     });
-    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toMatch(
-      /≈.*\(оценка\)/,
-    );
+    expect(sent()[0]).toMatch(/≈.*\(оценка\)/);
   });
 });
 
 describe("итог входа доставлен дважды (ревью PR #89, круг 2)", () => {
-  it("второй вызов не пишет журнал и не шлёт Telegram; свой стоп сохранён для оценки PnL", async () => {
+  it("второй вызов не пишет журнал и не шлёт уведомление; свой стоп сохранён для оценки PnL", async () => {
     await toggleOn("S98");
     const id = await newTrade("S98", "ATOMUSDT");
     await claimLive(id);
@@ -730,9 +796,8 @@ describe("итог входа доставлен дважды (ревью PR #89
     };
     vi.clearAllMocks();
     await saveLiveOpen(body);
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
-    const entries = () =>
-      vi.mocked(log.info).mock.calls.filter((c) => c[0] === "live.entry");
+    expect(channel.deliver).toHaveBeenCalledTimes(1);
+    const entries = () => notices().filter((n) => n.event === "live.entry");
     expect(entries()).toHaveLength(1);
     // Ответ потерялся по таймауту — воркер прислал тот же итог ещё раз; или outbox после сверки — уже «без защиты».
     await saveLiveOpen(body);
@@ -740,8 +805,9 @@ describe("итог входа доставлен дважды (ревью PR #89
       ...body,
       result: { ...body.result, status: "unprotected" },
     });
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(channel.deliver).toHaveBeenCalledTimes(1);
     expect(entries()).toHaveLength(1);
+    expect(notices().map((n) => n.event)).not.toContain("live.unprotected");
     expect(vi.mocked(log.error)).not.toHaveBeenCalled();
     expect((await getLiveMirror(db, id))?.status).toBe("protected");
 

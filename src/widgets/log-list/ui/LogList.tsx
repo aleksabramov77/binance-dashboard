@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { LogEntry } from "@/entities/log-entry";
+import { type LogEntry, notifyLines } from "@/entities/log-entry";
 import { cn } from "@/shared/lib";
 import { Button } from "@/shared/ui/Button";
 
@@ -14,7 +14,7 @@ const LEVEL_TONE: Record<LogEntry["level"], string> = {
 
 function Row({ entry }: { entry: LogEntry }) {
   const [open, setOpen] = useState(false);
-  const hasDetails = Boolean(entry.data || entry.error);
+  const hasDetails = Boolean(entry.data || entry.error || entry.notify);
   return (
     <li className="border-b py-2 text-sm last:border-0">
       <button
@@ -55,9 +55,21 @@ function Row({ entry }: { entry: LogEntry }) {
           </span>
         )}
       </button>
+      {open && entry.notify && (
+        // Уведомление записи (spec 0067): тема, звук и итог доставки — строкой, полностью — в JSON ниже.
+        <ul className="mt-2 space-y-0.5 text-xs">
+          {notifyLines(entry.notify).map((line) => (
+            <li key={line}>🔔 Уведомление · {line}</li>
+          ))}
+        </ul>
+      )}
       {open && (
         <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-muted p-3 font-mono text-xs">
-          {JSON.stringify({ data: entry.data, error: entry.error }, null, 2)}
+          {JSON.stringify(
+            { data: entry.data, error: entry.error, notify: entry.notify },
+            null,
+            2,
+          )}
         </pre>
       )}
     </li>

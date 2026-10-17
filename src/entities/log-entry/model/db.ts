@@ -2,6 +2,7 @@
 // data/logs/*.jsonl, но на Vercel постоянного диска нет. drizzle-kit собирает схемы из src/entities/*/model/db.ts.
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { isoTimestamp } from "@/shared/db/columns";
+import type { NotifyRecord } from "@/shared/notify";
 
 /** Запись журнала (info и выше; debug — только в консоль и локальный файл). */
 export const appLogsTable = sqliteTable(
@@ -16,6 +17,8 @@ export const appLogsTable = sqliteTable(
     error: text("error", { mode: "json" }).$type<Record<string, unknown>>(),
     /** Где записано: vercel | vm | local. */
     source: text("source").notNull(),
+    /** Уведомление записи (log.notify, spec 0067): категория, срочность, итог доставки по каналам; null — без него. */
+    notify: text("notify", { mode: "json" }).$type<NotifyRecord>(),
   },
   (t) => [
     index("app_logs_ts_idx").on(t.ts),

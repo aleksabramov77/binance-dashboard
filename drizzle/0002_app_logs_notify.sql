@@ -1,0 +1,1 @@
+ALTER TABLE `app_logs` ADD `notify` text;

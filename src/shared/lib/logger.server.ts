@@ -1,9 +1,18 @@
 // Серверный журнал: короткая строка в консоль, записи info+ — пачками в приёмник (БД, см.
 // src/app/server/logs.ts, подключается в instrumentation.ts), локально ещё JSON-строки в
 // data/logs/app-YYYY-MM-DD.jsonl (с debug). Только для сервера. Секреты маскируются по имени поля.
+// log.notify — запись и уведомление одним вызовом (spec 0067): каналы подключаются так же, как приёмник.
 import { appendFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import {
+  type ChannelDelivery,
+  type Notification,
+  type NotifyChannel,
+  type NotifyInput,
+  type NotifyRecord,
+  summarizeNotify,
+} from "@/shared/notify";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -15,6 +24,8 @@ export interface LogEntry {
   message: string;
   data?: Record<string, unknown>;
   error?: { name: string; message: string; code?: unknown; stack?: string };
+  /** Уведомление этой записи (log.notify): категория, срочность и итог доставки по каналам. */
+  notify?: NotifyRecord;
 }
 
 // На serverless (Vercel) каталог проекта только для чтения — пишем во временный каталог экземпляра.
@@ -80,16 +91,34 @@ interface SinkState {
   timer: ReturnType<typeof setTimeout> | null;
   /** Писать ли локальный файл data/logs; false — только консоль (воркер реального счёта, spec 0047). */
   files: boolean;
+  /** Каналы уведомлений log.notify (spec 0067); пусто — итог «канал не подключён». */
+  channels: NotifyChannel[];
 }
 const sinkKey = Symbol.for("binance-dashboard.logSink");
 const g = globalThis as typeof globalThis & { [sinkKey]?: SinkState };
 const state = (): SinkState => {
-  g[sinkKey] ??= { sink: null, buffer: [], timer: null, files: true };
+  g[sinkKey] ??= {
+    sink: null,
+    buffer: [],
+    timer: null,
+    files: true,
+    channels: [],
+  };
+  // Состояние могла создать прежняя версия модуля (горячая перезагрузка dev-сервера) — без каналов.
+  g[sinkKey].channels ??= [];
   return g[sinkKey];
 };
 
 export function setLogSink(next: LogSink | null): void {
   state().sink = next;
+}
+
+/**
+ * Каналы уведомлений (spec 0067): подключаются при старте — instrumentation.ts (сервер) и скрипты, которые
+ * уведомляют, — как приёмник журнала. Второй канал — ещё один элемент списка, места вызова не меняются.
+ */
+export function setNotifyChannels(channels: readonly NotifyChannel[]): void {
+  state().channels = [...channels];
 }
 
 /**
@@ -128,11 +157,17 @@ function toSink(entry: LogEntry): void {
   st.timer.unref?.();
 }
 
+/** Хвост строки консоли: что стало с уведомлением записи. */
+const notifySuffix = (n: NotifyRecord | undefined) =>
+  n
+    ? ` [уведомление ${n.category}: ${n.status}${n.reason ? ` — ${n.reason}` : ""}]`
+    : "";
+
 function write(entry: LogEntry): void {
   // Юнит-тесты не пишут в журнал приложения.
   if (process.env.VITEST) return;
   const icon = { debug: "·", info: "•", warn: "▲", error: "✖" }[entry.level];
-  const line = `[log] ${icon} ${entry.event}: ${entry.message}${entry.error ? ` — ${entry.error.message}` : ""}`;
+  const line = `[log] ${icon} ${entry.event}: ${entry.message}${entry.error ? ` — ${entry.error.message}` : ""}${notifySuffix(entry.notify)}`;
   if (entry.level === "error") console.error(line);
   else if (entry.level === "warn") console.warn(line);
   else if (entry.level === "info") console.log(line);
@@ -155,6 +190,7 @@ function emit(
   message: string,
   data?: Record<string, unknown>,
   error?: unknown,
+  notify?: NotifyRecord,
 ) {
   write({
     ts: new Date().toISOString(),
@@ -163,7 +199,86 @@ function emit(
     message,
     data: data ? (redact(data) as Record<string, unknown>) : undefined,
     error: error === undefined ? undefined : serializeError(error),
+    ...(notify && { notify }),
   });
+}
+
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+/** Каждому каналу — своё уведомление; исключение канала — итог failed, остальные каналы не ждут его. */
+function deliverAll(
+  n: Notification,
+  channels: readonly NotifyChannel[],
+): Promise<ChannelDelivery[]> {
+  return Promise.all(
+    channels.map(async (channel): Promise<ChannelDelivery> => {
+      try {
+        return { channel: channel.name, ...(await channel.deliver(n)) };
+      } catch (error) {
+        return {
+          channel: channel.name,
+          status: "failed",
+          reason: errorText(error),
+        };
+      }
+    }),
+  );
+}
+
+/**
+ * Уведомление и запись одним вызовом (spec 0067): запись — после доставки, итог (поле notify) в ней и в ответе.
+ * Сбой канала — ещё warn notify.failed, доставка не туда, куда просили (тема не найдена), — warn notify.fallback.
+ * Не бросает: уведомление не должно ронять сценарий.
+ */
+async function notify(input: NotifyInput): Promise<NotifyRecord> {
+  const urgent = input.urgent ?? false;
+  const n: Notification = {
+    category: input.category,
+    urgent,
+    text: input.text ?? input.message,
+    link: input.link ?? null,
+    level: input.level,
+    event: input.event,
+    fixture: input.fixture ?? false,
+    test: input.test ?? false,
+  };
+  const deliveries =
+    input.skip === undefined ? await deliverAll(n, state().channels) : [];
+  const record = summarizeNotify(
+    { category: input.category, urgent, skip: input.skip },
+    deliveries,
+  );
+  emit(
+    input.level,
+    input.event,
+    input.message,
+    input.data,
+    input.error,
+    record,
+  );
+  for (const d of deliveries) {
+    const where = {
+      event: input.event,
+      category: input.category,
+      channel: d.channel,
+    };
+    if (d.status === "failed")
+      emit(
+        "warn",
+        "notify.failed",
+        `Уведомление ${input.event} не доставлено (${d.channel}): ${d.reason ?? "без причины"}`,
+        where,
+      );
+    else if (d.note)
+      emit(
+        "warn",
+        "notify.fallback",
+        `Уведомление ${input.event} (${d.channel}): ${d.note}`,
+        where,
+      );
+  }
+  return record;
 }
 
 export const LEVEL_RANK: Record<LogLevel, number> = {
@@ -190,4 +305,10 @@ export const log = {
     data?: Record<string, unknown>,
     error?: unknown,
   ) => emit("error", event, message, data, error),
+  /**
+   * Запись журнала и уведомление (spec 0067): `await log.notify({ level, event, message, data?, error?, category,
+   * urgent?, text?, link? })`. Место вызова называет категорию и срочность, а не канал; итог доставки — в поле notify
+   * записи и в ответе (sent / failed / skipped с причиной).
+   */
+  notify: (input: NotifyInput): Promise<NotifyRecord> => notify(input),
 };

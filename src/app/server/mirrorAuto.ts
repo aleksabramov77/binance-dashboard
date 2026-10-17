@@ -1,5 +1,6 @@
-// Композиция авто-зеркала (spec 0043): БД и правило (entities/experiment) + журнал и Telegram. Вызывают POST /api/cron/mirror-auto (pg_cron раз в сутки), перевод в «Авто» из /settings и /experiments
-// (experimentSettings.setDemoMirrorMode) и `pnpm lab:apply --mirror-auto`. Только сервер.
+// Композиция авто-зеркала (spec 0043): БД и правило (entities/experiment) + запись журнала с уведомлением (категория
+// «Лаборатория», тихо — spec 0067). Вызывают POST /api/cron/mirror-auto (раз в сутки), перевод в «Авто» из /settings и
+// /experiments (experimentSettings.setDemoMirrorMode) и `pnpm lab:apply --mirror-auto`. Только сервер.
 import {
   decideMirrorAuto,
   type MirrorAdvice,
@@ -13,13 +14,10 @@ import {
   readMirrorAutoRows,
   saveMirrorAuto,
 } from "@/entities/experiment";
-import { sendTelegramMessage } from "@/shared/api/telegram";
-import {
-  getDemoTradingConfig,
-  getTelegramConfig,
-} from "@/shared/config/env.server";
+import { getDemoTradingConfig } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import type { NotifyInput, NotifyRecord } from "@/shared/notify";
 
 export interface MirrorAutoResult {
   dryRun: boolean;
@@ -37,8 +35,8 @@ export interface MirrorAutoResult {
     message: string;
   }[];
   advice: { id: string; advice: MirrorAdvice; message: string }[];
-  /** Telegram: сколько ушло и не ушло; skipped — почему не отправлялось (только журнал). */
-  telegram: { sent: number; failed: number; skipped: string | null };
+  /** Уведомления: сколько ушло и не ушло; skipped — почему не отправлялось (только журнал), первая причина. */
+  notify: { sent: number; failed: number; skipped: string | null };
 }
 
 const NO_KEY =
@@ -46,8 +44,8 @@ const NO_KEY =
 
 /**
  * Проверка авто-зеркала: правило spec 0043 к экспериментам (ids — только к этим). «Авто» — включить или выключить
- * зеркало, «Вкл» / «Выкл» — только подсказка. Каждое изменение и подсказка — запись журнала и сообщение в Telegram
- * (только production). dryRun — тот же план без записи в БД, журнал и Telegram.
+ * зеркало, «Вкл» / «Выкл» — только подсказка. Каждое изменение и подсказка — запись журнала с уведомлением (отправляет
+ * канал — только из production). dryRun — тот же план без записи в БД, журнала и уведомлений.
  */
 export async function runMirrorAuto(
   options: { dryRun?: boolean; ids?: string[] } = {},
@@ -61,13 +59,18 @@ export async function runMirrorAuto(
     checked: 0,
     changes: [],
     advice: [],
-    telegram: { sent: 0, failed: 0, skipped: null },
+    notify: { sent: 0, failed: 0, skipped: null },
   };
   const db = getDb();
   const data = await readMirrorAutoRows(db, options.ids);
   if (!data) return result;
   const at = new Date().toISOString();
-  const outbox: string[] = [];
+  // Сбой отправки изменения в БД не отменяет: итог — в записи и в счётчиках, сбой канала — warn notify.failed.
+  const notify = async (input: Omit<NotifyInput, "category" | "level">) =>
+    tally(
+      result.notify,
+      await log.notify({ ...input, level: "info", category: "lab" }),
+    );
 
   for (const row of data.rows) {
     const start = mirrorWindowStart(data.runStartedAt, row.resetAt, row.since);
@@ -104,8 +107,7 @@ export async function runMirrorAuto(
         });
         // Переключатель сменили, пока шла проверка, — решение устарело.
         if (!applied) continue;
-        log.info("mirror.auto", message, logData);
-        outbox.push(message);
+        await notify({ event: "mirror.auto", message, data: logData });
       }
       result.changes.push({
         id: row.id,
@@ -140,47 +142,18 @@ export async function runMirrorAuto(
     }
     if (plan.sendAdvice) {
       const message = mirrorAdviceMessage(plan);
-      if (!dryRun) {
-        log.info("mirror.advice", message, logData);
-        outbox.push(message);
-      }
+      if (!dryRun)
+        await notify({ event: "mirror.advice", message, data: logData });
       result.advice.push({ id: row.id, advice: plan.sendAdvice, message });
     }
   }
 
-  if (!dryRun) result.telegram = await notify(outbox);
   return result;
 }
 
-/**
- * Сообщения в Telegram по одному. Не production (локальный сервер worktree с прод-.env.local, скрипты) или нет
- * TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID — только журнал. Сбой отправки изменения в БД не отменяет — warn в журнале.
- */
-async function notify(
-  messages: string[],
-): Promise<MirrorAutoResult["telegram"]> {
-  const out = { sent: 0, failed: 0, skipped: null as string | null };
-  if (!messages.length) return out;
-  if (process.env.NODE_ENV !== "production")
-    return { ...out, skipped: "не production — сообщения только в журнале" };
-  const telegram = getTelegramConfig();
-  if (!telegram?.chatId)
-    return {
-      ...out,
-      skipped:
-        "Telegram не настроен (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) — сообщения только в журнале",
-    };
-  for (const text of messages) {
-    try {
-      await sendTelegramMessage(telegram.token, telegram.chatId, text);
-      out.sent++;
-    } catch (error) {
-      out.failed++;
-      log.warn("mirror.telegram", "Сообщение авто-зеркала не ушло в Telegram", {
-        text,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  return out;
+/** Счётчики уведомлений прогона: отправлено, сбой, почему не отправлялось (первая причина). */
+function tally(out: MirrorAutoResult["notify"], record: NotifyRecord): void {
+  if (record.status === "sent") out.sent++;
+  else if (record.status === "failed") out.failed++;
+  else out.skipped ??= record.reason ?? null;
 }

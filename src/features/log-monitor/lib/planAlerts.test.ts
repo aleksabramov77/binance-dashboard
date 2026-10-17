@@ -74,4 +74,21 @@ describe("planAlerts", () => {
     expect(reminder.notify).toEqual([issue]);
     expect(reminder.fresh).toEqual([]);
   });
+
+  it("urgent (spec 0067): новая — со звуком; напоминание и «восстановлено» — тихо; не дошедшая — снова со звуком", () => {
+    const first = planAlerts([issue], [], T0, 2 * H);
+    expect(first.urgent).toBe(true);
+    expect(planAlerts([issue], first.rows, T0 + 2 * H, 2 * H).urgent).toBe(
+      false,
+    );
+    expect(planAlerts([], first.rows, T0 + 15 * 60_000, 2 * H).urgent).toBe(
+      false,
+    );
+    // Сообщение не дошло — монитор сохранил строки без lastSent: повтор через 15 мин — первое сообщение о проблеме.
+    const undelivered = first.rows.map((r) => ({ ...r, lastSent: null }));
+    const retry = planAlerts([issue], undelivered, T0 + 15 * 60_000, 2 * H);
+    expect(retry.notify).toEqual([issue]);
+    expect(retry.fresh).toEqual([]);
+    expect(retry.urgent).toBe(true);
+  });
 });

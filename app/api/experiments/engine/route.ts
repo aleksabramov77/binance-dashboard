@@ -28,7 +28,7 @@ export const POST = withLogging(
         { error: "Ожидается { enabled: boolean }" },
         { status: 400 },
       );
-    // Кто переключил — для журнала и Telegram (spec 0044); без настроенного входа сессии нет.
+    // Кто переключил — для журнала и уведомления (spec 0044); без настроенного входа сессии нет.
     const session = nextAuth ? await nextAuth.auth() : null;
     return Response.json(
       await setEngineEnabled(

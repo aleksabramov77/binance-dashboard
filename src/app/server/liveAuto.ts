@@ -1,5 +1,5 @@
 // Композиция режимов реального счёта «Авто» и «Вкл + автовыкл» (spec 0053): БД и правило (entities/experiment) +
-// тексты (entities/live-account) + журнал и Telegram. Вызывают POST /api/cron/mirror-auto (раз в сутки, вместе с
+// тексты (entities/live-account) + журнал и уведомления (spec 0067). Вызывают POST /api/cron/mirror-auto (раз в сутки, вместе с
 // авто-зеркалом 0043) и перевод в «Авто» из /experiments (liveMirror.setLiveMode). Пороги при закрытии сделки —
 // liveMirror.saveLiveClose (closeLiveWithAuto) с той же причиной (liveAutoReasonOf). Только сервер.
 import {
@@ -27,9 +27,9 @@ import {
 import { getLiveSilentAfterMs } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
-import { loadLastLiveState, notifyLive } from "./liveAccount";
+import { liveNotice, loadLastLiveState } from "./liveAccount";
 
-/** Что сработало по плану: порог (убыток, серия) или демо — для причины, Telegram и подсказки; null — ничего. */
+/** Что сработало по плану: порог (убыток, серия) или демо — для причины, уведомления и подсказки; null — ничего. */
 export function liveAutoReasonOf(
   plan: LiveAutoPlan,
   thresholds: LiveThresholds,
@@ -50,7 +50,7 @@ export function liveAutoReasonOf(
   return null;
 }
 
-/** Причина автовыключения текстом (пометка у «Выкл», Telegram). */
+/** Причина автовыключения текстом (пометка у «Выкл», уведомление). */
 export const liveAutoOffReason = (
   plan: LiveAutoPlan,
   thresholds: LiveThresholds,
@@ -109,7 +109,7 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /**
  * Проверка режимов реального счёта (AC3, AC4, AC6): «Авто» — включить по демо, выключить по порогам или демо;
  * «Вкл + автовыкл» — выключить по порогам; ручное «Вкл» — подсказка. ids — только эти эксперименты (перевод в
- * «Авто»). dryRun — тот же план без записи, журнала и Telegram. Сбой по эксперименту — warn, остальные идут дальше.
+ * «Авто»). dryRun — тот же план без записи, журнала и уведомлений. Сбой по эксперименту — warn, остальные идут дальше.
  */
 export async function runLiveAuto(
   options: { dryRun?: boolean; ids?: string[] } = {},
@@ -206,9 +206,15 @@ export async function runLiveAuto(
           });
           // Переключатель сменили, пока шла проверка, — решение устарело.
           if (!applied) continue;
-          log.info("live.auto", message, {
-            ...liveAutoLogData(row.id, row.mode, plan, reason),
-            telegram: await notifyLive(message),
+          // Автомат включил или выключил реальный счёт — со звуком.
+          await log.notify({
+            level: "info",
+            event: "live.auto",
+            message,
+            data: liveAutoLogData(row.id, row.mode, plan, reason),
+            category: "trades",
+            urgent: true,
+            ...liveNotice(message),
           });
         }
         result.changes.push({
@@ -236,9 +242,13 @@ export async function runLiveAuto(
       if (adviceReason) {
         const message = liveAdviceText(row.id, adviceReason);
         if (!dryRun)
-          log.info("live.advice", message, {
-            ...liveAutoLogData(row.id, row.mode, plan, null),
-            telegram: await notifyLive(message),
+          await log.notify({
+            level: "info",
+            event: "live.advice",
+            message,
+            data: liveAutoLogData(row.id, row.mode, plan, null),
+            category: "trades",
+            ...liveNotice(message),
           });
         result.advice.push({ id: row.id, message });
       }

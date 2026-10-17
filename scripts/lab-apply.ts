@@ -1,8 +1,9 @@
 // `pnpm lab:apply [--disable <id>]… [--enable <id>]… [--mirror-on <id>]… [--mirror-off <id>]… [--mirror-auto <id>]…
 // [--dry-run] [--local] [--out <каталог>]` — применить решения разбора лаборатории (flow lab, этап apply) к БД из
 // .env.local: тумблер эксперимента и положение демо-зеркала (--mirror-on / --mirror-off — ручные «Вкл» / «Выкл»,
-// --mirror-auto — «Авто»: автомат сразу решает по правилу spec 0043, запись mirror.auto — в журнал /logs, Telegram —
-// только с production-сервера). То же, что тумблеры в /settings и /experiments. Только после явного подтверждения.
+// --mirror-auto — «Авто»: автомат сразу решает по правилу spec 0043, запись mirror.auto — в журнал /logs, уведомление
+// отправляет только production-сервер). То же, что тумблеры в /settings и /experiments. Только после явного
+// подтверждения.
 // Выключение — только с причиной (spec 0046): `--reason <id>=<категория>` для каждого --disable (+ `--note <id>=<текст>`);
 // уже выключенному --disable с причиной обновляет причину. Контрольный, у которого остаются включённые варианты, —
 // только с `--force-control`.
@@ -14,6 +15,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { writeLogs } from "@/app/server/logs";
 import { runMirrorAuto } from "@/app/server/mirrorAuto";
+import { createNotifyChannels } from "@/app/server/notify";
 import {
   readExperimentFlags,
   setDisableReason,
@@ -25,7 +27,11 @@ import {
   getDemoTradingConfig,
 } from "@/shared/config/env.server";
 import { closeDb, getDb, migrateDb } from "@/shared/db/client.server";
-import { flushLogs, setLogSink } from "@/shared/lib/logger.server";
+import {
+  flushLogs,
+  setLogSink,
+  setNotifyChannels,
+} from "@/shared/lib/logger.server";
 import { describeDatabase, PROD_WRITE_HINT } from "./lib/dbTarget";
 import {
   type ApplyChange,
@@ -68,8 +74,10 @@ async function main() {
   const db = getDb();
   // Локальная база может быть новой (пустой файл) — миграции идемпотентны.
   await migrateDb();
-  // Решения авто-зеркала — в журнал БД (/logs), как с сервера.
+  // Решения авто-зеркала — в журнал БД (/logs), как с сервера; канал уведомлений тот же — вне production он не
+  // отправляет, а пишет в запись, куда ушло бы (spec 0067).
   setLogSink(writeLogs);
+  setNotifyChannels(createNotifyChannels());
   const changes = diffApply(plan, await readExperimentFlags(db));
   const notes: string[] = [];
   if (!plan.dryRun) {

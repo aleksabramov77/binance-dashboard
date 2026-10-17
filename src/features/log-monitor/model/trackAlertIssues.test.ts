@@ -317,8 +317,9 @@ describe("runMonitor + задачи в GitHub", () => {
         rows = r;
       },
       analyze: async () => "Упал Binance.",
-      notify: async (t) => {
-        sent.push(t);
+      notify: async (alert) => {
+        sent.push(alert.text);
+        return "sent";
       },
       trackIssues: (i) => trackAlertIssues(CFG, i),
       prune: async () => 0,
@@ -372,16 +373,17 @@ describe("runMonitor + задачи в GitHub", () => {
     expect(m.sent[0]).not.toContain("Задача");
   });
 
-  it("Telegram упал после создания задачи — следующий прогон пишет комментарий, а не вторую задачу", async () => {
+  it("уведомление не доставлено после создания задачи — следующий прогон пишет комментарий, а не вторую задачу", async () => {
     const gh = fakeGithub();
     let fail = true;
     const m = deps({
-      notify: async (t) => {
-        if (fail) throw new Error("Telegram 502");
-        m.sent.push(t);
+      notify: async (alert) => {
+        if (fail) return "failed";
+        m.sent.push(alert.text);
+        return "sent";
       },
     });
-    await expect(runMonitor(m.d, NOW)).rejects.toThrow("Telegram 502");
+    expect((await runMonitor(m.d, NOW)).sent).toBe(false);
     expect(gh.created()).toHaveLength(1);
 
     fail = false;

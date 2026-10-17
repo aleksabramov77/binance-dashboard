@@ -1,12 +1,17 @@
-// Next.js вызывает register() один раз при старте сервера: подключаем журнал к БД, применяем миграции и запускаем
+// Next.js вызывает register() один раз при старте сервера: подключаем журнал к БД и каналы уведомлений, применяем миграции и запускаем
 // таймер движка лаборатории (spec 003, engine_state.enabled; по умолчанию выключен) и фоновых задач (spec 0048).
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.NEXT_PHASE === "phase-production-build") return;
-  // Журнал — в БД (и на Vercel): приёмник логгера подключаем до всех остальных шагов.
-  const { setLogSink } = await import("@/shared/lib/logger.server");
+  // Журнал — в БД (и на Vercel): приёмник логгера подключаем до всех остальных шагов. Каналы уведомлений log.notify
+  // (spec 0067) — там же: вызовы называют категорию и срочность, канал решает, куда и как слать.
+  const { setLogSink, setNotifyChannels } = await import(
+    "@/shared/lib/logger.server"
+  );
   const { writeLogs } = await import("@/app/server/logs");
   setLogSink(writeLogs);
+  const { createNotifyChannels } = await import("@/app/server/notify");
+  setNotifyChannels(createNotifyChannels());
   const { isServerless } = await import("@/shared/config/env.server");
   // Serverless (Vercel): процесс живёт только на время запроса — фоновых таймеров нет, а миграции
   // применяются отдельно (`pnpm db:migrate`), а не на каждом холодном старте. Тик — снаружи (spec 007b).
