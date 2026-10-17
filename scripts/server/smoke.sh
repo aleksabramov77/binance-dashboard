@@ -14,10 +14,12 @@ if systemctl is-active --quiet binance; then say "OK: binance active"; else bad 
 
 tick=$(sudo -u binance sqlite3 -readonly "$DB" "select coalesce(json_extract(value, '\$.at'), '') || '|' ||
   coalesce(json_extract(value, '\$.runner'), '') || '|' || coalesce(json_extract(value, '\$.status'), '')
-  from engine_state where key = 'last_tick'")
+  from engine_state where key = 'last_tick'") || { bad "sqlite3 не прочитал $DB"; tick=""; }
 IFS='|' read -r at runner status <<<"$tick"
 at_s=$(date -d "${at:-x}" +%s 2>/dev/null || true)
-if [ -z "$tick" ]; then
+if [ "$fail" = 1 ] && [ -z "$tick" ]; then
+  :
+elif [ -z "$tick" ]; then
   bad "в engine_state нет last_tick"
 elif [ -z "$at_s" ]; then
   bad "в last_tick нет времени тика (at='${at:-}')"

@@ -129,9 +129,12 @@ jobs:
             exit 0
           fi
           sudo /usr/bin/systemctl restart $LIVE_PROJECT
+          before=\$(systemctl show -p NRestarts --value $LIVE_PROJECT)
           sleep 15
-          if systemctl is-active --quiet $LIVE_PROJECT; then echo "OK: $LIVE_PROJECT active"; exit 0; fi
+          after=\$(systemctl show -p NRestarts --value $LIVE_PROJECT)
+          # active и без автоперезапусков за 15 с (падение на старте systemd поднимает заново через 10 с).
+          if systemctl is-active --quiet $LIVE_PROJECT && [ "\$before" = "\$after" ]; then echo "OK: $LIVE_PROJECT active"; exit 0; fi
           sudo /usr/bin/journalctl -u $LIVE_PROJECT -n 80 --no-pager
-          echo "::error::$LIVE_PROJECT не активен через 15 с после рестарта"
+          echo "::error::$LIVE_PROJECT не активен или перезапускается через 15 с после рестарта"
           exit 1
           EOF

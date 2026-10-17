@@ -140,9 +140,25 @@ Homepage `https://binance.<ip>.sslip.io`, callback `https://binance.<ip>.sslip.i
 Выкатка — из CI (`deploy.yml`, шаг «Воркер binance-live»): файл обновляется при каждой выкатке, рестарт — только если
 сервис включён; restart ждёт выхода по SIGTERM до 120 с (начатая сделка доделывается).
 
-Unit с таймаутом остановки (один раз, повтор безопасен):
-`ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-project.sh binance-live --no-web --exec live-worker.mjs --memory 128M --heap 96 --stop-timeout 120'`
-(копию скрипта на VM сначала обновить из `scripts/server/`).
+Первый запуск (Claude, порядок важен):
+1. Строки `LIVE_*` — до `add-project.sh` (значение секрета копируется из файла сайта, на экран не выводится):
+   ```sh
+   ssh claude@<ip> 'E=/etc/binance-live/app.env
+     sudo grep -q "^LIVE_WORKER_SECRET=" $E || sudo grep "^LIVE_WORKER_SECRET=" /etc/binance/app.env | sudo tee -a $E >/dev/null
+     sudo grep -q "^LIVE_APP_URL=" $E || echo "LIVE_APP_URL=http://127.0.0.1:5000" | sudo tee -a $E >/dev/null
+     sudo grep -cE "^(LIVE_WORKER_SECRET|LIVE_APP_URL)=" $E'   # → 2 (только число строк, без значений)
+   ```
+2. Unit с таймаутом остановки:
+   `ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-project.sh binance-live --no-web --exec live-worker.mjs --memory 128M --heap 96 --stop-timeout 120'`
+   (копию скрипта на VM сначала обновить из `scripts/server/`). **Внимание:** если `live-worker.mjs` уже лежит в
+   `/srv/binance-live/app`, `add-project.sh` сам делает `enable` и `restart` — воркер с ключом стартует сразу, а
+   выключенный владельцем сервис включается снова. Повторять его при выключенном воркере — только с последующим
+   `sudo systemctl disable --now binance-live`.
+3. Перед `enable --now` — проверка, что реальных входов не будет (оба числа — 0, только чтение):
+   ```sh
+   ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db "select count(*) from experiments where live_mirror = 1 or live_mirror_mode <> '\''off'\''; select count(*) from live_mirror_orders where status in ('\''pending'\'','\''protected'\'','\''unprotected'\'','\''closing'\'','\''close_failed'\'')"'
+   ```
+4. `ssh claude@<ip> 'sudo systemctl enable --now binance-live'`.
 
 Ключ субсчёта (владелец):
 1. На Binance у ключа субсчёта: права «чтение» + Spot + Futures, без вывода, переводов и займов; **Restrict access to
@@ -152,7 +168,8 @@ Unit с таймаутом остановки (один раз, повтор б�
 3. `sudo systemctl restart binance-live` (если сервис уже включён) — карточка «Реальный счёт» на `/settings` показывает
    проверку ключа и прав.
 
-Включить / выключить: `sudo systemctl enable --now binance-live` / `sudo systemctl disable --now binance-live`.
+Включить / выключить: `sudo systemctl enable --now binance-live` / `sudo systemctl disable --now binance-live`. Останавливать
+надолго — только `disable --now`: после простого `stop` следующая выкатка из CI снова запустит включённый сервис.
 Проверка: `sudo journalctl -u binance-live -n 30 --no-pager` — «Воркер реального счёта …: ключ задан, пульс →
 http://127.0.0.1:5000», пульсы без 401; остановка без SIGKILL: `sudo journalctl -u binance-live -n 20 --no-pager | grep -E "stop-sigterm|SIGKILL"`
 — пусто.
