@@ -5,6 +5,7 @@ import {
   ownerWarnings,
   parseSetupArgs,
   planTopics,
+  testTradeMessages,
   topicEnvLines,
 } from "./telegramSetup";
 
@@ -23,11 +24,20 @@ describe("parseSetupArgs", () => {
       delete: false,
       topics: false,
       test: false,
+      testTrade: false,
     });
     expect(parseSetupArgs(["--topics", "--test"])).toEqual({
       delete: false,
       topics: true,
       test: true,
+      testTrade: false,
+    });
+    expect(parseSetupArgs(["--test-trade"])).toMatchObject({
+      test: false,
+      testTrade: true,
+    });
+    expect(parseSetupArgs(["--delete", "--test-trade"])).toEqual({
+      error: expect.stringMatching(/только отдельно/),
     });
     expect(parseSetupArgs(["--delete"])).toMatchObject({ delete: true });
     expect(parseSetupArgs(["--delete", "--test"])).toEqual({
@@ -36,6 +46,20 @@ describe("parseSetupArgs", () => {
     expect(parseSetupArgs(["--topic"])).toEqual({
       error: expect.stringMatching(/неизвестные аргументы: --topic/),
     });
+  });
+});
+
+describe("testTradeMessages — пробная пара для темы «Сделки» (spec 0068, AC11)", () => {
+  it("вход и итог как у реальной сделки, с пометкой «пробное»; строка итога и отметка 👍", () => {
+    const m = testTradeMessages();
+    expect(m.entry).toMatch(/^🟡 Вход · S98 BTCUSDT long · USDⓈ-M\n/);
+    expect(m.exit).toMatch(/^🟢 \+\$0,84 · S98 BTCUSDT long\nЗакрыта по TP: /);
+    for (const text of [m.entry, m.exit])
+      expect(text).toMatch(
+        /\n🧪 Пробное сообщение: числа вымышленные, сделки нет$/,
+      );
+    expect(m.append).toBe("Итог: 🟢 +$0,84 (TP)");
+    expect(m.mark).toBe("good");
   });
 });
 

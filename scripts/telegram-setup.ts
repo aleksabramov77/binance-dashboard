@@ -6,6 +6,9 @@
 //                                   заданные TELEGRAM_TOPIC_* не пересоздаются
 //   pnpm telegram:setup --test    — по одному тихому пробному сообщению в каждую тему (вместе с --topics — и в только
 //                                   что созданные); явная проверка — отправляется и вне production
+//   pnpm telegram:setup --test-trade
+//                                 — пробная пара в тему «Сделки» (spec 0068): тихий вход и итог ответом на него со
+//                                   звуком, вход дописан строкой итога и отмечен 👍; числа вымышленные
 // Env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_OWNER_ID, TELEGRAM_TOPIC_*, TELEGRAM_WEBHOOK_SECRET (тот же, что
 // у прода), SITE_URL (адрес прода, обязателен для setWebhook). Берутся из .env.local и
 // ~/.config/vercel/binance-dashboard-prod.env; заданные в окружении — главнее. Значения секретов не печатаем.
@@ -28,6 +31,7 @@ import {
   setTelegramWebhook,
 } from "@/shared/api/telegram";
 import {
+  getSiteLink,
   getSiteUrl,
   getTelegramConfig,
   type TelegramConfig,
@@ -38,6 +42,7 @@ import {
   ownerWarnings,
   parseSetupArgs,
   planTopics,
+  testTradeMessages,
   topicEnvLines,
 } from "./lib/telegramSetup";
 
@@ -117,6 +122,56 @@ async function sendTests(): Promise<boolean> {
   return ok;
 }
 
+/**
+ * Пробная пара в тему «Сделки» (spec 0068, AC11) — тем же каналом и той же связью сообщений, что у реальных сделок:
+ * вход тихо, итог ответом со звуком, вход дописан и отмечен. Явная проверка — отправляется и вне production.
+ */
+async function sendTestTrade(): Promise<boolean> {
+  setNotifyChannels(createNotifyChannels());
+  const m = testTradeMessages();
+  const link = getSiteLink("/experiments");
+  const entry = await log.notify({
+    level: "info",
+    event: "telegram.test",
+    message: "Пробный вход в тему «Сделки»",
+    category: "trades",
+    test: true,
+    text: m.entry,
+    link,
+  });
+  console.log(
+    entry.status === "sent"
+      ? "✅ Пробный вход: отправлено"
+      : `✖ Пробный вход: не отправлено — ${entry.reason}`,
+  );
+  if (entry.status !== "sent") return false;
+  const exit = await log.notify({
+    level: "info",
+    event: "telegram.test",
+    message: "Пробный итог в тему «Сделки»",
+    category: "trades",
+    urgent: true,
+    test: true,
+    text: m.exit,
+    link,
+    thread: {
+      ref: entry.ref,
+      label: "сообщение о входе",
+      reply: true,
+      append: m.append,
+      mark: m.mark,
+    },
+  });
+  const c = exit.channels[0];
+  console.log(
+    exit.status === "sent"
+      ? `✅ Пробный итог: отправлено (${[c?.reply, c?.amend].filter(Boolean).join("; ")})`
+      : `✖ Пробный итог: не отправлено — ${exit.reason}`,
+  );
+  if (c?.amendError) console.log(`⚠️ Вход не изменён: ${c.amendError}`);
+  return exit.status === "sent" && !c?.amendError;
+}
+
 async function main() {
   const mode = parseSetupArgs(process.argv.slice(2));
   if ("error" in mode) fail(mode.error);
@@ -139,7 +194,7 @@ async function main() {
     return;
   }
 
-  if (mode.topics || mode.test) {
+  if (mode.topics || mode.test || mode.testTrade) {
     if (mode.topics) {
       if (!telegram.chatId)
         fail("TELEGRAM_CHAT_ID не задан — нужен id группы с темами");
@@ -147,6 +202,8 @@ async function main() {
     }
     if (mode.test && !(await sendTests()))
       fail("не все пробные сообщения отправлены");
+    if (mode.testTrade && !(await sendTestTrade()))
+      fail("пробная пара в тему «Сделки» отправлена не полностью");
     return;
   }
 
