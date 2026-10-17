@@ -35,7 +35,7 @@ fail() { echo "ОШИБКА: $*" >&2; rm -f "$PART" "$PART.gz"; exit 1; }
 started=$(date +%s)
 day=$(date -u +%F)
 umask 077
-mkdir -p "$DIR"
+mkdir -p "$DIR" || { echo "ОШИБКА: не создать каталог копий $DIR" >&2; exit 1; }
 OUT="$DIR/app-$day.db.gz"
 PART="$DIR/.app-$day.db.part"
 rm -f "$PART" "$PART.gz"
@@ -46,16 +46,21 @@ check=$(sqlite3 "$PART" "pragma integrity_check" 2>&1) || fail "integrity_check 
 [ "$check" = ok ] || fail "integrity_check копии: $(printf '%s' "$check" | head -3 | tr '\n' ' ')"
 gzip -9 "$PART" || fail "gzip не удался"
 chmod 600 "$PART.gz"
+sync "$PART.gz" 2>/dev/null || sync
 mv -f "$PART.gz" "$OUT"
 
 # Ротация: имена с датой сортируются по времени; остаются KEEP последних.
 mapfile -t old < <(find "$DIR" -maxdepth 1 -name 'app-????-??-??.db.gz' -printf '%f\n' | sort | head -n "-$KEEP")
 for f in "${old[@]}"; do rm -f "$DIR/$f"; done
 
+# Сбой чистки журнала копию не отменяет: итоговая строка печатается, но код выхода 1.
 logs_removed=0
+logs_failed=0
 if [ -d "$LOGS" ]; then
-  logs_removed=$(find "$LOGS" -maxdepth 1 -name 'app-*.jsonl' -mtime "+$((LOG_DAYS - 1))" -print -delete | wc -l)
+  logs_removed=$(find "$LOGS" -maxdepth 1 -name 'app-*.jsonl' -mtime "+$((LOG_DAYS - 1))" -print -delete | wc -l) ||
+    { echo "ОШИБКА: чистка журнала $LOGS не удалась (копия базы сделана)" >&2; logs_failed=1; }
 fi
 
 kept=$(find "$DIR" -maxdepth 1 -name 'app-????-??-??.db.gz' | wc -l)
 echo "Копия базы: $OUT, $(du -k "$OUT" | cut -f1) КБ, integrity ok, за $(($(date +%s) - started)) с; копий $kept (хранится $KEEP), удалено копий ${#old[@]}, файлов журнала $logs_removed"
+exit "$logs_failed"

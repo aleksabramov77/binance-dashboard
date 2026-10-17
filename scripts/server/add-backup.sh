@@ -31,6 +31,12 @@ Group=$NAME
 Nice=10
 IOSchedulingClass=idle
 ExecStart=$BIN --db $DATA/app.db --dir $DATA/backups --logs $DATA/logs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=$DATA
+RestrictAddressFamilies=AF_UNIX
 UNIT
 
 cat >"/etc/systemd/system/$NAME-backup.timer" <<UNIT
@@ -47,5 +53,5 @@ WantedBy=timers.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable --now "$NAME-backup.timer" >/dev/null 2>&1
+systemctl enable --now "$NAME-backup.timer"
 echo "Копии базы $NAME: $BIN, каталог $DATA/backups, таймер $NAME-backup.timer ($(systemctl show -p NextElapseUSecRealtime --value "$NAME-backup.timer"))"

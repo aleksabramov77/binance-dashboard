@@ -36,8 +36,10 @@ fi
 
 # Ночная копия базы (spec 0062): каталог 700 у binance — читаем от его имени. Копий ещё нет — предупреждение.
 latest=$(sudo -u binance find /var/lib/binance/backups -maxdepth 1 -name 'app-????-??-??.db.gz' -printf '%T@ %f\n' 2>/dev/null | sort -n | tail -1)
-if [ -z "$latest" ]; then
-  say "WARN: ночных копий базы ещё нет (/var/lib/binance/backups)"
+if [ -z "$latest" ] && systemctl is-enabled --quiet binance-backup.timer; then
+  bad "таймер binance-backup включён, а копий в /var/lib/binance/backups нет — sudo systemctl start binance-backup и журнал"
+elif [ -z "$latest" ]; then
+  say "WARN: ночных копий базы ещё нет — таймер binance-backup не установлен (add-backup.sh, spec 0062)"
 else
   bk_age=$(($(date +%s) - ${latest%%.*}))
   say "копия базы: ${latest#* } ($((bk_age / 3600)) ч назад)"

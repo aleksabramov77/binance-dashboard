@@ -52,7 +52,7 @@ function main() {
   if (ssh.error || ssh.status !== 0) {
     rmSync(part, { force: true });
     fail(
-      `ssh не удался (${ssh.error?.message ?? `код ${ssh.status}`}) — снимок не скачан, прежний ${out} не тронут`,
+      `ssh не удался (${ssh.error?.message ?? `код ${ssh.status}`}) — ${args.backup === null ? "снимок" : "ночная копия"} не скачан${args.backup === null ? "" : "а"}, прежний ${out} не тронут`,
     );
   }
 

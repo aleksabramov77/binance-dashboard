@@ -146,24 +146,30 @@ ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-backup.sh binance'
 - копия вручную: `ssh claude@<ip> 'sudo systemctl start binance-backup'`;
 - смоук (`scripts/server/smoke.sh`, этап smoke `/flow release`) падает, если последней копии больше 26 ч.
 
-Восстановление базы из копии дня `<дата>` (на секундах 25–50 минуты; пауза торговли ~1 мин):
+Восстановление базы из копии дня `<дата>` (на секундах 25–50 минуты; пауза торговли ~1 мин). Копия распаковывается и
+проверяется **до** остановки сервисов: нет копии или она битая — сервисы не трогаются. После остановки любой сбой
+поднимает сервисы обратно (`trap … EXIT`, он же запускает их и при успехе). Текущая база сохраняется в
+`app.db.before-restore-<время UTC>` — повторное восстановление её не затирает.
 ```sh
-ssh claude@<ip> 'set -e; d=<дата>; B=/var/lib/binance
+ssh claude@<ip> 'd=<дата>; B=/var/lib/binance; ts=$(date -u +%Y%m%dT%H%M%SZ)
+  sudo -u binance sh -c "gunzip -c $B/backups/app-$d.db.gz > $B/app.db.restore" &&
+    [ "$(sudo -u binance sqlite3 $B/app.db.restore "pragma integrity_check")" = ok ] ||
+    { echo "копия $d не годится — сервисы не останавливались"; sudo rm -f $B/app.db.restore; exit 1; }
   live=$(systemctl is-active binance-live || true)
+  trap "sudo systemctl start binance; [ $live != active ] || sudo systemctl start binance-live" EXIT
+  set -e
   [ "$live" != active ] || sudo systemctl stop binance-live
   sudo systemctl stop binance
-  # текущая база — на всякий случай, через .backup: сервер не сливает WAL при остановке
-  sudo -u binance sqlite3 $B/app.db ".backup $B/app.db.before-restore"
-  sudo -u binance sh -c "gunzip -c $B/backups/app-$d.db.gz > $B/app.db.restore"
-  [ "$(sudo -u binance sqlite3 $B/app.db.restore "pragma integrity_check")" = ok ]
+  sudo -u binance sqlite3 $B/app.db ".backup $B/app.db.before-restore-$ts"   # текущая (сервер не сливает WAL при остановке)
   sudo rm -f $B/app.db-wal $B/app.db-shm
   sudo -u binance mv $B/app.db.restore $B/app.db
-  sudo systemctl start binance
-  [ "$live" != active ] || sudo systemctl start binance-live'
+  sudo chmod 600 $B/app.db
+  echo "восстановлено из $d, прежняя база — app.db.before-restore-$ts"'
 ```
 Затем смоук и `/experiments` на сайте. Всё, что записано после 23:30 дня копии, теряется (сделки paper, журнал);
 демо- и реальные позиции на бирже остаются — сверить их со строками зеркал вручную (как в «Откат» spec 0059).
-`app.db.before-restore` удалить, когда восстановление проверено.
+Если команда всё же оборвалась — проверить `systemctl is-active binance binance-live` и при необходимости
+`sudo systemctl start binance binance-live`. Файлы `app.db.before-restore-*` удалить, когда восстановление проверено.
 
 Скачать копию на Mac: `pnpm db:pull --backup` (последняя) или `pnpm db:pull --backup 2026-10-16` →
 `data/backup-<дата|latest>.db` (`quick_check` до замены); локальный сервер на ней:
