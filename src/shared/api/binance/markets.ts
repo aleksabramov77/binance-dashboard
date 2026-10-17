@@ -15,7 +15,7 @@ export type BinanceMarket = (typeof BINANCE_MARKETS)[number];
 /** Фьючерсные рынки: бессрочные контракты и funding. */
 export type FuturesMarket = Exclude<BinanceMarket, "spot">;
 
-/** Рынки ручных сделок и Binance Demo Trading (COIN-M на демо — позже). */
+/** Рынки ручных сделок (/signals) и их истории на Binance Demo; COIN-M на демо торгует только зеркало (spec 0056). */
 export const TRADE_MARKETS = ["spot", "usdm"] as const;
 export type Market = (typeof TRADE_MARKETS)[number];
 
@@ -23,6 +23,12 @@ export type Market = (typeof TRADE_MARKETS)[number];
 export const tradeMarketSchema = z.preprocess(
   normalizeMarket,
   z.enum(TRADE_MARKETS),
+);
+
+/** Любой рынок Binance (заявка зеркала: Spot, USDⓈ-M, COIN-M); старое futures — usdm. */
+export const binanceMarketSchema = z.preprocess(
+  normalizeMarket,
+  z.enum(BINANCE_MARKETS),
 );
 
 export { withLegacyMarketField };

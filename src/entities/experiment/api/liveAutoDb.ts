@@ -6,7 +6,7 @@ import {
   planLiveAuto,
   stopLossPnl,
 } from "../lib/liveAuto";
-import { DEMO_MIRROR_MARKETS, type Market } from "../model/assetGroup";
+import { LIVE_MIRROR_MARKETS, type Market } from "../model/assetGroup";
 import {
   demoMirrorOrdersTable,
   experimentsTable,
@@ -91,7 +91,7 @@ export async function readLiveAutoRows(
     .from(experimentsTable)
     .where(
       and(
-        inArray(experimentsTable.market, [...DEMO_MIRROR_MARKETS]),
+        inArray(experimentsTable.market, [...LIVE_MIRROR_MARKETS]),
         ne(experimentsTable.liveMirrorMode, "off"),
         ids ? inArray(experimentsTable.id, ids) : undefined,
       ),
@@ -243,7 +243,7 @@ export async function setExperimentLiveMode(
         eq(experimentsTable.id, id),
         mode === "off"
           ? undefined
-          : inArray(experimentsTable.market, [...DEMO_MIRROR_MARKETS]),
+          : inArray(experimentsTable.market, [...LIVE_MIRROR_MARKETS]),
       ),
     )
     .returning({

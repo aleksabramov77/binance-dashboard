@@ -175,11 +175,47 @@ describe("resetGroupDemo", () => {
     expect(await demoResetIds()).toEqual(["PF99"]);
   });
 
-  it("COIN-M — заблокировано, ничего не меняется", async () => {
-    expect(await resetGroupDemo("coinm")).toEqual({
-      blocked: "Демо-зеркало COIN-M — позже",
+  it("COIN-M (spec 0056) — закрывает демо-позиции COIN-M со ссылками и начинает демо-эру группы", async () => {
+    const runId = await ensureRun(db);
+    await createDbExperimentStore(db).insertTrade({
+      ...trade("c", runId, "PC99", "coinm"),
+      symbol: "BTCUSD_PERP",
     });
-    expect(closeDemoPosition).not.toHaveBeenCalled();
-    expect(await demoResetIds()).toEqual([]);
+    await setExperimentDemoMirror(db, "PC99", true);
+    const [c] = await listMirrorCandidates(db, new Date(Date.now() - 60_000));
+    expect(c).toMatchObject({ tradeId: "c", market: "coinm" });
+    await claimMirror(db, c);
+    const protectRefs = {
+      market: "coinm" as const,
+      entryOrderId: 1,
+      legs: "quantity" as const,
+      stop: { algoId: 2, clientAlgoId: "bdc-S" },
+      takeProfit: null,
+      contracts: 1,
+      contractSize: 100,
+    };
+    await updateMirror(db, "c", {
+      status: "protected",
+      message: "ok",
+      steps: [],
+      entryPrice: 81_000,
+      quantity: 100 / 81_000,
+      protectRefs,
+    });
+    const r = await resetGroupDemo("coinm");
+    expect(r).toMatchObject({
+      account: "demo",
+      experiments: 1,
+      closed: 1,
+      failed: 0,
+    });
+    expect(closeDemoPosition).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(closeDemoPosition).mock.calls[0][0]).toMatchObject({
+      tradeId: "c",
+      market: "coinm",
+      symbol: "BTCUSD_PERP",
+      protectRefs,
+    });
+    expect(await demoResetIds()).toEqual(["PC99"]);
   });
 });

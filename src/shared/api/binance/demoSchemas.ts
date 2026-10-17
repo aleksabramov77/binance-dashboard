@@ -18,11 +18,17 @@ export const exchangeInfoSchema = z.object({
     z
       .object({
         symbol: z.string(),
-        status: z.string(),
+        // Spot и USDⓈ-M — status; у COIN-M (dapi) — contractStatus (проба 2026-10-17).
+        status: z.string().optional(),
+        contractStatus: z.string().optional(),
         filters: z.array(filterSchema),
         // Только спот: разрешены ли составные заявки (OCO, OTO/OTOCO).
         ocoAllowed: z.boolean().optional(),
         otoAllowed: z.boolean().optional(),
+        // Только COIN-M: бессрочный (PERPETUAL) или поставочный, размер контракта в $, монета маржи.
+        contractType: z.string().optional(),
+        contractSize: z.coerce.number().optional(),
+        marginAsset: z.string().optional(),
       })
       .loose(),
   ),

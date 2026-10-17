@@ -12,8 +12,9 @@ import {
 } from "drizzle-orm";
 import { computeLiveStats, type LiveStatsRow } from "../lib/liveStats";
 import {
-  DEMO_MIRROR_MARKETS,
-  demoMirrorMarketSchema,
+  LIVE_MIRROR_MARKETS,
+  type LiveMirrorMarket,
+  liveMirrorMarketSchema,
 } from "../model/assetGroup";
 import {
   experimentsTable,
@@ -45,8 +46,9 @@ const parseProtectRefs = (raw: unknown): MirrorProtectRefs | null => {
   return parsed.success ? parsed.data : null;
 };
 
-/** Реальная позиция на закрытие: как у демо + когда открыта (окно исполнений для PnL). */
-export interface LiveMirrorToClose extends MirrorToClose {
+/** Реальная позиция на закрытие: как у демо + когда открыта (окно исполнений для PnL). Только Spot и USDⓈ-M. */
+export interface LiveMirrorToClose extends Omit<MirrorToClose, "market"> {
+  market: LiveMirrorMarket;
   experimentId: string;
   entryPrice: number | null;
   stopLoss: number | null;
@@ -59,7 +61,7 @@ const toClose = (
 ): LiveMirrorToClose => ({
   tradeId: r.tradeId,
   experimentId: r.experimentId,
-  market: demoMirrorMarketSchema.parse(r.market),
+  market: liveMirrorMarketSchema.parse(r.market),
   symbol: r.symbol,
   direction: r.direction as MirrorToClose["direction"],
   quantity: r.quantity ?? 0,
@@ -70,11 +72,16 @@ const toClose = (
   openedAt: r.createdAt.toISOString(),
 });
 
+/** Кандидат реального зеркала: как у демо, но только Spot и USDⓈ-M (COIN-M на реальном счёте не торгуется). */
+export type LiveMirrorCandidate = Omit<MirrorCandidate, "market"> & {
+  market: LiveMirrorMarket;
+};
+
 /** Открытые paper-сделки экспериментов с включённым «Реальным счётом», не раньше `since`, ещё без строки зеркала. */
 export async function listLiveCandidates(
   db: Db,
   since: Date,
-): Promise<(MirrorCandidate & { experimentId: string })[]> {
+): Promise<LiveMirrorCandidate[]> {
   const rows = await db
     .select({
       tradeId: paperTradesTable.id,
@@ -100,7 +107,7 @@ export async function listLiveCandidates(
     .where(
       and(
         eq(experimentsTable.liveMirror, true),
-        inArray(paperTradesTable.market, [...DEMO_MIRROR_MARKETS]),
+        inArray(paperTradesTable.market, [...LIVE_MIRROR_MARKETS]),
         isNull(paperTradesTable.closedAt),
         gte(paperTradesTable.openedAt, since),
         isNull(liveMirrorOrdersTable.tradeId),
@@ -109,7 +116,7 @@ export async function listLiveCandidates(
     .orderBy(paperTradesTable.openedAt);
   return rows.map((r) => ({
     ...r,
-    market: demoMirrorMarketSchema.parse(r.market),
+    market: liveMirrorMarketSchema.parse(r.market),
     direction: r.direction as MirrorCandidate["direction"],
     openedAt: r.openedAt.toISOString(),
   }));
@@ -140,7 +147,7 @@ export async function liveActiveRows(db: Db): Promise<LiveActiveRow[]> {
   return rows.map((r) => ({
     tradeId: r.tradeId,
     experimentId: r.experimentId,
-    market: demoMirrorMarketSchema.parse(r.market),
+    market: liveMirrorMarketSchema.parse(r.market),
     symbol: r.symbol,
     direction: r.direction as LiveActiveRow["direction"],
     status: r.status as MirrorStatus,
@@ -490,7 +497,7 @@ export async function listStaleLivePending(db: Db): Promise<
   return rows.map((r) => ({
     tradeId: r.tradeId,
     experimentId: r.experimentId,
-    market: demoMirrorMarketSchema.parse(r.market),
+    market: liveMirrorMarketSchema.parse(r.market),
     symbol: r.symbol,
     direction: r.direction === "short" ? "short" : "long",
     openedAt: r.createdAt.toISOString(),

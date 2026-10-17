@@ -6,7 +6,7 @@
 |---|---|---|---|
 | Публичное API (рынок, Earn) | `api.binance.com`, `fapi.binance.com`, `dapi.binance.com` (COIN-M), `www.binance.com/bapi` | не нужен | `public.server.ts` |
 | Аккаунт (read-only) | `api.binance.com` (`/sapi`, `/api/v3/account`) | `BINANCE_API_KEY/SECRET` | `account.server.ts` |
-| Demo Trading (сделки) | `demo-api.binance.com`, `demo-fapi.binance.com`; `demo-dapi.binance.com` (COIN-M) — только чтение баланса | `BINANCE_DEMO_API_KEY/SECRET` | `demo.server.ts` |
+| Demo Trading (сделки) | `demo-api.binance.com`, `demo-fapi.binance.com`, `demo-dapi.binance.com` (COIN-M: демо-зеркало, spec 0056) | `BINANCE_DEMO_API_KEY/SECRET` | `demo.server.ts` |
 | Live — реальный счёт (торговый субсчёт, spec 0047) | `api.binance.com` (`/sapi`, `/api/v3`), `fapi.binance.com` — только пути белого списка | `BINANCE_TRADE_API_KEY/SECRET` — **только у воркера на VM** (`scripts/live-worker.ts`), у веб-приложения его нет | `live.server.ts` |
 
 ## Публичный API модуля
@@ -36,7 +36,9 @@
   `totalWalletBalance`, `availableBalance`, `totalUnrealizedProfit`). `LIVE_DEMO_HOSTS` — «площадка демо» для локальной
   проверки: тот же клиент и белый список на демо-хостах с демо-ключом (воркер запрещает режим в production и не на
   localhost). Импортирует только воркер.
-- `venue.server.ts` — `TradeVenue` (подписанный запрос к рынку + публичные адреса), `demoVenue(creds)`, `DEMO_URL`.
+- `venue.server.ts` — `TradeVenue` (подписанный запрос к рынку + публичные адреса), `demoVenue(creds)`, `DEMO_URL`. Рынки
+  площадки — `spot` / `usdm` / `coinm` (`VenueMarket`, spec 0056); адреса COIN-M есть только у демо (`venuePublicUrl` без
+  него — ошибка до сети), `liveVenue` отклоняет подписанный запрос к `coinm` до подписи (`LiveRequestDeniedError`).
   Функции `demoTrading.ts` (ордера, чтение позиций, исполнения) принимают площадку; `fetchDemoSymbolRules` /
   `fetchDemoPrice` — публичную часть площадки (`PublicVenue`) **обязательным** параметром: умолчания нет, чтобы правила и
   цена реального счёта не пришли с демо-хоста. Демо-вызовы передают `DEMO_PUBLIC_VENUE` (экспорт `demo.server.ts`). `enableOnewayMode` — One-way для реальных фьючерсов.
@@ -110,6 +112,23 @@
   и `nextRecheckDelay` — сколько перечитывать заявку с неизвестным исходом, прежде чем сказать «её нет».
   Перечитать ордер спота по своему id — `fetchDemoSpotOrderByClientId` (null — `-2013`, ордера нет);
   `clientOrderId` задают `demoSpotMarketOrder` и `spotEntryListRequest` (`clientIds`).
+- **COIN-M на демо (spec 0056, проба demo-dapi 2026-10-17).** Фьючерсные функции `demoTrading.ts` принимают рынок
+  последним параметром (`VenueFuturesMarket`, по умолчанию `usdm`); `fetchDemoAlgoOrder` / `demoCancelAlgoOrder` —
+  `ProtectMarket` (`{ market: "coinm", symbol }`). Пути — `/dapi/v1/…`: `exchangeInfo` (статус — `contractStatus`, только
+  `PERPETUAL`; `SymbolRules.contract` — размер контракта в $ и монета маржи, количество — целые контракты), `ticker/price`
+  (ответ — массив), `positionSide/dual` (режим и его кэш — свои у COIN-M; демо-счёт уже в Hedge), `marginType` (`-4046` —
+  уже изолированная), `leverage`, `positionRisk` (параметр `pair`, `symbol` dapi игнорирует — фильтр по символу у нас),
+  `openOrders`, `order`. Стоп и тейк — **обычные условные ордера** `POST /dapi/v1/order` `STOP_MARKET` /
+  `TAKE_PROFIT_MARKET` со `stopPrice`, `workingType=MARK_PRICE`, `priceProtect`, на свой объём; в Hedge — `positionSide`
+  без `reduceOnly` (`-1106`, биржа ставит reduceOnly сама), принимаются и без позиции («стоп до входа»). Сработавший — тот
+  же `orderId`: `type` MARKET, `origType` прежний, `status` FILLED, `executedQty`/`avgPrice`; соседняя нога остаётся NEW.
+  POST без `newOrderRespType=RESULT` и даже с ним не присылает `avgPrice` — цена из `GET /dapi/v1/order`. Маржа —
+  `fetchDemoCoinmAvailable` (`/dapi/v1/balance` → `availableBalance` по монетам; вход изолированной позиции списывает
+  маржу из него).
+- `coinmOrders.ts` (чистый, тесты `coinmOrders.test.ts`) — схема ордера dapi и приведение условного ордера к виду
+  algo-ордера (`coinmOrderAsAlgo`: algoId = orderId, clientAlgoId = clientOrderId; FILLED → FINISHED, частично —
+  TRIGGERED, сработал без исполнения — TRIGGERING), чтобы логика своих ног в `features/execute-trade` была одна;
+  `splitCoinmOpenOrders` — открытые ордера на обычные и условные (свои ноги), `coinmPair` — пара для `positionRisk`.
 - `positionMode.ts` — режим позиций фьючерсов (spec 0012, PR 2c): `FuturesSide` (режим + сторона) и параметры
   ордеров — вход (`entryParams`: Hedge — `positionSide`), закрытие (`reduceParams`: One-way — `reduceOnly`, Hedge —
   `positionSide`, reduceOnly там не передаётся), защита на свой объём (`protectParams`: `quantity`, без
@@ -119,7 +138,9 @@
   `fetchDemoSpotOpenOrders` / `demoSpotCancelOrder`. `demoFuturesMarketOrder`, `demoFuturesProtect` (бывший
   `demoFuturesCloseAt`), `demoFuturesReduceMarket` принимают `FuturesSide`. `demoFuturesPrepare`: `-4047/-4048`
   (ордера/позиция по символу) — тип маржи не меняется, не ошибка.
-- `protectRefs.ts` — `demoProtectRefsSchema` (клиент-безопасно): ссылки на свои стоп/тейк сделки (spec 0012, PR 2b).
+- `protectRefs.ts` — `demoProtectRefsSchema` (клиент-безопасно): ссылки на свои стоп/тейк сделки (spec 0012, PR 2b);
+  у COIN-M (spec 0056) — те же `{ algoId, clientAlgoId }` (orderId / clientOrderId условного ордера) плюс `contracts` и
+  `contractSize`.
   Свои ордера: `fetchDemoAlgoOrder` / `demoCancelAlgoOrder` (по algoId или clientAlgoId; нет — `-2013`/`-2011`), `demoSpotCancelByClientId`,
   `fetchDemoFuturesOrder` (по orderId или clientOrderId; null — `-2013`); свои id принимают `demoFuturesMarketOrder`,
   `demoFuturesProtect` (`clientAlgoId`), `demoSpotOcoSell`, `demoSpotStopLossSell`. `fetchDemoOpenAlgoOrders` —

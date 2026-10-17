@@ -144,7 +144,10 @@ export interface TradeContext {
   price: number;
   rules: SymbolRules;
   maxNotionalUsd: number;
-  /** Свободные USDT на кошельке, которым торгуем (Spot или USDⓈ-M Futures). */
+  /**
+   * Свободные деньги кошелька, которым торгуем, $: USDT Spot или USDⓈ-M Futures; у COIN-M — свободная маржа в монете
+   * контракта × её цена (spec 0056).
+   */
   availableUsd: number;
   /** Максимальная потеря на стопе, доля баланса кошелька. */
   maxRiskPct: number;
@@ -159,8 +162,14 @@ export function validateTrade(
 ): { ok: true; value: ValidatedTrade } | { ok: false; errors: string[] } {
   const { price, rules, maxNotionalUsd, availableUsd, maxRiskPct } = ctx;
   const errors: string[] = [];
-  if (req.direction === "short" && req.market !== "usdm")
+  if (req.direction === "short" && req.market === "spot")
     errors.push("Шорт возможен только на фьючерсах.");
+  // COIN-M: количество — в контрактах; без размера контракта заявку не перевести (spec 0056).
+  const contract = req.market === "coinm" ? rules.contract : undefined;
+  if (req.market === "coinm" && !contract)
+    errors.push(
+      `У ${req.symbol} нет размера контракта COIN-M — заявку не перевести в контракты.`,
+    );
   if (req.market === "spot" && req.leverage !== 1)
     errors.push("На Spot плечо не используется.");
 
@@ -203,25 +212,38 @@ export function validateTrade(
   const isSpot = req.market === "spot";
   // Стоп — как уйдёт на биржу (к тику): по нему биржа считает NOTIONAL стопа спота.
   const stopAtExchange = Number(roundToTick(stopLoss, rules.tickSize));
-  const quantity = floorToStep(
-    req.fitMinNotional
-      ? Math.max(
-          fitToMinNotional(req.quantity, price, rules, maxNotionalUsd),
-          isSpot
-            ? fitSpotStopToMinNotional(
-                req.quantity,
-                price,
-                stopAtExchange,
-                rules,
-                maxNotionalUsd,
-              )
-            : 0,
-        )
-      : req.quantity,
-    rules.stepSize,
-  );
+  // COIN-M: контракты = монетный эквивалент × цена его расчёта / размер контракта, не меньше 1 (как у paper-сделки).
+  const quantity = contract
+    ? floorToStep(
+        Math.max(
+          1,
+          Math.round(
+            (req.quantity * (req.referencePrice ?? price)) / contract.size,
+          ),
+        ),
+        rules.stepSize,
+      )
+    : floorToStep(
+        req.fitMinNotional
+          ? Math.max(
+              fitToMinNotional(req.quantity, price, rules, maxNotionalUsd),
+              isSpot
+                ? fitSpotStopToMinNotional(
+                    req.quantity,
+                    price,
+                    stopAtExchange,
+                    rules,
+                    maxNotionalUsd,
+                  )
+                : 0,
+            )
+          : req.quantity,
+        rules.stepSize,
+      );
   const qty = Number(quantity);
-  const notionalUsd = qty * price;
+  // COIN-M: объём — контракты × размер в $, в монете — объём / цена.
+  const notionalUsd = contract ? qty * contract.size : qty * price;
+  const coinQty = contract ? notionalUsd / price : qty;
   if (qty <= 0 || qty < rules.minQty)
     errors.push(`Количество меньше минимального (${rules.minQty}).`);
   if (notionalUsd < rules.minNotional)
@@ -241,21 +263,27 @@ export function validateTrade(
       `Объём $${notionalUsd.toFixed(2)} больше лимита на демо-сделку ($${maxNotionalUsd}).`,
     );
 
-  const wallet = req.market === "spot" ? "Spot" : "USDⓈ-M Futures";
+  const wallet =
+    req.market === "spot"
+      ? "Spot"
+      : contract
+        ? `COIN-M Futures (${contract.marginAsset})`
+        : "USDⓈ-M Futures";
+  const currency = contract ? contract.marginAsset : "USDT";
   // Спот покупается LIMIT FOK по цене +SPOT_ENTRY_SLIPPAGE — биржа блокирует USDT по лимитной цене.
   const requiredUsd = isSpot
     ? notionalUsd * (1 + SPOT_ENTRY_SLIPPAGE)
     : notionalUsd / req.leverage;
   if (availableUsd <= 0) {
     errors.push(
-      `На демо-кошельке ${wallet} 0 USDT — пополните его на demo.binance.com.`,
+      `На демо-кошельке ${wallet} 0 ${currency} — пополните его на demo.binance.com.`,
     );
   } else {
     if (requiredUsd > availableUsd)
       errors.push(
         `Нужно ${usd(requiredUsd)} ${isSpot ? `USDT (с запасом ${SPOT_ENTRY_SLIPPAGE_TEXT} на цену покупки)` : "маржи"}, а на ${wallet} свободно ${usd(availableUsd)}.`,
       );
-    const lossAtStop = qty * Math.abs(price - stopLoss);
+    const lossAtStop = coinQty * Math.abs(price - stopLoss);
     const maxLoss = availableUsd * maxRiskPct;
     if (lossAtStop > maxLoss)
       errors.push(

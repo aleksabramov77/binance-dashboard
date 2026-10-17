@@ -127,11 +127,9 @@ describe("parsePrivateExperiments", () => {
     expect(errorsOf(parse([item({ id: "PC99", market: "usdm" })]))).toEqual([
       "PC99: поле market — префикс PC означает coinm, а указано usdm",
     ]);
-    expect(
-      errorsOf(
-        parse([item({ id: "PC99", market: "coinm", demoMirror: true })]),
-      ),
-    ).toEqual(["PC99: поле demoMirror — Демо-зеркало COIN-M — позже"]);
+    // Демо-зеркало COIN-M есть (spec 0056): ручное «Вкл» файлом — как у остальных групп.
+    const on = parse([item({ id: "PC99", market: "coinm", demoMirror: true })]);
+    expect(on.ok && on.experiments[0]).toMatchObject({ demoMirror: true });
   });
 
   it("id без префикса PS/PF/PC и id с префиксом другого рынка", () => {

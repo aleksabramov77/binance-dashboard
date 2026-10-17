@@ -43,10 +43,22 @@ import {
 
 type Market = "spot" | "usdm";
 
+type OpenDecision = Extract<MirrorDecision, { kind: "open" }>;
+/** Вход на рынке реального счёта: COIN-M там не торгуется (spec 0056, AC9). */
+type LiveOpen = OpenDecision & {
+  request: OpenDecision["request"] & { market: Market };
+};
+const isLiveOpen = (d: OpenDecision): d is LiveOpen =>
+  d.request.market !== "coinm";
+
 /** Реальное зеркало: одна позиция на монету рынка, свои тексты пропусков. */
 export const LIVE_MIRROR_POLICY: MirrorPlanPolicy = {
   maxPerCoin: 1,
-  marketName: { spot: "реальном споте", usdm: "реальных фьючерсах" },
+  marketName: {
+    spot: "реальном споте",
+    usdm: "реальных фьючерсах",
+    coinm: "реальных фьючерсах COIN-M",
+  },
   name: "реальное зеркало",
   coinBusy: () => LIVE_SKIP.coin,
 };
@@ -735,11 +747,15 @@ export async function runLiveMirror(
         hasRefs: true,
       })),
     positionMode: async () => (await ensureOneway(ex)) ?? "oneway",
+    // COIN-M реального счёта нет (spec 0056): символа «нет», денег 0 — до ордеров дело не доходит.
     hasSymbol: async (market, symbol) =>
-      (await ex.symbolRules(market, symbol)) !== null,
-    freeUsd: async (market) => (await ex.balances())[market],
+      market !== "coinm" && (await ex.symbolRules(market, symbol)) !== null,
+    freeUsd: async (market) =>
+      market === "coinm" ? 0 : (await ex.balances())[market],
     gate: {
       check: async (d) => {
+        if (!isLiveOpen(d))
+          return { tradeId: d.tradeId, kind: "skip", reason: LIVE_SKIP.coinm };
         const r = await gate.check(d);
         if (r?.kind === "open") {
           tradeOfRequest.set(r.request, r.tradeId);
@@ -748,7 +764,9 @@ export async function runLiveMirror(
         }
         return r;
       },
-      spend: (d) => gate.spend(d),
+      spend: (d) => {
+        if (isLiveOpen(d)) gate.spend(d);
+      },
     },
     // Пропуск пишется одной вставкой в markSkipped; вход — атомарный захват в БД (стоп перепроверяется там же).
     claim: async (tradeId, kind) =>

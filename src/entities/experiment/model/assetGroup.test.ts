@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   ASSET_GROUPS,
   assetGroupOf,
-  COINM_MIRROR_BLOCKED,
   DEMO_MIRROR_MARKETS,
+  LIVE_MIRROR_MARKETS,
   parseMarketParam,
 } from "./assetGroup";
 
@@ -32,13 +32,17 @@ describe("ASSET_GROUPS", () => {
     ]);
   });
 
-  it("демо-зеркало COIN-M недоступно с подсказкой, у остальных — доступно", () => {
-    expect(ASSET_GROUPS.coinm.demoMirrorBlocked).toBe(COINM_MIRROR_BLOCKED);
-    expect(ASSET_GROUPS.spot.demoMirrorBlocked).toBeNull();
-    expect(ASSET_GROUPS.usdm.demoMirrorBlocked).toBeNull();
+  it("демо-зеркало доступно у всех групп, COIN-M — на demo-dapi (spec 0056)", () => {
+    for (const m of MARKETS)
+      expect(ASSET_GROUPS[m].demoMirrorBlocked).toBeNull();
     expect([...DEMO_MIRROR_MARKETS]).toEqual(
       MARKETS.filter((m) => ASSET_GROUPS[m].demoMirrorBlocked === null),
     );
+    expect([...DEMO_MIRROR_MARKETS]).toEqual(["spot", "usdm", "coinm"]);
+  });
+
+  it("реальный счёт — свой список без COIN-M, не общий с демо (spec 0056, AC9)", () => {
+    expect([...LIVE_MIRROR_MARKETS]).toEqual(["spot", "usdm"]);
   });
 
   it("фильтр из URL: старое futures — USDⓈ-M, мусор — null", () => {

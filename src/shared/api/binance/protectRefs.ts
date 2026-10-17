@@ -6,7 +6,7 @@ import { withLegacyMarketField } from "./markets.ts";
 // Та же форма — mirrorProtectRefsSchema в entities/experiment (слайс без @/…); совместимость типов
 // проверяет компилятор в src/app/server/demoMirror.ts.
 
-/** Algo-ордер фьючерсов (STOP_MARKET / TAKE_PROFIT_MARKET). */
+/** Algo-ордер фьючерсов (STOP_MARKET / TAKE_PROFIT_MARKET); у COIN-M — условный ордер (orderId / clientOrderId). */
 const algoRefSchema = z.object({
   /** null — исход постановки неизвестен и ордер не нашёлся: ищем и снимаем по clientAlgoId. */
   algoId: z.number().nullable(),
@@ -34,6 +34,21 @@ export const demoProtectRefsSchema = z.preprocess(
       legs: z.literal("quantity").optional(),
       stop: algoRefSchema.nullable(),
       takeProfit: algoRefSchema.nullable(),
+    }),
+    z.object({
+      /**
+       * COIN-M (demo-dapi, spec 0056): стоп и тейк — условные ордера `/dapi/v1/order` на свой объём; в ссылке algoId —
+       * их orderId, clientAlgoId — clientOrderId (coinmOrders.ts). Количество на бирже — в контрактах.
+       */
+      market: z.literal("coinm"),
+      entryOrderId: z.number().nullable(),
+      legs: z.literal("quantity"),
+      stop: algoRefSchema.nullable(),
+      takeProfit: algoRefSchema.nullable(),
+      /** Свой объём, контрактов (исполненный вход — на него стоят стоп и тейк): закрытие докрывает не больше. */
+      contracts: z.number(),
+      /** Размер контракта, $ (BTC — 100, остальные — 10): объём в монете = контракты × размер / цена. */
+      contractSize: z.number(),
     }),
     z.object({
       market: z.literal("spot"),

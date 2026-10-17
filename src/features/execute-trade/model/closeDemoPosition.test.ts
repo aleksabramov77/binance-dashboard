@@ -107,3 +107,117 @@ describe("closeDemoPosition: свои TP/SL сняты, а выход не пр�
     expect(api.demoCancelAlgoOrder).not.toHaveBeenCalled();
   });
 });
+
+describe("closeDemoPosition: COIN-M (spec 0056)", () => {
+  const coinmVenue: TradeVenue = {
+    kind: "demo",
+    publicUrl: { spot: "https://s", usdm: "https://f", coinm: "https://d" },
+    signed: vi.fn(),
+  };
+  // Зеркало на 2 контракта BTCUSD_PERP ($100): в строке — монетный эквивалент, на бирже — контракты из ссылок.
+  const coinmReq = {
+    market: "coinm" as const,
+    symbol: "BTCUSD_PERP",
+    direction: "long" as const,
+    quantity: 0.00246,
+    protectRefs: {
+      market: "coinm" as const,
+      entryOrderId: 1,
+      legs: "quantity" as const,
+      stop: { algoId: 21, clientAlgoId: "bdc-S" },
+      takeProfit: { algoId: 22, clientAlgoId: "bdc-T" },
+      contracts: 2,
+      contractSize: 100,
+    },
+  };
+  const at = { market: "coinm", symbol: "BTCUSD_PERP" };
+
+  beforeEach(() => {
+    api.fetchDemoSymbolRules.mockResolvedValue({
+      stepSize: "1",
+      tickSize: "0.1",
+      minQty: 1,
+      minNotional: 0,
+      contract: { size: 100, marginAsset: "BTC" },
+    });
+    api.fetchDemoPositionMode.mockResolvedValue("hedge");
+    // На стороне LONG ещё и соседнее зеркало: 5 контрактов.
+    api.demoFuturesPositions.mockResolvedValue([
+      { positionSide: "LONG", amount: 5, entryPrice: 81000 },
+    ]);
+  });
+
+  it("снимает свои стоп и тейк по ордерам символа и закрывает только свои 2 контракта своей стороны", async () => {
+    // POST закрытия на dapi без avgPrice — цена из GET ордера (проба 2026-10-17).
+    api.demoFuturesReduceMarket.mockResolvedValue({
+      orderId: 7,
+      avgPrice: 0,
+      executedQty: 2,
+    });
+    api.fetchDemoFuturesOrder.mockResolvedValue({
+      orderId: 7,
+      status: "FILLED",
+      avgPrice: 80915.97,
+      executedQty: 2,
+    });
+    const r = await closeDemoPosition(coinmReq, coinmVenue);
+    expect(api.fetchDemoAlgoOrder).toHaveBeenCalledWith(
+      coinmVenue,
+      { algoId: 21 },
+      at,
+    );
+    expect(api.demoCancelAlgoOrder).toHaveBeenCalledWith(
+      coinmVenue,
+      { algoId: 22 },
+      at,
+    );
+    expect(api.fetchDemoPositionMode).toHaveBeenCalledWith(coinmVenue, "coinm");
+    expect(api.demoFuturesReduceMarket).toHaveBeenCalledWith(
+      coinmVenue,
+      "BTCUSD_PERP",
+      "SELL",
+      "2",
+      { mode: "hedge", direction: "long" },
+      "bdc-C",
+      "coinm",
+    );
+    expect(api.fetchDemoFuturesOrder).toHaveBeenCalledWith(
+      coinmVenue,
+      "BTCUSD_PERP",
+      { orderId: 7 },
+      "coinm",
+    );
+    expect(r).toMatchObject({ status: "closed", exitPrice: 80915.97 });
+  });
+
+  it("сработал свой тейк на 2 контракта — докрывать нечего, позицию закрыла биржа", async () => {
+    api.fetchDemoAlgoOrder.mockImplementation(async (_v, ref) =>
+      ref.algoId === 22
+        ? {
+            algoId: 22,
+            algoStatus: "FINISHED",
+            actualOrderId: 22,
+            actualPrice: 81000.5,
+            actualQty: 2,
+          }
+        : {
+            algoId: 21,
+            algoStatus: "NEW",
+            actualOrderId: null,
+            actualPrice: 0,
+            actualQty: 0,
+          },
+    );
+    const r = await closeDemoPosition(coinmReq, coinmVenue);
+    expect(api.demoCancelAlgoOrder).toHaveBeenCalledWith(
+      coinmVenue,
+      { algoId: 21 },
+      at,
+    );
+    expect(api.demoFuturesReduceMarket).not.toHaveBeenCalled();
+    expect(r).toMatchObject({
+      status: "closed",
+      message: "Позиция уже закрыта биржей (сработал стоп/тейк).",
+    });
+  });
+});

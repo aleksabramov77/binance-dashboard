@@ -149,6 +149,17 @@ export function DemoAccountsCard({ settings }: { settings: LabSettings }) {
             <dd className="font-mono tabular-nums">
               {demoBalances ? formatUsd(demoBalances.usdm) : "—"}
             </dd>
+            <dt
+              className="text-muted-foreground"
+              title="Свободная маржа COIN-M в $: у каждой монеты свой кошелёк (BTC для BTCUSD_PERP…), сумма по монетам. Вход COIN-M пропускается, если в монете контракта после него останется меньше $50."
+            >
+              Свободно COIN-M
+            </dt>
+            <dd className="font-mono tabular-nums">
+              {demoBalances?.coinm != null
+                ? formatUsd(demoBalances.coinm)
+                : "—"}
+            </dd>
           </dl>
           <ConfirmAction
             label="Сбросить всё Demo"

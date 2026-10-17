@@ -263,7 +263,8 @@ export function diffApply(
         reason: null,
       });
   }
-  // «Вкл» и «Авто» для группы без демо-зеркала (COIN-M) — ошибка с той же причиной, что в UI и API (spec 0043).
+  // «Вкл» и «Авто» для группы без демо-зеркала — ошибка с той же причиной, что в UI и API (spec 0043; с spec 0056
+  // зеркало есть у всех групп, COIN-M тоже).
   const mode = (ids: string[], to: DemoMirrorMode) => {
     for (const id of ids) {
       const e = get(id);

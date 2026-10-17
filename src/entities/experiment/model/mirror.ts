@@ -79,6 +79,16 @@ export const mirrorProtectRefsSchema = z.preprocess(
       takeProfit: algoRefSchema.nullable(),
     }),
     z.object({
+      // COIN-M (spec 0056): условные ордера dapi — algoId = orderId, clientAlgoId = clientOrderId; объём — контракты.
+      market: z.literal("coinm"),
+      entryOrderId: z.number().nullable(),
+      legs: z.literal("quantity"),
+      stop: algoRefSchema.nullable(),
+      takeProfit: algoRefSchema.nullable(),
+      contracts: z.number(),
+      contractSize: z.number(),
+    }),
+    z.object({
       market: z.literal("spot"),
       orderListId: z.number().nullable(),
       netQuantity: z.number().nullable().optional(),

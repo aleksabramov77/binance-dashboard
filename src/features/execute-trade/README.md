@@ -40,6 +40,20 @@
   снимает вторую ногу сам.
 - `getTradeHistory()` — история демо-сделок с биржи (`GET /api/trade/history`), локально не хранится.
 
+## COIN-M на демо (spec 0056)
+- Только вход и закрытие **демо-зеркала** на `demo-dapi.binance.com` (ручных сделок COIN-M нет: `/api/trade` принимает
+  `manualTradeRequestSchema` — Spot и USDⓈ-M к USDT; реальный счёт COIN-M не торгует). `TradeRequest.market = "coinm"`,
+  символ `…USD_PERP`; `quantity` — монетный эквивалент paper-сделки, `referencePrice` — её вход.
+- `lib/validateTrade.ts`: контракты = `round(quantity × referencePrice / размер контракта)`, не меньше 1; объём в $ —
+  контракты × размер, маржа и риск — в $ по свободной марже монеты контракта (`COIN-M Futures (BTC)`). Шорт разрешён.
+- `placeTrade` → `placeFutures` с `market: "coinm"`: режим позиций, Hedge (`FUTURES_AUTO_HEDGE`), «стоп до входа»
+  (`FUTURES_STOP_BEFORE_ENTRY`), маржа и плечо, вход, стоп и тейк на свой объём, откат — те же шаги, что у USDⓈ-M, на
+  рынке coinm (стоп и тейк — условные ордера dapi, см. README `shared/api/binance`). `TradeResult.filledQuantity` — в монете
+  (контракты × размер / цена входа), `protectRefs` — `{ market: "coinm", …, contracts, contractSize }`.
+- `closeDemoPosition` / `sweepTriggeredLegs`: свои ноги — по `orderId` символа (`lib/closePlan.ts → protectMarketOf`),
+  докрывается не больше `protectRefs.contracts` своей стороны; сверка ног — одна выборка открытых ордеров COIN-M на прогон,
+  сбой одного рынка не мешает другому.
+
 ## Площадка (spec 0049)
 - `TradeVenue` (`shared/api/binance/venue.server.ts`) — куда уходят подписанные запросы и откуда берутся публичные
   справочники: демо — `demoVenue(creds)` (signedRequest на демо-хосты), реальный счёт — `liveVenue(client)` (каждый
@@ -176,6 +190,7 @@ PR 2d) — выход самой поздней открытой сделки д
 ## Тесты
 `lib/validateTrade.test.ts` — валидация, округление, минимум после округления, фильтр цены, деньги спота с +0,5%,
 минимум стопа после комиссии; `lib/spotEntry.test.ts` — выбор OTOCO/OTO, цена и объём заявки, статусы отложенных
-ордеров, clientOrderId и перечитанная заявка; `lib/closePlan.test.ts` — закрытие по своим ордерам; `lib/futuresMode.test.ts` — режим позиций, своя сторона, что снимать у старых строк, порядок «стоп до входа», общий срок сделки; `lib/tradeOutcome.test.ts` — исходы по шагам (откат фьючерсов,
+ордеров, clientOrderId и перечитанная заявка; `lib/closePlan.test.ts` — закрытие по своим ордерам; `model/placeTrade.test.ts` — вход COIN-M (контракты, рынок coinm,
+стоп до входа, откат, маржа монеты); `model/closeDemoPosition.test.ts`, `model/sweepTriggeredLegs.test.ts` — в т.ч. COIN-M; `lib/futuresMode.test.ts` — режим позиций, своя сторона, что снимать у старых строк, порядок «стоп до входа», общий срок сделки; `lib/tradeOutcome.test.ts` — исходы по шагам (откат фьючерсов,
 защита/продажа спота, неизвестный исход входа); `lib/groupFills.test.ts`, `lib/markTrades.test.ts` —
 сборка ордеров и статусы сделок. Сценарии с сетью проверяются вручную на демо-счёте.

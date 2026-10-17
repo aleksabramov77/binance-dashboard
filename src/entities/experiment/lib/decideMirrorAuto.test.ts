@@ -101,10 +101,13 @@ describe("decideMirrorAuto: «Авто»", () => {
     expect(off?.change).toBe(false);
   });
 
-  it("COIN-M автомат не трогает", () => {
-    expect(
-      decideMirrorAuto(exp({ market: "coinm", windowR: rs(30, 1) }), true),
-    ).toBeNull();
+  it("COIN-M — по общему правилу (spec 0056): 30 сделок со средним R > 0 — включает", () => {
+    const plan = decideMirrorAuto(
+      exp({ market: "coinm", windowR: rs(30, 1) }),
+      true,
+    );
+    expect(plan?.verdict.decision).toBe("enable");
+    expect(plan?.change).toBe(true);
   });
 
   it("в «Авто» подсказок нет, старая подсказка сбрасывается", () => {

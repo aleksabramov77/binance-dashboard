@@ -22,6 +22,7 @@ import {
   withMirrorRunLock,
 } from "@/entities/experiment";
 import {
+  coinmMarginCoin,
   emptyMirrorRunResult,
   type MirrorRunResult,
   mirrorLogEntry,
@@ -34,7 +35,9 @@ import {
 } from "@/features/execute-trade";
 import {
   DEMO_PUBLIC_VENUE,
+  fetchDemoCoinmAvailable,
   fetchDemoPositionMode,
+  fetchDemoPrice,
   fetchDemoSymbolRules,
   fetchDemoUsdtBalances,
 } from "@/shared/api/binance/demo.server";
@@ -63,11 +66,29 @@ export async function runDemoMirror(): Promise<MirrorRunResult> {
   return emptyMirrorRunResult(getDemoTradingConfig() !== null, true);
 }
 
+/**
+ * Монета маржи контракта COIN-M — из exchangeInfo demo-dapi (marginAsset), как у проверки заявки (spec 0056): резерв и
+ * вход смотрят в один кошелёк. Справочник кэшируется на 10 минут; нет символа — базовая монета.
+ */
+const coinmMarginAsset = async (symbol: string) =>
+  (await fetchDemoSymbolRules("coinm", symbol, DEMO_PUBLIC_VENUE))?.contract
+    ?.marginAsset ?? coinmMarginCoin(symbol);
+
 async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
   // Кандидаты прогона — чтобы claim знал поля сделки по id.
   const byId = new Map<string, MirrorCandidate>();
-  // Свободные USDT обоих кошельков — один запрос на прогон (runMirror спрашивает по рынку, spec 0043).
+  // Свободные USDT обоих кошельков — один запрос на прогон (runMirror спрашивает по рынку, spec 0043); маржа COIN-M
+  // по монетам — тоже один запрос на прогон (spec 0056).
   let balances: ReturnType<typeof fetchDemoUsdtBalances> | null = null;
+  let coinmMargin: ReturnType<typeof fetchDemoCoinmAvailable> | null = null;
+  const balanceFailed = (error: unknown) => {
+    log.warn(
+      "mirror.balance",
+      "Остаток демо-кошелька не прочитан — входы этого прогона без проверки резерва",
+      { error: error instanceof Error ? error.message : String(error) },
+    );
+    throw error;
+  };
   const result = await runMirror({
     now: Date.now,
     configured: getDemoTradingConfig() !== null,
@@ -77,31 +98,34 @@ async function runDemoMirrorUnlocked(db: Db): Promise<MirrorRunResult> {
       return list;
     },
     activeMirrors: () => activeMirrors(db),
-    positionMode: () => {
+    positionMode: (market) => {
       const config = getDemoTradingConfig();
       if (!config) return Promise.reject(new Error("Demo не настроен"));
-      return fetchDemoPositionMode(demoVenue(config.credentials));
+      return fetchDemoPositionMode(demoVenue(config.credentials), market);
     },
     // null — символа нет на демо; сетевой сбой — исключение (кандидат подождёт). Фьючерсный
     // справочник кэшируется на 10 минут, спот — запрос на символ.
     hasSymbol: async (market, symbol) =>
       (await fetchDemoSymbolRules(market, symbol, DEMO_PUBLIC_VENUE)) !== null,
-    freeUsd: async (market) => {
+    freeUsd: async (market, symbol) => {
       const config = getDemoTradingConfig();
       if (!config) throw new Error("Demo не настроен");
+      const venue = demoVenue(config.credentials);
       // Сбой — одна запись на прогон (промис общий), вход идёт без проверки резерва (fail-open в runMirror).
-      balances ??= fetchDemoUsdtBalances(demoVenue(config.credentials)).catch(
-        (error) => {
-          log.warn(
-            "mirror.balance",
-            "Остаток демо-кошелька не прочитан — входы этого прогона без проверки резерва",
-            { error: error instanceof Error ? error.message : String(error) },
-          );
-          throw error;
-        },
-      );
-      return (await balances)[market];
+      if (market !== "coinm") {
+        balances ??= fetchDemoUsdtBalances(venue).catch(balanceFailed);
+        return (await balances)[market];
+      }
+      // COIN-M: свободная маржа монеты контракта × цена контракта (…USD_PERP — цена монеты в $).
+      coinmMargin ??= fetchDemoCoinmAvailable(venue).catch(balanceFailed);
+      const coin = await coinmMarginAsset(symbol);
+      const [margin, price] = await Promise.all([
+        coinmMargin,
+        fetchDemoPrice("coinm", symbol, DEMO_PUBLIC_VENUE),
+      ]);
+      return (margin.get(coin) ?? 0) * price;
     },
+    coinmMarginAsset,
     claim: async (tradeId) => {
       const c = byId.get(tradeId);
       return c ? claimMirror(db, c) : false;
@@ -244,8 +268,8 @@ export async function resetDemo(
 }
 
 /**
- * Демо-сброс группы активов (spec 0038): то же для всех экспериментов группы, включая выключенные. Группа без
- * демо-зеркала (COIN-M) — { blocked }: позиций там нет, отметка сброса не нужна.
+ * Демо-сброс группы активов (spec 0038): то же для всех экспериментов группы, включая выключенные (COIN-M — с spec
+ * 0056). Группа без демо-зеркала — { blocked }: позиций там нет, отметка сброса не нужна.
  */
 export async function resetGroupDemo(
   market: ExperimentMarket,

@@ -50,9 +50,11 @@ describe("sweepTriggeredLegs: зеркало без тейка (stopOnly)", () =
         message: "Позиция закрыта биржей: сработал стоп.",
       }),
     ]);
-    expect(api.fetchDemoAlgoOrder).toHaveBeenCalledWith(expect.anything(), {
-      algoId: 21,
-    });
+    expect(api.fetchDemoAlgoOrder).toHaveBeenCalledWith(
+      expect.anything(),
+      { algoId: 21 },
+      { market: "usdm" },
+    );
     expect(api.demoCancelAlgoOrder).not.toHaveBeenCalled();
   });
 
@@ -144,8 +146,89 @@ describe("sweepTriggeredLegs: нога сработала раньше вход�
     expect(await sweepTriggeredLegs([both])).toEqual([
       expect.objectContaining({ tradeId: "m2", status: "closed" }),
     ]);
-    expect(api.demoCancelAlgoOrder).toHaveBeenCalledWith(expect.anything(), {
-      algoId: 32,
+    expect(api.demoCancelAlgoOrder).toHaveBeenCalledWith(
+      expect.anything(),
+      { algoId: 32 },
+      { market: "usdm" },
+    );
+  });
+});
+
+describe("sweepTriggeredLegs: COIN-M (spec 0056)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  // Условные ордера dapi: algoId — orderId, clientAlgoId — clientOrderId; объём — контракты.
+  const coinm = {
+    tradeId: "c1",
+    symbol: "BTCUSD_PERP",
+    protectRefs: {
+      market: "coinm" as const,
+      entryOrderId: 1,
+      legs: "quantity" as const,
+      stop: { algoId: 41, clientAlgoId: "bdc1-S" },
+      takeProfit: { algoId: 42, clientAlgoId: "bdc1-T" },
+      contracts: 1,
+      contractSize: 100,
+    },
+  };
+
+  it("сработал тейк — стоп снимается по ордеру символа, строка закрыта биржей", async () => {
+    // Демо 2026-10-17: тейк FILLED, соседний стоп остался NEW.
+    api.fetchDemoOpenAlgoOrders.mockImplementation(async (_v, market) =>
+      market === "coinm"
+        ? [
+            { algoId: 41, clientAlgoId: "bdc1-S", symbol: "BTCUSD_PERP" },
+            // Тот же номер ордера у другого символа — не своя нога (orderId dapi не уникален между символами).
+            { algoId: 42, clientAlgoId: "x-T", symbol: "ETHUSD_PERP" },
+          ]
+        : [],
+    );
+    api.fetchDemoAlgoOrder.mockResolvedValue({
+      algoId: 42,
+      algoStatus: "FINISHED",
+      actualOrderId: 42,
+      actualPrice: 81000.52,
+      actualQty: 1,
     });
+    api.demoCancelAlgoOrder.mockResolvedValue(true);
+    expect(await sweepTriggeredLegs([coinm])).toEqual([
+      expect.objectContaining({
+        tradeId: "c1",
+        status: "closed",
+        closedBy: "takeProfit",
+        exitPrice: 81000.52,
+      }),
+    ]);
+    const at = { market: "coinm", symbol: "BTCUSD_PERP" };
+    expect(api.fetchDemoOpenAlgoOrders).toHaveBeenCalledWith(
+      expect.anything(),
+      "coinm",
+    );
+    expect(api.fetchDemoAlgoOrder).toHaveBeenCalledWith(
+      expect.anything(),
+      { algoId: 42 },
+      at,
+    );
+    expect(api.demoCancelAlgoOrder).toHaveBeenCalledWith(
+      expect.anything(),
+      { algoId: 41 },
+      at,
+    );
+  });
+
+  it("ордера COIN-M не загрузились — USDⓈ-M сверяется, COIN-M ждёт прогона", async () => {
+    api.fetchDemoOpenAlgoOrders.mockImplementation(async (_v, market) => {
+      if (market === "coinm") throw new Error("timeout");
+      return [];
+    });
+    api.fetchDemoAlgoOrder.mockResolvedValue({
+      algoId: 21,
+      algoStatus: "FINISHED",
+      actualOrderId: 900,
+      actualPrice: 0.2192,
+      actualQty: 40,
+    });
+    expect(await sweepTriggeredLegs([stopOnly, coinm])).toEqual([
+      expect.objectContaining({ tradeId: "m1", status: "closed" }),
+    ]);
   });
 });

@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { experimentsTable, liveMirrorOrdersTable } from "../model/db";
 import { createDbExperimentStore, ensureRun, seedExperiments } from "./dbStore";
-import { closeLiveWithAuto } from "./liveAutoDb";
+import {
+  closeLiveWithAuto,
+  readLiveAutoRows,
+  setExperimentLiveMode,
+} from "./liveAutoDb";
 
 // Закрытие реальной сделки и автовыключение — одна синхронная транзакция SQLite с блокировкой записи сразу
 // (BEGIN IMMEDIATE, spec 0059 вместо SELECT … FOR UPDATE). Id — фиктивные.
@@ -143,5 +147,64 @@ describe("closeLiveWithAuto", () => {
     expect(
       await closeLiveWithAuto(db, "t1", lossPatch, ["closing"], () => "убыток"),
     ).toEqual({ closed: false, auto: null });
+  });
+});
+
+// Реальный счёт — свой список групп (spec 0056, AC9): демо-зеркало умеет COIN-M, а реальный счёт — нет.
+describe("liveAutoDb: COIN-M на реальном счёте не торгуется (spec 0056, AC9)", () => {
+  const exp = (id: string, market: Experiment["market"]): Experiment => ({
+    id,
+    market,
+    name: id,
+    hypothesis: "тест",
+    config: {
+      timeframe: "1h",
+      entry: { type: "hold" },
+      exit: { stop: { type: "none" }, takeProfit: null },
+      universe: { type: "majors" },
+      directions: ["long"],
+      maxOpen: 1,
+    },
+    initialBudget: 10_000,
+    enabled: true,
+    demoMirror: false,
+  });
+  const liveOf = async (id: string) =>
+    (
+      await db
+        .select({
+          mode: experimentsTable.liveMirrorMode,
+          on: experimentsTable.liveMirror,
+        })
+        .from(experimentsTable)
+        .where(eq(experimentsTable.id, id))
+    )[0];
+
+  beforeEach(async () => {
+    await seedExperiments(db, [exp("PS99", "spot"), exp("PC99", "coinm")]);
+  });
+
+  it("«Вкл» и «Авто» для COIN-M — null, положение не меняется; Spot — можно", async () => {
+    for (const mode of ["on", "auto"] as const)
+      expect(
+        await setExperimentLiveMode(db, "PC99", mode, undefined, "test"),
+      ).toBeNull();
+    expect(await liveOf("PC99")).toEqual({ mode: "off", on: false });
+    expect(
+      await setExperimentLiveMode(db, "PS99", "auto", undefined, "test"),
+    ).toEqual({ id: "PS99", liveMirror: false });
+  });
+
+  it("автомат реального счёта не читает эксперименты COIN-M, даже если положение не «Выкл»", async () => {
+    await setExperimentLiveMode(db, "PS99", "auto", undefined, "test");
+    // В обход переключателя (старые данные, ручная правка БД).
+    await db
+      .update(experimentsTable)
+      .set({ liveMirrorMode: "auto" })
+      .where(eq(experimentsTable.id, "PC99"));
+    const ids = (await readLiveAutoRows(db)).rows.map((r) => r.id);
+    expect(ids).toContain("PS99");
+    expect(ids).not.toContain("PC99");
+    expect((await readLiveAutoRows(db, ["PC99"])).rows).toEqual([]);
   });
 });

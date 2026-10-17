@@ -1,6 +1,7 @@
 import type { TradeRequest, TradeResult, TradeStep } from "@/entities/trade";
 import {
   type AlgoOrderQuery,
+  type DemoProtectRefs,
   demoCancelAlgoOrder,
   demoEnableHedgeMode,
   demoFuturesMarketOrder,
@@ -17,14 +18,19 @@ import {
   fetchDemoPositionMode,
   orderErrorOutcome,
   type PositionMode,
+  type ProtectMarket,
   type SymbolRules,
   unknownOutcomeDeadline,
 } from "@/shared/api/binance/demo.server";
-import type { TradeVenue } from "@/shared/api/binance/venue.server";
+import type {
+  TradeVenue,
+  VenueFuturesMarket,
+} from "@/shared/api/binance/venue.server";
 import { FUTURES_STOP_BEFORE_ENTRY } from "../config/trade";
 import {
   afterAlgoUnknown,
   algoLookup,
+  protectMarketOf,
   type StoredAlgoRef,
 } from "../lib/closePlan";
 import {
@@ -75,7 +81,15 @@ export interface FuturesContext {
   tradeDeadline: number;
   /** Можно ли переключить пустой счёт в Hedge (демо — FUTURES_AUTO_HEDGE, реальный счёт — нет). */
   autoHedge: boolean;
+  /**
+   * Рынок: USDⓈ-M (fapi, стоп и тейк — algo-ордера) или COIN-M (dapi, spec 0056: условные ордера, количество — в
+   * контрактах, режим позиций — свой).
+   */
+  market: VenueFuturesMarket;
 }
+
+/** Свои ордера фьючерсной сделки: заполняются по ходу входа (тот же объект — в RefsHolder). */
+type FuturesRefs = Extract<DemoProtectRefs, { market: "usdm" | "coinm" }>;
 
 const MODE_LABEL: Record<PositionMode, string> = {
   hedge: "Hedge (лонг и шорт раздельно)",
@@ -98,11 +112,12 @@ async function resolveMode(
   venue: TradeVenue,
   steps: TradeStep[],
   autoHedge: boolean,
+  market: VenueFuturesMarket,
 ): Promise<PositionMode | null> {
   const label = "Режим позиций";
   let current: PositionMode;
   try {
-    current = await fetchDemoPositionMode(venue);
+    current = await fetchDemoPositionMode(venue, market);
   } catch (error) {
     steps.push({ label, ok: false, detail: errorText(error) });
     return null;
@@ -111,7 +126,7 @@ async function resolveMode(
   let busy: boolean | null = null;
   if (current === "oneway" && autoHedge)
     try {
-      busy = await fetchDemoFuturesAccountBusy(venue);
+      busy = await fetchDemoFuturesAccountBusy(venue, market);
     } catch {
       busy = null;
     }
@@ -121,7 +136,7 @@ async function resolveMode(
     return chosen.mode;
   }
   try {
-    const r = await demoEnableHedgeMode(venue);
+    const r = await demoEnableHedgeMode(venue, market);
     steps.push({
       label,
       ok: true,
@@ -143,8 +158,9 @@ async function resolveMode(
  * объём (стоп, затем тейк; «стоп до входа» — за флагом). Стоп не встал — откат по своей стороне.
  */
 export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
-  const { venue, req, v, rules, price, steps, finish, done, refs } = c;
-  const mode = await resolveMode(venue, steps, c.autoHedge);
+  const { venue, req, v, rules, price, steps, finish, done, refs, market } = c;
+  const at = protectMarketOf(market, req.symbol);
+  const mode = await resolveMode(venue, steps, c.autoHedge, market);
   if (!mode)
     return finish(
       "rejected",
@@ -159,7 +175,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   // Своя сторона до входа: при неизвестном исходе свой объём — только прирост (на стороне соседи).
   let sideBefore = 0;
   try {
-    const state = await fetchDemoFuturesSymbolState(venue, req.symbol);
+    const state = await fetchDemoFuturesSymbolState(venue, req.symbol, market);
     sideBefore = ownPosition(state.positions, side).amount;
     const busy = ownSideBusy(state, side, req.mirror === true);
     if (busy === "opposite")
@@ -182,7 +198,12 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   }
 
   try {
-    const margin = await demoFuturesPrepare(venue, req.symbol, req.leverage);
+    const margin = await demoFuturesPrepare(
+      venue,
+      req.symbol,
+      req.leverage,
+      market,
+    );
     steps.push({
       label: "Маржа и плечо",
       ok: true,
@@ -207,15 +228,25 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
     side,
     steps,
     tradeDeadline: c.tradeDeadline,
+    market,
   };
-  const futuresRefs = {
-    market: "usdm" as const,
-    entryOrderId: null as number | null,
+  const own = {
+    entryOrderId: null,
     // Ноги на свой объём (PR 2c): без этой метки строки 2b считаются legacy (planMirror).
-    legs: "quantity" as const,
-    stop: null as StoredAlgoRef | null,
-    takeProfit: null as StoredAlgoRef | null,
-  };
+    legs: "quantity",
+    stop: null,
+    takeProfit: null,
+  } as const;
+  // COIN-M: свой объём в контрактах и размер контракта (spec 0056) — до входа объём заявки, после — исполненный.
+  const futuresRefs: FuturesRefs =
+    market === "coinm"
+      ? {
+          market: "coinm",
+          ...own,
+          contracts: Number(v.quantity),
+          contractSize: rules.contract?.size ?? 0,
+        }
+      : { market: "usdm", ...own };
   // Ссылки — сразу: у rejected finish их отбросит, у unprotected сохранит (стоп «до входа» и т.п.).
   refs.current = futuresRefs;
 
@@ -235,7 +266,10 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
     const next = afterStopBeforeEntry(stop.placed);
     if (next !== "enter")
       return done(
-        afterEarlyStopDrop(next, await cancelOwnAlgo(venue, stop.ref, steps)),
+        afterEarlyStopDrop(
+          next,
+          await cancelOwnAlgo(venue, stop.ref, steps, at),
+        ),
       );
   }
   // Вход не прошёл — снять стоп «до входа»; не снялся — unprotected со ссылкой на него, а не rejected.
@@ -244,7 +278,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
       stopFirst
         ? afterEarlyStopDrop(
             failed,
-            await cancelOwnAlgo(venue, futuresRefs.stop, steps),
+            await cancelOwnAlgo(venue, futuresRefs.stop, steps, at),
           )
         : failed,
     );
@@ -265,12 +299,13 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
       v.quantity,
       ids.market,
       side,
+      market,
     );
     futuresRefs.entryOrderId = order.orderId;
     filled = order.executedQty || Number(v.quantity);
     entryPrice =
       order.avgPrice ||
-      (await futuresFillPrice(venue, req.symbol, order.orderId)) ||
+      (await futuresFillPrice(venue, req.symbol, order.orderId, market)) ||
       price;
     steps.push({
       label: entryLabel,
@@ -296,9 +331,12 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
         deadline,
         c.tradeDeadline,
         () =>
-          fetchDemoFuturesOrder(venue, req.symbol, {
-            clientOrderId: ids.market,
-          }),
+          fetchDemoFuturesOrder(
+            venue,
+            req.symbol,
+            { clientOrderId: ids.market },
+            market,
+          ),
         (o) => o !== null && o.executedQty > 0,
       );
     } catch (checkError) {
@@ -324,7 +362,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
       filled = o.executedQty;
       entryPrice =
         o.avgPrice ||
-        (await futuresFillPrice(venue, req.symbol, o.orderId)) ||
+        (await futuresFillPrice(venue, req.symbol, o.orderId, market)) ||
         price;
       steps.push({
         label: "Проверка ордера",
@@ -338,7 +376,10 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
           deadline,
           c.tradeDeadline,
           async () =>
-            ownPosition(await demoFuturesPositions(venue, req.symbol), side),
+            ownPosition(
+              await demoFuturesPositions(venue, req.symbol, market),
+              side,
+            ),
           (p) => p.amount > sideBefore,
         );
       } catch (checkError) {
@@ -379,11 +420,13 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
   }
   // Защита — на свой исполненный объём (без closePosition): у каждого зеркала свои TP/SL.
   const protectQty = floorToStep(filled, rules.stepSize);
+  if (futuresRefs.market === "coinm")
+    futuresRefs.contracts = Number(protectQty);
   // Стоп «до входа» стоит на объём заявки, а исполнено меньше — переставить на исполненный: в Hedge
   // стоп без reduceOnly при срабатывании закрыл бы лишнее (объём соседа). Новый — со своим id `-S2`
   // (не тем же, что снятый `-S`): перечитывание и снятие по clientAlgoId не спутают их.
   if (stopFirst && Number(protectQty) < Number(v.quantity)) {
-    const cancel = await cancelOwnAlgo(venue, futuresRefs.stop, steps);
+    const cancel = await cancelOwnAlgo(venue, futuresRefs.stop, steps, at);
     const restop =
       cancel === "error"
         ? null
@@ -409,6 +452,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
         closeId: ids.close,
         steps,
         done,
+        market,
       });
     if (next !== "continue") return done(next, entryPrice, filled);
   }
@@ -441,6 +485,7 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
         closeId: ids.close,
         steps,
         done,
+        market,
       });
     if (afterStop !== "takeProfit")
       return doneEntry(afterStop, entryPrice, filled);
@@ -482,11 +527,12 @@ async function cancelOwnAlgo(
   venue: TradeVenue,
   ref: StoredAlgoRef | null,
   steps: TradeStep[],
+  at: ProtectMarket,
 ): Promise<CancelResult> {
   const lookup = ref && algoLookup(ref);
   if (!lookup) return "none";
   try {
-    const cancelled = await demoCancelAlgoOrder(venue, lookup);
+    const cancelled = await demoCancelAlgoOrder(venue, lookup, at);
     steps.push({
       label: "Снять свой стоп",
       ok: true,
@@ -516,6 +562,7 @@ async function placeProtectiveAlgo(
     side: FuturesSide;
     steps: TradeStep[];
     tradeDeadline: number;
+    market: VenueFuturesMarket;
   },
   type: "STOP_MARKET" | "TAKE_PROFIT_MARKET",
   trigger: string,
@@ -537,6 +584,7 @@ async function placeProtectiveAlgo(
         quantity,
         c.side,
         clientAlgoId,
+        c.market,
       );
     });
     c.steps.push({
@@ -561,7 +609,12 @@ async function placeProtectiveAlgo(
     found = await recheckUntil(
       unknownOutcomeDeadline(sentAt, Date.now()),
       c.tradeDeadline,
-      () => fetchDemoAlgoOrder(c.venue, { clientAlgoId }),
+      () =>
+        fetchDemoAlgoOrder(
+          c.venue,
+          { clientAlgoId },
+          protectMarketOf(c.market, c.symbol),
+        ),
       (a) => a !== null,
     );
   } catch (error) {
@@ -602,6 +655,7 @@ async function rollbackFutures(c: {
   closeId: string;
   steps: TradeStep[];
   done: Done;
+  market: VenueFuturesMarket;
 }): Promise<TradeResult> {
   const { venue, req, steps } = c;
   const label = "Закрытие по рынку (стоп не встал)";
@@ -615,6 +669,7 @@ async function rollbackFutures(c: {
         qty,
         c.side,
         c.closeId,
+        c.market,
       ),
     );
     steps.push({
@@ -626,6 +681,11 @@ async function rollbackFutures(c: {
     steps.push({ label, ok: false, detail: errorText(error) });
     return c.done(afterFuturesRollback(false), c.entryPrice, c.filled);
   }
-  await cancelOwnAlgo(venue, c.stopRef, steps);
+  await cancelOwnAlgo(
+    venue,
+    c.stopRef,
+    steps,
+    protectMarketOf(c.market, req.symbol),
+  );
   return c.done(afterFuturesRollback(true));
 }

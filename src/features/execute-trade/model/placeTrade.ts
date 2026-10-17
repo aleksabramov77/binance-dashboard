@@ -7,6 +7,7 @@ import {
   demoSpotMarketOrder,
   demoSpotOcoSell,
   demoSpotStopLossSell,
+  fetchDemoCoinmAvailable,
   fetchDemoPrice,
   fetchDemoSpotOrderByClientId,
   fetchDemoSpotOrderStatus,
@@ -86,12 +87,19 @@ export async function placeTrade(
   };
   // Свои защитные ордера (PR 2b) — заполняются по ходу сделки; у rejected позиции нет — и ссылок нет.
   const refs: RefsHolder = { current: null };
+  // COIN-M: биржа считает в контрактах, а сделка и PnL зеркала — в монете, как paper (spec 0056): исполненные
+  // контракты → контракты × размер / цена входа. Размер — из правил символа (известен до любого ордера).
+  let contractSize: number | null = null;
   const finish: Finish = (
     status,
     message,
     entryPrice = null,
-    filledQuantity = null,
+    filled = null,
   ) => {
+    const filledQuantity =
+      filled !== null && contractSize !== null && entryPrice
+        ? (filled * contractSize) / entryPrice
+        : filled;
     const result: TradeResult = {
       ...base,
       status,
@@ -148,14 +156,15 @@ export async function placeTrade(
     if (!rules)
       return finish(
         "rejected",
-        `${req.symbol} нет в ${venue.kind === "demo" ? "Binance Demo Trading" : "Binance"} (${req.market === "spot" ? "Spot" : "Futures"}).`,
+        `${req.symbol} нет в ${venue.kind === "demo" ? "Binance Demo Trading" : "Binance"} (${MARKET_NAME[req.market]}).`,
       );
-    const [demoPrice, balances] = await Promise.all([
+    // Цена и деньги — параллельно; у COIN-M свободное — в монете, в $ — по цене контракта.
+    const [demoPrice, free] = await Promise.all([
       fetchDemoPrice(req.market, req.symbol, venue),
-      fetchDemoUsdtBalances(venue),
+      availableFunds(venue, req, rules),
     ]);
     price = demoPrice;
-    availableUsd = balances[req.market];
+    availableUsd = req.market === "coinm" ? free * price : free;
   } catch (error) {
     // Сеть, а не отсутствие символа: ничего не отправлено, можно повторить.
     return finish(
@@ -177,6 +186,7 @@ export async function placeTrade(
   for (const detail of v.adjustments)
     steps.push({ label: "Фильтр цены биржи", ok: true, detail });
 
+  if (rules.contract) contractSize = rules.contract.size;
   if (req.market === "spot")
     return placeSpot({
       venue,
@@ -204,7 +214,30 @@ export async function placeTrade(
     done,
     tradeDeadline,
     autoHedge: ctx.autoHedge,
+    market: req.market,
   });
+}
+
+const MARKET_NAME: Record<TradeRequest["market"], string> = {
+  spot: "Spot",
+  usdm: "Futures",
+  coinm: "COIN-M Futures",
+};
+
+/**
+ * Свободные деньги кошелька сделки: USDT Spot / USDⓈ-M; COIN-M — свободная маржа в монете контракта (у каждой монеты
+ * свой кошелёк, spec 0056) — в $ её переводит вызывающий по цене контракта (у …USD_PERP это цена монеты в $).
+ */
+async function availableFunds(
+  venue: TradeVenue,
+  req: TradeRequest,
+  rules: SymbolRules,
+): Promise<number> {
+  if (req.market === "coinm") {
+    const coin = rules.contract?.marginAsset;
+    return coin ? ((await fetchDemoCoinmAvailable(venue)).get(coin) ?? 0) : 0;
+  }
+  return (await fetchDemoUsdtBalances(venue))[req.market];
 }
 
 interface SpotContext {
