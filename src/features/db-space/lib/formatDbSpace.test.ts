@@ -72,4 +72,10 @@ describe("formatDbSpace", () => {
       "Журнал: https://x/logs",
     ]);
   });
+
+  it("без адреса сайта — уведомление без строки журнала", () => {
+    const text = formatSpaceAlert(30, { ...usage, usedBytes: 352 * MB }, null);
+    expect(text).not.toContain("Журнал:");
+    expect(text.split("\n").at(-1)).toBe("• auth.users — 0,35 МБ");
+  });
 });

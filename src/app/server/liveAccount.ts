@@ -19,7 +19,7 @@ import { sendTelegramMessage } from "@/shared/api/telegram";
 import {
   getBinanceCredentials,
   getLiveSilentAfterMs,
-  getSiteUrl,
+  getSiteLink,
   getTelegramConfig,
 } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
@@ -104,11 +104,12 @@ export async function notifyLive(
   const skip = telegramSkip(fixture);
   const config = getTelegramConfig();
   if (skip || !config?.chatId) return `не отправлен: ${skip}`;
+  const link = getSiteLink(`/settings#${anchor}`);
   try {
     await sendTelegramMessage(
       config.token,
       config.chatId,
-      `Binance Dashboard · ${text}\n${getSiteUrl()}/settings#${anchor}`,
+      [`Binance Dashboard · ${text}`, link].filter(Boolean).join("\n"),
     );
     return "отправлен";
   } catch (error) {

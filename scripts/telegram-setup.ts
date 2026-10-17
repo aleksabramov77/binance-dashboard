@@ -1,7 +1,7 @@
 // Команды бота Telegram (spec 0021): webhook на прод и меню команд.
 //   pnpm telegram:setup           — setWebhook на ${SITE_URL}/api/telegram/webhook с секретом + setMyCommands
 //   pnpm telegram:setup --delete  — снять webhook (снова работает getUpdates: pnpm monitor:supabase chat-id)
-// Env: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET (тот же, что в переменных Vercel), SITE_URL (необязательно).
+// Env: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET (тот же, что у прода), SITE_URL (адрес прода, обязателен для setWebhook).
 // Берутся из .env.local и ~/.config/vercel/binance-dashboard-prod.env; значения не печатаем.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -46,7 +46,12 @@ async function main() {
     fail(
       "TELEGRAM_WEBHOOK_SECRET не задан. Сгенерируйте (openssl rand -hex 32), задайте в переменных Vercel и в .env.local, передеплойте и повторите.",
     );
-  const url = `${getSiteUrl()}/api/telegram/webhook`;
+  const site = getSiteUrl();
+  if (!site)
+    fail(
+      "SITE_URL не задан: передайте адрес прода, например SITE_URL=https://binance.<ip>.sslip.io pnpm telegram:setup",
+    );
+  const url = `${site}/api/telegram/webhook`;
   await setTelegramWebhook(telegram.token, {
     url,
     secret: telegram.webhookSecret,

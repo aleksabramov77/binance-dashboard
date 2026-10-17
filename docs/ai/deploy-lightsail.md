@@ -39,7 +39,8 @@ claude@<ip>` (ключ владельца `~/.ssh/apps_tokyo` — только �
 `ENGINE_RUNNER=oracle` (роль «свой постоянный процесс»), `AUTH_URL`, `AUTH_GITHUB_ID/SECRET` (отдельное OAuth App под
 адрес VM), `AUTH_SECRET`, `AUTH_ALLOWED_GITHUB_LOGINS`, `DATABASE_PATH=/var/lib/binance/app.db` (база SQLite, spec 0059;
 `DATABASE_URL` Supabase остаётся неделю для отката — новая версия его не читает), `CRON_SECRET`, `OPENROUTER_API_KEY`,
-`ANALYSIS_MODEL`, `TELEGRAM_*` (в т.ч. `TELEGRAM_WEBHOOK_SECRET` — тот же, что на Vercel), `LOG_DIR=/var/lib/binance/logs`
+`ANALYSIS_MODEL`, `TELEGRAM_*` (в т.ч. `TELEGRAM_WEBHOOK_SECRET` — тот же, что на Vercel), `SITE_URL=https://binance.<ip>.sslip.io`
+(ссылки в сообщениях бота; без него — сообщения без ссылки, spec 0063), `LOG_DIR=/var/lib/binance/logs`
 (файловый журнал `app-YYYY-MM-DD.jsonl` с debug: каталог кода только для чтения, писать можно только в `/var/lib/binance`;
 без `LOG_DIR` файл не пишется), с переключения — `BINANCE_DEMO_API_KEY` / `BINANCE_DEMO_API_SECRET` (демо-зеркало,
 решение владельца 2026-10-17). Ключа реального аккаунта Binance на VM нет (решение владельца 2026-10-15; позже — в базе
@@ -333,7 +334,8 @@ Spec 0055. Выполняет Claude после мержа PR 0055 и успеш
    Серия оборвалась — повторить оставшиеся `cron-install` (они идемпотентны) и проверить `status`, чтобы тик не встал нигде.
    Задания pg_cron по умолчанию вызывают роуты Vercel (`https://binance-dashboard-gold.vercel.app`); таймеры VM
    при `runner = supabase` пропускают работу сами.
-2. Бот Telegram — обратно на Vercel: `pnpm telegram:setup` (без `SITE_URL` — адрес Vercel).
+2. Бот Telegram — обратно на Vercel: `SITE_URL=https://binance-dashboard-gold.vercel.app pnpm telegram:setup`
+   (`SITE_URL` обязателен; тот же адрес — в переменных Vercel, иначе сообщения уйдут без ссылки).
 3. Если нужна выкатка нового кода на Vercel — PR, который возвращает в `vercel.json` `"main": true`; автовыкатку VM из
    `deploy.yml` при этом можно оставить (VM с `runner = supabase` ничего не исполняет).
 4. Проверки: `pnpm engine:supabase status` (раннер `supabase`, задание активно, тики идут), `pnpm mirror:supabase status`,
