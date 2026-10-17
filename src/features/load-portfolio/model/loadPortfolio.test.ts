@@ -31,18 +31,16 @@ describe("loadPortfolio без ключа", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it("локально — инструкция по подключению ключа", async () => {
-    vi.stubEnv("BINANCE_API_KEY", "");
     vi.stubEnv("VERCEL", "");
-    expect(await loadPortfolio()).toEqual({
+    expect(await loadPortfolio(null)).toEqual({
       status: "not-configured",
       hosting: "local",
     });
   });
 
   it("в облаке (VERCEL=1) — портфель только на компьютере", async () => {
-    vi.stubEnv("BINANCE_API_KEY", "");
     vi.stubEnv("VERCEL", "1");
-    expect(await loadPortfolio()).toEqual({
+    expect(await loadPortfolio(null)).toEqual({
       status: "not-configured",
       hosting: "cloud",
     });
@@ -55,8 +53,6 @@ describe("loadPortfolio: начисления за вчера", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(Date.UTC(2026, 9, day++, 12)));
-    vi.stubEnv("BINANCE_API_KEY", "key");
-    vi.stubEnv("BINANCE_API_SECRET", "secret");
     vi.mocked(fetchSpotAccount).mockResolvedValue({
       balances: [{ asset: "BNB", free: 1, locked: 0 }],
     });
@@ -117,7 +113,10 @@ describe("loadPortfolio: начисления за вчера", () => {
   });
 
   const yesterday = async () => {
-    const portfolio = await loadPortfolio();
+    const portfolio = await loadPortfolio({
+      apiKey: "key",
+      apiSecret: "secret",
+    });
     if (portfolio.status !== "ok") throw new Error(portfolio.status);
     return portfolio.holdings.map((h) => [
       h.place,

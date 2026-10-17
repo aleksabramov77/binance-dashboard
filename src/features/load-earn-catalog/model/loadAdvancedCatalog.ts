@@ -21,7 +21,6 @@ import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import {
   type BinanceCredentials,
   getAppHost,
-  getBinanceCredentials,
 } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { DUAL_COINS, DUAL_STABLES } from "../config/dualUniverse";
@@ -40,8 +39,7 @@ export interface CatalogDeps {
   latestRate: typeof fetchLatestRate;
 }
 
-const defaultDeps: CatalogDeps = {
-  credentials: getBinanceCredentials,
+const defaultDeps: Omit<CatalogDeps, "credentials"> = {
   hosting: () => (getAppHost() === "local" ? "local" : "cloud"),
   prices: fetchTickerPrices,
   dual: fetchDualProducts,
@@ -101,11 +99,11 @@ async function loadDual(
 
 /** Загрузка каталогов без кэша: группы независимы, упавшие уходят в warnings. */
 export async function buildAdvancedCatalog(
-  deps: CatalogDeps = defaultDeps,
+  deps: CatalogDeps,
   now: () => Date = () => new Date(),
 ): Promise<AdvancedCatalog> {
   const creds = deps.credentials();
-  // В облаке ключа реального аккаунта нет намеренно (как у Портфеля, docs/ai/deploy-supabase.md).
+  // Ключа нет (не введён в «Настройках», локально — нет в .env.local) — подсказка, как подключить (spec 0065).
   if (!creds) return { status: "not-configured", hosting: deps.hosting() };
 
   const warnings: string[] = [];
@@ -195,11 +193,22 @@ const cache = createTtlCache<AdvancedCatalog>(
   (catalog) => catalog.status === "ok",
 );
 
-/** Каталоги сложных продуктов Earn по read-only ключу; успешный ответ кэшируется на 5 минут. */
-export function loadAdvancedCatalog(): Promise<AdvancedCatalog> {
+/**
+ * Каталоги сложных продуктов Earn по read-only ключу; успешный ответ кэшируется на 5 минут. Ключ передаёт роут
+ * (`getMainCredentials` платформы, spec 0065). Ключа нет — сразу «не настроено», мимо кэша: удалённый ключ не
+ * продолжает показывать каталог из кэша.
+ */
+export function loadAdvancedCatalog(
+  credentials: () => BinanceCredentials | null,
+): Promise<AdvancedCatalog> {
+  if (!credentials())
+    return Promise.resolve({
+      status: "not-configured",
+      hosting: defaultDeps.hosting(),
+    });
   return cache.get(async () => {
     try {
-      return await buildAdvancedCatalog();
+      return await buildAdvancedCatalog({ ...defaultDeps, credentials });
     } catch (error) {
       return { status: "error", message: message(error) };
     }
