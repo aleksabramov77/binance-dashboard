@@ -11,6 +11,8 @@ import {
   getLiveWorkerSecret,
   getSiteUrl,
   getTelegramConfig,
+  getTelegramTopicId,
+  isPrivateChatId,
   isServerless,
 } from "./env.server";
 
@@ -101,6 +103,7 @@ describe("getTelegramConfig", () => {
     expect(getTelegramConfig({ TELEGRAM_BOT_TOKEN: "t" })).toEqual({
       token: "t",
       chatId: null,
+      ownerId: null,
       webhookSecret: null,
     });
     expect(
@@ -109,8 +112,53 @@ describe("getTelegramConfig", () => {
         TELEGRAM_CHAT_ID: "42",
         TELEGRAM_WEBHOOK_SECRET: "s",
       }),
-    ).toEqual({ token: "t", chatId: "42", webhookSecret: "s" });
+    ).toEqual({ token: "t", chatId: "42", ownerId: "42", webhookSecret: "s" });
     expect(getTelegramConfig({ TELEGRAM_WEBHOOK_SECRET: "s" })).toBeNull();
+  });
+
+  it("владелец (spec 0067): TELEGRAM_OWNER_ID, иначе личный TELEGRAM_CHAT_ID; у группы без него — никто", () => {
+    const bot = { TELEGRAM_BOT_TOKEN: "t" };
+    expect(
+      getTelegramConfig({
+        ...bot,
+        TELEGRAM_CHAT_ID: "-1001234",
+        TELEGRAM_OWNER_ID: " 42 ",
+      })?.ownerId,
+    ).toBe("42");
+    expect(
+      getTelegramConfig({ ...bot, TELEGRAM_CHAT_ID: "-1001234" })?.ownerId,
+    ).toBeNull();
+    expect(getTelegramConfig({ ...bot, TELEGRAM_CHAT_ID: "42" })?.ownerId).toBe(
+      "42",
+    );
+  });
+
+  it("личный чат — положительный id", () => {
+    expect(isPrivateChatId("42")).toBe(true);
+    expect(isPrivateChatId("-1001234")).toBe(false);
+    expect(isPrivateChatId("0")).toBe(false);
+    expect(isPrivateChatId(null)).toBe(false);
+  });
+});
+
+describe("getTelegramTopicId (spec 0067)", () => {
+  it("целое > 0 — номер темы; не задана или мусор — null (сообщение без темы)", () => {
+    expect(
+      getTelegramTopicId("TELEGRAM_TOPIC_LAB", { TELEGRAM_TOPIC_LAB: " 12 " }),
+    ).toBe(12);
+    expect(getTelegramTopicId("TELEGRAM_TOPIC_LAB", {})).toBeNull();
+    expect(
+      getTelegramTopicId("TELEGRAM_TOPIC_LAB", { TELEGRAM_TOPIC_LAB: "" }),
+    ).toBeNull();
+    expect(
+      getTelegramTopicId("TELEGRAM_TOPIC_LAB", { TELEGRAM_TOPIC_LAB: "abc" }),
+    ).toBeNull();
+    expect(
+      getTelegramTopicId("TELEGRAM_TOPIC_LAB", { TELEGRAM_TOPIC_LAB: "-3" }),
+    ).toBeNull();
+    expect(
+      getTelegramTopicId("TELEGRAM_TOPIC_LAB", { TELEGRAM_TOPIC_LAB: "1.5" }),
+    ).toBeNull();
   });
 });
 

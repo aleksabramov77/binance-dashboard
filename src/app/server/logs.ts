@@ -9,6 +9,7 @@ import {
 import { getAppHost } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { LEVEL_RANK } from "@/shared/lib/logger.server";
+import { notifyRecordSchema } from "@/shared/notify";
 
 /** Сколько дней хранить журнал. */
 export const LOG_RETENTION_DAYS = 14;
@@ -27,6 +28,7 @@ export async function writeLogs(entries: LogEntry[]): Promise<void> {
         data: e.data ?? null,
         error: (e.error as Record<string, unknown> | undefined) ?? null,
         source,
+        notify: e.notify ?? null,
       })),
     );
 }
@@ -69,6 +71,7 @@ export async function readLogs(
     message: r.message,
     data: { ...(r.data ?? {}), source: r.source },
     error: (r.error as LogEntry["error"]) ?? undefined,
+    notify: notifyRecordSchema.safeParse(r.notify).data,
   }));
 }
 

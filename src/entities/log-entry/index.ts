@@ -1,4 +1,6 @@
 export { useLogs } from "./api/useLogs";
+// Уведомление записи для людей — детали в /logs (spec 0067).
+export { notifyLines } from "./lib/notifyLines";
 // Таблицы журнала и алертов (Drizzle) — запросы делает сервер через shared/db.
 export { alertStateTable, appLogsTable } from "./model/db";
 // Фильтры журнала в URL страницы /logs и GET /api/logs (spec 0016).

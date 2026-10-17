@@ -193,11 +193,23 @@ export function getAuthConfig(
 
 export interface TelegramConfig {
   token: string;
-  /** Чат владельца: бот пишет лично (chat id из /start). null — ещё не известен. */
+  /**
+   * Чат уведомлений: закрытая группа с темами (spec 0067, id отрицательный) или, как раньше, личный чат владельца
+   * (chat id из /start). null — ещё не известен.
+   */
   chatId: string | null;
+  /**
+   * Владелец — id пользователя Telegram (TELEGRAM_OWNER_ID): бот отвечает на его команды в личке и в группе. По
+   * умолчанию — TELEGRAM_CHAT_ID, если это личный чат (положительный id). null — бот не отвечает никому.
+   */
+  ownerId: string | null;
   /** Секрет webhook команд бота (заголовок X-Telegram-Bot-Api-Secret-Token). null — не задан. */
   webhookSecret: string | null;
 }
+
+/** Личный чат: id пользователя — положительный (у групп и каналов — отрицательный). */
+export const isPrivateChatId = (id: string | null): boolean =>
+  id !== null && /^[1-9]\d*$/.test(id);
 
 /** Бот уведомлений и команд. null — токен не задан. */
 export function getTelegramConfig(
@@ -205,11 +217,31 @@ export function getTelegramConfig(
 ): TelegramConfig | null {
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return null;
+  const chatId = env.TELEGRAM_CHAT_ID?.trim() || null;
   return {
     token,
-    chatId: env.TELEGRAM_CHAT_ID?.trim() || null,
+    chatId,
+    ownerId:
+      env.TELEGRAM_OWNER_ID?.trim() ||
+      (isPrivateChatId(chatId) ? chatId : null),
     webhookSecret: env.TELEGRAM_WEBHOOK_SECRET?.trim() || null,
   };
+}
+
+const topicIdSchema = z.coerce.number().int().positive();
+
+/**
+ * Номер темы группы (message_thread_id) из env-переменной name — у каждой категории уведомлений своя
+ * (TELEGRAM_TOPIC_*, список — src/app/server/notify.ts). null — не задана или не целое > 0: сообщение без темы.
+ */
+export function getTelegramTopicId(
+  name: string,
+  env: Record<string, string | undefined> = process.env,
+): number | null {
+  const raw = env[name]?.trim();
+  if (!raw) return null;
+  const parsed = topicIdSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 /**

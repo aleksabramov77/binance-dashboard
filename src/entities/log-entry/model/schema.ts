@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { notifyRecordSchema } from "@/shared/notify";
 
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 
@@ -16,6 +17,11 @@ export const logEntrySchema = z.object({
       stack: z.string().optional(),
     })
     .optional(),
+  /**
+   * Уведомление записи (spec 0067): категория, срочность и итог доставки. Запись чужого вида не роняет страницу /logs —
+   * поле просто пропадает.
+   */
+  notify: notifyRecordSchema.optional().catch(undefined),
 });
 
 export const logsResponseSchema = z.object({

@@ -15,6 +15,13 @@
       "when": 1792230733971,
       "tag": "0001_account_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792238143275,
+      "tag": "0002_app_logs_notify",
+      "breakpoints": true
     }
   ]
 }
