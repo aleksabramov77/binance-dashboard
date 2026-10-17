@@ -6,6 +6,12 @@
 > ([deploy-lightsail.md](deploy-lightsail.md)). Vercel новых выкаток не получает (`vercel.json` → `"main": false`) и неделю
 > остаётся резервом с последней выкаткой и той же базой; бот Telegram отвечает с VM. Разделы ниже описывают прежнюю схему
 > и нужны для отката — [«Откат»](deploy-lightsail.md#откат).
+>
+> **После переезда базы на SQLite (spec 0059)** приложение Supabase не использует: база — файл
+> `/var/lib/binance/app.db` на VM, `DATABASE_URL` читают только `pnpm db:import-pg` (перенос) и `pnpm *:supabase`.
+> Supabase неделю остаётся для отката ([«Переезд базы на SQLite»](deploy-lightsail.md#переезд-базы-на-sqlite-spec-0059)),
+> затем отключается (очередь PRD, п. 24). Edge Function `engine-tick` и `pnpm check:edge` до отключения остаются как
+> есть, но с кодом после spec 0059 функция не совместима (схемы таблиц — SQLite) — не выкатывать.
 
 **Было:** https://binance-dashboard-gold.vercel.app — Vercel-проект `binance-dashboard` (команда `aleksabramov77s-projects`), функции в `hnd1`.
 Прод-секреты (`AUTH_SECRET`, `CRON_SECRET`, OAuth prod-App) — копия на Mac владельца: `~/.config/vercel/binance-dashboard-prod.env` (chmod 600); токен Vercel — `~/.config/vercel/claude-mac.token`.

@@ -141,8 +141,8 @@ function tickEnv(): EngineTickEnv {
 }
 
 /**
- * Один тик. Блокировка процесса — таймер и /api/cron/tick не выполняются параллельно; межпроцессная
- * (advisory lock в БД, runEngineTick) — с Edge Function Supabase и другими экземплярами сервера.
+ * Один тик. Таймер и /api/cron/tick не выполняются параллельно (e.running); блокировка тика runEngineTick
+ * (withEngineTickLock, в памяти процесса — база SQLite одного процесса, spec 0059) отсекает тик во время сброса.
  */
 export function tickExperimentEngine(): Promise<TickResult> {
   const e = engine();
@@ -153,7 +153,10 @@ export function tickExperimentEngine(): Promise<TickResult> {
     const started = Date.now();
     const result = await runEngineTick(tickEnv(), started);
     if (result.status === "locked")
-      log.info("engine.tick", "Тик пропущен: блокировку держит другой процесс");
+      log.info(
+        "engine.tick",
+        "Тик пропущен: предыдущий тик или сброс ещё идёт",
+      );
     if (result.status === "ok" && (result.evaluated.length || result.closed))
       log.info(
         "engine.tick",

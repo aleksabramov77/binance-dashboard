@@ -1,9 +1,12 @@
 // Свободное место в базе (платформа, spec 0021): замер, пороги без повторов, уведомление в Telegram.
 // Вызывают POST /api/cron/log-monitor (раз в 15 минут) и команда бота /db. Только сервер.
+import { statfsSync, statSync } from "node:fs";
+import path from "node:path";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   DB_SPACE,
+  type DbTableSize,
   type DbUsage,
   formatSpaceAlert,
   freePctOf,
@@ -11,12 +14,13 @@ import {
   type SpaceAlertRow,
 } from "@/features/db-space";
 import { sendTelegramMessage } from "@/shared/api/telegram";
+import { getSiteUrl, getTelegramConfig } from "@/shared/config/env.server";
 import {
-  getDbSizeLimit,
-  getSiteUrl,
-  getTelegramConfig,
-} from "@/shared/config/env.server";
-import { type Db, getDb, rowsOf } from "@/shared/db/client.server";
+  type Db,
+  getDb,
+  getDbPath,
+  MEMORY_PATH,
+} from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import {
   type AlertStateRow,
@@ -24,44 +28,91 @@ import {
   saveAlertState,
 } from "./alertState";
 
-const sizeRowSchema = z.object({ bytes: z.coerce.number() });
 const tableRowSchema = z.object({
   name: z.string(),
   bytes: z.coerce.number(),
 });
 
-/** Лимит из DB_SIZE_LIMIT_MB; некорректное значение — лимит по умолчанию и предупреждение в журнале. */
-function limitBytes(): number {
-  const limit = getDbSizeLimit();
-  if (limit.invalid)
-    log.warn(
-      "monitor.db_space",
-      `DB_SIZE_LIMIT_MB=${limit.invalid} некорректен — используется ${limit.limitBytes / 1024 / 1024} МБ`,
-    );
-  return limit.limitBytes;
+/** Файлы базы SQLite: сама база и журнал WAL (-shm — разделяемая память, место почти не занимает). */
+export interface DbFiles {
+  /** Размер файла базы, байт. */
+  dbBytes: number;
+  /** Размер -wal, байт (нет файла — 0). */
+  walBytes: number;
+  /** Свободно на диске, где лежит база, байт (statfs: доступно непривилегированному процессу). */
+  diskFreeBytes: number;
 }
 
 /**
- * Размер базы и самые большие таблицы. Postgres (Supabase) и PGlite — один запрос; Supabase
- * считает лимит Free по размеру базы на диске, это и есть pg_database_size. При переезде на
- * SQLite (Lightsail) меняется только эта функция.
+ * Занято и лимит (spec 0059): занято — файл базы с WAL, лимит — занято + свободное место на диске. Сколько ещё
+ * может вырасти база — ровно свободное место диска VM, пороги уведомлений (spec 0021) считаются от этого.
  */
-export async function getDbUsage(db: Db = getDb()): Promise<DbUsage> {
-  const [size] = rowsOf<unknown>(
-    await db.execute(
-      sql`select pg_database_size(current_database())::bigint as bytes`,
-    ),
-  ).map((r) => sizeRowSchema.parse(r));
-  if (!size) throw new Error("pg_database_size не вернул размер базы");
-  const tables = rowsOf<unknown>(
-    await db.execute(sql`
-      select case when schemaname = 'public' then relname else schemaname || '.' || relname end as name,
-        pg_total_relation_size(relid)::bigint as bytes
-      from pg_stat_user_tables
-      order by bytes desc, name
-      limit ${DB_SPACE.topTables}`),
-  ).map((r) => tableRowSchema.parse(r));
-  return { usedBytes: size.bytes, limitBytes: limitBytes(), tables };
+export function usageOfFiles(
+  files: DbFiles,
+): Pick<DbUsage, "usedBytes" | "limitBytes"> {
+  const usedBytes = files.dbBytes + files.walBytes;
+  return { usedBytes, limitBytes: usedBytes + files.diskFreeBytes };
+}
+
+const fileSize = (file: string) => {
+  try {
+    return statSync(file).size;
+  } catch {
+    return 0;
+  }
+};
+
+/** Размеры файлов базы и свободное место на её диске. База в памяти — страницы базы, диска нет. */
+function readDbFiles(db: Db, file: string): DbFiles {
+  if (file === MEMORY_PATH) {
+    const pages = db.get<{ bytes: number }>(
+      sql`select page_count * page_size as bytes from pragma_page_count(), pragma_page_size()`,
+    );
+    return { dbBytes: pages?.bytes ?? 0, walBytes: 0, diskFreeBytes: 0 };
+  }
+  const disk = statfsSync(path.dirname(path.resolve(file)));
+  return {
+    dbBytes: fileSize(file),
+    walBytes: fileSize(`${file}-wal`),
+    diskFreeBytes: disk.bavail * disk.bsize,
+  };
+}
+
+/** Самые большие таблицы (с их индексами) — виртуальная таблица dbstat; нет её в сборке SQLite — пусто. */
+function largestTables(db: Db): DbTableSize[] {
+  try {
+    return db
+      .all(
+        sql`select coalesce(m.tbl_name, s.name) as name, sum(s.pgsize) as bytes
+          from dbstat s left join sqlite_schema m on m.name = s.name
+          where coalesce(m.tbl_name, s.name) not like 'sqlite_%'
+            and coalesce(m.tbl_name, s.name) <> '__drizzle_migrations'
+          group by 1
+          order by bytes desc, name
+          limit ${DB_SPACE.topTables}`,
+      )
+      .map((r) => tableRowSchema.parse(r));
+  } catch (error) {
+    log.warn(
+      "monitor.db_space",
+      "Размеры таблиц не прочитаны (dbstat)",
+      undefined,
+      error,
+    );
+    return [];
+  }
+}
+
+/**
+ * Размер базы и самые большие таблицы (spec 0059): файл SQLite с WAL относительно свободного места на диске.
+ * file — путь базы (по умолчанию — база приложения).
+ */
+export async function getDbUsage(
+  db: Db = getDb(),
+  file: string = getDbPath(),
+): Promise<DbUsage> {
+  // База в памяти (тесты): диска нет — лимит равен занятому.
+  return { ...usageOfFiles(readDbFiles(db, file)), tables: largestTables(db) };
 }
 
 export interface DbSpaceResult {

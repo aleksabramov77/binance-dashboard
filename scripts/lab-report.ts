@@ -1,6 +1,8 @@
-// `pnpm lab:report [--run <id>] [--experiment <id>]… [--since 7d|24h|<ISO>] [--out <каталог>] [--no-market]
-// [--after-exit] [--no-prices]` — отчёт лаборатории по эпохе из БД (.env.local: DATABASE_URL или локальный PGlite) для разбора
+// `pnpm lab:report [--prod] [--run <id>] [--experiment <id>]… [--since 7d|24h|<ISO>] [--out <каталог>] [--no-market]
+// [--after-exit] [--no-prices]` — отчёт лаборатории по эпохе из БД для разбора
 // экспериментов (flow lab, агент quant, скилл trading-lab). Только чтение; печатает, к какой БД подключён.
+// `--prod` — сначала `pnpm db:pull` (свежий снимок прод-базы с VM в data/prod.db), отчёт — по нему (spec 0059);
+// без флага — локальная база (DATABASE_PATH, по умолчанию data/app.db).
 // Эпоха — текущая, `--run <id>` — прошлая (период — до начала следующей эпохи).
 // Считает всегда по всем экспериментам (семейства, архетипы, контроль нужны целиком); --experiment — фокус:
 // подробные разделы только по этим id. С --out пишет report.md, report.json, trades.csv (сделки периода) и
@@ -9,6 +11,7 @@
 // запрос): «что было через 4/12/24 свечи после выхода» и грубый исход отсечённых сигналов; по умолчанию выключен.
 // Открытые позиции текущей эпохи оцениваются по последней цене (`ticker/price` публичного API, баг 0041): столбцы
 // «Откр.» и «Нереализ. R / $», в report.json — `unrealized`; `--no-prices` — без этого запроса.
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -23,7 +26,7 @@ import { fetchKlines } from "@/shared/api/binance/market";
 import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import { getDatabaseConfig } from "@/shared/config/env.server";
 import { closeDb, getDb } from "@/shared/db/client.server";
-import { describeDatabase } from "./lib/dbTarget";
+import { describeDatabase, PROD_SNAPSHOT_PATH } from "./lib/dbTarget";
 import { type KlineSet, klineRequests, loadKlines } from "./lib/labKlines";
 import { loadMarketContext, type MarketContext } from "./lib/labMarket";
 import {
@@ -97,10 +100,26 @@ async function main() {
       "no-market": { type: "boolean", default: false },
       "after-exit": { type: "boolean", default: false },
       "no-prices": { type: "boolean", default: false },
+      prod: { type: "boolean", default: false },
     },
   });
   const runId = parseRun(values.run);
   if (existsSync(".env.local")) process.loadEnvFile(".env.local");
+  if (values.prod) {
+    // Свежий снимок прода — тем же скриптом, что `pnpm db:pull`; не скачался — отчёта по старому снимку не строим.
+    const pull = spawnSync(
+      "pnpm",
+      ["-s", "db:pull", "--out", PROD_SNAPSHOT_PATH],
+      {
+        stdio: "inherit",
+      },
+    );
+    if (pull.status !== 0)
+      throw new Error(
+        "снимок прод-базы не скачан (pnpm db:pull) — отчёт не построен",
+      );
+    process.env.DATABASE_PATH = PROD_SNAPSHOT_PATH;
+  }
   const database = describeDatabase(getDatabaseConfig());
   console.log(`[lab:report] БД: ${database}`);
   const now = Date.now();

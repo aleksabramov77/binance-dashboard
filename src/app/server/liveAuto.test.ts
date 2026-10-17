@@ -36,7 +36,7 @@ import {
   setLiveMode,
 } from "./liveMirror";
 
-// Режимы реального счёта (spec 0053) без биржи: PGlite в памяти, Telegram — мок. Id — фиктивные (S96–S98, PS99).
+// Режимы реального счёта (spec 0053) без биржи: SQLite в памяти, Telegram — мок. Id — фиктивные (S96–S98, PS99).
 let db: Db;
 let close: () => Promise<void>;
 
@@ -183,9 +183,9 @@ async function demoTrade(experimentId: string, r: number) {
     .update(paperTradesTable)
     .set({ closedAt: new Date(), exitPrice: exit, exitReason: "takeProfit" })
     .where(eq(paperTradesTable.id, id));
-  await db.execute(
+  db.run(
     `insert into demo_mirror_orders (trade_id, experiment_id, market, symbol, direction, status, entry_price, quantity, exit_price, closed_at)
-     values ('${id}', '${experimentId}', 'usdm', 'C${n}USDT', 'long', 'closed', 100, 1, ${exit}, now())`,
+     values ('${id}', '${experimentId}', 'usdm', 'C${n}USDT', 'long', 'closed', 100, 1, ${exit}, ${Date.now()})`,
   );
 }
 const demoTrades = async (experimentId: string, rs: number[]) => {
@@ -222,9 +222,9 @@ beforeEach(async () => {
   vi.stubEnv("TELEGRAM_BOT_TOKEN", "bot");
   vi.stubEnv("TELEGRAM_CHAT_ID", "42");
   await db.delete(liveWorkerStateTable);
-  await db.execute("delete from live_mirror_orders");
-  await db.execute("delete from demo_mirror_orders");
-  await db.execute("delete from live_trading_halt");
+  db.run("delete from live_mirror_orders");
+  db.run("delete from demo_mirror_orders");
+  db.run("delete from live_trading_halt");
   await db.update(experimentsTable).set({
     liveMirror: false,
     liveMirrorMode: "off",

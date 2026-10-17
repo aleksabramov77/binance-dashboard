@@ -14,7 +14,7 @@ import { closeDemoPosition } from "@/features/execute-trade";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { resetDemo, resetGroupDemo } from "./demoMirror";
 
-// Демо-сброс без биржи (spec 0038, AC9): БД — PGlite в памяти, закрытие позиции — мок. Реальный демо-счёт общий
+// Демо-сброс без биржи (spec 0038, AC9): БД — SQLite в памяти, закрытие позиции — мок. Реальный демо-счёт общий
 // с продом — против него сброс не вызываем.
 let db: Db;
 let close: () => Promise<void>;

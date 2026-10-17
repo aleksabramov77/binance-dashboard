@@ -1,10 +1,7 @@
-import { eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createDbExperimentStore,
-  ENGINE_TICK_LOCK_KEY,
   type ExperimentDb,
   engineStateTable,
   experimentsTable,
@@ -24,7 +21,7 @@ import {
 } from "./engineTick";
 
 // Общая композиция тика (VM и Edge Function Supabase, spec 007b): no-op чужого раннера, блокировка
-// тика (advisory lock), идемпотентность повтора. PGlite в памяти с миграциями drizzle/.
+// тика, идемпотентность повтора. SQLite в памяти с миграциями drizzle/.
 let db: ExperimentDb;
 let close: () => Promise<void>;
 beforeEach(async () => {
@@ -97,14 +94,6 @@ const env = (over: Partial<EngineTickEnv> = {}): EngineTickEnv => ({
   ...over,
 });
 
-const advisoryLocks = (tx: ExperimentDb) =>
-  tx.execute(
-    sql`select objid::bigint as key from pg_locks where locktype = 'advisory'`,
-  );
-
-const rowsOf = (r: unknown) =>
-  Array.isArray(r) ? r : (r as { rows: Record<string, unknown>[] }).rows;
-
 describe("runEngineTick: раннер", () => {
   it("runner = oracle (по умолчанию) — тик supabase no-op: ни сида, ни записей в БД", async () => {
     const prepare = vi.fn(prepareEngineDb);
@@ -146,96 +135,40 @@ describe("runEngineTick: раннер", () => {
   });
 });
 
-describe("withEngineTickLock (advisory lock)", () => {
-  it("держит pg_try_advisory_xact_lock с фиксированным ключом на время тика и снимает после", async () => {
-    let inside: unknown[] = [];
-    const r = await withEngineTickLock(db, async (tx) => {
-      inside = rowsOf(await advisoryLocks(tx));
-      return 42;
-    });
-    expect(r).toEqual({ acquired: true, value: 42 });
-    expect(inside.map((x) => Number((x as { key: unknown }).key))).toContain(
-      ENGINE_TICK_LOCK_KEY,
-    );
-    expect(rowsOf(await advisoryLocks(db))).toHaveLength(0);
-  });
-
-  it("блокировка занята другим сеансом — второй тик пропускается (locked), в БД ничего не пишет", async () => {
-    // PGlite — один сеанс, а advisory lock в своём сеансе реентерабелен. Чужой сеанс имитируем:
-    // ответ pg_try_advisory_xact_lock подменяется на false, остальные запросы идут в настоящую БД.
+describe("withEngineTickLock (в памяти процесса, spec 0059)", () => {
+  it("второй тик, пока идёт первый, — locked: ничего не пишет; после первого — снова идёт (AC3)", async () => {
     const store = createDbExperimentStore(db);
     await store.setState(ENGINE_KEYS.runner, "supabase");
     await store.setState(ENGINE_KEYS.enabled, true);
-    const busy = new Proxy(db, {
-      get(target, prop, receiver) {
-        if (prop !== "transaction") return Reflect.get(target, prop, receiver);
-        return (fn: (tx: ExperimentDb) => Promise<unknown>) =>
-          target.transaction((tx) =>
-            fn(
-              new Proxy(tx, {
-                get(t, p, r) {
-                  if (p !== "execute") return Reflect.get(t, p, r);
-                  return async () => ({ rows: [{ locked: false }] });
-                },
-              }),
-            ),
-          );
-      },
-    });
+    let release = () => {};
+    const first = withEngineTickLock(
+      db,
+      () => new Promise<string>((r) => (release = () => r("first"))),
+    );
     const prepare = vi.fn(prepareEngineDb);
-    const r = await runEngineTick(env({ db: busy, prepare }), NOW);
+    const r = await runEngineTick(env({ prepare }), NOW);
     expect(r.status).toBe("locked");
     expect(prepare).not.toHaveBeenCalled();
     expect(await db.select().from(paperTradesTable)).toHaveLength(0);
     expect(await store.getState(ENGINE_KEYS.lastTick)).toBeUndefined();
+    release();
+    expect(await first).toEqual({ acquired: true, value: "first" });
+    expect(await withEngineTickLock(db, async () => 42)).toEqual({
+      acquired: true,
+      value: 42,
+    });
   });
 
-  it("ошибка внутри тика откатывает транзакцию и снимает блокировку", async () => {
+  it("ошибка внутри тика снимает блокировку", async () => {
     await expect(
-      withEngineTickLock(db, async (tx) => {
-        await createDbExperimentStore(tx).setState("probe", 1);
+      withEngineTickLock(db, async () => {
         throw new Error("сбой");
       }),
     ).rejects.toThrow("сбой");
-    expect(await createDbExperimentStore(db).getState("probe")).toBeUndefined();
-    expect(rowsOf(await advisoryLocks(db))).toHaveLength(0);
-  });
-});
-
-// Настоящая конкуренция двух сеансов — только на живом Postgres (не прод!): TEST_POSTGRES_URL.
-const pgUrl = process.env.TEST_POSTGRES_URL;
-describe.skipIf(!pgUrl)("withEngineTickLock на Postgres: два сеанса", () => {
-  it("пока первый тик держит блокировку, второй получает acquired: false", async () => {
-    const a = postgres(pgUrl as string, { max: 1, prepare: false });
-    const b = postgres(pgUrl as string, { max: 1, prepare: false });
-    try {
-      let release = () => {};
-      const hold = new Promise<void>((r) => {
-        release = r;
-      });
-      let entered = () => {};
-      const inside = new Promise<void>((r) => {
-        entered = r;
-      });
-      const first = withEngineTickLock(
-        drizzle(a) as unknown as ExperimentDb,
-        async () => {
-          entered();
-          await hold;
-          return "first";
-        },
-      );
-      await inside;
-      const second = await withEngineTickLock(
-        drizzle(b) as unknown as ExperimentDb,
-        async () => "second",
-      );
-      expect(second).toEqual({ acquired: false });
-      release();
-      expect(await first).toEqual({ acquired: true, value: "first" });
-    } finally {
-      await Promise.all([a.end(), b.end()]);
-    }
+    expect(await withEngineTickLock(db, async () => 1)).toEqual({
+      acquired: true,
+      value: 1,
+    });
   });
 });
 

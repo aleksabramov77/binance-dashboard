@@ -98,7 +98,7 @@ const input = (fromRunId: number): ResetRunInput => ({
   initialBudget: 20_000,
 });
 
-describe("сброс тестовых капиталов (PGlite)", () => {
+describe("сброс тестовых капиталов (SQLite)", () => {
   it("закрывает открытые сделки эпохи по плану (manual) и помечает закрытые без цены", async () => {
     const { runId } = await setup();
     const out = await resetRun(db, input(runId));
@@ -187,6 +187,22 @@ describe("сброс тестовых капиталов (PGlite)", () => {
       .where(eq(paperTradesTable.id, "done"));
     expect(done.exitReason).toBe("tp");
     expect(done.pnl).toBe(3.9);
+  });
+
+  it("сбой посреди сброса откатывает всё: сделки открыты, эпоха и бюджеты прежние (транзакция SQLite)", async () => {
+    const { runId, store } = await setup();
+    // Значение engine_state пишется после закрытий и новой эпохи; BigInt не сериализуется в JSON — сбой.
+    await expect(
+      resetRun(db, { ...input(runId), state: { bars: BigInt(1) } }),
+    ).rejects.toThrow(/BigInt/);
+    expect(await store.currentRunId()).toBe(runId);
+    expect(await db.select().from(runsTable)).toHaveLength(1);
+    expect((await store.openTrades(runId)).map((t) => t.id)).toEqual([
+      "open-1",
+      "open-2",
+    ]);
+    const budgets = (await store.listExperiments()).map((e) => e.initialBudget);
+    expect(budgets).toEqual([10_000, 10_000]);
   });
 });
 
@@ -294,6 +310,58 @@ describe("отдельный сброс paper-капитала эксперим�
         barsKey: "bars",
       }),
     ).toEqual({ found: false, closed: 0, closedWithoutPrice: 0 });
+  });
+});
+
+describe("откат сбросов эксперимента и группы (транзакция SQLite)", () => {
+  it("resetExperimentRun: сбой после закрытия сделки — сделка открыта, reset_at не поставлен", async () => {
+    const { runId, store } = await setup();
+    await expect(
+      resetExperimentRun(db, {
+        runId,
+        experimentId: "F01",
+        closes: [{ id: "open-1", close: manual(5, 105), noPrice: false }],
+        // Метка свечи пишется последней; BigInt не сериализуется в JSON — сбой.
+        bar: BigInt(1) as unknown as number,
+        barsKey: "bars",
+      }),
+    ).rejects.toThrow(/BigInt/);
+    expect((await store.openTrades(runId)).map((t) => t.id)).toEqual([
+      "open-1",
+      "open-2",
+    ]);
+    const [f01] = await db
+      .select()
+      .from(experimentsTable)
+      .where(eq(experimentsTable.id, "F01"));
+    expect(f01?.resetAt).toBeNull();
+    expect(await store.realizedPnl(runId)).toEqual({ F01: 3.9 });
+  });
+
+  it("resetGroupRun: сбой после закрытий — сделки открыты, бюджеты и reset_at прежние", async () => {
+    const { runId, store } = await setup();
+    await expect(
+      resetGroupRun(db, {
+        runId,
+        market: "usdm",
+        closes: [
+          { id: "open-1", close: manual(5, 105), noPrice: false },
+          { id: "open-2", close: manual(0, 100), noPrice: true },
+        ],
+        initialBudget: 20_000,
+        bars: { F01: BigInt(1) as unknown as number },
+        barsKey: "bars",
+      }),
+    ).rejects.toThrow(/BigInt/);
+    expect((await store.openTrades(runId)).map((t) => t.id)).toEqual([
+      "open-1",
+      "open-2",
+    ]);
+    const rows = await db.select().from(experimentsTable);
+    expect(rows.map((e) => [e.initialBudget, e.resetAt])).toEqual([
+      [10_000, null],
+      [10_000, null],
+    ]);
   });
 });
 

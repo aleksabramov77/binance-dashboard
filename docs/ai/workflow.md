@@ -12,7 +12,7 @@
  │     в нём docs/PRD.md + docs/specs/NNNN-slug.md + строка docs/HISTORY.md
  │     ⏸ пользователь подтверждает ТЗ → первый коммит ветки
  ├─2. DEVELOPER — субагент `developer` в worktree задачи  → код + тесты, push
- ├─3. `pnpm check && build` → `pnpm wt serve` (локальный сервер worktree: PGlite, без входа)
+ ├─3. `pnpm check && build` → `pnpm wt serve` (локальный сервер worktree: своя SQLite, без входа)
  │     TESTER (субагент) проходит AC на этом сервере → скриншоты + PASS/FAIL
  │     FAIL → 2 (до 3 кругов, дальше — к пользователю)
  │     ⏸ пользователь смотрит скриншоты: «ок» / «не то: …» (→ 2)
@@ -75,7 +75,7 @@ Claude запускать из папки проекта (`~/Projects/my/binance
 своём worktree `~/Projects/my/binance-dashboard_<метка>`, созданном `pnpm wt new` (скилл `worktree`): ветка от
 свежего `main`, ссылки на `.env.local` и `private/` (если есть) по списку `.claude/worktree-links.json`, зависимости. Основной checkout всегда
 на чистом `main` — в нём только мерж и выкатка; spec и строка журнала задачи пишутся уже в её worktree. У каждого worktree свой локальный сервер (`pnpm wt serve`, свой порт
-и своя PGlite): на нём Tester проверяет задачу до PR и после каждого круга правок по ревью.
+и своя SQLite): на нём Tester проверяет задачу до PR и после каждого круга правок по ревью.
 
 После мержа и выкатки задача удаляет свой worktree — `pnpm wt remove <ветка>` (останавливает сервер,
 удаляет worktree и локальную ветку), а последним сообщением сессии выводит блок «сессию можно закрывать» (шаг 8). Чтобы забытые копии не копились, хук `SessionStart` (`.claude/settings.json`)

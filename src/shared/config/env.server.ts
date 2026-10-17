@@ -194,31 +194,6 @@ export const getSiteUrl = (
     "",
   );
 
-const DEFAULT_DB_SIZE_LIMIT_MB = 500;
-
-export interface DbSizeLimitConfig {
-  limitBytes: number;
-  /** Значение DB_SIZE_LIMIT_MB, которое не распознано (тогда лимит по умолчанию); null — всё в порядке. */
-  invalid: string | null;
-}
-
-/** Лимит размера базы для свободного места: DB_SIZE_LIMIT_MB, по умолчанию 500 МБ (Supabase Free). */
-export function getDbSizeLimit(
-  env: Record<string, string | undefined> = process.env,
-): DbSizeLimitConfig {
-  const raw = env.DB_SIZE_LIMIT_MB?.trim();
-  const parsed = z.coerce
-    .number()
-    .positive()
-    .finite()
-    .safeParse(raw || DEFAULT_DB_SIZE_LIMIT_MB);
-  return {
-    limitBytes:
-      (parsed.success ? parsed.data : DEFAULT_DB_SIZE_LIMIT_MB) * 1024 * 1024,
-    invalid: parsed.success || !raw ? null : raw,
-  };
-}
-
 /** Модель для разбора сбоев монитором логов: дешёвая, отдельно от разбора сетапов. */
 export const getLogAnalysisModel = (
   env: Record<string, string | undefined> = process.env,
@@ -286,16 +261,14 @@ export const getCronSecret = (
   env: Record<string, string | undefined> = process.env,
 ): string | null => env.CRON_SECRET || null;
 
-const dbEnvSchema = z.object({
-  /** Postgres (прод — Supabase, строка подключения пулера). Пусто — локальный PGlite. */
-  DATABASE_URL: z.url().optional(),
-  /** Каталог файла PGlite, когда DATABASE_URL не задан. */
-  PGLITE_DIR: z.string().min(1).default("data/pglite"),
-});
+/** База приложения — файл SQLite (spec 0059): путь из DATABASE_PATH; `:memory:` — в памяти (тесты). */
+export interface DatabaseConfig {
+  kind: "sqlite";
+  path: string;
+}
 
-export type DatabaseConfig =
-  | { kind: "postgres"; url: string }
-  | { kind: "pglite"; dir: string };
+/** Файл базы по умолчанию — локально, относительно папки проекта (на VM DATABASE_PATH задаёт app.env). */
+export const DEFAULT_DATABASE_PATH = "data/app.db";
 
 /**
  * Serverless-хостинг (Vercel выставляет VERCEL=1): процесс живёт только на время запроса,
@@ -313,22 +286,23 @@ export const getAppHost = (
 ): AppHost =>
   isServerless(env) ? "vercel" : env.APP_HOST?.trim() === "vm" ? "vm" : "local";
 
-/** Куда подключаться: Postgres по DATABASE_URL или встроенный PGlite (локально, без внешних сервисов). */
+/** Файл SQLite приложения: DATABASE_PATH или data/app.db. DATABASE_URL (Supabase) приложение больше не читает. */
 export function getDatabaseConfig(
   env: Record<string, string | undefined> = process.env,
 ): DatabaseConfig {
-  const parsed = dbEnvSchema.parse({
-    DATABASE_URL: env.DATABASE_URL || undefined,
-    PGLITE_DIR: env.PGLITE_DIR || undefined,
-  });
-  if (parsed.DATABASE_URL)
-    return { kind: "postgres", url: parsed.DATABASE_URL };
-  // PGlite пишет файл на диск — на serverless писать некуда, а данные терялись бы между запросами.
+  // Файл базы на serverless писать некуда, а данные терялись бы между запросами.
   if (isServerless(env))
     throw new Error(
-      "DATABASE_URL не задан: на serverless-хостинге нужен Postgres (Supabase, Transaction pooler).",
+      "База приложения — файл SQLite (spec 0059): на serverless-хостинге (Vercel) приложение не работает, только на VM.",
     );
-  return { kind: "pglite", dir: parsed.PGLITE_DIR };
+  const path = env.DATABASE_PATH?.trim();
+  // На VM каталог кода только для чтения (ProtectSystem=strict) и перезаписывается выкаткой (rsync --delete):
+  // база по умолчанию data/app.db там не сохранилась бы — путь обязателен.
+  if (!path && getAppHost(env) === "vm")
+    throw new Error(
+      "DATABASE_PATH не задан: на VM база — /var/lib/binance/app.db, путь задаётся в /etc/binance/app.env.",
+    );
+  return { kind: "sqlite", path: path || DEFAULT_DATABASE_PATH };
 }
 
 const RUNNER_ROLES = ["oracle", "supabase"] as const;

@@ -5,9 +5,7 @@ import {
   checkVariantParents,
   DEFAULT_PRIVATE_FILE,
   decideLabPrivateWrite,
-  describeDbTarget,
   formatPlanLine,
-  NEED_PROD_HINT,
   type ParseResult,
   parseLabPrivateArgs,
   parsePrivateExperiments,
@@ -272,20 +270,6 @@ describe("checkVariantParents (spec 0046)", () => {
   });
 });
 
-describe("describeDbTarget", () => {
-  it("Postgres — без пользователя и пароля; PGlite — каталог", () => {
-    const text = describeDbTarget({
-      kind: "postgres",
-      url: "postgresql://postgres.ref:s3cret@aws-0.pooler.example.com:6543/postgres",
-    });
-    expect(text).toBe("Postgres aws-0.pooler.example.com:6543/postgres");
-    expect(text).not.toMatch(/s3cret|postgres\.ref/);
-    expect(describeDbTarget({ kind: "pglite", dir: "/tmp/x" })).toBe(
-      "локальная PGlite (/tmp/x)",
-    );
-  });
-});
-
 describe("parseLabPrivateArgs", () => {
   it("без аргументов — файл по умолчанию, без флагов", () => {
     expect(parseLabPrivateArgs([])).toEqual({
@@ -320,36 +304,19 @@ describe("parseLabPrivateArgs", () => {
 });
 
 describe("decideLabPrivateWrite", () => {
-  it("Postgres без --prod — отказ, с --prod — запись", () => {
-    expect(
-      decideLabPrivateWrite("postgres", { dryRun: false, prod: false }),
-    ).toBe("need-prod");
-    expect(
-      decideLabPrivateWrite("postgres", { dryRun: false, prod: true }),
-    ).toBe("write");
-  });
-
-  it("--dry-run работает без --prod и никогда не пишет", () => {
-    expect(
-      decideLabPrivateWrite("postgres", { dryRun: true, prod: false }),
-    ).toBe("dry-run");
-    expect(
-      decideLabPrivateWrite("postgres", { dryRun: true, prod: true }),
-    ).toBe("dry-run");
-    expect(decideLabPrivateWrite("pglite", { dryRun: true, prod: false })).toBe(
-      "dry-run",
+  it("--prod — отказ (прод — SQLite на VM, spec 0059), даже с --dry-run", () => {
+    expect(decideLabPrivateWrite({ dryRun: false, prod: true })).toBe(
+      "prod-unsupported",
+    );
+    expect(decideLabPrivateWrite({ dryRun: true, prod: true })).toBe(
+      "prod-unsupported",
     );
   });
 
-  it("PGlite пишется без --prod", () => {
-    expect(
-      decideLabPrivateWrite("pglite", { dryRun: false, prod: false }),
-    ).toBe("write");
-  });
-
-  it("подсказка называет --prod и запуск для сервера worktree", () => {
-    expect(NEED_PROD_HINT).toContain("--prod");
-    expect(NEED_PROD_HINT).toContain("DATABASE_URL= pnpm lab:private");
-    expect(NEED_PROD_HINT).toContain("pnpm wt stop");
+  it("без --prod — запись в локальную базу; --dry-run — только план", () => {
+    expect(decideLabPrivateWrite({ dryRun: false, prod: false })).toBe("write");
+    expect(decideLabPrivateWrite({ dryRun: true, prod: false })).toBe(
+      "dry-run",
+    );
   });
 });

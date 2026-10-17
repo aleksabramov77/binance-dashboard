@@ -13,7 +13,7 @@ import {
 } from "@/features/paper-engine";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 
-// Сквозная проверка композиции 2b: тик движка пишет в БД (PGlite в памяти) по каталогу.
+// Сквозная проверка композиции 2b: тик движка пишет в БД (SQLite в памяти) по каталогу.
 let db: Db;
 let close: () => Promise<void>;
 beforeEach(async () => {
