@@ -49,7 +49,7 @@
   - на каждую запись новый случайный IV (12 байт);
   - AAD — имя записи (`binance-main`), чтобы шифротекст нельзя было переставить в другую запись;
   - шифруется JSON `{ apiKey, apiSecret }`, в базе хранятся `iv`, `tag` и шифротекст (base64).
-  - Модуль `src/shared/lib/crypto/aesGcm.server.ts` — чистые функции `encrypt` / `decrypt` с тестами: круг
+  - Модуль `src/shared/crypto/aesGcm.server.ts` (свой сегмент shared, как `shared/db`: в `shared/lib` Steiger ограничивает число модулей) — чистые функции `encrypt` / `decrypt` с тестами: круг
     шифрования, чужой мастер-ключ → ошибка, подмена шифротекста, тега или AAD → ошибка.
 - **Мастер-ключ** — файл `/etc/binance/master.key`:
   - 32 случайных байта (base64), `root:binance 0640`;
@@ -129,3 +129,4 @@
 | Дата | Событие |
 |---|---|
 | 2026-10-17 | ТЗ заведено и утверждено владельцем |
+| 2026-10-17 | Ветка `feature/0065-account-key`: AC1–AC8 в коде. `shared/crypto/aesGcm.server.ts` (AES-256-GCM, мастер-ключ из `SECRETS_KEY_FILE`), `entities/account-key` (таблица `account_keys`, миграция `0001_account_keys`, схемы, статус), композиция `src/app/server/accountKey.ts` (`getMainCredentials` база → env → нет, кэш, проверка прав, журнал), правила read-only ключа — `shared/api/binance/readRestrictions.ts`, роут `/api/account-key`, карточка `features/manage-account-key` в «Настройках», тексты «Портфеля» и Earn, `add-project.sh`, документация. Отличия от ТЗ: `getMainCredentials` — в композиции платформы (`src/app/server`), а не в `entities/account-key/api` (сущности не открывают базу и не пишут журнал сами; домены получают ключ аргументом из роута); модуль шифрования — `src/shared/crypto/` (в `shared/lib` Steiger ограничивает число модулей); заглушка Binance для локальной проверки — `ACCOUNT_KEY_FIXTURE` (только Mac, не production) |
