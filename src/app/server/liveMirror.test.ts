@@ -576,6 +576,56 @@ describe("карточка сделки: баланс, замена, нет кл
     expect(sent()).toHaveLength(1);
   });
 
+  it("«исполнен» и итог входа одновременно, в любом порядке — в теме ровно одна карточка, 🟡 (B2)", async () => {
+    for (const filledFirst of [true, false]) {
+      await toggleOn("S98");
+      const id = await newTrade("S98", filledFirst ? "TIAUSDT" : "WLDUSDT");
+      await claimLive(id);
+      vi.clearAllMocks();
+      // Фиктивная тема: первая отправка ждёт сигнала (карточка «в пути»), замена удаляет прежнюю по ключу.
+      const live = new Map<number, string>();
+      let next = 1;
+      let release = () => {};
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      channel.deliver.mockImplementation(async (n) => {
+        const cardId = next++;
+        if (cardId === 1) await gate;
+        live.set(cardId, n.text);
+        const old = n.replaces?.ref as { id: number } | null | undefined;
+        if (old) live.delete(old.id);
+        return { status: "sent", ref: { id: cardId } };
+      });
+      const filled = () =>
+        saveLiveFilled({ tradeId: id, entryPrice: 100, quantity: 0.1, order });
+      const opened = () =>
+        saveLiveOpen({
+          tradeId: id,
+          result: {
+            id: `r-${id}`,
+            status: "protected",
+            message: "ok",
+            entryPrice: 100,
+            filledQuantity: 0.1,
+            steps: [],
+            protectRefs: null,
+          },
+          order,
+        });
+      // Первое событие доходит до канала и «висит», второе приходит в это время.
+      const first = filledFirst ? filled() : opened();
+      await vi.waitFor(() => expect(channel.deliver).toHaveBeenCalled());
+      const second = filledFirst ? opened() : filled();
+      await new Promise((r) => setTimeout(r, 20));
+      release();
+      await Promise.all([first, second]);
+      expect([...live.values()].map((t) => t.split(" · ")[0])).toEqual([
+        "🟡 Открыта, SL/TP стоят",
+      ]);
+    }
+  });
+
   it("после ⏳ вход не открылся (биржа откатила) — карточка «вход отменён» вместо ⏳", async () => {
     await toggleOn("S98");
     const id = await newTrade("S98", "ARBUSDT");

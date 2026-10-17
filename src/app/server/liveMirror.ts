@@ -111,12 +111,37 @@ const cardEntryOf = (row: LiveRow): LiveCardEntry => ({
   openedAt: (row.filledAt ?? row.createdAt).toISOString(),
 });
 
+type CardChains = Map<string, Promise<void>>;
+const cardChainsKey = Symbol.for("binance-dashboard.liveCardChains");
+
+/**
+ * Карточки одной сделки — строго по очереди (приложение — один процесс на VM): «исполнен» и итог входа приходят
+ * разными запросами почти одновременно, и без очереди 🟡 мог бы прочитать ключ карточки до того, как ⏳ его записала, —
+ * ⏳ осталась бы висеть. Очередь в globalThis — как блокировки тика (dev: роуты и instrumentation — разные модули).
+ */
+function serialByTrade(
+  tradeId: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const g = globalThis as typeof globalThis & { [cardChainsKey]?: CardChains };
+  g[cardChainsKey] ??= new Map();
+  const chains = g[cardChainsKey];
+  const run = (chains.get(tradeId) ?? Promise.resolve()).then(fn, fn);
+  const tail = run.catch(() => {});
+  chains.set(tradeId, tail);
+  void tail.then(() => {
+    if (chains.get(tradeId) === tail) chains.delete(tradeId);
+  });
+  return run;
+}
+
 /**
  * Новая карточка сделки (spec 0068, вариант B): журнал и уведомление одним вызовом, звук — по статусу, прежняя
  * карточка заменяется (канал отправляет новую, потом удаляет прежнюю); ключ новой — в строку сделки. Не отправлено —
- * ключ прежней остаётся: следующая карточка заменит её.
+ * ключ прежней остаётся: следующая карточка заменит её. Строка и ключ читаются заново внутри очереди сделки; onlyIf —
+ * не слать, если сделка уже ушла дальше (⏳ после 🟡/⚠️/итога — ничего).
  */
-async function announceCard(
+function announceCard(
   row: LiveRow,
   status: LiveCardStatus,
   entry: {
@@ -124,23 +149,29 @@ async function announceCard(
     event: string;
     data: Record<string, unknown>;
     skip?: string;
+    onlyIf?: (current: LiveRow) => boolean;
   },
 ): Promise<void> {
-  const ref = cardRefOf(row);
-  const text = liveCardText(subjectOf(row), cardEntryOf(row), status);
-  const sent = await log.notify({
-    level: entry.level,
-    event: entry.event,
-    message: text,
-    // Для /logs без канала: была ли прежняя карточка (B6).
-    data: { ...entry.data, card: status.kind, previousCard: ref !== null },
-    category: "trades",
-    urgent: liveCardUrgent(status),
-    ...liveTradeNotice(text, row.experimentId),
-    replaces: { ref, label: CARD },
-    skip: entry.skip,
+  return serialByTrade(row.tradeId, async () => {
+    const current = (await getLiveMirror(getDb(), row.tradeId)) ?? row;
+    if (entry.onlyIf && !entry.onlyIf(current)) return;
+    const ref = cardRefOf(current);
+    const text = liveCardText(subjectOf(current), cardEntryOf(current), status);
+    const sent = await log.notify({
+      level: entry.level,
+      event: entry.event,
+      message: text,
+      // Для /logs без канала: была ли прежняя карточка (B6).
+      data: { ...entry.data, card: status.kind, previousCard: ref !== null },
+      category: "trades",
+      urgent: liveCardUrgent(status),
+      ...liveTradeNotice(text, current.experimentId),
+      replaces: { ref, label: CARD },
+      skip: entry.skip,
+    });
+    if (sent.ref)
+      await setLiveCardNotifyRef(getDb(), current.tradeId, sent.ref);
   });
-  if (sent.ref) await setLiveCardNotifyRef(getDb(), row.tradeId, sent.ref);
 }
 
 /** «12:40 UTC» — время пульса для баланса из него. */
@@ -344,6 +375,8 @@ export async function saveLiveFilled(body: LiveFilledRequest): Promise<void> {
         entryPrice: body.entryPrice,
         quantity: body.quantity,
       },
+      // Монотонно: сделка уже защищена, без защиты или закрыта — ⏳ не нужна.
+      onlyIf: (current) => current.status === "pending",
     },
   );
 }
