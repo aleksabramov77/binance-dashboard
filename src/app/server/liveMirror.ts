@@ -403,9 +403,12 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
       steps: r.steps,
       liveRef: r.id,
       noProtection: r.status === "unprotected",
-      entryPrice: r.entryPrice,
-      quantity: r.filledQuantity,
-      notionalUsd: notionalUsd ?? body.order.notionalUsd,
+      // Не известны (вход откатили) — не затирать то, что пришло с «исполнен» (карточка «вход отменён» с ценой).
+      entryPrice: r.entryPrice ?? undefined,
+      quantity: r.filledQuantity ?? undefined,
+      notionalUsd:
+        notionalUsd ??
+        (r.status === "rejected" ? undefined : body.order.notionalUsd),
       stopLoss: body.order.stopLoss > 0 ? body.order.stopLoss : null,
       takeProfit: body.order.takeProfit,
       sizeRaised: body.order.raised,
@@ -678,16 +681,23 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
 }
 
 /** Исходный стоп paper-сделки (стоп реального входа ставится по нему). */
-async function paperInitialStop(tradeId: string): Promise<number | null> {
+/** Уровни paper-сделки: исходный стоп (стоп реального входа ставится по нему) и тейк (нет — вход без TP). */
+async function paperLevels(
+  tradeId: string,
+): Promise<{ stop: number | null; takeProfit: number | null }> {
   const [t] = await getDb()
     .select({
       initialStop: paperTradesTable.initialStop,
       stop: paperTradesTable.stop,
+      takeProfit: paperTradesTable.takeProfit,
     })
     .from(paperTradesTable)
     .where(eq(paperTradesTable.id, tradeId));
   const stop = t?.initialStop ?? t?.stop ?? null;
-  return stop !== null && stop > 0 ? stop : null;
+  return {
+    stop: stop !== null && stop > 0 ? stop : null,
+    takeProfit: t?.takeProfit ?? null,
+  };
 }
 
 /**
@@ -698,6 +708,10 @@ export async function saveLiveReconcile(
   body: LiveReconcileRequest,
 ): Promise<void> {
   const db = getDb();
+  const paper = await paperLevels(body.tradeId);
+  // TP — сохранённый с «исполнен», иначе тейк paper-сделки (вход без тейка — так же и у зеркала: stopOnly).
+  const takeProfit =
+    (await getLiveMirror(db, body.tradeId))?.takeProfit ?? paper.takeProfit;
   const changed = await updateLiveMirror(
     db,
     body.tradeId,
@@ -708,15 +722,16 @@ export async function saveLiveReconcile(
           noProtection: body.outcome === "unprotected",
           message: body.message,
           steps: [],
-          entryPrice: body.entryPrice,
-          quantity: body.quantity,
+          entryPrice: body.entryPrice ?? undefined,
+          quantity: body.quantity ?? undefined,
           notionalUsd:
             body.entryPrice !== null && body.quantity !== null
               ? body.entryPrice * body.quantity
-              : null,
+              : undefined,
           protectRefs: body.protectRefs,
           // Свой стоп — для оценки PnL и порогов (spec 0053): с биржи, иначе исходный стоп paper-сделки.
-          stopLoss: body.stopLoss ?? (await paperInitialStop(body.tradeId)),
+          stopLoss: body.stopLoss ?? paper.stop,
+          takeProfit,
         },
     ["pending"],
   );

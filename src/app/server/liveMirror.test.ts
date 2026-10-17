@@ -655,6 +655,15 @@ describe("карточка сделки: баланс, замена, нет кл
       order,
     });
     expect(sent()[1]).toMatch(/^⚪ Вход отменён · /);
+    // Данные «исполнен» не затёрты: цена, объём и уровни с процентами — в карточке.
+    expect(sent()[1]).toMatch(
+      /\nОбъём: \$10,00\nЦена входа: 100\nSL: 95 \(−5,0 %\)\nTP: 110 \(\+10,0 %\)\n/,
+    );
+    expect(await getLiveMirror(db, id)).toMatchObject({
+      status: "rejected",
+      entryPrice: 100,
+      quantity: 0.1,
+    });
     expect(channel.deliver.mock.calls[1][0].replaces?.ref).toEqual({
       chat: "42",
       id: 90,
@@ -1017,9 +1026,17 @@ describe("сверка «потерянного» входа (ревью PR #89)
       protectRefs: null,
       stopLoss: null,
     };
+    vi.clearAllMocks();
     await saveLiveReconcile(body);
     const row = await getLiveMirror(db, a);
-    expect(row).toMatchObject({ status: "protected", entryPrice: 100 });
+    expect(row).toMatchObject({
+      status: "protected",
+      entryPrice: 100,
+      // TP — тейк paper-сделки: карточка 🟡 со строкой TP (spec 0068).
+      takeProfit: 110,
+    });
+    expect(sent()[0]).toMatch(/^🟡 Открыта, SL\/TP стоят · /);
+    expect(sent()[0]).toMatch(/\nSL: 95 \(−5,0 %\)\nTP: 110 \(\+10,0 %\)\n/);
     expect((await liveMirrorState()).stalePending).toEqual([]);
     await saveLiveReconcile({ ...body, outcome: "skipped" });
     expect((await getLiveMirror(db, a))?.status).toBe("protected");
