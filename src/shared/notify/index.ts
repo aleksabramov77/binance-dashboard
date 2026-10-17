@@ -31,8 +31,12 @@ export interface NotifyInput {
   urgent?: boolean;
   /** Текст уведомления; по умолчанию message. */
   text?: string;
-  /** Ссылка строкой под текстом; null или не задана — без ссылки. */
+  /** Ссылка строкой под текстом; null или не задана — без ссылки. Канал с кнопками (links) её не дублирует. */
   link?: string | null;
+  /** Ссылки-кнопки под сообщением (spec 0068): канал без кнопок покажет link текстом. */
+  links?: NotifyLink[];
+  /** text — разметка HTML (экранирована местом вызова): <b>, <i>; канал без разметки получит её как есть. */
+  html?: boolean;
   /** Событие фикстуры (готовые данные для проверки): канал не отправляет. */
   fixture?: boolean;
   /** Явная пробная команда, её запускают руками: отправляется и вне production. */
@@ -70,6 +74,13 @@ export interface NotificationReplace {
   label: string;
 }
 
+/** Ссылка-кнопка: подпись, адрес; primary — выделенная (главное действие). */
+export interface NotifyLink {
+  label: string;
+  url: string;
+  kind?: "primary";
+}
+
 /** Уведомление, которое получает канал. */
 export interface Notification {
   category: NotifyCategory;
@@ -82,6 +93,8 @@ export interface Notification {
   test: boolean;
   /** Заменяет прошлое сообщение; null — обычное сообщение. */
   replaces: NotificationReplace | null;
+  links: NotifyLink[];
+  html: boolean;
 }
 
 export const NOTIFY_STATUSES = ["sent", "failed", "skipped"] as const;

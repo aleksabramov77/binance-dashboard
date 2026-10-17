@@ -81,6 +81,20 @@ describe("sendTelegramMessage", () => {
     });
   });
 
+  it("HTML и кнопки — parse_mode и inline_keyboard со style (spec 0068)", async () => {
+    const { call } = stubFetch({ message_id: 1 });
+    await sendTelegramMessage("T", "-1001", "<b>BTC</b>", {
+      html: true,
+      buttons: [[{ text: "✍️", url: "https://b", style: "primary" }]],
+    });
+    expect(call().body).toMatchObject({
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [[{ text: "✍️", url: "https://b", style: "primary" }]],
+      },
+    });
+  });
+
   it("Telegram не принял — ошибка с описанием", async () => {
     stubFetch(null, { ok: false, status: 400 });
     await expect(sendTelegramMessage("T", "1", "x")).rejects.toThrow(

@@ -33,6 +33,8 @@ const note = (over: Partial<Notification> = {}): Notification => ({
   fixture: false,
   test: false,
   replaces: null,
+  links: [],
+  html: false,
   ...over,
 });
 
@@ -301,6 +303,7 @@ describe("Telegram-канал: замена карточки (spec 0068, вар�
         chatId: "-1001234",
         messageId: 71,
         text: "🟢 +$0,84 · S98 BTCUSDT long · USDⓈ-M",
+        html: false,
       },
     });
     expect(calls).toEqual(["send", "delete"]);
@@ -350,6 +353,7 @@ describe("Telegram-канал: замена карточки (spec 0068, вар�
       "-1001234",
       70,
       `${oldRef.text}\n⤵️ обновлено ниже`,
+      { html: false },
     );
   });
 
@@ -424,6 +428,97 @@ describe("Telegram-канал: замена карточки (spec 0068, вар�
   });
 });
 
+describe("HTML и ссылки-кнопки (spec 0068, вид — версия 3)", () => {
+  it("links — один ряд кнопок, primary — синяя; ссылка в тексте не дублируется; html — parse_mode", async () => {
+    const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(async () => ({
+      messageId: 5,
+    }));
+    const { ch } = channel({ send });
+    const r = await ch.deliver(
+      note({
+        text: "<b>BTC/USDT</b>",
+        html: true,
+        link: "https://x.test/experiments/S98",
+        links: [
+          { label: "📊 Эксперимент", url: "https://x.test/experiments/S98" },
+          {
+            label: "✍️ Выставить вручную на Binance",
+            url: "https://www.binance.com/en/futures/BTCUSDT",
+            kind: "primary",
+          },
+        ],
+      }),
+    );
+    expect(send.mock.calls[0][2]).toBe("<b>BTC/USDT</b>");
+    expect(send.mock.calls[0][3]).toEqual({
+      messageThreadId: 14,
+      silent: true,
+      html: true,
+      buttons: [
+        [
+          { text: "📊 Эксперимент", url: "https://x.test/experiments/S98" },
+          {
+            text: "✍️ Выставить вручную на Binance",
+            url: "https://www.binance.com/en/futures/BTCUSDT",
+            style: "primary",
+          },
+        ],
+      ],
+    });
+    expect(r.ref).toMatchObject({ html: true, text: "<b>BTC/USDT</b>" });
+  });
+
+  it("без кнопок — ссылка текстом (в HTML — с экранированным &)", () => {
+    expect(
+      telegramMessageText({
+        text: "a",
+        link: "https://x/?a=1&b=2",
+        html: true,
+      }),
+    ).toBe("a\nhttps://x/?a=1&amp;b=2");
+    expect(
+      telegramMessageText({
+        text: "a",
+        link: "https://x",
+        links: [{ label: "x", url: "https://x" }],
+      }),
+    ).toBe("a");
+  });
+
+  it("«⤵️ обновлено ниже» к HTML-карточке — с тем же parse_mode", async () => {
+    const edit = vi.fn<NonNullable<TelegramChannelDeps["edit"]>>(
+      async () => {},
+    );
+    const { ch } = channel({
+      send: async () => ({ messageId: 9 }),
+      remove: async () => {
+        throw new Error("Telegram deleteMessage 400: message can't be deleted");
+      },
+      edit,
+    });
+    await ch.deliver(
+      note({
+        replaces: {
+          ref: {
+            chatId: "-1001234",
+            messageId: 3,
+            text: "<b>old</b>",
+            html: true,
+          },
+          label: "карточка",
+        },
+      }),
+    );
+    expect(edit).toHaveBeenCalledWith(
+      "bot-token",
+      "-1001234",
+      3,
+      "<b>old</b>\n⤵️ обновлено ниже",
+      { html: true },
+    );
+  });
+});
+
 describe("ключ сообщения — отправленный текст (обрезанный до лимита)", () => {
   it("длинный текст — в ключе ровно то, что ушло в Telegram", async () => {
     const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(async () => ({
@@ -435,6 +530,7 @@ describe("ключ сообщения — отправленный текст (�
       chatId: "-1001234",
       messageId: 9,
       text: "x".repeat(4000),
+      html: false,
     });
   });
 });

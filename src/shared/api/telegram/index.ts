@@ -24,6 +24,7 @@ export {
   type TelegramCommand,
   type TelegramSendOptions,
   type TelegramSentMessage,
+  type TelegramUrlButton,
 } from "./client.server";
 export {
   parseTelegramCommand,

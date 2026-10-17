@@ -121,6 +121,7 @@ describe("каналы приложения: log.notify → Bot API", () => {
           chatId: "-1001234",
           messageId: 101,
           text: "Binance Dashboard · ⚠️ без защиты\nhttps://binance.example.test/settings#live",
+          html: false,
         },
       },
     });

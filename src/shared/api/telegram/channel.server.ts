@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getAppHost, type TelegramConfig } from "@/shared/config/env.server";
 import {
   type ChannelResult,
+  type Notification,
   type NotificationReplace,
   type NotifyCategory,
   type NotifyChannel,
@@ -64,6 +65,8 @@ export const telegramMessageRefSchema = z.object({
   chatId: z.string(),
   messageId: z.number().int(),
   text: z.string(),
+  /** Текст — HTML: правка «⤵️ обновлено ниже» — с тем же parse_mode. */
+  html: z.boolean().default(false),
 });
 export type TelegramMessageRef = z.infer<typeof telegramMessageRefSchema>;
 
@@ -80,9 +83,34 @@ const CANT_DELETE = /message can't be deleted/i;
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
-/** Текст сообщения: текст уведомления и ссылка строкой ниже. */
-export const telegramMessageText = (n: { text: string; link: string | null }) =>
-  [n.text, n.link].filter(Boolean).join("\n");
+/**
+ * Текст сообщения: текст уведомления и ссылка строкой ниже. Есть ссылки-кнопки — ссылка не дублируется в тексте. В
+ * HTML ссылка экранируется (& в адресе).
+ */
+export const telegramMessageText = (n: {
+  text: string;
+  link: string | null;
+  links?: readonly unknown[];
+  html?: boolean;
+}) =>
+  [
+    n.text,
+    n.links?.length ? null : n.html ? n.link?.replaceAll("&", "&amp;") : n.link,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+/** Ссылки уведомления → один ряд кнопок; primary — синяя. */
+const buttonsOf = (n: Notification) =>
+  n.links.length
+    ? [
+        n.links.map((l) => ({
+          text: l.label,
+          url: l.url,
+          ...(l.kind === "primary" && { style: "primary" as const }),
+        })),
+      ]
+    : undefined;
 
 const NOT_CONFIGURED =
   "Telegram не настроен (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)";
@@ -131,6 +159,7 @@ export function createTelegramChannel(
           ref.chatId,
           ref.messageId,
           `${ref.text}\n${UPDATED_BELOW}`,
+          { html: ref.html },
         );
         return { replaceError: `${notRemoved}; дописано «${UPDATED_BELOW}»` };
       } catch (editError) {
@@ -175,6 +204,10 @@ export function createTelegramChannel(
         };
       const { token, chatId } = config;
       const text = telegramMessageText(n);
+      const format = {
+        ...(n.html && { html: true }),
+        ...(buttonsOf(n) && { buttons: buttonsOf(n) }),
+      };
       /** Отправлено: прежнее убирается только после успешной отправки нового (B2); ключ — нового. */
       const sent = async (
         message: Awaited<ReturnType<typeof send>>,
@@ -192,6 +225,7 @@ export function createTelegramChannel(
             chatId,
             messageId: message.messageId,
             text: text.slice(0, TELEGRAM_TEXT_LIMIT),
+            html: n.html,
           } satisfies TelegramMessageRef,
         }),
       });
@@ -200,6 +234,7 @@ export function createTelegramChannel(
           await send(token, chatId, text, {
             messageThreadId: policy.topicId,
             silent,
+            ...format,
           }),
           {},
         );
@@ -213,6 +248,7 @@ export function createTelegramChannel(
         return send(token, chatId, text, {
           messageThreadId: null,
           silent,
+          ...format,
         }).then(
           (message) =>
             sent(message, {

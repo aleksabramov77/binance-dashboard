@@ -8,6 +8,8 @@ import {
   type LiveHeartbeatReply,
   type LiveState,
   type LiveStatusResponse,
+  type LiveTradeSubject,
+  liveBinanceUrl,
   loadLiveState,
   planHeartbeat,
   planSilence,
@@ -18,6 +20,7 @@ import { fetchAccountUid } from "@/shared/api/binance/account.server";
 import { getLiveSilentAfterMs, getSiteLink } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import type { NotifyLink } from "@/shared/notify";
 import { getMainCredentials } from "./accountKey";
 
 /** UID основного счёта не меняется — достаточно перечитывать раз в час. */
@@ -92,16 +95,32 @@ export const liveNotice = (
 });
 
 /**
- * Текст и ссылка уведомления о сделке (вход, итог, без защиты, не закрылась — spec 0068, AC8): текст как есть (по
- * строкам, начинается со значка) и ссылка на страницу эксперимента сделки. Сообщения о счёте целиком — liveNotice.
+ * Ссылки карточки сделки (spec 0068, AC8, вид — версия 3): кнопки «📊 Эксперимент» (страница эксперимента сделки) и
+ * «🔗 Binance» (монета на бирже); у проблемы — синяя «✍️ Выставить вручную на Binance». link — та же страница
+ * эксперимента текстом для каналов без кнопок. Сообщения о счёте целиком — liveNotice.
  */
-export const liveTradeNotice = (
-  text: string,
-  experimentId: string,
-): { text: string; link: string | null } => ({
-  text,
-  link: getSiteLink(`/experiments/${encodeURIComponent(experimentId)}`),
-});
+export function liveTradeLinks(
+  s: Pick<LiveTradeSubject, "experimentId" | "symbol" | "market">,
+  problem: boolean,
+): { link: string | null; links: NotifyLink[] } {
+  const link = getSiteLink(
+    `/experiments/${encodeURIComponent(s.experimentId)}`,
+  );
+  const binance = liveBinanceUrl(s);
+  return {
+    link,
+    links: [
+      ...(link ? [{ label: "📊 Эксперимент", url: link }] : []),
+      problem
+        ? {
+            label: "✍️ Выставить вручную на Binance",
+            url: binance,
+            kind: "primary" as const,
+          }
+        : { label: "🔗 Binance", url: binance },
+    ],
+  };
+}
 
 async function emit(events: LiveEvent[], heartbeat: LiveHeartbeat) {
   const data = {

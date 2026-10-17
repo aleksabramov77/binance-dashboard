@@ -41,6 +41,7 @@ export {
   type LiveSkipDecision,
 } from "./lib/liveGate";
 export {
+  escapeHtml,
   type LiveBalance,
   type LiveCardEntry,
   type LiveCardExit,
@@ -48,6 +49,8 @@ export {
   type LiveHaltAction,
   type LiveSizeRaised,
   type LiveTradeSubject,
+  liveBinanceUrl,
+  liveCardProblem,
   liveCardText,
   liveCardUrgent,
   liveCloseAllDoneText,

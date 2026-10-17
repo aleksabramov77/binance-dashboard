@@ -2,6 +2,7 @@
 // предупреждение о владельце. Сеть и печать — scripts/telegram-setup.ts.
 import {
   type LiveCardStatus,
+  liveBinanceUrl,
   liveCardText,
   liveCardUrgent,
 } from "@/entities/live-account";
@@ -129,13 +130,18 @@ export function ownerWarnings(config: TelegramConfig): string[] {
 
 /** Пометка пробной пары: числа вымышленные, сделки нет. */
 const TEST_MARK = "🧪 Пробное сообщение: числа вымышленные, сделки нет";
+/** Пробный баланс субсчёта. */
+const TEST_BALANCE = { usd: 512.4, asOf: null };
 
 /** Пробная карточка: текст и звук (как у настоящей сделки с тем же статусом). */
 export interface TestTradeCard {
   /** Для журнала и вывода: «⏳ вход исполнен». */
   label: string;
+  /** HTML, как у настоящей карточки. */
   text: string;
   urgent: boolean;
+  /** Кнопка «🔗 Binance». */
+  binanceUrl: string;
 }
 
 /**
@@ -170,15 +176,16 @@ export function testTradeCards(): TestTradeCard[] {
           closedBy: "tp",
           exitPrice: 83230,
           feesUsd: 0.05,
+          closedAt: "2026-10-18T12:40:00.000Z",
           heldMs: (2 * 60 + 15) * 60_000,
-          balance: { usd: 512.4, asOf: null },
         },
       },
     ],
   ];
   return chain.map(([label, status]) => ({
     label,
-    text: `${liveCardText(subject, entry, status)}\n${TEST_MARK}`,
+    text: `${liveCardText(subject, entry, status, TEST_BALANCE, "html")}\n\n<i>${TEST_MARK}</i>`,
     urgent: liveCardUrgent(status),
+    binanceUrl: liveBinanceUrl(subject),
   }));
 }

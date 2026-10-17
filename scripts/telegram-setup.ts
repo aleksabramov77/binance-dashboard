@@ -141,7 +141,12 @@ async function sendTestTrade(): Promise<boolean> {
       urgent: card.urgent,
       test: true,
       text: card.text,
+      html: true,
       link,
+      links: [
+        ...(link ? [{ label: "📊 Эксперимент", url: link }] : []),
+        { label: "🔗 Binance", url: card.binanceUrl },
+      ],
       replaces: { ref, label: "карточка" },
     });
     const c = r.channels[0];

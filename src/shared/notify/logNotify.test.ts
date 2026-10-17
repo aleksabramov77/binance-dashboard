@@ -58,6 +58,8 @@ describe("log.notify", () => {
       fixture: false,
       test: false,
       replaces: null,
+      links: [],
+      html: false,
     });
     expect(r).toEqual({
       category: "lab",

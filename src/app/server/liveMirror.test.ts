@@ -75,7 +75,14 @@ const channel = {
 };
 /** Тексты, которые получил канал (текст + ссылка — как в Telegram). */
 const sent = () =>
-  channel.deliver.mock.calls.map(([n]) => telegramMessageText(n));
+  channel.deliver.mock.calls.map(([n]) =>
+    // Карточки — HTML (spec 0068, вид — версия 3): проверяем текст без разметки.
+    telegramMessageText(n)
+      .replace(/<\/?b>/g, "")
+      .replaceAll("&lt;", "<")
+      .replaceAll("&gt;", ">")
+      .replaceAll("&amp;", "&"),
+  );
 /** Записи с уведомлением: событие, категория и звук. */
 const notices = () =>
   vi.mocked(log.notify).mock.calls.map(([n]) => ({
@@ -329,8 +336,22 @@ describe("вход, выход и дневной PnL", () => {
     await saveLiveFilled({ tradeId: a, entryPrice: 100, quantity: 0.1, order });
     expect(sent()).toHaveLength(1);
     expect(sent()[0]).toMatch(
-      /^⏳ Вход исполнен, ставлю SL\/TP · S98 LINKUSDT long · USDⓈ-M\nОбъём: \$10,00\nЦена входа: 100\nSL: 95 \(−5,0 %\)\nTP: 110 \(\+10,0 %\)\nВход: \d\d\.\d\d \d\d:\d\d UTC\nhttps:\/\/binance\.example\.test\/experiments\/S98$/,
+      /^⏳ 📈 LONG\nLINK\/USDT · USDⓈ-M · S98\n\n⏳ Вход исполнен, ставлю SL\/TP…\n\n🟩 110\u2002\u2002\+10,0 %\n➡️ 100\u2002\u2002\$10,00\n🟥 95\u2002\u2002−5,0 %\n\n➡️ \d\d\.\d\d · \d\d:\d\d UTC\n🏦 Баланс: нет данных$/,
     );
+    // Telegram — HTML (монета жирным); ссылки — кнопками: страница эксперимента (AC8) и монета на Binance.
+    const first = channel.deliver.mock.calls[0][0];
+    expect(first.html).toBe(true);
+    expect(first.text).toMatch(/<b>LINK\/USDT<\/b>/);
+    expect(first.links).toEqual([
+      {
+        label: "📊 Эксперимент",
+        url: "https://binance.example.test/experiments/S98",
+      },
+      {
+        label: "🔗 Binance",
+        url: "https://www.binance.com/en/futures/LINKUSDT",
+      },
+    ]);
     expect(channel.deliver.mock.calls[0][0].replaces).toEqual({
       ref: null,
       label: "карточка",
@@ -351,11 +372,8 @@ describe("вход, выход и дневной PnL", () => {
       },
       order,
     });
-    // 🟡 заменяет ⏳ (ключ ⏳ — каналу), ссылка — на страницу эксперимента (AC8).
-    expect(sent()[1]).toMatch(/^🟡 Открыта, SL\/TP стоят · S98 LINKUSDT long/);
-    expect(sent()[1]).toMatch(
-      /\nhttps:\/\/binance\.example\.test\/experiments\/S98$/,
-    );
+    // 🟡 заменяет ⏳ (ключ ⏳ — каналу); у 🟡 нет строки статуса.
+    expect(sent()[1]).toMatch(/^🟡 📈 LONG\nLINK\/USDT · USDⓈ-M · S98\n\n🟩 /);
     expect(channel.deliver.mock.calls[1][0].replaces?.ref).toEqual({
       chat: "42",
       id: 70,
@@ -397,7 +415,7 @@ describe("вход, выход и дневной PnL", () => {
       id: 71,
     });
     expect(sent()[2]).toMatch(
-      /^🔴 −\$16,00 · S98 LINKUSDT long · USDⓈ-M\n[\s\S]*\nЗакрыта вслед за paper-сделкой: 100 → 90\nКомиссии: \$0,10 · в сделке меньше минуты\nБаланс: нет данных\nВход: [^\n]+\nhttps:\/\/binance\.example\.test\/experiments\/S98$/,
+      /^🔴 −\$16,00 📈 LONG\nLINK\/USDT · USDⓈ-M · S98\n\n[\s\S]*\n🏁 [^\n]+ · вслед за paper-сделкой по 90\n⏱ В сделке: меньше минуты\n💸 Комиссии: \$0,10\n🏦 Баланс: нет данных$/,
     );
     expect((await liveMirrorState()).dailyPnl).toEqual({ S98: -16 });
     // ⏳ и 🟡 — тихо, итог — со звуком; подсказка ручному «Вкл» (убыток −$16 ≥ порога $15) — тихо.
@@ -520,7 +538,7 @@ describe("карточка сделки: баланс, замена, нет кл
   it("баланс от воркера после закрытия — без пометки времени (AC4)", async () => {
     const id = await open("NEARUSDT");
     await closed(id, 512.4);
-    expect(sent()[0]).toMatch(/\nБаланс субсчёта: \$512,40\n/);
+    expect(sent()[0]).toMatch(/\n🏦 Баланс: \$512,40$/);
     expect(noticeData("live.exit")).toMatchObject({
       balance: { usd: 512.4, asOf: null },
     });
@@ -543,7 +561,7 @@ describe("карточка сделки: баланс, замена, нет кл
       receivedAt: "2026-10-18T12:40:05.000Z",
     });
     await closed(id);
-    expect(sent()[0]).toMatch(/\nБаланс субсчёта: \$30,50 \(на 12:40 UTC\)\n/);
+    expect(sent()[0]).toMatch(/\n🏦 Баланс: \$30,50 \(на 12:40 UTC\)$/);
   });
 
   it("сообщение «исполнен» потерялось — итог входа сразу даёт 🟡 (B1)", async () => {
@@ -565,7 +583,7 @@ describe("карточка сделки: баланс, замена, нет кл
       order,
     });
     expect(sent()).toHaveLength(1);
-    expect(sent()[0]).toMatch(/^🟡 Открыта, SL\/TP стоят · /);
+    expect(sent()[0]).toMatch(/^🟡 📈 LONG\n/);
     // Опоздавшее «исполнен» после итога — карточки ⏳ нет.
     await saveLiveFilled({
       tradeId: id,
@@ -620,8 +638,8 @@ describe("карточка сделки: баланс, замена, нет кл
       await new Promise((r) => setTimeout(r, 20));
       release();
       await Promise.all([first, second]);
-      expect([...live.values()].map((t) => t.split(" · ")[0])).toEqual([
-        "🟡 Открыта, SL/TP стоят",
+      expect([...live.values()].map((t) => t.split("\n")[0])).toEqual([
+        "🟡 📈 LONG",
       ]);
     }
   });
@@ -668,8 +686,8 @@ describe("карточка сделки: баланс, замена, нет кл
     await new Promise((r) => setTimeout(r, 20));
     release();
     await Promise.all([filled, rejected]);
-    expect([...live.values()].map((t) => t.split(" · ")[0])).toEqual([
-      "⚪ Вход отменён",
+    expect([...live.values()].map((t) => t.split("\n")[0])).toEqual([
+      "⚪ Вход отменён 📈 LONG",
     ]);
   });
 
@@ -725,10 +743,10 @@ describe("карточка сделки: баланс, замена, нет кл
       },
       order,
     });
-    expect(sent()[1]).toMatch(/^⚪ Вход отменён · /);
+    expect(sent()[1]).toMatch(/^⚪ Вход отменён 📈 LONG\n/);
     // Данные «исполнен» не затёрты: цена, объём и уровни с процентами — в карточке.
     expect(sent()[1]).toMatch(
-      /\nОбъём: \$10,00\nЦена входа: 100\nSL: 95 \(−5,0 %\)\nTP: 110 \(\+10,0 %\)\n/,
+      /\n\n🟩 110\u2002\u2002\+10,0 %\n➡️ 100\u2002\u2002\$10,00\n🟥 95\u2002\u2002−5,0 %\n\n/,
     );
     expect(await getLiveMirror(db, id)).toMatchObject({
       status: "rejected",
@@ -764,8 +782,14 @@ describe("карточка сделки: баланс, замена, нет кл
       order,
     });
     expect(sent()[0]).toMatch(
-      /^⚠️ Без защиты · S98 INJUSDT long · USDⓈ-M\n[\s\S]*\nЧто случилось: Стоп не поставлен\.\nЧто сделать: /,
+      /^⚠️ 📈 LONG\nINJ\/USDT · USDⓈ-M · S98\n\n⚠️ Причина: Стоп не поставлен\.\n\n/,
     );
+    // Проблема — синяя кнопка «✍️ Выставить вручную на Binance» вместо «🔗 Binance».
+    expect(channel.deliver.mock.calls[0][0].links.at(-1)).toEqual({
+      label: "✍️ Выставить вручную на Binance",
+      url: "https://www.binance.com/en/futures/INJUSDT",
+      kind: "primary",
+    });
     expect(notices()[0]).toMatchObject({
       event: "live.unprotected",
       urgent: true,
@@ -791,7 +815,9 @@ describe("карточка сделки: баланс, замена, нет кл
       ref: null,
       label: "карточка",
     });
-    expect(sent()[0]).toMatch(/^🟢 \+\$0,99 · S98 SUIUSDT long · USDⓈ-M\n/);
+    expect(sent()[0]).toMatch(
+      /^🟢 \+\$0,99 📈 LONG\nSUI\/USDT · USDⓈ-M · S98\n/,
+    );
     expect(noticeData("live.exit")).toMatchObject({
       card: "closed",
       previousCard: false,
@@ -918,12 +944,14 @@ describe("повтор закрытий (приёмка 0049)", () => {
     expect((await getLiveMirror(db, a))?.status).toBe("closed");
     expect(channel.deliver).toHaveBeenCalledTimes(2);
     const text = sent()[1];
-    expect(text).toMatch(/\nЗакрыта после 3 попыток/);
+    expect(text).toMatch(/\n🔁 Закрыта после 3 попыток/);
     expect(text).toMatch(
-      /\nОстаток 0\.00000986 AVAX ≈ \$0,00 на субсчёте, в PnL не входит/,
+      /\n🪙 Остаток 0\.00000986 AVAX ≈ \$0,00 на субсчёте, в PnL не входит/,
     );
     // «Не закрылась» — карточка ⚠️ со звуком, заменяет прежнюю (B2); итог — следующая карточка.
-    expect(sent()[0]).toMatch(/^⚠️ Не закрылась · S98 AVAXUSDT long · USDⓈ-M\n/);
+    expect(sent()[0]).toMatch(
+      /^⚠️ 📈 LONG\nAVAX\/USDT · USDⓈ-M · S98\n\n⚠️ Причина: позиция не закрылась — /,
+    );
     expect(channel.deliver.mock.calls[0][0].replaces?.label).toBe("карточка");
     expect(noticeData("live.exit")).toMatchObject({
       attempts: 3,
@@ -967,7 +995,7 @@ describe("повтор закрытий (приёмка 0049)", () => {
     });
     expect((await getLiveMirror(db, a))?.status).toBe("unprotected");
     expect(sent()[0]).toMatch(
-      /^⚠️ Без защиты · S98 DOGEUSDT long · USDⓈ-M\n[\s\S]*\nЧто случилось: .*Свои TP\/SL уже сняты/,
+      /^⚠️ 📈 LONG\nDOGE\/USDT · USDⓈ-M · S98\n\n⚠️ Причина: .*Свои TP\/SL уже сняты/,
     );
     await minuteLater(a);
     expect((await liveMirrorState()).toClose).toContain(a);
@@ -1106,8 +1134,10 @@ describe("сверка «потерянного» входа (ревью PR #89)
       // TP — тейк paper-сделки: карточка 🟡 со строкой TP (spec 0068).
       takeProfit: 110,
     });
-    expect(sent()[0]).toMatch(/^🟡 Открыта, SL\/TP стоят · /);
-    expect(sent()[0]).toMatch(/\nSL: 95 \(−5,0 %\)\nTP: 110 \(\+10,0 %\)\n/);
+    expect(sent()[0]).toMatch(/^🟡 📈 LONG\n/);
+    expect(sent()[0]).toMatch(
+      /\n\n🟩 110\u2002\u2002\+10,0 %\n➡️ 100\u2002\u2002\$10,00\n🟥 95\u2002\u2002−5,0 %\n\n/,
+    );
     expect((await liveMirrorState()).stalePending).toEqual([]);
     await saveLiveReconcile({ ...body, outcome: "skipped" });
     expect((await getLiveMirror(db, a))?.status).toBe("protected");
@@ -1206,9 +1236,9 @@ describe("PnL — оценка (исполнения не прочитаны)", 
       realizedPnl: -0.51,
       pnlEstimated: true,
     });
-    expect(sent()[0]).toMatch(/^🔴 ≈ −\$0,51 · /);
+    expect(sent()[0]).toMatch(/^🔴 ≈ −\$0,51 📈 LONG\n/);
     expect(sent()[0]).toMatch(
-      /\n≈ PnL — оценка по ценам входа и выхода \(исполнения не прочитаны\)/,
+      /\n≈ PnL — оценка: исполнения Binance не прочитаны\n/,
     );
   });
 });

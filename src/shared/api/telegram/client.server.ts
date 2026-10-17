@@ -36,6 +36,17 @@ export interface TelegramSendOptions {
   messageThreadId?: number | null;
   /** Без звука (disable_notification): «сообщение придёт без звука». */
   silent?: boolean;
+  /** Текст — HTML (parse_mode HTML, экранирован вызывающим). */
+  html?: boolean;
+  /** Ссылки-кнопки под сообщением (inline_keyboard): ряды кнопок. */
+  buttons?: TelegramUrlButton[][];
+}
+
+/** Кнопка-ссылка; style primary — синяя (Bot API, поле style у InlineKeyboardButton). */
+export interface TelegramUrlButton {
+  text: string;
+  url: string;
+  style?: "primary";
 }
 
 /** Сколько символов текста отправляем и правим (лимит Telegram — 4096). */
@@ -62,6 +73,10 @@ export async function sendTelegramMessage(
     }),
     text: text.slice(0, TELEGRAM_TEXT_LIMIT),
     ...(options.silent && { disable_notification: true }),
+    ...(options.html && { parse_mode: "HTML" }),
+    ...(options.buttons?.length && {
+      reply_markup: { inline_keyboard: options.buttons },
+    }),
     link_preview_options: { is_disabled: true },
   });
   const sent = sentMessageSchema.safeParse(result);
@@ -74,11 +89,13 @@ export async function editTelegramMessageText(
   chatId: string,
   messageId: number,
   text: string,
+  options: { html?: boolean } = {},
 ): Promise<void> {
   await callTelegram(token, "editMessageText", {
     chat_id: chatId,
     message_id: messageId,
     text: text.slice(0, TELEGRAM_TEXT_LIMIT),
+    ...(options.html && { parse_mode: "HTML" }),
     link_preview_options: { is_disabled: true },
   });
 }

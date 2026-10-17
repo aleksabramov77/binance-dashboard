@@ -52,6 +52,7 @@ import {
   type LiveTrading,
   liveAdviceText,
   liveAutoDisableText,
+  liveCardProblem,
   liveCardText,
   liveCardUrgent,
   liveCloseAllDoneText,
@@ -72,7 +73,7 @@ import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { type NotifyRef, notifyRefSchema } from "@/shared/notify";
 import { actorLabel, type EngineToggleActor } from "./engineToggleNotice";
-import { liveNotice, liveTradeNotice, loadLastLiveState } from "./liveAccount";
+import { liveNotice, liveTradeLinks, loadLastLiveState } from "./liveAccount";
 import {
   liveAutoLogData,
   liveAutoOffReason,
@@ -152,6 +153,8 @@ function announceCard(
     onlyIf?: (current: LiveRow) => boolean;
     /** onlyIf не пропустил — вместо карточки (например, запись журнала). */
     otherwise?: (current: LiveRow) => void;
+    /** Баланс от воркера после закрытия; нет — последний пульс. */
+    balanceUsd?: number | null;
   },
 ): Promise<void> {
   return serialByTrade(row.tradeId, async () => {
@@ -161,16 +164,27 @@ function announceCard(
       return;
     }
     const ref = cardRefOf(current);
-    const text = liveCardText(subjectOf(current), cardEntryOf(current), status);
+    const s = subjectOf(current);
+    const balance = await exitBalance(s.market, entry.balanceUsd);
+    const card = (format: "html" | "plain") =>
+      liveCardText(s, cardEntryOf(current), status, balance, format);
     const sent = await log.notify({
       level: entry.level,
       event: entry.event,
-      message: text,
+      // Журнал — простой текст, Telegram — HTML с кнопками (spec 0068, вид — версия 3).
+      message: card("plain"),
+      text: card("html"),
+      html: true,
       // Для /logs без канала: была ли прежняя карточка (B6).
-      data: { ...entry.data, card: status.kind, previousCard: ref !== null },
+      data: {
+        ...entry.data,
+        card: status.kind,
+        previousCard: ref !== null,
+        balance,
+      },
       category: "trades",
       urgent: liveCardUrgent(status),
-      ...liveTradeNotice(text, current.experimentId),
+      ...liveTradeLinks(s, liveCardProblem(status)),
       replaces: { ref, label: CARD },
       skip: entry.skip,
     });
@@ -439,7 +453,7 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
     // вход просто не состоялся, как раньше: только журнал.
     await announceCard(
       row,
-      { kind: "cancelled", message: r.message },
+      { kind: "cancelled", message: r.message, at: new Date().toISOString() },
       {
         level: "warn",
         event: "live.rejected",
@@ -483,7 +497,6 @@ async function announceExit(
 ): Promise<void> {
   const row = await getLiveMirror(getDb(), tradeId);
   if (!row) return;
-  const balance = await exitBalance(subjectOf(row).market, exit.balanceUsd);
   const opened = row.filledAt ?? row.createdAt;
   await announceCard(
     row,
@@ -491,8 +504,8 @@ async function announceExit(
       kind: "closed",
       exit: {
         ...exit,
+        closedAt: (row.closedAt ?? new Date()).toISOString(),
         heldMs: row.closedAt ? row.closedAt.getTime() - opened.getTime() : null,
-        balance,
         attempts,
       },
     },
@@ -509,10 +522,10 @@ async function announceExit(
         pnlEstimated: exit.pnlEstimated,
         closedBy: exit.closedBy,
         leftover: exit.leftover,
-        balance,
         attempts,
         steps: exit.steps,
       },
+      balanceUsd: exit.balanceUsd,
     },
   );
 }
@@ -772,7 +785,11 @@ export async function saveLiveReconcile(
     row,
     body.outcome === "open"
       ? { kind: "protected" }
-      : { kind: "cancelled", message: body.message },
+      : {
+          kind: "cancelled",
+          message: body.message,
+          at: new Date().toISOString(),
+        },
     {
       level: "warn",
       event: "live.reconcile",

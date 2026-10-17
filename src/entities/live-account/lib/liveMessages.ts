@@ -1,9 +1,11 @@
+import { splitSymbol } from "@/shared/lib";
 import { LIVE } from "../config/liveMirror";
 import { livePrice, liveUsd } from "./money";
 
-// Тексты журнала и Telegram реального зеркала (spec 0049, AC8; карточка сделки — spec 0068, вариант B). Чистые
-// функции: id эксперимента — настоящий (в журнале и Telegram), в тестах и документации — фиктивный. Карточка сделки —
-// одно сообщение на сделку, всегда полное: статус в заголовке, данные входа, итог или «что случилось», время входа.
+// Тексты журнала и Telegram реального зеркала (spec 0049, AC8; карточка сделки — spec 0068, вариант B, вид — версия 3).
+// Чистые функции: id эксперимента — настоящий (в журнале и Telegram), в тестах и документации — фиктивный. Карточка
+// сделки — одно сообщение на сделку: шапка в две строки, строка статуса (если нужна), лесенка цен, время, комиссии и
+// баланс. Текст — HTML (монета жирным, всё остальное экранировано) или простой текст для журнала.
 
 /** Почему объём выше $10 — по причине из sizeEntry: «минимум биржи» — только когда сработал minNotional. */
 const RAISED = {
@@ -22,30 +24,18 @@ export interface LiveTradeSubject {
   direction: "long" | "short";
 }
 
-/** «S98 BTCUSDT long · USDⓈ-M». */
-const fullSubject = (s: LiveTradeSubject) =>
-  `${s.experimentId} ${s.symbol} ${s.direction} · ${MARKET[s.market]}`;
+/** Отступ между ценой и процентом/суммой в лесенке: два en space (U+2002). */
+const GAP = "  ";
 
-/** «−2,0 %» — уровень от цены входа. */
-function pctFrom(level: number, entry: number): string {
-  const pct = ((level - entry) / entry) * 100;
-  const abs = Math.abs(pct).toFixed(1).replace(".", ",");
-  return `${pct < 0 ? "−" : "+"}${abs} %`;
+/** Экранирование для parse_mode HTML Telegram: &, <, >. */
+export const escapeHtml = (text: string) =>
+  text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+/** «+4,0 %» / «−2,0 %» — возможная прибыль (TP) или убыток (SL) от цены входа. */
+function pctText(level: number, entry: number, sign: "+" | "−"): string {
+  const pct = Math.abs(((level - entry) / entry) * 100);
+  return `${sign}${pct.toFixed(1).replace(".", ",")} %`;
 }
-
-const levelLine = (name: string, level: number, entry: number | null) =>
-  `${name}: ${livePrice(level)}${entry ? ` (${pctFrom(level, entry)})` : ""}`;
-
-const optionalPrice = (v: number | null) =>
-  v === null || v <= 0 ? "нет данных" : livePrice(v);
-
-/** Чем закрыта — для строки цен итога. */
-const CLOSED_LINE: Record<string, string> = {
-  tp: "Закрыта по TP",
-  sl: "Закрыта по SL",
-  mirror: "Закрыта вслед за paper-сделкой",
-  close_all: "Закрыта по «Закрыть всё»",
-};
 
 /** «остаток 0.00000986 BTC ≈ $0,81 на субсчёте». */
 export function liveLeftoverText(l: {
@@ -68,11 +58,11 @@ export function liveHeldText(ms: number): string {
   return `${days} д${hours % 24 ? ` ${hours % 24} ч` : ""}`;
 }
 
-/** «18.10 12:40 UTC» — время входа в карточке. */
+/** «18.10 · 08:10 UTC». */
 const utcDateTime = (iso: string) =>
-  `${iso.slice(8, 10)}.${iso.slice(5, 7)} ${iso.slice(11, 16)} UTC`;
+  `${iso.slice(8, 10)}.${iso.slice(5, 7)} · ${iso.slice(11, 16)} UTC`;
 
-/** Баланс субсчёта для итога: после закрытия (от воркера) или по последнему пульсу — с временем пульса. */
+/** Баланс субсчёта: после закрытия (от воркера) или по последнему пульсу — с временем пульса. */
 export interface LiveBalance {
   usd: number;
   /** «12:40 UTC» — баланс из последнего пульса воркера; null — прочитан после закрытия. */
@@ -102,9 +92,10 @@ export interface LiveCardExit {
   closedBy: string | null;
   exitPrice: number | null;
   feesUsd: number | null;
+  /** Когда закрыта, ISO. */
+  closedAt: string;
   /** Время в сделке, мс; null — не известно. */
   heldMs: number | null;
-  balance: LiveBalance | null;
   leftover?: { qty: number; asset: string; usd: number } | null;
   attempts?: number;
 }
@@ -119,115 +110,189 @@ export type LiveCardStatus =
   | { kind: "unprotected"; message: string }
   | { kind: "close_failed"; message: string }
   /** Вход исполнялся (была карточка ⏳), но позиции нет: биржа откатила вход. */
-  | { kind: "cancelled"; message: string }
+  | { kind: "cancelled"; message: string; at: string }
   | { kind: "closed"; exit: LiveCardExit };
 
 /** Со звуком — итог и проблемы; ход входа (⏳, 🟡) — тихо. */
 export const liveCardUrgent = (status: LiveCardStatus): boolean =>
   status.kind !== "filled" && status.kind !== "protected";
 
+/** Проблема с позицией — вместо «🔗 Binance» кнопка «✍️ Выставить вручную на Binance». */
+export const liveCardProblem = (status: LiveCardStatus): boolean =>
+  status.kind === "unprotected" || status.kind === "close_failed";
+
+/** Страница монеты на Binance: фьючерс — /futures/BTCUSDT, спот — /trade/BTC_USDT. */
+export function liveBinanceUrl(s: Pick<LiveTradeSubject, "symbol" | "market">) {
+  if (s.market === "usdm")
+    return `https://www.binance.com/en/futures/${s.symbol}`;
+  const { base, quote } = splitSymbol(s.symbol);
+  return `https://www.binance.com/en/trade/${quote ? `${base}_${quote}` : s.symbol}`;
+}
+
 /** 🟢 — прибыль, 🔴 — убыток, ⚪ — ноль или PnL неизвестен. */
 const outcomeColor = (pnl: number | null) =>
   pnl === null || pnl === 0 ? "⚪" : pnl > 0 ? "🟢" : "🔴";
 
-const exitHead = (o: LiveCardExit) =>
-  `${outcomeColor(o.realizedPnl)} ${
-    o.realizedPnl === null
-      ? "PnL неизвестен"
-      : `${o.pnlEstimated ? "≈ " : ""}${liveUsd(o.realizedPnl, true)}`
-  }`;
-
-function cardHead(status: LiveCardStatus, entry: LiveCardEntry): string {
+/** Первая строка шапки: значок статуса, PnL (у закрытой), направление. */
+function headLine(s: LiveTradeSubject, status: LiveCardStatus): string {
+  const dir = s.direction === "long" ? "📈 LONG" : "📉 SHORT";
   switch (status.kind) {
     case "filled":
-      return "⏳ Вход исполнен, ставлю SL/TP";
+      return `⏳ ${dir}`;
     case "protected":
-      return entry.takeProfit === null
-        ? "🟡 Открыта, SL стоит"
-        : "🟡 Открыта, SL/TP стоят";
+      return `🟡 ${dir}`;
     case "unprotected":
-      return "⚠️ Без защиты";
     case "close_failed":
-      return "⚠️ Не закрылась";
+      return `⚠️ ${dir}`;
     case "cancelled":
-      return "⚪ Вход отменён";
-    case "closed":
-      return exitHead(status.exit);
+      return `⚪ Вход отменён ${dir}`;
+    case "closed": {
+      const e = status.exit;
+      const pnl =
+        e.realizedPnl === null
+          ? "PnL ?"
+          : `${e.pnlEstimated ? "≈ " : ""}${liveUsd(e.realizedPnl, true)}`;
+      return `${outcomeColor(e.realizedPnl)} ${pnl} ${dir}`;
+    }
   }
 }
 
-/** Итог закрытия: чем закрыта и цены, комиссии и время, баланс, пометки — каждая своей строкой (AC3–AC4). */
-function exitLines(o: LiveCardExit, entryPrice: number | null): string[] {
-  const closed = o.closedBy
-    ? (CLOSED_LINE[o.closedBy] ?? `Закрыта (${o.closedBy})`)
-    : "Закрыта";
-  const fees = `Комиссии: ${o.feesUsd === null ? "нет данных" : liveUsd(o.feesUsd)}`;
-  const leftover = o.leftover ? liveLeftoverText(o.leftover) : null;
-  return [
-    `${closed}: ${optionalPrice(entryPrice)} → ${optionalPrice(o.exitPrice)}`,
-    o.heldMs === null ? fees : `${fees} · в сделке ${liveHeldText(o.heldMs)}`,
-    o.balance
-      ? `Баланс субсчёта: ${liveUsd(o.balance.usd)}${o.balance.asOf ? ` (на ${o.balance.asOf})` : ""}`
-      : "Баланс: нет данных",
-    o.realizedPnl === null
-      ? "⚠️ Исполнения и цена не прочитаны — в порогах автовыключения сделка считается убыточной"
-      : o.pnlEstimated
-        ? "≈ PnL — оценка по ценам входа и выхода (исполнения не прочитаны)"
-        : null,
-    leftover
-      ? `${leftover[0].toUpperCase()}${leftover.slice(1)}, в PnL не входит`
-      : null,
-    o.attempts && o.attempts > 1 ? `Закрыта после ${o.attempts} попыток` : null,
-  ].filter((l) => l !== null);
+/** Код ошибки Binance из текста: «… (-2010)» → «-2010». */
+const apiCode = (message: string) =>
+  /\((-\d{3,5})\)/.exec(message)?.[1] ??
+  /(?:^|\s)(-\d{4})\b/.exec(message)?.[1];
+
+/** Строки статуса: только у ⏳, ⚠️, ⚪ отменён и у закрытой с оценкой / неизвестным PnL / остатком / повторами. */
+function statusLines(status: LiveCardStatus): string[] {
+  switch (status.kind) {
+    case "filled":
+      return ["⏳ Вход исполнен, ставлю SL/TP…"];
+    case "protected":
+      return [];
+    case "unprotected":
+    case "close_failed": {
+      const code = apiCode(status.message);
+      // Что сделать — кнопка «✍️ Выставить вручную на Binance» под карточкой.
+      return [
+        status.kind === "unprotected"
+          ? `⚠️ Причина: ${status.message}`
+          : `⚠️ Причина: позиция не закрылась — ${status.message} Повторяю каждый прогон воркера.`,
+        ...(code ? [`🧾 Код API: ${code}`] : []),
+      ];
+    }
+    case "cancelled":
+      return [`↩️ ${status.message}`];
+    case "closed": {
+      const e = status.exit;
+      return [
+        e.realizedPnl === null
+          ? "❔ Цена выхода и исполнения не прочитаны — в порогах автовыключения считается убытком"
+          : e.pnlEstimated
+            ? "≈ PnL — оценка: исполнения Binance не прочитаны"
+            : null,
+        e.leftover
+          ? `🪙 ${liveLeftoverText(e.leftover).replace(/^о/, "О")}, в PnL не входит`
+          : null,
+        e.attempts && e.attempts > 1
+          ? `🔁 Закрыта после ${e.attempts} попыток`
+          : null,
+      ].filter((l) => l !== null);
+    }
+  }
 }
 
-/** Проблема: что случилось и что сделать (AC7). */
-function problemLines(
-  status: Extract<
-    LiveCardStatus,
-    { kind: "unprotected" | "close_failed" | "cancelled" }
-  >,
-): string[] {
-  const next = {
-    unprotected:
-      "Что сделать: закройте позицию на Binance вручную или нажмите «Закрыть всё».",
-    close_failed:
-      "Что дальше: закрытие повторяется каждый прогон воркера, пока позиция не закроется.",
-    cancelled: null,
-  }[status.kind];
-  return [`Что случилось: ${status.message}`, next].filter((l) => l !== null);
+/** Лесенка по цене (long: TP, вход, SL сверху вниз; short: SL, вход, TP); нет TP — без строки. */
+function ladder(s: LiveTradeSubject, e: LiveCardEntry): string[] {
+  const entry = e.entryPrice !== null && e.entryPrice > 0 ? e.entryPrice : null;
+  const stop = e.stopLoss !== null && e.stopLoss > 0 ? e.stopLoss : null;
+  const amount =
+    e.notionalUsd === null
+      ? ""
+      : `${GAP}${liveUsd(e.notionalUsd)}${e.raised ? ` (${RAISED[e.raised]})` : ""}`;
+  const level = (icon: string, price: number, sign: "+" | "−") =>
+    `${icon} ${livePrice(price)}${entry ? `${GAP}${pctText(price, entry, sign)}` : ""}`;
+  const tp = e.takeProfit === null ? null : level("🟩", e.takeProfit, "+");
+  const sl = stop === null ? "🟥 SL нет" : level("🟥", stop, "−");
+  const mid = `➡️ ${entry === null ? "цена входа: нет данных" : livePrice(entry)}${amount}`;
+  const rows = s.direction === "long" ? [tp, mid, sl] : [sl, mid, tp];
+  return rows.filter((l) => l !== null);
+}
+
+/** Чем закрыта (не TP/SL) — после времени у 🏁. */
+const CLOSED_BY: Record<string, string> = {
+  mirror: "вслед за paper-сделкой",
+  close_all: "«Закрыть всё»",
+};
+
+/** Время: ➡️ вход; закрыта по TP — 🟩, по SL — 🟥; иначе 🏁 время · причина; ⏱ в сделке — у закрытой. */
+function timeLines(e: LiveCardEntry, status: LiveCardStatus): string[] {
+  const lines = [`➡️ ${utcDateTime(e.openedAt)}`];
+  if (status.kind === "cancelled")
+    lines.push(`🏁 ${utcDateTime(status.at)} · вход отменён биржей`);
+  if (status.kind !== "closed") return lines;
+  const x = status.exit;
+  const at = utcDateTime(x.closedAt);
+  if (x.closedBy === "tp") lines.push(`🟩 ${at}`);
+  else if (x.closedBy === "sl") lines.push(`🟥 ${at}`);
+  else {
+    const by = x.closedBy ? (CLOSED_BY[x.closedBy] ?? x.closedBy) : "закрыта";
+    const price =
+      x.exitPrice && x.exitPrice > 0 ? ` по ${livePrice(x.exitPrice)}` : "";
+    lines.push(`🏁 ${at} · ${by}${price}`);
+  }
+  if (x.heldMs !== null) lines.push(`⏱ В сделке: ${liveHeldText(x.heldMs)}`);
+  return lines;
+}
+
+/** Комиссии (у закрытой) и баланс — сразу под временем, без пустой строки. */
+function reportLines(status: LiveCardStatus, balance: LiveBalance | null) {
+  const fees =
+    status.kind === "closed"
+      ? [
+          `💸 Комиссии: ${
+            status.exit.feesUsd === null
+              ? "нет данных"
+              : `${status.exit.pnlEstimated ? "≈ " : ""}${liveUsd(status.exit.feesUsd)}`
+          }`,
+        ]
+      : [];
+  return [
+    ...fees,
+    balance
+      ? `🏦 Баланс: ${liveUsd(balance.usd)}${balance.asOf ? ` (на ${balance.asOf})` : ""}`
+      : "🏦 Баланс: нет данных",
+  ];
 }
 
 /**
- * Карточка сделки (spec 0068, вариант B): «<статус> · S98 BTCUSDT long · USDⓈ-M», объём (с причиной, если выше $10),
- * цена входа, SL и TP с процентом от цены входа (без TP — без строки), затем итог или «что случилось», время входа.
- * Ссылку добавляет канал строкой ниже.
+ * Карточка сделки (spec 0068, вид — версия 3): шапка в две строки (статус · PnL · направление / монета · рынок ·
+ * эксперимент), строка статуса (у 🟡 и у 🟢/🔴 по TP/SL — нет), лесенка цен, время, комиссии и баланс. format html —
+ * для Telegram (монета жирным, текст экранирован), plain — для журнала. Ссылки — кнопками у канала, не в тексте.
  */
 export function liveCardText(
   s: LiveTradeSubject,
   entry: LiveCardEntry,
   status: LiveCardStatus,
+  balance: LiveBalance | null,
+  format: "html" | "plain" = "plain",
 ): string {
-  const price =
-    entry.entryPrice !== null && entry.entryPrice > 0 ? entry.entryPrice : null;
-  const stop =
-    entry.stopLoss !== null && entry.stopLoss > 0 ? entry.stopLoss : null;
-  return [
-    `${cardHead(status, entry)} · ${fullSubject(s)}`,
-    `Объём: ${entry.notionalUsd === null ? "нет данных" : liveUsd(entry.notionalUsd)}${entry.raised ? ` (${RAISED[entry.raised]})` : ""}`,
-    `Цена входа: ${price === null ? "нет данных" : livePrice(price)}`,
-    stop === null ? "SL: нет" : levelLine("SL", stop, price),
-    entry.takeProfit === null ? null : levelLine("TP", entry.takeProfit, price),
-    ...(status.kind === "closed" ? exitLines(status.exit, price) : []),
-    ...(status.kind === "unprotected" ||
-    status.kind === "close_failed" ||
-    status.kind === "cancelled"
-      ? problemLines(status)
-      : []),
-    `Вход: ${utcDateTime(entry.openedAt)}`,
-  ]
-    .filter((l) => l !== null)
-    .join("\n");
+  const esc = format === "html" ? escapeHtml : (t: string) => t;
+  const { base, quote } = splitSymbol(s.symbol);
+  const pair = esc(quote ? `${base}/${quote}` : s.symbol);
+  const coin = format === "html" ? `<b>${pair}</b>` : pair;
+  const blocks = [
+    [
+      esc(headLine(s, status)),
+      `${coin} · ${MARKET[s.market]} · ${esc(s.experimentId)}`,
+    ],
+    statusLines(status).map(esc),
+    ladder(s, entry).map(esc),
+    [...timeLines(entry, status), ...reportLines(status, balance)].map(esc),
+  ];
+  return blocks
+    .filter((b) => b.length > 0)
+    .map((b) => b.join("\n"))
+    .join("\n\n");
 }
 
 /** Сработал дневной лимит эксперимента (один раз за сутки). */
