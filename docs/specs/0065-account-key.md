@@ -1,7 +1,7 @@
 # 0065 · Read-only ключ основного аккаунта: ввод на сайте, хранение в базе в зашифрованном виде
 
 - **Тип:** feature
-- **Статус:** in-progress
+- **Статус:** done
 - **Раздел PRD:** §3.4 Авто-бот (хостинг), очередь задач п. 22
 - **Дата:** 2026-10-17
 
@@ -134,3 +134,4 @@
 | 2026-10-17 | Ветка `feature/0065-account-key`: AC1–AC8 в коде. `shared/crypto/aesGcm.server.ts` (AES-256-GCM, мастер-ключ из `SECRETS_KEY_FILE`), `entities/account-key` (таблица `account_keys`, миграция `0001_account_keys`, схемы, статус), композиция `src/app/server/accountKey.ts` (`getMainCredentials` база → env → нет, кэш, проверка прав, журнал), правила read-only ключа — `shared/api/binance/readRestrictions.ts`, роут `/api/account-key`, карточка `features/manage-account-key` в «Настройках», тексты «Портфеля» и Earn, `add-project.sh`, документация. Отличия от ТЗ: `getMainCredentials` — в композиции платформы (`src/app/server`), а не в `entities/account-key/api` (сущности не открывают базу и не пишут журнал сами; домены получают ключ аргументом из роута); модуль шифрования — `src/shared/crypto/` (в `shared/lib` Steiger ограничивает число модулей); заглушка Binance для локальной проверки — `ACCOUNT_KEY_FIXTURE` (только Mac, не production) |
 | 2026-10-17 | Доработка: read-only ключ отклоняется и при включённых «Enable Vanilla Options» и «Enable Portfolio Margin Trading» (`READ_KEY_FLAGS`, `readKeyFlagsSchema`: нет поля — выключено); строки в карточке прав; правила воркера не менялись |
 | 2026-10-17 | Правки по ревью PR #104: «мастер-ключ недоступен» (нет `SECRETS_KEY_FILE`, файла, прав) отличается от «не расшифровывается» — поле статуса `masterUnavailable`, запись цела, warn `account-key.master-unavailable` вместо decrypt-failed, в карточке без «Удалить» и формы; общий обработчик мутаций глушит только 4xx `/api/account-key` (сеть и 5xx пишутся); `add-project.sh` выравнивает владельца и права существующего мастер-ключа; тесты `getAccountKeyFixture` |
+| 2026-10-17 | Финал: PR #104. Тестировщик — 2 прогона, PASS; ревью — 1 круг CHANGES REQUESTED → APPROVED. AC1–AC8 — в PR; AC9–AC10 — на VM после мержа (мастер-ключ и `SECRETS_KEY_FILE` на VM, ввод ключа владельцем) |

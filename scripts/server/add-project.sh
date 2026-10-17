@@ -65,6 +65,8 @@ if [ "$WEB" = 1 ] && [ ! -s "$ETC/master.key" ]; then
   echo "Мастер-ключ: создан $ETC/master.key (root:$NAME 640)"
 elif [ "$WEB" = 1 ]; then
   # Уже есть: содержимое не трогаем, только выравниваем владельца и права (сервис должен читать, другие — нет).
+  # Символическая ссылка — не наш файл: chown/chmod ушли бы на цель ссылки.
+  [ ! -L "$ETC/master.key" ] || fail "$ETC/master.key — символическая ссылка; нужен обычный файл (содержимое не тронуто)"
   chown root:"$NAME" "$ETC/master.key"
   chmod 640 "$ETC/master.key"
 fi

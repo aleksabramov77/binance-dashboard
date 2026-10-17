@@ -93,7 +93,7 @@ export function readMasterKeyFile(file: string): Buffer {
       error instanceof Error && "code" in error
         ? String(error.code)
         : "ошибка чтения";
-    throw new Error(`мастер-ключ не прочитан (${file}: ${code})`);
+    throw new Error(`мастер-ключ не прочитан: ${file}, ${code}`);
   }
   return parseMasterKey(text);
 }

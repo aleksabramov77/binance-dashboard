@@ -54,7 +54,7 @@ function loadMasterKey(): MasterKey {
   if (!file)
     return {
       key: null,
-      reason: "на сервере не задан мастер-ключ (SECRETS_KEY_FILE)",
+      reason: "на сервере не задан мастер-ключ: нет SECRETS_KEY_FILE в env",
     };
   try {
     return { key: readMasterKeyFile(file), reason: null };

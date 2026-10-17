@@ -27,7 +27,8 @@ describe("accountKeyView", () => {
       accountKeyView({
         ...base,
         source: "none",
-        masterUnavailable: "на сервере не задан мастер-ключ (SECRETS_KEY_FILE)",
+        masterUnavailable:
+          "на сервере не задан мастер-ключ: нет SECRETS_KEY_FILE в env",
         input: { available: false, reason: "на сервере не задан мастер-ключ" },
       }),
     ).toBe("master-unavailable");
