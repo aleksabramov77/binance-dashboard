@@ -163,7 +163,7 @@ ssh claude@<ip> 'd=<дата>; B=/var/lib/binance; ts=$(date -u +%Y%m%dT%H%M%SZ)
   sudo -u binance sqlite3 $B/app.db ".backup $B/app.db.before-restore-$ts"   # текущая (сервер не сливает WAL при остановке)
   sudo rm -f $B/app.db-wal $B/app.db-shm
   sudo -u binance mv $B/app.db.restore $B/app.db
-  sudo chmod 600 $B/app.db
+  sudo chmod 600 $B/app.db $B/app.db.before-restore-$ts
   echo "восстановлено из $d, прежняя база — app.db.before-restore-$ts"'
 ```
 Затем смоук и `/experiments` на сайте. Всё, что записано после 23:30 дня копии, теряется (сделки paper, журнал);
