@@ -626,6 +626,77 @@ describe("карточка сделки: баланс, замена, нет кл
     }
   });
 
+  it("⏳ ещё в пути, а пришёл отказ входа — «вход отменён» заменяет ⏳, висящей ⏳ нет", async () => {
+    await toggleOn("S98");
+    const id = await newTrade("S98", "JUPUSDT");
+    await claimLive(id);
+    vi.clearAllMocks();
+    const live = new Map<number, string>();
+    let next = 1;
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    channel.deliver.mockImplementation(async (n) => {
+      const cardId = next++;
+      if (cardId === 1) await gate;
+      live.set(cardId, n.text);
+      const old = n.replaces?.ref as { id: number } | null | undefined;
+      if (old) live.delete(old.id);
+      return { status: "sent", ref: { id: cardId } };
+    });
+    const filled = saveLiveFilled({
+      tradeId: id,
+      entryPrice: 100,
+      quantity: 0.1,
+      order,
+    });
+    await vi.waitFor(() => expect(channel.deliver).toHaveBeenCalled());
+    const rejected = saveLiveOpen({
+      tradeId: id,
+      result: {
+        id: `r-${id}`,
+        status: "rejected",
+        message: "Стоп не встал — позиция закрыта по рынку.",
+        entryPrice: null,
+        filledQuantity: null,
+        steps: [],
+        protectRefs: null,
+      },
+      order,
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    await Promise.all([filled, rejected]);
+    expect([...live.values()].map((t) => t.split(" · ")[0])).toEqual([
+      "⚪ Вход отменён",
+    ]);
+  });
+
+  it("отказ входа без ⏳ — только журнал live.rejected, карточки нет", async () => {
+    await toggleOn("S98");
+    const id = await newTrade("S98", "PYTHUSDT");
+    await claimLive(id);
+    vi.clearAllMocks();
+    await saveLiveOpen({
+      tradeId: id,
+      result: {
+        id: `r-${id}`,
+        status: "rejected",
+        message: "Мало денег.",
+        entryPrice: null,
+        filledQuantity: null,
+        steps: [],
+        protectRefs: null,
+      },
+      order,
+    });
+    expect(channel.deliver).not.toHaveBeenCalled();
+    expect(vi.mocked(log.warn).mock.calls.map((c) => c[0])).toContain(
+      "live.rejected",
+    );
+  });
+
   it("после ⏳ вход не открылся (биржа откатила) — карточка «вход отменён» вместо ⏳", async () => {
     await toggleOn("S98");
     const id = await newTrade("S98", "ARBUSDT");

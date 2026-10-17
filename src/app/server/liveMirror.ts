@@ -150,11 +150,16 @@ function announceCard(
     data: Record<string, unknown>;
     skip?: string;
     onlyIf?: (current: LiveRow) => boolean;
+    /** onlyIf не пропустил — вместо карточки (например, запись журнала). */
+    otherwise?: (current: LiveRow) => void;
   },
 ): Promise<void> {
   return serialByTrade(row.tradeId, async () => {
     const current = (await getLiveMirror(getDb(), row.tradeId)) ?? row;
-    if (entry.onlyIf && !entry.onlyIf(current)) return;
+    if (entry.onlyIf && !entry.onlyIf(current)) {
+      entry.otherwise?.(current);
+      return;
+    }
     const ref = cardRefOf(current);
     const text = liveCardText(subjectOf(current), cardEntryOf(current), status);
     const sent = await log.notify({
@@ -430,19 +435,23 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
     steps: r.steps,
   };
   if (r.status === "rejected") {
-    // Карточки ⏳ не было — вход просто не состоялся, как раньше: только журнал.
-    if (!cardRefOf(row)) {
-      log.warn(
-        "live.rejected",
-        `${row.experimentId} ${row.symbol}: реальный вход не открылся — ${r.message}`,
-        data,
-      );
-      return;
-    }
+    // Ключ карточки ⏳ — внутри очереди сделки: ⏳, ещё не записавшая ключ, не останется висеть. Карточки ⏳ не было —
+    // вход просто не состоялся, как раньше: только журнал.
     await announceCard(
       row,
       { kind: "cancelled", message: r.message },
-      { level: "warn", event: "live.rejected", data },
+      {
+        level: "warn",
+        event: "live.rejected",
+        data,
+        onlyIf: (current) => cardRefOf(current) !== null,
+        otherwise: () =>
+          log.warn(
+            "live.rejected",
+            `${row.experimentId} ${row.symbol}: реальный вход не открылся — ${r.message}`,
+            data,
+          ),
+      },
     );
     return;
   }
@@ -680,7 +689,6 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
   }
 }
 
-/** Исходный стоп paper-сделки (стоп реального входа ставится по нему). */
 /** Уровни paper-сделки: исходный стоп (стоп реального входа ставится по нему) и тейк (нет — вход без TP). */
 async function paperLevels(
   tradeId: string,
@@ -754,20 +762,27 @@ export async function saveLiveReconcile(
   }
   // Вход нашёлся со стопом — карточка 🟡 (итог входа потерялся, а сделка открыта); после ⏳ входа не оказалось —
   // карточка «вход отменён», чтобы ⏳ не висела.
-  if (body.outcome === "open" || cardRefOf(row)) {
-    await announceCard(
-      row,
-      body.outcome === "open"
-        ? { kind: "protected" }
-        : { kind: "cancelled", message: body.message },
-      { level: "warn", event: "live.reconcile", data },
+  const noCard = () =>
+    log.warn(
+      "live.reconcile",
+      `${row.experimentId} ${row.symbol}: сверка «потерянного» входа — ${body.message}`,
+      data,
     );
-    return;
-  }
-  log.warn(
-    "live.reconcile",
-    `${row.experimentId} ${row.symbol}: сверка «потерянного» входа — ${body.message}`,
-    data,
+  await announceCard(
+    row,
+    body.outcome === "open"
+      ? { kind: "protected" }
+      : { kind: "cancelled", message: body.message },
+    {
+      level: "warn",
+      event: "live.reconcile",
+      data,
+      // «Вход отменён» — только если была ⏳ (ключ читается внутри очереди сделки).
+      ...(body.outcome !== "open" && {
+        onlyIf: (current: LiveRow) => cardRefOf(current) !== null,
+        otherwise: noCard,
+      }),
+    },
   );
 }
 
