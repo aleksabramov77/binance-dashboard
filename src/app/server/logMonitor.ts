@@ -24,7 +24,7 @@ import {
   getGithubAlertsConfig,
   getLlmConfig,
   getLogAnalysisModel,
-  getSiteUrl,
+  getSiteLink,
   getTelegramConfig,
 } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
@@ -212,7 +212,7 @@ export async function runLogMonitor(): Promise<MonitorResult> {
         ? (text) => sendTelegramMessage(telegram.token, chatId, text)
         : undefined,
     prune: () => pruneLogs(),
-    logsUrl: `${getSiteUrl()}/logs`,
+    logsUrl: getSiteLink("/logs"),
   });
   if (!telegram || !chatId)
     log.warn(
@@ -253,7 +253,12 @@ export async function sendMonitorTest(): Promise<{
   await sendTelegramMessage(
     telegram.token,
     telegram.chatId,
-    `✅ Binance Dashboard: уведомления работают. Монитор проверяет журнал каждые 15 минут.\n${getSiteUrl()}/logs`,
+    [
+      "✅ Binance Dashboard: уведомления работают. Монитор проверяет журнал каждые 15 минут.",
+      getSiteLink("/logs"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
   );
   return { sent: true };
 }

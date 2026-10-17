@@ -14,7 +14,7 @@ import {
   type SpaceAlertRow,
 } from "@/features/db-space";
 import { sendTelegramMessage } from "@/shared/api/telegram";
-import { getSiteUrl, getTelegramConfig } from "@/shared/config/env.server";
+import { getSiteLink, getTelegramConfig } from "@/shared/config/env.server";
 import {
   type Db,
   getDb,
@@ -147,7 +147,7 @@ export async function checkDbSpace(now = Date.now()): Promise<DbSpaceResult> {
       await sendTelegramMessage(
         telegram.token,
         chatId,
-        formatSpaceAlert(threshold, usage, `${getSiteUrl()}/logs`),
+        formatSpaceAlert(threshold, usage, getSiteLink("/logs")),
       );
       sent = true;
     } catch (error) {

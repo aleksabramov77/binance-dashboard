@@ -16,7 +16,8 @@ export function formatAlert(input: {
   notify: Issue[];
   resolved: AlertRow[];
   analysis: string | null;
-  logsUrl: string;
+  /** null — адрес сайта не задан: без строки журнала. */
+  logsUrl: string | null;
   /** Задачи в GitHub по тревогам; нет — уведомление без ссылок. */
   tracked?: TrackedIssue[];
 }): string | null {
@@ -38,6 +39,6 @@ export function formatAlert(input: {
     if (lines.length) lines.push("");
     for (const r of resolved) lines.push(`✅ Восстановлено: ${r.title}`);
   }
-  lines.push("", `Журнал: ${logsUrl}`);
+  if (logsUrl) lines.push("", `Журнал: ${logsUrl}`);
   return lines.join("\n");
 }

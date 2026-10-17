@@ -46,7 +46,7 @@ export function formatAlertIssue(
   issue: Issue,
   analysis: string | null,
   samples: SampleLog[],
-  logsUrl: string,
+  logsUrl: string | null,
 ): { title: string; body: string } {
   const logs = relevant(issue, samples);
   const lines = [
@@ -63,8 +63,7 @@ export function formatAlertIssue(
     ...(logs.length
       ? ["```text", ...logs.map((s) => fence(sampleLine(s))), "```"]
       : ["_записей нет_"]),
-    "",
-    `Журнал на сайте: ${logsUrl}`,
+    ...(logsUrl ? ["", `Журнал на сайте: ${logsUrl}`] : []),
   ];
   return { title: issue.title, body: lines.join("\n") };
 }

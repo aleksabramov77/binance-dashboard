@@ -22,6 +22,7 @@ import {
   clearMainAccountUidCache,
   getLiveStatusView,
   ingestHeartbeat,
+  notifyLive,
 } from "./liveAccount";
 
 let db: Db;
@@ -76,6 +77,7 @@ beforeEach(async () => {
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("TELEGRAM_BOT_TOKEN", "bot");
   vi.stubEnv("TELEGRAM_CHAT_ID", "42");
+  vi.stubEnv("SITE_URL", "https://binance.example.test");
   vi.stubEnv("BINANCE_API_KEY", "ro-key");
   vi.stubEnv("BINANCE_API_SECRET", "ro-secret");
   vi.stubEnv("LIVE_SILENT_AFTER_SEC", "");
@@ -106,7 +108,7 @@ describe("ingestHeartbeat", () => {
     );
     expect(sendTelegramMessage).toHaveBeenCalledTimes(2);
     expect(vi.mocked(sendTelegramMessage).mock.calls[1][2]).toMatch(
-      /ключ заблокирован: у ключа разрешён вывод средств\n.*\/settings#live$/,
+      /ключ заблокирован: у ключа разрешён вывод средств\nhttps:\/\/binance\.example\.test\/settings#live$/,
     );
     expect(statusLogs()).toHaveLength(2);
     const view = await getLiveStatusView();
@@ -201,6 +203,23 @@ describe("ingestHeartbeat", () => {
     await ingestHeartbeat(pulse(), T0);
     expect(sendTelegramMessage).not.toHaveBeenCalled();
     expect(statusLogs()[0].telegram).toBe("не отправлен: не production");
+  });
+});
+
+describe("notifyLive", () => {
+  it("ссылка — на адрес из SITE_URL", async () => {
+    expect(await notifyLive("🟢 Реальная сделка")).toBe("отправлен");
+    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toBe(
+      "Binance Dashboard · 🟢 Реальная сделка\nhttps://binance.example.test/settings#live",
+    );
+  });
+
+  it("без SITE_URL — сообщение без ссылки, не на старый адрес Vercel", async () => {
+    vi.stubEnv("SITE_URL", "");
+    expect(await notifyLive("🟢 Реальная сделка")).toBe("отправлен");
+    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toBe(
+      "Binance Dashboard · 🟢 Реальная сделка",
+    );
   });
 });
 
