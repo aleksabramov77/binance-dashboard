@@ -32,11 +32,15 @@ const note = (over: Partial<Notification> = {}): Notification => ({
   event: "engine.toggle",
   fixture: false,
   test: false,
+  thread: null,
   ...over,
 });
 
 function channel(over: Partial<TelegramChannelDeps> = {}) {
-  const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(async () => {});
+  const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(async () => ({
+    messageId: null,
+    replied: false,
+  }));
   const deps: TelegramChannelDeps = {
     config: () => config,
     policy: () => lab,
@@ -175,7 +179,7 @@ describe("Telegram-канал", () => {
           "Telegram sendMessage 400: Bad Request: message thread not found",
         ),
       )
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ messageId: null, replied: false });
     const { ch } = channel({ send });
     expect(await ch.deliver(note({ urgent: true }))).toEqual({
       status: "sent",
@@ -238,6 +242,179 @@ describe("Telegram-канал", () => {
         "Telegram sendMessage 403: Forbidden: bot was kicked from the supergroup chat",
       target: { topicId: 14 },
     });
+  });
+});
+
+describe("Telegram-канал: ответ, дописать, отметка (spec 0068)", () => {
+  const trades: TelegramTopicPolicy = {
+    title: "💰 Сделки",
+    topicId: 5,
+    enabled: true,
+    sound: "urgent",
+  };
+  const entryRef = {
+    chatId: "-1001234",
+    messageId: 70,
+    text: "🟡 Вход · S98 BTCUSDT long · USDⓈ-M\nhttps://x.test/experiments/S98",
+  };
+  const exitNote = (thread: Partial<NonNullable<Notification["thread"]>>) =>
+    note({
+      category: "trades",
+      urgent: true,
+      text: "🟢 +$0,84 · S98 BTCUSDT long",
+      event: "live.exit",
+      thread: {
+        ref: entryRef,
+        label: "сообщение о входе",
+        reply: true,
+        append: "Итог: 🟢 +$0,84 (TP)",
+        mark: "good",
+        ...thread,
+      },
+    });
+  function tradesChannel(over: Partial<TelegramChannelDeps> = {}) {
+    const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(
+      async (_t, _c, _text, o) => ({
+        messageId: 71,
+        replied: o?.replyTo != null,
+      }),
+    );
+    const edit = vi.fn<NonNullable<TelegramChannelDeps["edit"]>>(
+      async () => {},
+    );
+    const react = vi.fn<NonNullable<TelegramChannelDeps["react"]>>(
+      async () => {},
+    );
+    const ch = createTelegramChannel({
+      config: () => config,
+      policy: () => trades,
+      send,
+      edit,
+      react,
+      host: () => ({ production: true, server: true }),
+      ...over,
+    });
+    return { ch, send, edit, react };
+  }
+
+  it("итог — ответом на вход; вход дописан строкой итога и отмечен 👍; ключ нового сообщения — в ответе", async () => {
+    const { ch, send, edit, react } = tradesChannel();
+    expect(await ch.deliver(exitNote({}))).toEqual({
+      status: "sent",
+      target: { topic: "💰 Сделки", topicId: 5, to: "-1001234", silent: false },
+      reply: "ответ на сообщение о входе",
+      amend: "дописано, отметка 👍",
+      ref: {
+        chatId: "-1001234",
+        messageId: 71,
+        text: "🟢 +$0,84 · S98 BTCUSDT long",
+      },
+    });
+    expect(send.mock.calls[0][3]).toEqual({
+      messageThreadId: 5,
+      silent: false,
+      replyTo: 70,
+    });
+    expect(edit).toHaveBeenCalledWith(
+      "bot-token",
+      "-1001234",
+      70,
+      `${entryRef.text}\nИтог: 🟢 +$0,84 (TP)`,
+    );
+    expect(react).toHaveBeenCalledWith("bot-token", "-1001234", 70, "👍");
+  });
+
+  it("убыток — отметка 👎; без отметки (PnL неизвестен) — реакции нет", async () => {
+    const bad = tradesChannel();
+    await bad.ch.deliver(exitNote({ mark: "bad" }));
+    expect(bad.react.mock.calls[0][3]).toBe("👎");
+    const none = tradesChannel();
+    expect(await none.ch.deliver(exitNote({ mark: null }))).toMatchObject({
+      amend: "дописано",
+    });
+    expect(none.react).not.toHaveBeenCalled();
+  });
+
+  it("номер входа не известен — обычное сообщение, «без ответа», дописывать нечего (AC6)", async () => {
+    const { ch, send, edit, react } = tradesChannel();
+    expect(await ch.deliver(exitNote({ ref: null }))).toMatchObject({
+      status: "sent",
+      reply: "без ответа: сообщение о входе не известно",
+      amendError: "сообщение о входе не известно — не к чему дописать",
+    });
+    expect(send.mock.calls[0][3]).not.toHaveProperty("replyTo");
+    expect(edit).not.toHaveBeenCalled();
+    expect(react).not.toHaveBeenCalled();
+    // Ключ другого чата или не того формата — тоже не известен.
+    const other = tradesChannel();
+    await other.ch.deliver(exitNote({ ref: { ...entryRef, chatId: "-999" } }));
+    await other.ch.deliver(exitNote({ ref: { message_id: 70 } }));
+    expect(other.send.mock.calls.map((c) => c[3]?.replyTo)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("сообщение о входе удалено — Telegram отправил без ответа: так и записано", async () => {
+    const { ch } = tradesChannel({
+      send: async () => ({ messageId: 72, replied: false }),
+      edit: async () => {
+        throw new Error(
+          "Telegram editMessageText 400: message to edit not found",
+        );
+      },
+      react: async () => {
+        throw new Error("Telegram setMessageReaction 400: message not found");
+      },
+    });
+    expect(await ch.deliver(exitNote({}))).toMatchObject({
+      status: "sent",
+      reply: "без ответа: сообщение о входе не найдено",
+      amendError:
+        "не дописано: Telegram editMessageText 400: message to edit not found; без отметки 👍: Telegram setMessageReaction 400: message not found",
+    });
+  });
+
+  it("сбой правки не мешает итогу: отправлено, отметка поставлена, причина — в amendError (AC5)", async () => {
+    const { ch, react } = tradesChannel({
+      edit: async () => {
+        throw new Error(
+          "Telegram editMessageText 400: message can't be edited",
+        );
+      },
+    });
+    expect(await ch.deliver(exitNote({}))).toMatchObject({
+      status: "sent",
+      reply: "ответ на сообщение о входе",
+      amend: "отметка 👍",
+      amendError:
+        "не дописано: Telegram editMessageText 400: message can't be edited",
+    });
+    expect(react).toHaveBeenCalledTimes(1);
+  });
+
+  it("не production — ничего не шлёт и не правит, но в итоге видно, что это был бы ответ", async () => {
+    const { ch, send, edit, react } = tradesChannel({
+      host: () => ({ production: false, server: false }),
+    });
+    expect(await ch.deliver(exitNote({}))).toMatchObject({
+      status: "skipped",
+      reason: "не production",
+      reply: "ответ на сообщение о входе",
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(edit).not.toHaveBeenCalled();
+    expect(react).not.toHaveBeenCalled();
+  });
+
+  it("только ответ (тревога «не закрылась») — без правки и отметки", async () => {
+    const { ch, edit, react } = tradesChannel();
+    const r = await ch.deliver(exitNote({ append: null, mark: null }));
+    expect(r).toMatchObject({ reply: "ответ на сообщение о входе" });
+    expect(r).not.toHaveProperty("amend");
+    expect(r).not.toHaveProperty("amendError");
+    expect(edit).not.toHaveBeenCalled();
+    expect(react).not.toHaveBeenCalled();
   });
 });
 

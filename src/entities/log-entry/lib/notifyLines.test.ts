@@ -79,6 +79,53 @@ describe("notifyLines — уведомление в деталях записи 
     ]);
   });
 
+  it("ответ на прошлое сообщение и его правка — хвостом строки (spec 0068, AC10)", () => {
+    const target = {
+      topic: "💰 Сделки",
+      topicId: 5,
+      to: "-1001",
+      silent: false,
+    };
+    expect(
+      notifyLines({
+        category: "trades",
+        urgent: true,
+        status: "sent",
+        channels: [
+          {
+            channel: "telegram",
+            status: "sent",
+            target,
+            reply: "ответ на сообщение о входе",
+            amend: "отметка 👍",
+            amendError: "не дописано: message to edit not found",
+          },
+        ],
+      }),
+    ).toEqual([
+      "telegram: 💰 Сделки (тема 5), со звуком — отправлено · ответ на сообщение о входе; отметка 👍; не изменено: не дописано: message to edit not found",
+    ]);
+    expect(
+      notifyLines({
+        category: "trades",
+        urgent: true,
+        status: "skipped",
+        reason: "не production",
+        channels: [
+          {
+            channel: "telegram",
+            status: "skipped",
+            reason: "не production",
+            target,
+            reply: "без ответа: сообщение о входе не известно",
+          },
+        ],
+      }),
+    ).toEqual([
+      "telegram: 💰 Сделки (тема 5), со звуком — не отправлено: не production · без ответа: сообщение о входе не известно",
+    ]);
+  });
+
   it("канал не подключён — категория и запрошенный звук", () => {
     expect(
       notifyLines({

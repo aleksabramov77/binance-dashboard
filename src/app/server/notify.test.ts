@@ -33,13 +33,30 @@ describe("notifyPolicy", () => {
 
 describe("каналы приложения: log.notify → Bot API", () => {
   let bodies: Record<string, unknown>[];
+  let methods: string[];
   beforeEach(() => {
     bodies = [];
+    methods = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-        bodies.push(JSON.parse(String(init?.body)));
-        return new Response(JSON.stringify({ ok: true, result: {} }));
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        methods.push(String(url).split("/").at(-1) ?? "");
+        // sendMessage — номер нового сообщения (100 + порядковый); ответ — с reply_to_message.
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              message_id: 100 + bodies.length,
+              ...(body.reply_parameters && {
+                reply_to_message: {
+                  message_id: body.reply_parameters.message_id,
+                },
+              }),
+            },
+          }),
+        );
       }),
     );
     vi.stubEnv("NODE_ENV", "production");
@@ -106,6 +123,72 @@ describe("каналы приложения: log.notify → Bot API", () => {
           },
         },
       ],
+      ref: {
+        telegram: {
+          chatId: "-1001234",
+          messageId: 101,
+          text: "Binance Dashboard · ⚠️ без защиты\nhttps://binance.example.test/settings#live",
+        },
+      },
+    });
+  });
+
+  it("итог сделки — ответ на вход, правка входа и реакция через Bot API (spec 0068)", async () => {
+    vi.stubEnv("TELEGRAM_TOPIC_TRADES", "12");
+    const entry = await log.notify({
+      level: "info",
+      event: "live.entry",
+      message: "🟡 Вход",
+      category: "trades",
+      link: "https://binance.example.test/experiments/S98",
+    });
+    const exit = await log.notify({
+      level: "info",
+      event: "live.exit",
+      message: "🟢 +$0,84",
+      category: "trades",
+      urgent: true,
+      thread: {
+        ref: entry.ref,
+        label: "сообщение о входе",
+        reply: true,
+        append: "Итог: 🟢 +$0,84 (TP)",
+        mark: "good",
+      },
+    });
+    expect(methods).toEqual([
+      "sendMessage",
+      "sendMessage",
+      "editMessageText",
+      "setMessageReaction",
+    ]);
+    expect(bodies.slice(1)).toEqual([
+      {
+        chat_id: "-1001234",
+        message_thread_id: 12,
+        text: "🟢 +$0,84",
+        reply_parameters: {
+          message_id: 101,
+          allow_sending_without_reply: true,
+        },
+        link_preview_options: { is_disabled: true },
+      },
+      {
+        chat_id: "-1001234",
+        message_id: 101,
+        text: "🟡 Вход\nhttps://binance.example.test/experiments/S98\nИтог: 🟢 +$0,84 (TP)",
+        link_preview_options: { is_disabled: true },
+      },
+      {
+        chat_id: "-1001234",
+        message_id: 101,
+        reaction: [{ type: "emoji", emoji: "👍" }],
+      },
+    ]);
+    expect(exit.channels[0]).toMatchObject({
+      status: "sent",
+      reply: "ответ на сообщение о входе",
+      amend: "дописано, отметка 👍",
     });
   });
 

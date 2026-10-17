@@ -42,6 +42,16 @@ describe("уведомления — только через логгер", () =
     ]);
   });
 
+  it("правка сообщений и реакции (spec 0068) — только Telegram-канал", () => {
+    expect(
+      using(/\b(editTelegramMessageText|setTelegramMessageReaction)\b/),
+    ).toEqual([
+      "src/shared/api/telegram/channel.server.ts",
+      "src/shared/api/telegram/client.server.ts",
+      "src/shared/api/telegram/index.ts",
+    ]);
+  });
+
   it("Bot API напрямую — только клиент (и getUpdates для chat id в monitor:supabase)", () => {
     expect(using(/api\.telegram\.org/)).toEqual([
       "scripts/monitor-supabase.ts",

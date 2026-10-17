@@ -57,12 +57,14 @@ describe("log.notify", () => {
       event: "engine.toggle",
       fixture: false,
       test: false,
+      thread: null,
     });
     expect(r).toEqual({
       category: "lab",
       urgent: false,
       status: "sent",
       channels: [{ channel: "test", status: "sent" }],
+      ref: null,
     });
     expect(got).toHaveLength(1);
     expect(got[0]).toMatchObject({
@@ -71,7 +73,12 @@ describe("log.notify", () => {
       message: "Автоторговля выключена (octocat)",
       // Секреты маскируются, как у обычных записей.
       data: { enabled: false, apiKey: "***" },
-      notify: r,
+      notify: {
+        category: "lab",
+        urgent: false,
+        status: "sent",
+        channels: [{ channel: "test", status: "sent" }],
+      },
     });
   });
 
@@ -204,6 +211,76 @@ describe("log.notify", () => {
         channel: "telegram",
       },
     });
+  });
+
+  it("ключ сообщения: каждый канал получает свой ключ из thread.ref, ответ — ключи по каналам; в запись ключ не попадает (spec 0068)", async () => {
+    const telegram = fakeChannel("telegram", async (n) => ({
+      status: "sent",
+      reply: n.thread?.ref ? "ответ на сообщение о входе" : undefined,
+      ref: { messageId: 71 },
+    }));
+    const mail = fakeChannel("mail", async () => ({
+      status: "skipped",
+      reason: "не настроен",
+      ref: "не отправлено — ключ не берётся",
+    }));
+    setNotifyChannels([telegram, mail]);
+    const r = await log.notify({
+      level: "info",
+      event: "live.exit",
+      message: "итог",
+      category: "trades",
+      thread: {
+        ref: { telegram: { messageId: 70 } },
+        label: "сообщение о входе",
+        reply: true,
+        append: "Итог: 🟢",
+        mark: "good",
+      },
+    });
+    await flushLogs();
+    expect(telegram.deliver.mock.calls[0][0].thread).toEqual({
+      ref: { messageId: 70 },
+      label: "сообщение о входе",
+      reply: true,
+      append: "Итог: 🟢",
+      mark: "good",
+    });
+    expect(mail.deliver.mock.calls[0][0].thread?.ref).toBeNull();
+    expect(r.ref).toEqual({ telegram: { messageId: 71 } });
+    expect(got[0].notify?.channels).toEqual([
+      {
+        channel: "telegram",
+        status: "sent",
+        reply: "ответ на сообщение о входе",
+      },
+      { channel: "mail", status: "skipped", reason: "не настроен" },
+    ]);
+  });
+
+  it("не дописано или не отмечено прошлое сообщение — уведомление отправлено, warn notify.amend с причиной (AC5)", async () => {
+    setNotifyChannels([
+      fakeChannel("telegram", async () => ({
+        status: "sent",
+        amendError: "не дописано: message to edit not found",
+      })),
+    ]);
+    const r = await log.notify({
+      level: "info",
+      event: "live.exit",
+      message: "итог",
+      category: "trades",
+      thread: { ref: null, label: "сообщение о входе", append: "Итог" },
+    });
+    await flushLogs();
+    expect(r.status).toBe("sent");
+    expect(got.map((e) => [e.level, e.event])).toEqual([
+      ["info", "live.exit"],
+      ["warn", "notify.amend"],
+    ]);
+    expect(got[1].message).toBe(
+      "Уведомление live.exit (telegram): сообщение о входе не изменено — не дописано: message to edit not found",
+    );
   });
 
   it("skip — каналы не вызываются, причина в записи", async () => {

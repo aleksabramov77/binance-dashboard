@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createTelegramForumTopic,
+  editTelegramMessageText,
   getTelegramChat,
   getTelegramChatMember,
   getTelegramMe,
   sendTelegramMessage,
+  setTelegramMessageReaction,
 } from "./client.server";
 
 // Запросы к Bot API без сети: fetch подменён, проверяем метод и тело (spec 0067).
@@ -68,11 +70,54 @@ describe("sendTelegramMessage", () => {
     });
   });
 
+  it("ответ — reply_parameters с allow_sending_without_reply; возвращает номер и ушло ли ответом (spec 0068)", async () => {
+    const { call } = stubFetch({
+      message_id: 77,
+      reply_to_message: { message_id: 70 },
+    });
+    expect(
+      await sendTelegramMessage("T", "-1001", "итог", { replyTo: 70 }),
+    ).toEqual({ messageId: 77, replied: true });
+    expect(call().body).toMatchObject({
+      reply_parameters: { message_id: 70, allow_sending_without_reply: true },
+    });
+    // Сообщения, на которое отвечали, нет — Telegram отправил обычным: replied false.
+    stubFetch({ message_id: 78 });
+    expect(
+      await sendTelegramMessage("T", "-1001", "итог", { replyTo: 70 }),
+    ).toEqual({ messageId: 78, replied: false });
+  });
+
   it("Telegram не принял — ошибка с описанием", async () => {
     stubFetch(null, { ok: false, status: 400 });
     await expect(sendTelegramMessage("T", "1", "x")).rejects.toThrow(
       "Telegram sendMessage 400: Bad Request: chat not found",
     );
+  });
+});
+
+describe("правка своего сообщения и реакция (spec 0068)", () => {
+  it("editMessageText — чат, номер и новый текст", async () => {
+    const { call } = stubFetch({ message_id: 70 });
+    await editTelegramMessageText("T", "-1001", 70, "вход\nИтог: 🟢");
+    expect(call().url).toBe("https://api.telegram.org/botT/editMessageText");
+    expect(call().body).toEqual({
+      chat_id: "-1001",
+      message_id: 70,
+      text: "вход\nИтог: 🟢",
+      link_preview_options: { is_disabled: true },
+    });
+  });
+
+  it("setMessageReaction — одно эмодзи", async () => {
+    const { call } = stubFetch(true);
+    await setTelegramMessageReaction("T", "-1001", 70, "👍");
+    expect(call().url).toBe("https://api.telegram.org/botT/setMessageReaction");
+    expect(call().body).toEqual({
+      chat_id: "-1001",
+      message_id: 70,
+      reaction: [{ type: "emoji", emoji: "👍" }],
+    });
   });
 });
 
