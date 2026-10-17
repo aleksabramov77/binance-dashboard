@@ -24,7 +24,6 @@ import {
 import {
   coinmMarginCoin,
   emptyMirrorRunResult,
-  MIRROR,
   type MirrorRunResult,
   mirrorLogEntry,
   runMirror,
@@ -44,7 +43,7 @@ import {
 } from "@/shared/api/binance/demo.server";
 import { demoVenue } from "@/shared/api/binance/venue.server";
 import { getDemoTradingConfig } from "@/shared/config/env.server";
-import { type Db, getDb, getDbKind } from "@/shared/db/client.server";
+import { type Db, getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { getLabSettings } from "./experimentSettings";
 
@@ -57,12 +56,7 @@ const writeMirrorLog = (e: ReturnType<typeof mirrorLogEntry>) =>
  */
 export async function runDemoMirror(): Promise<MirrorRunResult> {
   const db = getDb();
-  const run = await withMirrorRunLock(
-    db,
-    () => runDemoMirrorUnlocked(db),
-    getDbKind() === "postgres",
-    MIRROR.lockIdleTimeoutS,
-  );
+  const run = await withMirrorRunLock(() => runDemoMirrorUnlocked(db));
   if (run.acquired) return run.value;
   log.info(
     "mirror.locked",

@@ -1,5 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { and, asc, desc, eq, gte, inArray, isNull, ne } from "drizzle-orm";
 import {
   demoTradeR,
   type LiveAutoPlan,
@@ -23,13 +22,14 @@ import {
   liveAutoSnapshotSchema,
 } from "../model/liveAuto";
 import type { MirrorStatus } from "../model/mirror";
-import { type LiveMirrorPatch, updateLiveMirror } from "./liveMirrorDb";
+import { type LiveMirrorPatch, updateLiveMirrorSync } from "./liveMirrorDb";
+import type { ExperimentDb } from "./tickLock";
 
 // Режимы реального счёта в БД (spec 0053): положение переключателя, данные для решения автомата и запись решения.
 // Решение — чистая функция (lib/liveAuto.ts); композиции — src/app/server/liveAuto.ts (суточная проверка, перевод в
 // «Авто») и src/app/server/liveMirror.ts (пороги — атомарно в сохранении закрытия). Без @/… и node:* — как mirrorDb.
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = ExperimentDb;
 
 /** Кто переключил, если переключил автомат (experiments.live_mirror_by). */
 export const LIVE_AUTO_BY = "автомат";
@@ -166,7 +166,16 @@ export async function liveClosedSince(
   experimentId: string,
   since: Date | null,
 ): Promise<LiveClosedTrade[]> {
-  const rows = await db
+  return liveClosedSinceSync(db, experimentId, since);
+}
+
+/** То же синхронно — внутри транзакции SQLite (closeLiveWithAuto). */
+function liveClosedSinceSync(
+  db: Db,
+  experimentId: string,
+  since: Date | null,
+): LiveClosedTrade[] {
+  const rows = db
     .select({
       realizedPnl: liveMirrorOrdersTable.realizedPnl,
       direction: liveMirrorOrdersTable.direction,
@@ -185,7 +194,8 @@ export async function liveClosedSince(
     .orderBy(
       asc(liveMirrorOrdersTable.closedAt),
       asc(liveMirrorOrdersTable.tradeId),
-    );
+    )
+    .all();
   return rows.map((r) => ({
     realizedPnl: r.realizedPnl,
     stopPnl: stopLossPnl({
@@ -210,12 +220,13 @@ export async function setExperimentLiveMode(
   by: string,
 ): Promise<{ id: string; liveMirror: boolean } | null> {
   const liveMirror = mode === "on" || mode === "on_autooff";
+  const now = new Date();
   const [row] = await db
     .update(experimentsTable)
     .set({
       liveMirrorMode: mode,
       liveMirror,
-      liveMirrorSince: sql`now()`,
+      liveMirrorSince: now,
       liveMirrorBy: by,
       ...(thresholds && {
         liveLossLimitUsd: thresholds.lossUsd,
@@ -225,7 +236,7 @@ export async function setExperimentLiveMode(
       liveAutoOffReason: null,
       liveMirrorAdvice: null,
       liveMirrorAuto: null,
-      updatedAt: sql`now()`,
+      updatedAt: now,
     })
     .where(
       and(
@@ -253,7 +264,7 @@ export async function setExperimentLiveThresholds(
     .set({
       liveLossLimitUsd: t.lossUsd,
       liveLossStreak: t.streak,
-      updatedAt: sql`now()`,
+      updatedAt: new Date(),
     })
     .where(eq(experimentsTable.id, id))
     .returning({ id: experimentsTable.id });
@@ -278,24 +289,34 @@ export async function saveLiveAuto(
   row: Pick<LiveAutoRow, "id" | "mode" | "liveOn">,
   patch: LiveAutoPatch,
 ): Promise<boolean> {
+  return saveLiveAutoSync(db, row, patch);
+}
+
+/** То же синхронно — внутри транзакции SQLite (closeLiveWithAuto). */
+function saveLiveAutoSync(
+  db: Db,
+  row: Pick<LiveAutoRow, "id" | "mode" | "liveOn">,
+  patch: LiveAutoPatch,
+): boolean {
   const change = patch.change;
-  const rows = await db
+  const now = new Date();
+  const rows = db
     .update(experimentsTable)
     .set({
       ...(change?.kind === "enable" && {
         liveMirror: true,
-        liveMirrorSince: sql`now()`,
+        liveMirrorSince: now,
         liveMirrorBy: LIVE_AUTO_BY,
-        updatedAt: sql`now()`,
+        updatedAt: now,
       }),
       ...(change?.kind === "disable" && {
         liveMirrorMode: "off" as const,
         liveMirror: false,
-        liveMirrorSince: sql`now()`,
+        liveMirrorSince: now,
         liveMirrorBy: LIVE_AUTO_BY,
-        liveAutoOffAt: sql`now()`,
+        liveAutoOffAt: now,
         liveAutoOffReason: change.reason,
-        updatedAt: sql`now()`,
+        updatedAt: now,
       }),
       ...(patch.snapshot && { liveMirrorAuto: { ...patch.snapshot } }),
       ...(patch.advice && { liveMirrorAdvice: patch.advice.to }),
@@ -312,7 +333,8 @@ export async function saveLiveAuto(
           : undefined,
       ),
     )
-    .returning({ id: experimentsTable.id });
+    .returning({ id: experimentsTable.id })
+    .all();
   return rows.length > 0;
 }
 
@@ -340,56 +362,62 @@ export async function closeLiveWithAuto(
   from: readonly MirrorStatus[],
   reasonOf: (plan: LiveAutoPlan, thresholds: LiveThresholds) => string,
 ): Promise<{ closed: boolean; auto: LiveCloseAuto | null }> {
-  return db.transaction(async (tx) => {
-    if (!(await updateLiveMirror(tx, tradeId, patch, from)))
-      return { closed: false, auto: null };
-    const [trade] = await tx
-      .select({ experimentId: liveMirrorOrdersTable.experimentId })
-      .from(liveMirrorOrdersTable)
-      .where(eq(liveMirrorOrdersTable.tradeId, tradeId));
-    if (!trade) return { closed: true, auto: null };
-    const [exp] = await tx
-      .select()
-      .from(experimentsTable)
-      .where(eq(experimentsTable.id, trade.experimentId))
-      .for("update");
-    if (!exp || exp.liveMirrorMode === "off")
-      return { closed: true, auto: null };
-    const row = toRow(exp);
-    const plan = planLiveAuto({
-      mode: row.mode,
-      liveOn: row.liveOn,
-      enabled: row.enabled,
-      advice: row.advice,
-      thresholds: row.thresholds,
-      closed: await liveClosedSince(tx, row.id, row.since),
-      demo: null,
-    });
-    if (!plan) return { closed: true, auto: null };
-    const disabledReason =
-      plan.change === "disable" ? reasonOf(plan, row.thresholds) : null;
-    const wrote =
-      (plan.change === "disable" || plan.adviceState !== undefined) &&
-      (await saveLiveAuto(tx, row, {
-        ...(disabledReason !== null && {
-          change: { kind: "disable", reason: disabledReason },
-        }),
-        ...(plan.adviceState !== undefined && {
-          advice: { from: row.advice, to: plan.adviceState },
-        }),
-      }));
-    return {
-      closed: true,
-      auto: {
-        experimentId: row.id,
+  // Транзакция SQLite синхронная и берёт блокировку записи сразу (BEGIN IMMEDIATE): чтение эксперимента и запись
+  // решения идут под одной блокировкой, параллельное закрытие другой сделки ждёт (вместо SELECT … FOR UPDATE).
+  return db.transaction(
+    (tx): { closed: boolean; auto: LiveCloseAuto | null } => {
+      if (!updateLiveMirrorSync(tx, tradeId, patch, from))
+        return { closed: false, auto: null };
+      const trade = tx
+        .select({ experimentId: liveMirrorOrdersTable.experimentId })
+        .from(liveMirrorOrdersTable)
+        .where(eq(liveMirrorOrdersTable.tradeId, tradeId))
+        .get();
+      if (!trade) return { closed: true, auto: null };
+      const exp = tx
+        .select()
+        .from(experimentsTable)
+        .where(eq(experimentsTable.id, trade.experimentId))
+        .get();
+      if (!exp || exp.liveMirrorMode === "off")
+        return { closed: true, auto: null };
+      const row = toRow(exp);
+      const plan = planLiveAuto({
         mode: row.mode,
+        liveOn: row.liveOn,
+        enabled: row.enabled,
+        advice: row.advice,
         thresholds: row.thresholds,
-        plan,
-        disabledReason: wrote ? disabledReason : null,
-        advised: wrote && plan.sendAdvice !== null,
-      },
-    };
-  });
+        closed: liveClosedSinceSync(tx, row.id, row.since),
+        demo: null,
+      });
+      if (!plan) return { closed: true, auto: null };
+      const disabledReason =
+        plan.change === "disable" ? reasonOf(plan, row.thresholds) : null;
+      const wrote =
+        (plan.change === "disable" || plan.adviceState !== undefined) &&
+        saveLiveAutoSync(tx, row, {
+          ...(disabledReason !== null && {
+            change: { kind: "disable", reason: disabledReason },
+          }),
+          ...(plan.adviceState !== undefined && {
+            advice: { from: row.advice, to: plan.adviceState },
+          }),
+        });
+      return {
+        closed: true,
+        auto: {
+          experimentId: row.id,
+          mode: row.mode,
+          thresholds: row.thresholds,
+          plan,
+          disabledReason: wrote ? disabledReason : null,
+          advised: wrote && plan.sendAdvice !== null,
+        },
+      };
+    },
+    { behavior: "immediate" },
+  );
 }
 
 /** Последнее автовыключение эксперимента для пометки у «Выкл». */

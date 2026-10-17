@@ -93,7 +93,7 @@ export interface TickDeps {
   ) => void;
 }
 
-/** locked — тик не запускался: блокировку тика держит другой процесс (ставит композиция, не runTick). */
+/** locked — тик не запускался: блокировка тика занята — идёт тик или сброс (ставит композиция, не runTick). */
 export type TickStatus = "ok" | "disabled" | "foreign-runner" | "locked";
 
 export interface TickResult {

@@ -6,7 +6,7 @@ import {
   skippedSignalSchema,
 } from "@binance-dashboard/trading-core";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { emptyLiveSummary } from "../lib/liveStats";
 import { filterTrades, periodStart, sliceStats } from "../lib/slices";
 import { computeStats, equityCurve } from "../lib/stats";
@@ -56,7 +56,7 @@ import {
 // текущая эпоха (по умолчанию), прошлая эпоха или все эпохи сразу (spec 0046). Эпоха — runs, текущая — с
 // наибольшим id; сид и создание первой эпохи — ensureEngineReady.
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = BaseSQLiteDatabase<"sync", unknown>;
 
 /** Эпоха с границами: endedAt — начало следующей; null — текущая. */
 interface RunRange {

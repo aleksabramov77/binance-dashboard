@@ -138,10 +138,13 @@ spec 007b). Поэтому модули слайса импортируют то
 - VM (план A): `src/app/server/experimentEngine.ts` — хранилище на Drizzle (`entities/experiment`),
   таймер раз в минуту из `instrumentation.ts`, `POST /api/cron/tick`, тумблер `GET/POST /api/experiments/engine`.
 - Supabase (spec 007b): Edge Function `supabase/functions/engine-tick` — тот же `runEngineTick` с
-  `runner: "supabase"`.
-- Общая композиция — `src/app/server/engineTick.ts`: тик идёт в одной транзакции под
-  `pg_try_advisory_xact_lock` (`entities/experiment` → `withEngineTickLock`); блокировку держит другой
-  процесс — статус `locked`, тик пропускается. Чужой раннер — `foreign-runner` без записей в БД.
+  `runner: "supabase"`. С переезда базы в SQLite (spec 0059) не используется: функция и Postgres остаются до
+  отключения Supabase (очередь PRD, п. 24).
+- Общая композиция — `src/app/server/engineTick.ts`: тик идёт под блокировкой в памяти процесса
+  (`entities/experiment` → `withEngineTickLock`; база — файл SQLite одного процесса, spec 0059); тик или сброс
+  уже идёт — статус `locked`, тик пропускается. Чужой раннер — `foreign-runner` без записей в БД. В одну транзакцию
+  тик не завёрнут (транзакции SQLite синхронные, а в тике сеть): упал посередине — записанное остаётся, следующий тик
+  продолжает с меток свечей.
 - Модули слайса импортируются Deno исходниками: относительные импорты — с расширением `.ts`.
 - Бэктест (spec 0032): `pnpm lab:backtest` (`scripts/lab-backtest.ts`, логика — `scripts/lib/labBacktest.ts`, история —
   `scripts/lib/labHistory.ts`) прогоняет тот же `runTick` по истории — раздел ниже.

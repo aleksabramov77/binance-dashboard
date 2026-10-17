@@ -33,7 +33,7 @@ stages:
 
   - id: serve
     uses: [worktree]
-    note: В worktree. Сервер работает на своей PGlite и без входа — прод не трогается.
+    note: В worktree. Сервер работает на своей базе SQLite (data/app.db worktree) и без входа — прод не трогается.
     run: pnpm wt serve
     produces: адрес локального сервера
 

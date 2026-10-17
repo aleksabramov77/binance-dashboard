@@ -78,8 +78,8 @@ export {
   toDemoSummary,
   updateMirror,
 } from "./api/mirrorDb";
-// Блокировка прогона demo-зеркала (spec 0012, PR 2e): два прогона крона не идут одновременно.
-export { MIRROR_RUN_LOCK_KEY, withMirrorRunLock } from "./api/mirrorLock";
+// Блокировка прогона demo-зеркала (spec 0012, PR 2e): два прогона не идут одновременно (в памяти процесса, spec 0059).
+export { withMirrorRunLock } from "./api/mirrorLock";
 // Чтение для страниц лаборатории (только сервер: вызывает композиция src/app/server).
 export {
   type LabExperiment,
@@ -263,6 +263,8 @@ export {
   type MarketBudget,
   marketBudgetSchema,
 } from "./model/budget";
+// Таблицы зеркал (Drizzle) — для переноса базы (`pnpm db:import-pg`, spec 0059); запросы — функциями api/*.
+export { demoMirrorOrdersTable, liveMirrorOrdersTable } from "./model/db";
 // Причина выключения эксперимента (spec 0046).
 export {
   DISABLE_NOTE_MAX,

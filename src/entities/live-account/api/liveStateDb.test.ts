@@ -32,7 +32,7 @@ const state: LiveState = {
   silentSince: null,
 };
 
-describe("live_worker_state (миграция на PGlite)", () => {
+describe("live_worker_state (миграция на SQLite)", () => {
   it("пульса не было — null; запись и перезапись одной строки", async () => {
     expect(await loadLiveState(db)).toBeNull();
     await saveLiveState(db, state);

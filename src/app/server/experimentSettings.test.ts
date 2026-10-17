@@ -9,7 +9,7 @@ import {
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { setDemoMirrorMode } from "./experimentSettings";
 
-// Положение демо-зеркала через сервер (spec 0043): БД — PGlite в памяти, движок, биржа и журнал — моки.
+// Положение демо-зеркала через сервер (spec 0043): БД — SQLite в памяти, движок, биржа и журнал — моки.
 let db: Db;
 let close: () => Promise<void>;
 

@@ -1,12 +1,12 @@
 // Worktree на задачу (решение пользователя 2026-10-15). Каждая задача — своя ветка в своём worktree, плоско рядом
 // с репозиторием: ~/Projects/my/binance-dashboard_<метка>. Неотслеживаемые файлы из .claude/worktree-links.json
 // (.env.local; папка private — клон приватного репозитория, spec 0015) — ссылками на основной checkout;
-// у каждого worktree свой локальный сервер, своя PGlite и свой порт.
+// у каждого worktree свой локальный сервер, своя база SQLite (data/app.db) и свой порт.
 //
 //   pnpm wt next                                               номер новой задачи: журнал main + невлитые ветки задач
 //   pnpm wt new <ветка> [--name <метка>] [--from <commit-ish>]  создать (ветка от свежего origin/main) и подготовить
 //   pnpm wt link                                               внутри worktree: создать или починить ссылки
-//   pnpm wt serve [--path <worktree>]                          запустить локальный сервер (PGlite, без входа)
+//   pnpm wt serve [--path <worktree>]                          запустить локальный сервер (своя SQLite, без входа)
 //   pnpm wt stop [--path <worktree>]                           остановить его
 //   pnpm wt list                                               все worktree: ветка, PR, изменения, сервер
 //   pnpm wt remove [<путь|ветка>] [--force]                    остановить сервер и удалить worktree (после мержа)
@@ -204,17 +204,16 @@ async function serve(root: string): Promise<void> {
     });
   const log = path.join(path.dirname(stateFile(root)), "dev-server.log");
   const fd = fs.openSync(log, "w");
-  // Локальная база PGlite в data/pglite этого worktree и вход выключен: прод (Supabase) не трогаем,
-  // Playwright тестировщика заходит без GitHub.
+  // Своя база SQLite в data/app.db этого worktree и вход выключен: прод (файл на VM) не трогаем,
+  // Playwright тестировщика заходит без GitHub. Путь — явно: DATABASE_PATH из окружения сюда не попадает.
   const child = spawn("pnpm", ["dev"], {
     cwd: root,
     detached: true,
     stdio: ["ignore", fd, fd],
     env: {
       ...process.env,
-      DATABASE_URL: "",
       AUTH_SECRET: "",
-      PGLITE_DIR: "data/pglite",
+      DATABASE_PATH: path.join(root, "data", "app.db"),
     },
   });
   child.unref();
@@ -234,7 +233,9 @@ async function serve(root: string): Promise<void> {
         log,
       };
       fs.writeFileSync(stateFile(root), `${JSON.stringify(state, null, 2)}\n`);
-      console.log(`Сервер: ${url} (PGlite, без входа; журнал — ${log})`);
+      console.log(
+        `Сервер: ${url} (SQLite data/app.db, без входа; журнал — ${log})`,
+      );
       return;
     }
     if (!alive(pid)) fail(`pnpm dev завершился, журнал: ${log}`);

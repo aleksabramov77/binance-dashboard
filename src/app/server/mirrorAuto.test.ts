@@ -14,7 +14,7 @@ import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { runMirrorAuto } from "./mirrorAuto";
 
-// Авто-зеркало без биржи и Telegram (spec 0043): БД — PGlite в памяти, Telegram и журнал — моки.
+// Авто-зеркало без биржи и Telegram (spec 0043): БД — SQLite в памяти, Telegram и журнал — моки.
 let db: Db;
 let close: () => Promise<void>;
 

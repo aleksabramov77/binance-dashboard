@@ -1,11 +1,11 @@
-import { eq, sql } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { eq } from "drizzle-orm";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { liveTradingHaltTable } from "../model/db";
 import type { LiveHalt } from "../model/halt";
 
 // Состояние аварийного стопа (одна строка "main"). Только сервер: вызывает композиция src/app/server/liveMirror.ts.
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = BaseSQLiteDatabase<"sync", unknown>;
 
 const ID = "main";
 
@@ -59,7 +59,7 @@ async function upsert(
     .values({ id: ID, ...set })
     .onConflictDoUpdate({
       target: liveTradingHaltTable.id,
-      set: { ...set, updatedAt: sql`now()` },
+      set: { ...set, updatedAt: new Date() },
     });
 }
 

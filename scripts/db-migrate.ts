@@ -1,4 +1,4 @@
-// `pnpm db:migrate` — применить миграции к БД из .env.local (DATABASE_URL или локальный PGlite).
+// `pnpm db:migrate` — применить миграции к базе SQLite (DATABASE_PATH, по умолчанию data/app.db; spec 0059).
 import { existsSync } from "node:fs";
 import { closeDb, migrateDb } from "@/shared/db/client.server";
 

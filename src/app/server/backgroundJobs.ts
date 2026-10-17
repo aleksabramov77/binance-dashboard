@@ -3,14 +3,14 @@
 // пропуск без записей в БД. Логика задач — общая с роутами. Только сервер, только вне Vercel.
 import { createDbExperimentStore } from "@/entities/experiment";
 import { collectSnapshot } from "@/features/collect-snapshot";
-import { readRunner } from "@/features/paper-engine";
+import { ENGINE_KEYS, readRunner } from "@/features/paper-engine";
 import {
   getAppHost,
   getRunnerRole,
   isServerless,
   type RunnerRole,
 } from "@/shared/config/env.server";
-import { getDb } from "@/shared/db/client.server";
+import { type Db, getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import {
   BACKGROUND_JOBS,
@@ -35,7 +35,8 @@ export interface BackgroundJob extends BackgroundJobConfig {
 export interface JobGate {
   serverless: () => boolean;
   processRunner: () => RunnerRole;
-  dbRunner: () => Promise<RunnerRole>;
+  /** engine_state.runner; null — не задан (новая пустая база до переноса данных, spec 0059). */
+  dbRunner: () => Promise<RunnerRole | null>;
 }
 
 type Writer = (
@@ -57,12 +58,15 @@ export type JobOutcome =
   | "skipped-serverless"
   | "skipped-running"
   | "skipped-runner"
+  | "skipped-runner-unset"
   | "skipped-runner-unknown";
 
 const SKIP_TEXT = {
   "skipped-serverless": "процесс на Vercel — задачи запускает pg_cron",
   "skipped-running": "прошлый запуск ещё идёт",
   "skipped-runner": "задачи выполняет другой раннер",
+  "skipped-runner-unset":
+    "engine_state.runner не задан (новая пустая база) — задачи стоят до переноса данных",
   "skipped-runner-unknown":
     "раннер неизвестен — engine_state.runner не прочитан",
 } as const;
@@ -120,12 +124,16 @@ export async function runBackgroundJob(
   const started = now();
   try {
     const processRunner = gate.processRunner();
-    let dbRunner: RunnerRole;
+    let dbRunner: RunnerRole | null;
     try {
       dbRunner = await gate.dbRunner();
     } catch (error) {
       return skip("skipped-runner-unknown", { processRunner }, error);
     }
+    // Пустая база (переключение на SQLite, spec 0059): раннер по умолчанию совпал бы с ролью VM, и демо-зеркало,
+    // монитор и Earn заработали бы на пустых таблицах. Задачи ждут явного runner — он приходит с переносом данных.
+    if (dbRunner === null)
+      return skip("skipped-runner-unset", { processRunner });
     if (dbRunner !== processRunner)
       return skip("skipped-runner", { processRunner, dbRunner });
     resumed();
@@ -162,7 +170,7 @@ const RUNS: Record<BackgroundJobId, BackgroundJob["run"]> = {
     const dbSpace = await checkDbSpaceSafe();
     return { issues: r.issues.length, sent: r.sent, dbSpace };
   },
-  // Межпроцессная блокировка зеркала — внутри runDemoMirror; таймер её не обходит.
+  // Блокировка прогона зеркала — внутри runDemoMirror; таймер её не обходит.
   "demo-mirror": async () => {
     await runDemoMirror();
     return undefined;
@@ -192,10 +200,17 @@ const RUNS: Record<BackgroundJobId, BackgroundJob["run"]> = {
 export const backgroundJobs = (): BackgroundJob[] =>
   BACKGROUND_JOBS.map((config) => ({ ...config, run: RUNS[config.id] }));
 
+/** engine_state.runner базы; null — ключа нет (не путать с раннером по умолчанию у тика). */
+export async function readDbRunner(db: Db): Promise<RunnerRole | null> {
+  const store = createDbExperimentStore(db);
+  if ((await store.getState(ENGINE_KEYS.runner)) === undefined) return null;
+  return readRunner(store);
+}
+
 const realGate: JobGate = {
   serverless: () => isServerless(),
   processRunner: () => getRunnerRole().role,
-  dbRunner: () => readRunner(createDbExperimentStore(getDb())),
+  dbRunner: () => readDbRunner(getDb()),
 };
 
 const realLog: JobLog = {
@@ -253,8 +268,8 @@ function schedule(p: JobsProcess, item: ScheduledJob, after: number) {
 }
 
 /**
- * Таймеры фоновых задач (один набор на процесс). Только на своей VM (APP_HOST=vm): на Mac роль процесса и runner
- * локальной PGlite по умолчанию совпадают (oracle), и монитор слал бы Telegram и задачи GitHub ключами из .env.local.
+ * Таймеры фоновых задач (один набор на процесс). Только на своей VM (APP_HOST=vm): на Mac монитор слал бы Telegram и
+ * задачи GitHub ключами из .env.local.
  * Выполнять ли задачу — решает engine_state.runner перед каждым запуском.
  */
 export function startBackgroundJobs(): void {

@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
+import { createDbExperimentStore } from "@/entities/experiment";
+import { ENGINE_KEYS } from "@/features/paper-engine";
+import { createMemoryDb } from "@/shared/db/client.server";
 import {
   type BackgroundJob,
   backgroundJobs,
   createJobsState,
   type JobGate,
   type JobLog,
+  readDbRunner,
   runBackgroundJob,
   scheduleJobs,
 } from "./backgroundJobs";
@@ -107,6 +111,37 @@ describe("runBackgroundJob", () => {
     expect(log.info).not.toHaveBeenCalled();
     expect(log.error).not.toHaveBeenCalled();
     expect(r.running.size).toBe(0);
+  });
+
+  it("пустая база (runner не задан, spec 0059) — пропуск, задача не выполняется", async () => {
+    const j = job();
+    const log = fakeLog();
+    const outcome = await runBackgroundJob(
+      j,
+      running(),
+      gate({ dbRunner: async () => null }),
+      log,
+    );
+    expect(outcome).toBe("skipped-runner-unset");
+    expect(j.run).not.toHaveBeenCalled();
+    expect(log.debug).toHaveBeenCalledOnce();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("readDbRunner: новая база SQLite — null (не раннер по умолчанию); после переноса — значение из БД", async () => {
+    const { db, close } = await createMemoryDb();
+    try {
+      expect(await readDbRunner(db)).toBeNull();
+      await createDbExperimentStore(db).setState(ENGINE_KEYS.runner, "oracle");
+      expect(await readDbRunner(db)).toBe("oracle");
+      await createDbExperimentStore(db).setState(
+        ENGINE_KEYS.runner,
+        "supabase",
+      );
+      expect(await readDbRunner(db)).toBe("supabase");
+    } finally {
+      await close();
+    }
   });
 
   it("прошлый запуск ещё идёт — второй пропускается, после окончания — снова идёт", async () => {
