@@ -1,4 +1,5 @@
-// `pnpm db:pull [--out <файл>]` — свежий снимок прод-базы с VM в data/prod.db (spec 0059): по SSH на VM
+// `pnpm db:pull [--out <файл>] [--backup [ГГГГ-ММ-ДД]]` — свежий снимок прод-базы с VM в data/prod.db (spec 0059); с
+// --backup — ночная копия (spec 0062, по умолчанию последняя) в data/backup-<дата|latest>.db. Снимок: по SSH на VM
 // `sqlite3 .backup` (согласованная копия с WAL, сервис не останавливается) → stdout → локальный файл. Проверка
 // целостности (`quick_check`) до замены прежнего снимка. Только чтение прода. Адрес VM и ключ — .env.local
 // (APPS_TOKYO_HOST, APPS_TOKYO_SSH_USER, APPS_TOKYO_SSH_KEY_FILE). Вход для `pnpm lab:report --prod`.
@@ -17,6 +18,7 @@ import {
   dbPullConfig,
   parseDbPullArgs,
   remoteBackupCommand,
+  remoteBackupFetchCommand,
   sshArgs,
 } from "./lib/dbPull";
 import { installSnapshot } from "./lib/dbSnapshot";
@@ -39,14 +41,18 @@ function main() {
   mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
   const fd = openSync(part, "w");
   const started = Date.now();
-  const ssh = spawnSync("ssh", sshArgs(cfg.config, remoteBackupCommand()), {
+  const command =
+    args.backup === null
+      ? remoteBackupCommand()
+      : remoteBackupFetchCommand(args.backup === "latest" ? null : args.backup);
+  const ssh = spawnSync("ssh", sshArgs(cfg.config, command), {
     stdio: ["ignore", fd, "inherit"],
   });
   closeSync(fd);
   if (ssh.error || ssh.status !== 0) {
     rmSync(part, { force: true });
     fail(
-      `ssh не удался (${ssh.error?.message ?? `код ${ssh.status}`}) — снимок не скачан, прежний ${out} не тронут`,
+      `ssh не удался (${ssh.error?.message ?? `код ${ssh.status}`}) — ${args.backup === null ? "снимок" : "ночная копия"} не скачан${args.backup === null ? "" : "а"}, прежний ${out} не тронут`,
     );
   }
 
@@ -57,7 +63,7 @@ function main() {
     fail(error instanceof Error ? error.message : String(error));
   }
   console.log(
-    `Снимок прод-базы: ${out}, ${(statSync(out).size / 1024 / 1024).toFixed(1)} МБ, экспериментов ${experiments}, за ${((Date.now() - started) / 1000).toFixed(1)} с`,
+    `${args.backup === null ? "Снимок прод-базы" : "Ночная копия базы"}: ${out}, ${(statSync(out).size / 1024 / 1024).toFixed(1)} МБ, экспериментов ${experiments}, за ${((Date.now() - started) / 1000).toFixed(1)} с`,
   );
 }
 

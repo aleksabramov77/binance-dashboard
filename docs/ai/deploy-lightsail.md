@@ -115,6 +115,7 @@ Homepage `https://binance.<ip>.sslip.io`, callback `https://binance.<ip>.sslip.i
 | Секреты | `ssh claude@<ip> 'sudoedit /etc/binance/app.env'` → рестарт |
 | Снимок прод-базы на Mac | `pnpm db:pull` → `data/prod.db` (`sqlite3 .backup` на VM по SSH, сервис не останавливается; `APPS_TOKYO_HOST` в `.env.local`); отчёт лаборатории по нему — `pnpm lab:report --prod` |
 | Смоук прода | `ssh claude@<ip> 'bash -s' < scripts/server/smoke.sh` — тик в SQLite свежий, `runner = oracle`, `binance` и включённый `binance-live` активны (этап smoke `/flow release`) |
+| Ночная копия базы на Mac | `pnpm db:pull --backup [ГГГГ-ММ-ДД]` → `data/backup-<дата\|latest>.db` (по умолчанию последняя; spec 0062) |
 | Журнал воркера | `ssh claude@<ip> 'sudo journalctl -u binance-live -n 100 --no-pager'` |
 | Запрос к базе на VM | `ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db "select key, value from engine_state"'` |
 | Новый проект (сайт) | `sudo bash add-project.sh <имя> --port <порт> [--stop-timeout <сек>]` → `https://<имя>.<ip>.sslip.io` |
@@ -123,6 +124,58 @@ Homepage `https://binance.<ip>.sslip.io`, callback `https://binance.<ip>.sslip.i
 | Повторить общую настройку | `sudo CLAUDE_KEY=… DEPLOY_KEY=… [OWNER_KEY=…] bash bootstrap.sh` (повторный запуск сам держит `ubuntu` закрытым) |
 
 Скрипты лежат в `scripts/server/`; на VM их копия — `~claude/server-scripts/`.
+
+## Бэкапы базы (spec 0062)
+
+Каждую ночь в 23:30 UTC (до снимка Lightsail в 00:00 — свежая копия попадает и в снимок) `binance-backup.timer` запускает
+`binance-backup.service` (oneshot, от `binance`, `Nice=10`): `/usr/local/bin/binance-db-backup` (= `scripts/server/db-backup.sh`)
+делает `sqlite3 .backup` без остановки сервиса, проверяет копию (`pragma integrity_check` = ok), сжимает в
+`/var/lib/binance/backups/app-YYYY-MM-DD.db.gz` (каталог 700, файлы 600) и оставляет 7 последних копий. Та же задача
+удаляет файлы журнала `/var/lib/binance/logs/app-*.jsonl` старше 14 дней. Пропущенный запуск (VM была выключена)
+догоняется после загрузки (`Persistent=true`). Копия ~1–2 МБ.
+
+Установка и обновление (один раз и после правки скриптов; повтор безопасен):
+```sh
+scp -i ~/.ssh/lightsail_apps_tokyo -o IdentitiesOnly=yes scripts/server/db-backup.sh scripts/server/add-backup.sh claude@<ip>:server-scripts/
+ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-backup.sh binance'
+```
+
+Проверка:
+- `ssh claude@<ip> 'systemctl list-timers binance-backup.timer --no-pager'` — следующий запуск;
+- `ssh claude@<ip> 'sudo journalctl -u binance-backup -n 5 --no-pager'` — строка «Копия базы: …, integrity ok»;
+- копия вручную: `ssh claude@<ip> 'sudo systemctl start binance-backup'`;
+- смоук (`scripts/server/smoke.sh`, этап smoke `/flow release`) падает, если последней копии больше 26 ч.
+
+Восстановление базы из копии дня `<дата>` (на секундах 25–50 минуты; пауза торговли ~1 мин). Копия распаковывается и
+проверяется **до** остановки сервисов: нет копии или она битая — сервисы не трогаются. После остановки любой сбой
+поднимает сервисы обратно (`trap … EXIT`, он же запускает их и при успехе). Текущая база сохраняется в
+`app.db.before-restore-<время UTC>` — повторное восстановление её не затирает.
+```sh
+ssh claude@<ip> 'd=<дата>; B=/var/lib/binance; ts=$(date -u +%Y%m%dT%H%M%SZ)
+  sudo -u binance sh -c "gunzip -c $B/backups/app-$d.db.gz > $B/app.db.restore" &&
+    [ "$(sudo -u binance sqlite3 $B/app.db.restore "pragma integrity_check")" = ok ] ||
+    { echo "копия $d не годится — сервисы не останавливались"; sudo rm -f $B/app.db.restore; exit 1; }
+  live=$(systemctl is-active binance-live || true)
+  trap "sudo systemctl start binance; [ $live != active ] || sudo systemctl start binance-live" EXIT
+  set -e
+  [ "$live" != active ] || sudo systemctl stop binance-live
+  sudo systemctl stop binance
+  sudo -u binance sqlite3 $B/app.db ".backup $B/app.db.before-restore-$ts"   # текущая (сервер не сливает WAL при остановке)
+  sudo rm -f $B/app.db-wal $B/app.db-shm
+  sudo -u binance mv $B/app.db.restore $B/app.db
+  sudo chmod 600 $B/app.db $B/app.db.before-restore-$ts
+  echo "восстановлено из $d, прежняя база — app.db.before-restore-$ts"'
+```
+Затем смоук и `/experiments` на сайте. Всё, что записано после 23:30 дня копии, теряется (сделки paper, журнал);
+демо- и реальные позиции на бирже остаются — сверить их со строками зеркал вручную (как в «Откат» spec 0059).
+Если команда всё же оборвалась — проверить `systemctl is-active binance binance-live` и при необходимости
+`sudo systemctl start binance binance-live`. Файлы `app.db.before-restore-*` удалить, когда восстановление проверено.
+
+Скачать копию на Mac: `pnpm db:pull --backup` (последняя) или `pnpm db:pull --backup 2026-10-16` →
+`data/backup-<дата|latest>.db` (`quick_check` до замены); локальный сервер на ней:
+`DATABASE_PATH=data/backup-latest.db pnpm dev` с `ENGINE_RUNNER=supabase` (чтобы не тикал).
+
+Вне AWS копии не уходят: при потере VM база возвращается из снимка Lightsail (в нём и свежая ночная копия).
 
 ## Воркер реального счёта (spec 0061)
 
