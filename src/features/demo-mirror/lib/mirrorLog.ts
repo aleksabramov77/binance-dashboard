@@ -1,3 +1,5 @@
+import type { MirrorMarket } from "./planMirror";
+
 // Записи журнала об отказах и пропусках зеркала (spec 0016): по одной на сделку, с experimentId —
 // страница /logs фильтрует по ним по ссылке из «N отказ · M пропуск». Пишет композиция src/app/server/demoMirror.ts.
 
@@ -5,7 +7,7 @@ export interface MirrorLogSubject {
   tradeId: string;
   experimentId: string;
   symbol: string;
-  market: "spot" | "usdm";
+  market: MirrorMarket;
 }
 
 export function mirrorLogEntry(

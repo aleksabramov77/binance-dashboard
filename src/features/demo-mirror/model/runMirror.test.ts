@@ -299,7 +299,7 @@ describe("runMirror: резерв демо-кошелька (spec 0043)", () => 
     );
     expect(r.skipped).toBe(1);
     expect(freeUsd).toHaveBeenCalledTimes(1);
-    expect(freeUsd).toHaveBeenCalledWith("usdm");
+    expect(freeUsd).toHaveBeenCalledWith("usdm", "ETHUSDT");
   });
 
   it("отказ биржи средства не тратит: следующий вход проверяется по прежнему остатку", async () => {
@@ -399,5 +399,154 @@ describe("runMirror: резерв демо-кошелька (spec 0043)", () => 
       }),
     );
     expect(freeUsd).not.toHaveBeenCalled();
+  });
+});
+
+describe("runMirror: COIN-M (spec 0056)", () => {
+  // Paper COIN-M: 5 контрактов ADA по $10 при входе 0,6 → 5 × 10 / 0,6 ADA; объём $50.
+  const coinm = (over: Partial<MirrorTradeInput>) =>
+    trade({
+      market: "coinm",
+      symbol: "ADAUSD_PERP",
+      entryPrice: 0.6,
+      quantity: 50 / 0.6,
+      stop: 0.57,
+      takeProfit: 0.66,
+      ...over,
+    });
+  const opened = () => {
+    const list: string[] = [];
+    const open: MirrorDeps["open"] = async (req) => {
+      list.push(`${req.market}:${req.symbol}`);
+      return {
+        id: "r",
+        status: "protected",
+        message: "ok",
+        entryPrice: 0.6,
+        filledQuantity: req.quantity,
+        steps: [],
+      };
+    };
+    return { list, open };
+  };
+
+  it("мало свободной маржи монеты контракта — пропуск с монетой, суммой и резервом $50, биржа заявку не получает", async () => {
+    const { list, open } = opened();
+    const d = deps({
+      open,
+      freeUsd: async () => 0.3,
+      listCandidates: async () => [coinm({ tradeId: "a" })],
+    });
+    const r = await runMirror(d);
+    expect(list).toEqual([]);
+    expect(r.skipped).toBe(1);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "a",
+      "мало свободной маржи ADA на демо: $0,30 < резерв $50 + вход ~$50,00",
+    );
+  });
+
+  it("резерв — по монете: BTC и ETH считаются отдельно, второй вход той же монеты вычитает первый", async () => {
+    const { list, open } = opened();
+    const freeUsd = vi.fn(async (_m: string, symbol: string) =>
+      symbol === "BTCUSD_PERP" ? 210 : 1000,
+    );
+    const d = deps({
+      open,
+      freeUsd,
+      listCandidates: async () => [
+        coinm({
+          tradeId: "b1",
+          symbol: "BTCUSD_PERP",
+          entryPrice: 81_000,
+          quantity: 100 / 81_000,
+        }),
+        coinm({
+          tradeId: "b2",
+          symbol: "BTCUSD_PERP",
+          entryPrice: 81_000,
+          quantity: 100 / 81_000,
+        }),
+        coinm({
+          tradeId: "e1",
+          symbol: "ETHUSD_PERP",
+          entryPrice: 2000,
+          quantity: 50 / 2000,
+        }),
+      ],
+    });
+    await runMirror(d);
+    // BTC: 210 − 100 = 110 ≥ 50 — вход; 110 − 100 = 10 < 50 — пропуск. ETH — свой кошелёк.
+    expect(list).toEqual(["coinm:BTCUSD_PERP", "coinm:ETHUSD_PERP"]);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "b2",
+      expect.stringMatching(
+        /^мало свободной маржи BTC на демо: \$110,00 < резерв \$50/,
+      ),
+    );
+    expect(freeUsd).toHaveBeenCalledTimes(2);
+  });
+
+  it("заявка COIN-M: плечо 1, вход paper для перевода в контракты; монеты нет на demo-dapi — пропуск до входа", async () => {
+    const requests: unknown[] = [];
+    const d = deps({
+      hasSymbol: async (market, symbol) =>
+        !(market === "coinm" && symbol === "WLDUSD_PERP"),
+      open: async (req) => {
+        requests.push(req);
+        return {
+          id: "r",
+          status: "protected",
+          message: "ok",
+          entryPrice: 0.6,
+          filledQuantity: req.quantity,
+          steps: [],
+        };
+      },
+      listCandidates: async () => [
+        coinm({ tradeId: "a" }),
+        coinm({ tradeId: "w", symbol: "WLDUSD_PERP" }),
+      ],
+    });
+    await runMirror(d);
+    expect(requests).toEqual([
+      expect.objectContaining({
+        market: "coinm",
+        symbol: "ADAUSD_PERP",
+        leverage: 1,
+        quantity: 50 / 0.6,
+        referencePrice: 0.6,
+        mirror: true,
+      }),
+    ]);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "w",
+      "WLDUSD_PERP: нет на демо-фьючерсах COIN-M.",
+    );
+  });
+
+  it("монета маржи — из зависимости (exchangeInfo, как у проверки заявки): кошелёк и причина по ней", async () => {
+    const d = deps({
+      coinmMarginAsset: async () => "USDX",
+      freeUsd: async () => 10,
+      listCandidates: async () => [coinm({ tradeId: "a" })],
+    });
+    await runMirror(d);
+    expect(d.markSkipped).toHaveBeenCalledWith(
+      "a",
+      expect.stringMatching(/^мало свободной маржи USDX на демо/),
+    );
+  });
+
+  it("режим позиций — свой у COIN-M: спрашивается по рынку кандидатов", async () => {
+    const positionMode = vi.fn(async () => "hedge" as const);
+    await runMirror(
+      deps({
+        positionMode,
+        listCandidates: async () => [coinm({ tradeId: "a" })],
+      }),
+    );
+    expect(positionMode).toHaveBeenCalledTimes(1);
+    expect(positionMode).toHaveBeenCalledWith("coinm");
   });
 });

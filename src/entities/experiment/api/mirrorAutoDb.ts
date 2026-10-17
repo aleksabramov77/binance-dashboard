@@ -7,9 +7,10 @@ import {
   inArray,
   isNotNull,
   isNull,
+  ne,
   sql,
 } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { DEMO_MIRROR_MARKETS, type Market } from "../model/assetGroup";
 import { experimentsTable, paperTradesTable, runsTable } from "../model/db";
 import {
@@ -22,7 +23,7 @@ import {
 // Авто-зеркало в БД (spec 0043): положение переключателя, данные для решения автомата и запись решения.
 // Само решение — чистая функция (lib/decideMirrorAuto.ts), композиция — src/app/server/mirrorAuto.ts.
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = BaseSQLiteDatabase<"sync", unknown>;
 
 /** Закрытая paper-сделка текущей эпохи с R (сделки без стопа R не имеют и автомат их не считает). */
 export interface MirrorAutoTrade {
@@ -129,16 +130,18 @@ export async function setExperimentMirrorMode(
   mode: DemoMirrorMode,
 ): Promise<boolean> {
   const flag = mode === "auto" ? null : mode === "on";
+  const now = new Date();
   const rows = await db
     .update(experimentsTable)
     .set({
       demoMirrorMode: mode,
       ...(flag !== null && {
         demoMirror: flag,
-        demoMirrorSince: sql`case when ${experimentsTable.demoMirror} = ${flag} then ${experimentsTable.demoMirrorSince} else now() end`,
+        // better-sqlite3 не принимает JS boolean и Date параметром запроса — 1/0 и миллисекунды.
+        demoMirrorSince: sql`case when ${experimentsTable.demoMirror} = ${flag ? 1 : 0} then ${experimentsTable.demoMirrorSince} else ${now.getTime()} end`,
       }),
       demoMirrorAdvice: sql`case when ${experimentsTable.demoMirrorMode} = ${mode} then ${experimentsTable.demoMirrorAdvice} else null end`,
-      updatedAt: sql`now()`,
+      updatedAt: now,
     })
     .where(
       and(
@@ -171,13 +174,14 @@ export async function saveMirrorAuto(
   mode: DemoMirrorMode,
   patch: MirrorAutoPatch,
 ): Promise<boolean> {
+  const now = new Date();
   const rows = await db
     .update(experimentsTable)
     .set({
       ...(patch.demoMirror !== undefined && {
         demoMirror: patch.demoMirror,
-        demoMirrorSince: sql`now()`,
-        updatedAt: sql`now()`,
+        demoMirrorSince: now,
+        updatedAt: now,
       }),
       ...(patch.snapshot && { demoMirrorAuto: { ...patch.snapshot } }),
       ...(patch.advice && { demoMirrorAdvice: patch.advice.to }),
@@ -187,7 +191,7 @@ export async function saveMirrorAuto(
         eq(experimentsTable.id, id),
         eq(experimentsTable.demoMirrorMode, mode),
         patch.demoMirror !== undefined
-          ? sql`${experimentsTable.demoMirror} <> ${patch.demoMirror}`
+          ? ne(experimentsTable.demoMirror, patch.demoMirror)
           : undefined,
         patch.advice
           ? patch.advice.from === null

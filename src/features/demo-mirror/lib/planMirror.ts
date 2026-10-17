@@ -2,9 +2,26 @@ import { MIRROR } from "../config/mirror";
 
 // Чистая часть demo-зеркала (spec 008): отбор paper-сделок и уровни заявки на Binance Demo.
 
+/** Группы, которые повторяет зеркало: Spot, USDⓈ-M и COIN-M (demo-dapi, spec 0056; реальный счёт — без COIN-M). */
+export type MirrorMarket = "spot" | "usdm" | "coinm";
+export type MirrorFuturesMarket = Exclude<MirrorMarket, "spot">;
+export type FuturesMode = "oneway" | "hedge" | null;
+/** Режим позиций по фьючерсному рынку: у USDⓈ-M и COIN-M он свой; null — узнать не удалось. */
+export type FuturesModes = Record<MirrorFuturesMarket, FuturesMode>;
+
+/** Монета маржи контракта COIN-M: у бессрочных …USD_PERP это базовая монета (BTCUSD_PERP → BTC, проба 2026-10-17). */
+export const coinmMarginCoin = (symbol: string) =>
+  symbol.replace(/USD_PERP$/, "");
+
+/** Пара, которую зеркало умеет: Spot и USDⓈ-M — к USDT, COIN-M — бессрочные …USD_PERP. */
+export const tradablePair = (t: Pick<MirrorTradeInput, "market" | "symbol">) =>
+  t.market === "coinm"
+    ? t.symbol.endsWith("USD_PERP")
+    : t.symbol.endsWith("USDT");
+
 export interface MirrorTradeInput {
   tradeId: string;
-  market: "spot" | "usdm";
+  market: MirrorMarket;
   symbol: string;
   direction: "long" | "short";
   openedAt: string;
@@ -16,7 +33,7 @@ export interface MirrorTradeInput {
 
 export interface MirrorOrderRequest {
   symbol: string;
-  market: "spot" | "usdm";
+  market: MirrorMarket;
   direction: "long" | "short";
   quantity: number;
   stopLoss: number;
@@ -28,6 +45,8 @@ export interface MirrorOrderRequest {
   stopOnly: boolean;
   /** Вход зеркала: монета и сторона могут быть общими с другими зеркалами (PR 2d). */
   mirror: true;
+  /** COIN-M: вход paper-сделки — по нему quantity переводится в те же контракты, что у paper (spec 0056). */
+  referencePrice?: number;
 }
 
 export type MirrorDecision =
@@ -79,12 +98,12 @@ export interface MirrorPlanPolicy {
   /** null — без лимита на монету. */
   maxPerCoin: number | null;
   /** «на демо-споте» / «на демо-фьючерсах» — где нет символа. */
-  marketName: Record<"spot" | "usdm", string>;
+  marketName: Record<MirrorMarket, string>;
   /** Кто торгует только пары к USDT. */
   name: string;
   /** Причина пропуска, когда лимит на монету исчерпан. */
   coinBusy: (
-    t: { symbol: string; market: "spot" | "usdm" },
+    t: { symbol: string; market: MirrorMarket },
     count: number,
     limit: number,
   ) => string;
@@ -95,7 +114,11 @@ export const DEMO_MIRROR_POLICY: MirrorPlanPolicy = {
   get maxPerCoin() {
     return MIRROR.maxPerCoin;
   },
-  marketName: { spot: "демо-споте", usdm: "демо-фьючерсах" },
+  marketName: {
+    spot: "демо-споте",
+    usdm: "демо-фьючерсах",
+    coinm: "демо-фьючерсах COIN-M",
+  },
   name: "демо-зеркало",
   coinBusy: (t, count, limit) =>
     `По ${t.symbol} (${t.market}) уже ${count} зеркал — лимит на монету ${limit}.`,
@@ -103,7 +126,7 @@ export const DEMO_MIRROR_POLICY: MirrorPlanPolicy = {
 
 /** Зеркало, которое держит или открывает позицию (из БД). */
 export interface ActiveMirror {
-  market: "spot" | "usdm";
+  market: MirrorMarket;
   symbol: string;
   direction: "long" | "short";
   /** Свои ссылки на стоп/тейк (PR 2b). false — строка до них: монета занята до её закрытия. */
@@ -115,6 +138,7 @@ export interface ActiveMirror {
  * монету допустимы (spec 0012, PR 2d): у каждого свои TP/SL на свой объём; лимит — MIRROR.maxPerCoin.
  * Фьючерсы в One-way: встречная сторона по монете — пропуск (лонг и шорт там — одна позиция, вход
  * закрыл бы чужую); в Hedge — открываем. Режим неизвестен (null) — встречный кандидат ждёт прогона.
+ * Режим — свой у USDⓈ-M и COIN-M (FuturesModes); одно значение — для обоих.
  * Старые входы и монеты, которых нет на демо, пропускаем.
  */
 export function planMirror(
@@ -122,9 +146,13 @@ export function planMirror(
   active: ActiveMirror[],
   now: number,
   listing: MirrorListing = { missing: new Set(), unknown: new Set() },
-  futuresMode: "oneway" | "hedge" | null = "oneway",
+  futuresMode: FuturesMode | FuturesModes = "oneway",
   policy: MirrorPlanPolicy = DEMO_MIRROR_POLICY,
 ): MirrorDecision[] {
+  const modeOf = (market: MirrorFuturesMarket): FuturesMode =>
+    futuresMode !== null && typeof futuresMode === "object"
+      ? futuresMode[market]
+      : futuresMode;
   const taken: ActiveMirror[] = [...active];
   const decisions: MirrorDecision[] = [];
   let opened = 0;
@@ -137,11 +165,14 @@ export function planMirror(
       });
       continue;
     }
-    if (!t.symbol.endsWith("USDT")) {
+    if (!tradablePair(t)) {
       decisions.push({
         tradeId: t.tradeId,
         kind: "skip",
-        reason: `${t.symbol}: ${policy.name} торгует только пары к USDT.`,
+        reason:
+          t.market === "coinm"
+            ? `${t.symbol}: ${policy.name} торгует только бессрочные контракты COIN-M (…USD_PERP).`
+            : `${t.symbol}: ${policy.name} торгует только пары к USDT.`,
       });
       continue;
     }
@@ -182,12 +213,14 @@ export function planMirror(
       });
       continue;
     }
+    // Встречная позиция мешает только фьючерсам в One-way (у спота шорта нет — отсечён выше).
+    const mode = t.market === "spot" ? null : modeOf(t.market);
     if (
-      t.market === "usdm" &&
-      futuresMode !== "hedge" &&
+      t.market !== "spot" &&
+      mode !== "hedge" &&
       sameCoin.some((m) => m.direction !== t.direction)
     ) {
-      if (futuresMode === null) continue;
+      if (mode === null) continue;
       decisions.push({
         tradeId: t.tradeId,
         kind: "skip",
@@ -212,10 +245,11 @@ export function planMirror(
         market: t.market,
         direction: t.direction,
         quantity: t.quantity,
-        leverage: t.market === "usdm" ? MIRROR.leverage : 1,
+        leverage: t.market === "spot" ? 1 : MIRROR.leverage,
         fitMinNotional: true,
         stopOnly: t.takeProfit === null,
         mirror: true,
+        ...(t.market === "coinm" && { referencePrice: t.entryPrice }),
         ...mirrorLevels(t),
       },
     });

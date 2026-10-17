@@ -1,6 +1,14 @@
+import { z } from "zod";
 import { isStablecoin } from "@/shared/config";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import { getJsonWithRetry, HttpError } from "@/shared/lib/fetchRetry";
+import {
+  coinmOrderAsAlgo,
+  coinmOrderSchema,
+  coinmOrdersSchema,
+  coinmPair,
+  splitCoinmOpenOrders,
+} from "./coinmOrders";
 import {
   type SpotEntryListParams,
   type SpotEntryListResult,
@@ -58,7 +66,13 @@ import {
   reduceParams,
 } from "./positionMode";
 import { BinanceApiError, type SignedParams, signedRequest } from "./signed";
-import { DEMO_PUBLIC, DEMO_URL, type TradeVenue } from "./venue.server";
+import {
+  DEMO_PUBLIC,
+  DEMO_URL,
+  type TradeVenue,
+  type VenueFuturesMarket,
+  venuePublicUrl,
+} from "./venue.server";
 import {
   sumUsd,
   type UsdPrice,
@@ -68,7 +82,18 @@ import {
 
 // Функции ордеров и чтения принимают площадку (spec 0049): демо — demoVenue(creds), реальный счёт — liveVenue.
 // Имена с «Demo» исторические; адреса и подпись — у площадки (venue.server.ts). Equity демо-счёта (COIN-M) — только демо.
-const PREFIX: Record<Market, string> = { spot: "/api/v3", usdm: "/fapi/v1" };
+// Фьючерсные функции принимают рынок последним параметром (по умолчанию USDⓈ-M): COIN-M (demo-dapi, spec 0056) — те
+// же шаги на `/dapi/v1/…`, а стоп и тейк там — обычные условные ордера (coinmOrders.ts), а не algo-ордера.
+const PREFIX: Record<BinanceMarket, string> = {
+  spot: "/api/v3",
+  usdm: "/fapi/v1",
+  coinm: "/dapi/v1",
+};
+/** Позиции: у USDⓈ-M — v3 с параметром symbol, у COIN-M — v1 с параметром pair (symbol dapi не принимает). */
+const POSITION_RISK: Record<VenueFuturesMarket, string> = {
+  usdm: "/fapi/v3/positionRisk",
+  coinm: "/dapi/v1/positionRisk",
+};
 const RULES_TTL_MS = 10 * 60_000;
 
 /**
@@ -98,11 +123,19 @@ const isInvalidSymbol = (error: unknown) =>
   error instanceof HttpError &&
   (error.body as { code?: number } | null)?.code === -1121;
 
-function indexRules(market: Market, raw: unknown): Map<string, SymbolRules> {
+function indexRules(
+  market: BinanceMarket,
+  raw: unknown,
+): Map<string, SymbolRules> {
   const info = exchangeInfoSchema.parse(raw);
   const bySymbol = new Map<string, SymbolRules>();
   for (const s of info.symbols) {
-    const rules = s.status === "TRADING" ? toRules(market, s) : null;
+    // COIN-M: статус — contractStatus, торгуем только бессрочные (у dapi есть и поставочные).
+    const trading =
+      market === "coinm"
+        ? s.contractStatus === "TRADING" && s.contractType === "PERPETUAL"
+        : s.status === "TRADING";
+    const rules = trading ? toRules(market, s) : null;
     if (rules) bySymbol.set(s.symbol, rules);
   }
   return bySymbol;
@@ -113,7 +146,7 @@ function indexRules(market: Market, raw: unknown): Map<string, SymbolRules> {
  * Сетевой сбой — исключение NetworkError, а не null.
  */
 export async function fetchDemoSymbolRules(
-  market: Market,
+  market: BinanceMarket,
   symbol: string,
   venue: PublicVenue,
 ): Promise<SymbolRules | null> {
@@ -130,12 +163,12 @@ export async function fetchDemoSymbolRules(
     }
   }
 
-  const url = `${venue.publicUrl.usdm}${PREFIX.usdm}/exchangeInfo`;
+  const url = `${venuePublicUrl(venue, market)}${PREFIX[market]}/exchangeInfo`;
   let cached = futuresRules.get(url);
   if (!cached || Date.now() - cached.at > RULES_TTL_MS) {
     try {
       const raw = await getJson(url, venue);
-      cached = { at: Date.now(), bySymbol: indexRules("usdm", raw) };
+      cached = { at: Date.now(), bySymbol: indexRules(market, raw) };
       futuresRules.set(url, cached);
     } catch (error) {
       // Устаревший справочник лучше, чем никакого: шаги цены меняются редко.
@@ -146,14 +179,20 @@ export async function fetchDemoSymbolRules(
 }
 
 export async function fetchDemoPrice(
-  market: Market,
+  market: BinanceMarket,
   symbol: string,
   venue: PublicVenue,
 ): Promise<number> {
   const raw = await getJson(
-    `${venue.publicUrl[market]}${PREFIX[market]}/ticker/price?symbol=${symbol}`,
+    `${venuePublicUrl(venue, market)}${PREFIX[market]}/ticker/price?symbol=${symbol}`,
     venue,
   );
+  // dapi отвечает массивом и с символом (проба 2026-10-17): [{ symbol, ps, price, time }].
+  if (market === "coinm") {
+    const row = z.array(priceSchema).parse(raw)[0];
+    if (!row) throw new Error(`Binance: нет цены ${symbol} (COIN-M)`);
+    return row.price;
+  }
   return priceSchema.parse(raw).price;
 }
 
@@ -171,6 +210,26 @@ export async function fetchDemoUsdtBalances(
     spot: spot.balances.find((b) => b.asset === "USDT")?.free ?? 0,
     usdm: futures.find((b) => b.asset === "USDT")?.availableBalance ?? 0,
   };
+}
+
+/**
+ * Свободная маржа COIN-M по монетам (`/dapi/v1/balance` → availableBalance, в монете): у COIN-M у каждой монеты свой
+ * кошелёк маржи (spec 0056). Монеты с нулём не возвращаются.
+ */
+export async function fetchDemoCoinmAvailable(
+  venue: TradeVenue,
+): Promise<Map<string, number>> {
+  const rows = await venue.signed(
+    "coinm",
+    "GET",
+    "/dapi/v1/balance",
+    futuresBalancesSchema,
+  );
+  return new Map(
+    rows
+      .filter((b) => b.availableBalance > 0)
+      .map((b) => [b.asset, b.availableBalance]),
+  );
 }
 
 const settle = (p: Promise<WalletEquity>): Promise<WalletEquityResult> =>
@@ -401,13 +460,20 @@ export async function demoFuturesPrepare(
   venue: TradeVenue,
   symbol: string,
   leverage: number,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<"isolated" | "kept"> {
   let margin: "isolated" | "kept" = "isolated";
   try {
-    await venue.signed("usdm", "POST", "/fapi/v1/marginType", anySchema, {
-      symbol,
-      marginType: "ISOLATED",
-    });
+    await venue.signed(
+      market,
+      "POST",
+      `${PREFIX[market]}/marginType`,
+      anySchema,
+      {
+        symbol,
+        marginType: "ISOLATED",
+      },
+    );
   } catch (error) {
     const code = error instanceof BinanceApiError ? error.code : undefined;
     // Демо на marginType при открытых ордерах отвечает -4067 (проверено 2026-10-15), по документации — -4047.
@@ -415,7 +481,7 @@ export async function demoFuturesPrepare(
       margin = "kept";
     else if (code !== -4046) throw error;
   }
-  await venue.signed("usdm", "POST", "/fapi/v1/leverage", anySchema, {
+  await venue.signed(market, "POST", `${PREFIX[market]}/leverage`, anySchema, {
     symbol,
     leverage,
   });
@@ -429,26 +495,30 @@ const positionModeCaches = new Map<
   string,
   { at: number; mode: PositionMode } | null
 >();
-const modeKey = (venue: TradeVenue) => `${venue.kind}:${venue.publicUrl.usdm}`;
+/** Ключ кэша: площадка и рынок — у USDⓈ-M и COIN-M режим свой (spec 0056). */
+const modeKey = (venue: TradeVenue, market: VenueFuturesMarket) =>
+  `${venue.kind}:${venuePublicUrl(venue, market)}`;
 
-/** Режим позиций демо-фьючерсов (GET /fapi/v1/positionSide/dual): Hedge или One-way. */
+/** Режим позиций демо-фьючерсов (GET `/fapi|dapi/v1/positionSide/dual`): Hedge или One-way. */
 export async function fetchDemoPositionMode(
   venue: TradeVenue,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<PositionMode> {
-  const positionModeCache = positionModeCaches.get(modeKey(venue)) ?? null;
+  const positionModeCache =
+    positionModeCaches.get(modeKey(venue, market)) ?? null;
   if (
     positionModeCache &&
     Date.now() - positionModeCache.at < POSITION_MODE_TTL_MS
   )
     return positionModeCache.mode;
   const res = await venue.signed(
-    "usdm",
+    market,
     "GET",
-    "/fapi/v1/positionSide/dual",
+    `${PREFIX[market]}/positionSide/dual`,
     positionModeSchema,
   );
   const mode: PositionMode = res.dualSidePosition ? "hedge" : "oneway";
-  positionModeCaches.set(modeKey(venue), { at: Date.now(), mode });
+  positionModeCaches.set(modeKey(venue, market), { at: Date.now(), mode });
   return mode;
 }
 
@@ -458,23 +528,25 @@ export async function fetchDemoPositionMode(
  */
 export async function demoEnableHedgeMode(
   venue: TradeVenue,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<"switched" | "already"> {
+  const key = modeKey(venue, market);
   try {
     await venue.signed(
-      "usdm",
+      market,
       "POST",
-      "/fapi/v1/positionSide/dual",
+      `${PREFIX[market]}/positionSide/dual`,
       anySchema,
       { dualSidePosition: "true" },
     );
-    positionModeCaches.set(modeKey(venue), { at: Date.now(), mode: "hedge" });
+    positionModeCaches.set(key, { at: Date.now(), mode: "hedge" });
     return "switched";
   } catch (error) {
     if (error instanceof BinanceApiError && error.code === -4059) {
-      positionModeCaches.set(modeKey(venue), { at: Date.now(), mode: "hedge" });
+      positionModeCaches.set(key, { at: Date.now(), mode: "hedge" });
       return "already";
     }
-    positionModeCaches.set(modeKey(venue), null);
+    positionModeCaches.set(key, null);
     throw error;
   }
 }
@@ -494,17 +566,20 @@ export async function enableOnewayMode(
       anySchema,
       { dualSidePosition: "false" },
     );
-    positionModeCaches.set(modeKey(venue), { at: Date.now(), mode: "oneway" });
+    positionModeCaches.set(modeKey(venue, "usdm"), {
+      at: Date.now(),
+      mode: "oneway",
+    });
     return "switched";
   } catch (error) {
     if (error instanceof BinanceApiError && error.code === -4059) {
-      positionModeCaches.set(modeKey(venue), {
+      positionModeCaches.set(modeKey(venue, "usdm"), {
         at: Date.now(),
         mode: "oneway",
       });
       return "already";
     }
-    positionModeCaches.set(modeKey(venue), null);
+    positionModeCaches.set(modeKey(venue, "usdm"), null);
     throw error;
   }
 }
@@ -512,7 +587,16 @@ export async function enableOnewayMode(
 /** Есть ли на демо-фьючерсах хоть одна позиция или открытый ордер (обычный или algo) — по всему счёту. */
 export async function fetchDemoFuturesAccountBusy(
   venue: TradeVenue,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<boolean> {
+  if (market === "coinm") {
+    // У COIN-M стоп и тейк — обычные ордера: openOrders покрывает и их.
+    const [positions, orders] = await Promise.all([
+      venue.signed("coinm", "GET", POSITION_RISK.coinm, positionRiskSchema),
+      venue.signed("coinm", "GET", "/dapi/v1/openOrders", symbolRowsSchema),
+    ]);
+    return positions.some((p) => p.positionAmt !== 0) || orders.length > 0;
+  }
   const [positions, orders, algos] = await Promise.all([
     venue.signed("usdm", "GET", "/fapi/v3/positionRisk", positionRiskSchema),
     venue.signed("usdm", "GET", "/fapi/v1/openOrders", symbolRowsSchema),
@@ -529,7 +613,17 @@ export async function fetchDemoFuturesAccountBusy(
 export async function fetchDemoFuturesSymbolState(
   venue: TradeVenue,
   symbol: string,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<FuturesSymbolState> {
+  if (market === "coinm") {
+    const [positions, open] = await Promise.all([
+      demoFuturesPositions(venue, symbol, "coinm"),
+      venue.signed("coinm", "GET", "/dapi/v1/openOrders", coinmOrdersSchema, {
+        symbol,
+      }),
+    ]);
+    return { positions, ...splitCoinmOpenOrders(open) };
+  }
   const [positions, orders, algos] = await Promise.all([
     venue.signed("usdm", "GET", "/fapi/v3/positionRisk", positionRiskSchema, {
       symbol,
@@ -566,7 +660,18 @@ export async function fetchDemoFuturesSymbolState(
  */
 export async function fetchDemoOpenAlgoOrders(
   venue: TradeVenue,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<FuturesSymbolState["algos"]> {
+  // COIN-M: открытые ордера всего счёта (вес 40) — условные из них и есть свои ноги.
+  if (market === "coinm")
+    return splitCoinmOpenOrders(
+      await venue.signed(
+        "coinm",
+        "GET",
+        "/dapi/v1/openOrders",
+        coinmOrdersSchema,
+      ),
+    ).algos;
   return venue.signed(
     "usdm",
     "GET",
@@ -580,9 +685,10 @@ export async function demoFuturesCancelOrder(
   venue: TradeVenue,
   symbol: string,
   orderId: number,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<boolean> {
   try {
-    await venue.signed("usdm", "DELETE", "/fapi/v1/order", anySchema, {
+    await venue.signed(market, "DELETE", `${PREFIX[market]}/order`, anySchema, {
       symbol,
       orderId,
     });
@@ -601,17 +707,24 @@ export async function demoFuturesMarketOrder(
   quantity: string,
   clientOrderId: string | undefined,
   pos: FuturesSide,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<FuturesOrder> {
-  return venue.signed("usdm", "POST", "/fapi/v1/order", futuresOrderSchema, {
-    symbol,
-    side,
-    type: "MARKET",
-    quantity,
-    newOrderRespType: "RESULT",
-    recvWindow: ORDER_RECV_WINDOW_MS,
-    ...entryParams(pos),
-    ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
-  });
+  return venue.signed(
+    market,
+    "POST",
+    `${PREFIX[market]}/order`,
+    futuresOrderSchema,
+    {
+      symbol,
+      side,
+      type: "MARKET",
+      quantity,
+      newOrderRespType: "RESULT",
+      recvWindow: ORDER_RECV_WINDOW_MS,
+      ...entryParams(pos),
+      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
+    },
+  );
 }
 
 /**
@@ -622,12 +735,13 @@ export async function fetchDemoFuturesOrder(
   venue: TradeVenue,
   symbol: string,
   ref: { orderId: number } | { clientOrderId: string },
+  market: VenueFuturesMarket = "usdm",
 ): Promise<FuturesOrder | null> {
   try {
     return await venue.signed(
-      "usdm",
+      market,
       "GET",
-      "/fapi/v1/order",
+      `${PREFIX[market]}/order`,
       futuresOrderSchema,
       "orderId" in ref
         ? { symbol, orderId: ref.orderId }
@@ -652,7 +766,30 @@ export async function demoFuturesProtect(
   quantity: string,
   pos: FuturesSide,
   clientAlgoId?: string,
-) {
+  market: VenueFuturesMarket = "usdm",
+): Promise<{ algoId: number; clientAlgoId: string | null }> {
+  // COIN-M: условный ордер /dapi/v1/order (stopPrice); в Hedge reduceOnly не передаём — биржа ставит его сама.
+  if (market === "coinm") {
+    const order = await venue.signed(
+      "coinm",
+      "POST",
+      "/dapi/v1/order",
+      coinmOrderSchema,
+      {
+        symbol,
+        side,
+        type,
+        stopPrice: triggerPrice,
+        ...protectParams(pos, quantity),
+        workingType: "MARK_PRICE",
+        priceProtect: true,
+        recvWindow: ORDER_RECV_WINDOW_MS,
+        ...(clientAlgoId ? { newClientOrderId: clientAlgoId } : {}),
+      },
+    );
+    const algo = coinmOrderAsAlgo(order);
+    return { algoId: algo.algoId, clientAlgoId: algo.clientAlgoId };
+  }
   return venue.signed("usdm", "POST", "/fapi/v1/algoOrder", algoOrderSchema, {
     algoType: "CONDITIONAL",
     symbol,
@@ -674,12 +811,37 @@ export type AlgoRef = { algoId: number } | { clientAlgoId: string };
 const algoParams = (ref: AlgoRef): SignedParams =>
   "algoId" in ref ? { algoId: ref.algoId } : { clientAlgoId: ref.clientAlgoId };
 
+/**
+ * Где искать свой стоп/тейк: USDⓈ-M — algo-ордер счёта; COIN-M — условный ордер символа (orderId = algoId,
+ * clientOrderId = clientAlgoId, spec 0056), ему нужен symbol.
+ */
+export type ProtectMarket =
+  | { market: "usdm" }
+  | { market: "coinm"; symbol: string };
+const USDM: ProtectMarket = { market: "usdm" };
+
+const coinmOrderParams = (symbol: string, ref: AlgoRef): SignedParams =>
+  "algoId" in ref
+    ? { symbol, orderId: ref.algoId }
+    : { symbol, origClientOrderId: ref.clientAlgoId };
+
 /** Свой algo-ордер (стоп/тейк); null — не найден (снятые без исполнения хранятся 3 дня). */
 export async function fetchDemoAlgoOrder(
   venue: TradeVenue,
   ref: AlgoRef,
+  at: ProtectMarket = USDM,
 ): Promise<AlgoOrderQuery | null> {
   try {
+    if (at.market === "coinm")
+      return coinmOrderAsAlgo(
+        await venue.signed(
+          "coinm",
+          "GET",
+          "/dapi/v1/order",
+          coinmOrderSchema,
+          coinmOrderParams(at.symbol, ref),
+        ),
+      );
     return await venue.signed(
       "usdm",
       "GET",
@@ -697,15 +859,25 @@ export async function fetchDemoAlgoOrder(
 export async function demoCancelAlgoOrder(
   venue: TradeVenue,
   ref: AlgoRef,
+  at: ProtectMarket = USDM,
 ): Promise<boolean> {
   try {
-    await venue.signed(
-      "usdm",
-      "DELETE",
-      "/fapi/v1/algoOrder",
-      anySchema,
-      algoParams(ref),
-    );
+    if (at.market === "coinm")
+      await venue.signed(
+        "coinm",
+        "DELETE",
+        "/dapi/v1/order",
+        anySchema,
+        coinmOrderParams(at.symbol, ref),
+      );
+    else
+      await venue.signed(
+        "usdm",
+        "DELETE",
+        "/fapi/v1/algoOrder",
+        anySchema,
+        algoParams(ref),
+      );
     return true;
   } catch (error) {
     if (isNoSuchOrder(error)) return false;
@@ -724,17 +896,24 @@ export async function demoFuturesReduceMarket(
   quantity: string,
   pos: FuturesSide,
   clientOrderId?: string,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<FuturesOrder> {
-  return venue.signed("usdm", "POST", "/fapi/v1/order", futuresOrderSchema, {
-    symbol,
-    side,
-    type: "MARKET",
-    quantity,
-    ...reduceParams(pos),
-    newOrderRespType: "RESULT",
-    // Свой id закрытия — сделка в истории «Демо-сделки» не смешается с соседними по монете.
-    ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
-  });
+  return venue.signed(
+    market,
+    "POST",
+    `${PREFIX[market]}/order`,
+    futuresOrderSchema,
+    {
+      symbol,
+      side,
+      type: "MARKET",
+      quantity,
+      ...reduceParams(pos),
+      newOrderRespType: "RESULT",
+      // Свой id закрытия — сделка в истории «Демо-сделки» не смешается с соседними по монете.
+      ...(clientOrderId ? { newClientOrderId: clientOrderId } : {}),
+    },
+  );
 }
 
 /** Binance: -2011 (отмена: ордер неизвестен/уже не активен), -2013 (запрос: ордера нет). */
@@ -783,19 +962,23 @@ export async function demoSpotCancelOrder(
 export async function demoFuturesPositions(
   venue: TradeVenue,
   symbol: string,
+  market: VenueFuturesMarket = "usdm",
 ): Promise<FuturesSymbolState["positions"]> {
   const rows = await venue.signed(
-    "usdm",
+    market,
     "GET",
-    "/fapi/v3/positionRisk",
+    POSITION_RISK[market],
     positionRiskSchema,
-    { symbol },
+    // dapi не фильтрует по symbol (проба 2026-10-17: отдаёт все) — пара и фильтр по символу ниже.
+    market === "coinm" ? { pair: coinmPair(symbol) } : { symbol },
   );
-  return rows.map((r) => ({
-    positionSide: r.positionSide,
-    amount: r.positionAmt,
-    entryPrice: r.entryPrice,
-  }));
+  return rows
+    .filter((r) => r.symbol === symbol)
+    .map((r) => ({
+      positionSide: r.positionSide,
+      amount: r.positionAmt,
+      entryPrice: r.entryPrice,
+    }));
 }
 
 /** Одно исполнение (fill) ордера на демо-счёте. */

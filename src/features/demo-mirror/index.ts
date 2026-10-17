@@ -9,9 +9,13 @@ export {
 } from "./lib/mirrorLog";
 export {
   type ActiveMirror,
+  coinmMarginCoin,
   DEMO_MIRROR_POLICY,
+  type FuturesModes,
   type MirrorDecision,
+  type MirrorFuturesMarket,
   type MirrorListing,
+  type MirrorMarket,
   type MirrorOrderRequest,
   type MirrorPlanPolicy,
   type MirrorTradeInput,

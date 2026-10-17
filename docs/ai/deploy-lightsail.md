@@ -6,6 +6,8 @@
 [«Переключение прода на VM»](#переключение-прода-на-vm)) прод — VM: сайт, API, тик движка, фоновые задачи и бот Telegram.
 Supabase — только база Postgres ([deploy-supabase.md](deploy-supabase.md)); Vercel новых выкаток не получает и неделю
 остаётся резервом с той же базой (тик там не идёт). До переключения VM работала рядом с той же базой, тик на ней — no-op.
+С [spec 0059](../specs/0059-sqlite.md) (раздел [«Переезд базы на SQLite»](#переезд-базы-на-sqlite-spec-0059)) база —
+файл SQLite на VM `/var/lib/binance/app.db`; Supabase неделю остаётся для отката, потом отключается (очередь PRD, п. 24).
 
 Репозиторий публичный: IP VM, ключи и секреты сюда не пишем. Они в секретах GitHub Actions и в
 `/etc/<проект>/app.env` на VM. Ниже `<ip>` — static IP инстанса (Lightsail → Networking).
@@ -14,8 +16,8 @@ Supabase — только база Postgres ([deploy-supabase.md](deploy-supabas
 
 | Что | Где |
 |---|---|
-| VM | Lightsail `apps-tokyo`: Tokyo, Ubuntu 24.04, $5 (512 МБ, 2 vCPU, 20 ГБ), static IP `apps-tokyo-ip`, порты 22/80/443, ежедневные снимки (00:00 UTC) |
-| Общая настройка | `scripts/server/bootstrap.sh`: пользователи, Node 22, Caddy, sqlite3, swap 2 ГБ, unattended-upgrades, fail2ban, SSH только по ключам |
+| VM | Lightsail `apps-tokyo`: Tokyo, Ubuntu 24.04, $5 (512 МБ, 2 vCPU, 20 ГБ), static IP `apps-tokyo-ip`, порты 22/80/443 TCP и 443 UDP (HTTP/3 — Caddy, решение владельца 2026-10-17), ежедневные снимки (00:00 UTC) |
+| Общая настройка | `scripts/server/bootstrap.sh`: пользователи, Node 22, Caddy, sqlite3, swap 2 ГБ, TCP BBR (быстрее на длинном маршруте, решение владельца 2026-10-17), unattended-upgrades, fail2ban, SSH только по ключам |
 | Проекты | `scripts/server/add-project.sh`: свой Linux-пользователь, `/srv/<проект>/app` (код), `/var/lib/<проект>` (данные), `/etc/<проект>/app.env` (секреты, 640), `<проект>.service` с `MemoryMax`, сайт `/etc/caddy/sites/<проект>.caddy` |
 | binance | сайт `https://binance.<ip>.sslip.io` → 127.0.0.1:5000, `MemoryMax=300M`, `--stop-timeout 30` |
 | binance-live | фоновый `live-worker.mjs` эпика «Реальные деньги» (spec 0047): без порта и Caddy, `MemoryMax=128M`, `--stop-timeout 120` |
@@ -33,7 +35,8 @@ Supabase — только база Postgres ([deploy-supabase.md](deploy-supabas
 
 Переменные `binance` (`/etc/binance/app.env`): `APP_HOST=vm` (источник журнала `vm`, хостинг «облако»),
 `ENGINE_RUNNER=oracle` (роль «свой постоянный процесс»), `AUTH_URL`, `AUTH_GITHUB_ID/SECRET` (отдельное OAuth App под
-адрес VM), `AUTH_SECRET`, `AUTH_ALLOWED_GITHUB_LOGINS`, `DATABASE_URL`, `CRON_SECRET`, `OPENROUTER_API_KEY`,
+адрес VM), `AUTH_SECRET`, `AUTH_ALLOWED_GITHUB_LOGINS`, `DATABASE_PATH=/var/lib/binance/app.db` (база SQLite, spec 0059;
+`DATABASE_URL` Supabase остаётся неделю для отката — новая версия его не читает), `CRON_SECRET`, `OPENROUTER_API_KEY`,
 `ANALYSIS_MODEL`, `TELEGRAM_*` (в т.ч. `TELEGRAM_WEBHOOK_SECRET` — тот же, что на Vercel), `LOG_DIR=/var/lib/binance/logs`
 (файловый журнал `app-YYYY-MM-DD.jsonl` с debug: каталог кода только для чтения, писать можно только в `/var/lib/binance`;
 без `LOG_DIR` файл не пишется), с переключения — `BINANCE_DEMO_API_KEY` / `BINANCE_DEMO_API_SECRET` (демо-зеркало,
@@ -85,7 +88,8 @@ runner не проверяют, и без снятия заданий задач
 Инстанс (сделано 2026-10-16): Lightsail → **Create instance** → Tokyo → **Linux operating system** → **Ubuntu 24.04 LTS**
 → General purpose, Dual-stack, **$5** → **Advanced settings** → SSH key → **Upload key** (`~/.ssh/lightsail_apps_tokyo.pub`)
 → **Enable Automatic Snapshots** → имя `apps-tokyo` → **Create instance**. Затем **Networking** → **Create static IP**
-(Tokyo, attach `apps-tokyo`) и в файрволе инстанса **Add rule** → **HTTPS** (Anywhere IPv4 + Anywhere IPv6).
+(Tokyo, attach `apps-tokyo`) и в файрволе инстанса **Add rule** → **HTTPS** (Anywhere IPv4 + Anywhere IPv6), а для
+HTTP/3 — ещё правило **Custom**, протокол **UDP**, порт **443** (Anywhere IPv4 + Anywhere IPv6; решение владельца 2026-10-17).
 
 Свой ключ для входа: `ssh-keygen -t ed25519 -f ~/.ssh/apps_tokyo -C aleksandr@apps-tokyo` (с паролем) — Claude
 добавляет его пользователю `aleksandr` (`OWNER_KEY=… bootstrap.sh`). Вход: `ssh -i ~/.ssh/apps_tokyo aleksandr@<ip>`.
@@ -107,6 +111,8 @@ Homepage `https://binance.<ip>.sslip.io`, callback `https://binance.<ip>.sslip.i
 | Журнал сервиса | `ssh claude@<ip> 'sudo journalctl -u binance -n 100 --no-pager'` |
 | Рестарт | `ssh claude@<ip> 'sudo systemctl restart binance'` |
 | Секреты | `ssh claude@<ip> 'sudoedit /etc/binance/app.env'` → рестарт |
+| Снимок прод-базы на Mac | `pnpm db:pull` → `data/prod.db` (`sqlite3 .backup` на VM по SSH, сервис не останавливается; `APPS_TOKYO_HOST` в `.env.local`); отчёт лаборатории по нему — `pnpm lab:report --prod` |
+| Запрос к базе на VM | `ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db "select key, value from engine_state"'` |
 | Новый проект (сайт) | `sudo bash add-project.sh <имя> --port <порт> [--stop-timeout <сек>]` → `https://<имя>.<ip>.sslip.io` |
 | Новый фоновый сервис | `sudo bash add-project.sh <имя> --no-web --exec <файл> --memory 128M --heap 96 [--stop-timeout <сек>]` |
 | Таймаут остановки binance | `sudo bash ~claude/server-scripts/add-project.sh binance --port 5000 --stop-timeout 30` (скрипт на VM — обновить копию из `scripts/server/`) |
@@ -186,3 +192,93 @@ Spec 0055. Выполняет Claude после мержа PR 0055 и успеш
    `/db` в Telegram, `/logs` — свежие тики идут с Supabase (Edge Function), задачи по расписанию — с Vercel.
 
 Demo-ключи на VM при откате можно оставить: при `runner = supabase` VM в демо не торгует.
+
+## Переезд базы на SQLite (spec 0059)
+
+Выполняет Claude после мержа PR 0059. База приложения переезжает из Supabase Postgres в файл
+`/var/lib/binance/app.db` на VM (владелец `binance`, права 600). Данных около 6 МБ, перенос — секунды; торговля стоит
+≈ 5 минут. Команды `pnpm db:import-pg` — на Mac из основного checkout на свежем `main` (`.env.local`: `DATABASE_URL`);
+`ssh` — под `claude`. Значения секретов не выводить.
+
+**До мержа:**
+1. В `/etc/binance/app.env` (`ssh claude@<ip> 'sudoedit /etc/binance/app.env'`) добавить
+   `DATABASE_PATH=/var/lib/binance/app.db`. `DATABASE_URL` не удалять — он нужен откату неделю. Рестарт не нужен:
+   текущая версия `DATABASE_PATH` не читает (новая без него на VM не стартует — явная ошибка).
+2. `ssh claude@<ip> 'sqlite3 --version'` — CLI есть (ставит `bootstrap.sh`), он нужен `.backup` и проверкам.
+3. Репетиция переноса из worktree задачи: `pnpm db:import-pg --to /tmp/rehearsal.db` — все строки `✓`, затем
+   `rm /tmp/rehearsal.db`.
+
+**Переключение:**
+1. Мерж PR. Сразу, пока идут CI и сборка Deploy (≈ 3 мин), — основной checkout на свежий `main` с новыми
+   зависимостями (нативный `better-sqlite3`, `postgres` теперь в devDependencies), иначе перенос упадёт, когда торговля
+   уже стоит:
+   ```sh
+   git pull --ff-only && pnpm install --frozen-lockfile
+   ```
+2. Там же, до выкатки, на **25–50-й секунде минуты** (мимо тика +5 с и прогона демо-зеркала +20 с) остановить старую
+   версию — не ждать случайного `restart` из Deploy (сервис не дожидается конца прогона по SIGTERM: прерванный прогон
+   оставил бы ордер на демо при строке `pending`):
+   ```sh
+   ssh claude@<ip> 'sudo systemctl stop binance'
+   pnpm mirror:supabase status   # в demo_mirror_orders нет pending и closing
+   ```
+   Есть `pending` или `closing` — прогон оборвался: после шага 4 взять их из `data/import.db`
+   (`sqlite3 data/import.db "select trade_id, symbol, status from demo_mirror_orders where status in ('pending','closing')"`)
+   и после переключения сверить эти позиции на демо-счёте со строками вручную. Если Deploy уже дошёл до шага
+   «Перезапуск и проверка» (новая версия поднята) — этот шаг пропустить: `stop` остановил бы новую версию, и проверка
+   Deploy упала бы. С этого момента торговля на паузе и Supabase никто не пишет.
+3. Deploy (`systemctl restart`) поднимает новую версию на пустом файле `app.db`: миграции и сид каталога есть, но
+   `engine_state.runner` нет — фоновые задачи стоят (пропуск «engine_state.runner не задан» пишется на уровне debug — в `journalctl` его нет), тумблер движка
+   выключен — сделок нет. Дождаться конца Deploy и проверить, что модуль загрузился:
+   `ssh claude@<ip> 'sudo journalctl -u binance --since "-3 min" --no-pager | grep db.migrate'` —
+   «Миграции применены (sqlite)», а не «Миграции не применены».
+4. Остановить новую версию и перенести данные:
+   ```sh
+   ssh claude@<ip> 'sudo systemctl stop binance'
+   pnpm db:import-pg --to data/import.db   # уже есть — добавить --force
+   ```
+   Все строки сверки — `✓` (число строк 12 таблиц, суммы PnL `paper_trades`, `demo_mirror_orders`,
+   `live_mirror_orders`); иначе код 1 и `data/import.db` не создаётся — не продолжать, разбор (сервис можно поднять на
+   пустой базе: торговли не будет) или «Откат».
+5. Загрузить файл и запустить сервис (файлы пустой версии `app.db*` с журналом этих минут удаляются):
+   ```sh
+   scp data/import.db claude@<ip>:/tmp/app-import.db
+   ssh claude@<ip> 'set -e; sudo rm -f /var/lib/binance/app.db /var/lib/binance/app.db-wal /var/lib/binance/app.db-shm; \
+     sudo install -o binance -g binance -m 600 /tmp/app-import.db /var/lib/binance/app.db; rm -f /tmp/app-import.db; \
+     sudo -u binance sqlite3 /var/lib/binance/app.db "pragma quick_check; select value from engine_state where key = '\''runner'\''"; \
+     sudo systemctl start binance'
+   ```
+   `quick_check` — `ok`, runner — `"oracle"`. Момент запуска записать (UTC) — он нужен откату.
+
+**Проверки (через 2–3 мин):**
+- тики идут раз в минуту, `runner = oracle`, новые сделки пишутся в SQLite: `/logs` на сайте (`source = vm`) или
+  `ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db "select value from engine_state where key = '\''last_tick'\''"'`;
+- демо-зеркало прогоняется без ошибок, открытые демо-позиции на месте (не закрыты как «чужие»);
+- `/db` в Telegram отвечает размером файла базы и свободным местом диска;
+- сайт показывает те же цифры `/experiments` и `/stats`, что до переключения;
+- в Supabase после переключения новых записей нет: `pnpm engine:supabase status` — последний тик не двигается.
+
+**Откат** (в течение недели): ручная выкатка коммита до мержа PR 0059 — Actions → Deploy → **Run workflow** с этим
+ref (`gh workflow run deploy.yml -f ref=<sha>`); `DATABASE_URL` в `app.env` ещё есть, старая версия снова работает с
+Supabase (там `runner = oracle`, тик пойдёт на VM). Paper-сделки и журнал, записанные в SQLite после переключения, при
+откате теряются. Демо-зеркало работает только со своими строками в базе, поэтому демо-счёт нужно сверить вручную —
+сразу после выкатки, до первого прогона зеркала (или остановив сервис на время сверки). Файл
+`/var/lib/binance/app.db` не удалять: по нему видно, что изменилось за время на SQLite (`<T>` — момент запуска на
+SQLite, мс):
+```sh
+ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db \
+  "select trade_id, market, symbol, direction, status, created_at >= <T> as new from demo_mirror_orders \
+   where created_at >= <T> or closed_at >= <T> or updated_at >= <T>"'
+```
+- **Новые позиции** (`new = 1`, статус открытый: `protected`, `unprotected`, `closing`, `close_failed`) — Supabase о них не
+  знает, это сироты: закрыть вручную на Binance Demo (позицию и её стоп/тейк), иначе они закроются только своими
+  ногами на бирже.
+- **Закрытые за время на SQLite** (`new = 0`, `closed`) — в Supabase они ещё открыты, и зеркало попытается закрыть
+  позицию, которой нет: перевести их строки в Supabase в `closed` (`update demo_mirror_orders set status = 'closed',
+  closed_at = now(), message = 'закрыто на SQLite до отката' where trade_id in (…)`) — с согласия владельца, это запись в
+  прод-базу.
+- Итог сверить с открытыми позициями демо-счёта: каждой открытой строке `demo_mirror_orders` в Supabase — позиция на
+  демо, и наоборот.
+
+Через неделю без отката — отдельная задача (п. 24 очереди PRD): `DATABASE_URL` убрать из `app.env`, Supabase
+отключить. Ночные `sqlite3 .backup` — п. 23; до них данные защищают ежедневные снимки Lightsail.

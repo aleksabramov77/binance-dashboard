@@ -1,24 +1,22 @@
 // `pnpm lab:private [--dry-run] [--prod] [--file <path>]` — записать приватные эксперименты лаборатории
 // (private/experiments.json, приватный репозиторий binance-dashboard-private) в таблицу experiments (spec 0015).
-// БД — как у `pnpm db:migrate`: DATABASE_URL из .env.local (прод — Supabase), без неё — локальная PGlite.
-// Запись в Postgres (прод) — только с явным --prod; без него печатаются цель и план, выход с ошибкой.
-// Для локального сервера worktree — `DATABASE_URL= pnpm lab:private` (data/pglite worktree).
+// База — локальный файл SQLite (DATABASE_PATH, по умолчанию data/app.db; spec 0059) — для сервера worktree тот же
+// файл, что у `pnpm wt serve`. Прод — SQLite на VM: `--prod` отказывает с подсказкой (запись в прод — задача в очереди PRD).
 // Upsert по id через seedExperiments: name, hypothesis, config, parentId, variantNote обновляются; enabled,
 // demoMirror, initialBudget пишутся только при вставке, сделки не трогаются. Вариант (spec 0046): родитель должен
 // быть в файле, каталоге или БД и сам не быть вариантом — иначе ошибка до записи. Содержимое экспериментов в журнал приложения не пишем.
 import { existsSync, readFileSync } from "node:fs";
-import { experimentsTable, seedExperiments } from "@/entities/experiment";
+import { experimentsTable, seedExperimentsSync } from "@/entities/experiment";
 import { EXPERIMENT_CATALOG } from "@/features/paper-engine";
 import { getDatabaseConfig } from "@/shared/config/env.server";
 import { closeDb, getDb, migrateDb } from "@/shared/db/client.server";
+import { describeDatabase, PROD_WRITE_HINT } from "./lib/dbTarget";
 import {
   CLONE_HINT,
   checkVariantParents,
   DEFAULT_PRIVATE_FILE,
   decideLabPrivateWrite,
-  describeDbTarget,
   formatPlanLine,
-  NEED_PROD_HINT,
   parseLabPrivateArgs,
   parsePrivateExperiments,
   planPrivateSeed,
@@ -33,7 +31,12 @@ async function main() {
   const parsedArgs = parseLabPrivateArgs(process.argv.slice(2));
   if (!parsedArgs.ok) fail(parsedArgs.error);
   const { dryRun, prod, file } = parsedArgs.args;
-  // Уже заданные переменные (в т.ч. пустой DATABASE_URL — принудительно PGlite) loadEnvFile не перезаписывает.
+  const decision = decideLabPrivateWrite({ dryRun, prod });
+  if (decision === "prod-unsupported")
+    fail(
+      `${PROD_WRITE_HINT}\n  Новые эксперименты из private/experiments.json — в локальную базу: pnpm lab:private (без --prod).`,
+    );
+  // Уже заданные переменные (в т.ч. DATABASE_PATH) loadEnvFile не перезаписывает.
   if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 
   if (!existsSync(file))
@@ -53,17 +56,14 @@ async function main() {
     );
   const { experiments } = parsed;
 
-  const target = getDatabaseConfig();
-  console.log(`БД: ${describeDbTarget(target)}`);
+  console.log(`БД: ${describeDatabase(getDatabaseConfig())}`);
   if (!experiments.length) {
     console.log(`${file}: экспериментов нет — записывать нечего`);
     return;
   }
-  const decision = decideLabPrivateWrite(target.kind, { dryRun, prod });
-
   const db = getDb();
-  // Локальную PGlite готовим сами (может быть пустой); прод мигрирует деплой — схему там не трогаем.
-  if (target.kind === "pglite") await migrateDb();
+  // Локальная база может быть пустой или новее кода — миграции идемпотентны.
+  await migrateDb();
   const rows = await db
     .select({
       id: experimentsTable.id,
@@ -95,16 +95,12 @@ async function main() {
     console.log("--dry-run: в БД ничего не записано");
     return;
   }
-  if (decision === "need-prod") {
-    console.error(`[lab:private] ${NEED_PROD_HINT}`);
-    process.exitCode = 1;
-    return;
-  }
   const changed = new Set(
     plan.filter((l) => l.status !== "unchanged").map((l) => l.id),
   );
-  await db.transaction((tx) =>
-    seedExperiments(
+  // Одна синхронная транзакция SQLite: все эксперименты или ни одного.
+  db.transaction((tx) =>
+    seedExperimentsSync(
       tx,
       experiments.filter((e) => changed.has(e.id)),
     ),

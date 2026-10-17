@@ -32,7 +32,7 @@ export const POST = withLogging("experiments.mirror", async (request) => {
       { error: `Эксперимент ${input.id} не найден` },
       { status: 404 },
     );
-  // Группа не умеет демо-зеркало (COIN-M — позже, spec 0023).
+  // Группа не умеет демо-зеркало или «Вкл» без ключа Binance Demo (COIN-M зеркало умеет с spec 0056).
   if ("blocked" in settings)
     return Response.json({ error: settings.blocked }, { status: 400 });
   return Response.json(settings);

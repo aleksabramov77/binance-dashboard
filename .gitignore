@@ -62,6 +62,9 @@ supabase/functions/**/deno.lock
 # Лаборатория: прогоны /flow lab живут только в private/lab/ (spec 0015) — случайный прогон в docs/lab/runs не коммитить
 docs/lab/runs/
 
+# логи Playwright MCP (проверка тестером): Tailwind сканирует их, и dev-страница бесконечно перезагружается
+/.playwright-mcp/
+
 # storybook (задача 0051): pnpm build-storybook
 /storybook-static
 *storybook.log

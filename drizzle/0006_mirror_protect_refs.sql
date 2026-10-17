@@ -1,1 +1,0 @@
-ALTER TABLE "demo_mirror_orders" ADD COLUMN "protect_refs" jsonb;

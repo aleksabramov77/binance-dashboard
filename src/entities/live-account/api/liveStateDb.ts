@@ -1,11 +1,11 @@
 import { eq } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { liveWorkerStateTable } from "../model/db";
 import { type LiveState, liveStateSchema } from "../model/heartbeat";
 
 // Чтение и запись последнего пульса (только сервер: вызывает композиция src/app/server/liveAccount.ts).
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = BaseSQLiteDatabase<"sync", unknown>;
 
 const ID = "main";
 

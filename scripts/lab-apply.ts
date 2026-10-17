@@ -6,7 +6,8 @@
 // Выключение — только с причиной (spec 0046): `--reason <id>=<категория>` для каждого --disable (+ `--note <id>=<текст>`);
 // уже выключенному --disable с причиной обновляет причину. Контрольный, у которого остаются включённые варианты, —
 // только с `--force-control`.
-// Печатает, к какой БД подключён; без DATABASE_URL (локальная PGlite) отказывается, если нет --local.
+// Печатает, к какой БД подключён. Прод — SQLite на VM (spec 0059): туда скрипт не пишет — без --local отказывает с
+// подсказкой (тумблеры — на /experiments и /settings); с --local пишет в локальную базу (DATABASE_PATH, data/app.db).
 // С --out дописывает apply.md в каталог прогона. Реальных ордеров нет: зеркало — Binance Demo.
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -23,9 +24,9 @@ import {
   getDatabaseConfig,
   getDemoTradingConfig,
 } from "@/shared/config/env.server";
-import { closeDb, getDb } from "@/shared/db/client.server";
+import { closeDb, getDb, migrateDb } from "@/shared/db/client.server";
 import { flushLogs, setLogSink } from "@/shared/lib/logger.server";
-import { describeDatabase, isLocalDatabase } from "./lib/dbTarget";
+import { describeDatabase, PROD_WRITE_HINT } from "./lib/dbTarget";
 import {
   type ApplyChange,
   diffApply,
@@ -54,9 +55,9 @@ async function main() {
   const config = getDatabaseConfig();
   const database = describeDatabase(config);
   console.log(`[lab:apply] БД: ${database}`);
-  if (isLocalDatabase(config) && !plan.local)
+  if (!plan.local)
     throw new Error(
-      "DATABASE_URL не задан — это локальная PGlite, а не прод: решения туда не дойдут. Если так и задумано, добавьте --local.",
+      `${PROD_WRITE_HINT}\n  Записать в локальную базу (${config.path}) — добавьте --local.`,
     );
   // Как тумблер в /settings: зеркало без ключей Binance Demo включать бессмысленно.
   if (plan.mirrorOn.length && getDemoTradingConfig() === null)
@@ -65,6 +66,8 @@ async function main() {
     );
 
   const db = getDb();
+  // Локальная база может быть новой (пустой файл) — миграции идемпотентны.
+  await migrateDb();
   // Решения авто-зеркала — в журнал БД (/logs), как с сервера.
   setLogSink(writeLogs);
   const changes = diffApply(plan, await readExperimentFlags(db));

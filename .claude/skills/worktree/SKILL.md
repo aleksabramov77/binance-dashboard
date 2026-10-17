@@ -40,18 +40,17 @@ pnpm wt prune [--older-than 24h] [--dry-run] # удалить worktree зада�
 
 ## Локальный сервер worktree
 
-`pnpm wt serve` запускает `pnpm dev` этого worktree в фоне: свой порт (5000+, первый свободный), **своя база PGlite**
-в `data/pglite` worktree и **вход выключен** (`DATABASE_URL=`, `AUTH_SECRET=`). Прод (Supabase) не трогается, а
+`pnpm wt serve` запускает `pnpm dev` этого worktree в фоне: свой порт (5000+, первый свободный), **своя база SQLite**
+в `data/app.db` worktree (`DATABASE_PATH`, spec 0059) и **вход выключен** (`AUTH_SECRET=`). Прод (файл на VM) не трогается, а
 Playwright тестировщика заходит без GitHub. Адрес и PID — в `.git/worktrees/<имя>/dev-server.json`, журнал —
 `dev-server.log` рядом. Повторный `serve` возвращает адрес уже запущенного сервера.
 
 На этом сервере агент-тестировщик проверяет задачу **до PR** и **ещё раз после правок по ревью** — перед повторным
 ревью (`.config/flows/feature.yaml`, `bug.yaml`).
 
-Приватные эксперименты (spec 0015) на сервере worktree: `.env.local` worktree — ссылка на основной checkout с
-прод-`DATABASE_URL`, поэтому обычный `pnpm lab:private` целится в прод и без `--prod` ничего не пишет. В базу сервера
-worktree — `pnpm wt stop` → `DATABASE_URL= pnpm lab:private` (пишет в `data/pglite` worktree) → `pnpm wt serve`.
-Запись в прод — только явно: `pnpm lab:private --prod`.
+Приватные эксперименты (spec 0015) на сервере worktree: `pnpm lab:private` пишет в локальную базу `data/app.db`
+worktree — `pnpm wt stop` → `pnpm lab:private` → `pnpm wt serve`. В прод-базу (SQLite на VM) скрипт не пишет:
+`--prod` отказывает, пока не сделана задача «Запись в прод-базу из скриптов лаборатории» (очередь PRD).
 
 ## Связанные файлы
 

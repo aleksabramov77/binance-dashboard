@@ -116,7 +116,7 @@ export function parsePrivateExperiments(
       );
       return;
     }
-    // Демо-зеркало COIN-M — позже (spec 0023): включить его файлом нельзя, как и тумблером.
+    // Группа без демо-зеркала: включить его файлом нельзя, как и тумблером (с spec 0056 зеркало есть у всех групп).
     const blocked = ASSET_GROUPS[e.market].demoMirrorBlocked;
     if (e.demoMirror && blocked) {
       errors.push(`${who}: поле demoMirror — ${blocked}`);
@@ -243,20 +243,6 @@ const STATUS_TEXT: Record<PlanStatus, string> = {
 export const formatPlanLine = (l: PlanLine) =>
   `${l.id.padEnd(6)} ${l.market.padEnd(8)} ${STATUS_TEXT[l.status].padEnd(14)} ${l.name}`;
 
-/** Куда пишем — без пароля и пользователя: хост, порт и база Postgres или «локальная PGlite». */
-export function describeDbTarget(
-  config: { kind: "postgres"; url: string } | { kind: "pglite"; dir: string },
-): string {
-  if (config.kind === "pglite") return `локальная PGlite (${config.dir})`;
-  try {
-    const url = new URL(config.url);
-    const port = url.port ? `:${url.port}` : "";
-    return `Postgres ${url.hostname}${port}${url.pathname}`;
-  } catch {
-    return "Postgres (адрес из DATABASE_URL не разобран)";
-  }
-}
-
 /** Подсказка, когда нет private/experiments.json: приватный репозиторий не склонирован. */
 export const CLONE_HINT = [
   "Нет приватного репозитория. В основном checkout проекта:",
@@ -306,23 +292,13 @@ export function parseLabPrivateArgs(
 }
 
 /**
- * Что делать после печати цели и плана: записать, только показать (--dry-run) или отказать.
- * Postgres по DATABASE_URL — прод (Supabase; в worktree .env.local — ссылка на основной checkout),
- * поэтому запись туда — только с явным --prod. Локальная PGlite пишется без флага.
+ * Что делать: записать в локальную базу, только показать план (--dry-run) или отказать (--prod). Прод — файл SQLite
+ * на VM (spec 0059): с ноутбука в него не пишем, отказ — до подключения к базе.
  */
 export function decideLabPrivateWrite(
-  targetKind: "postgres" | "pglite",
   args: Pick<LabPrivateArgs, "dryRun" | "prod">,
-): "write" | "dry-run" | "need-prod" {
+): "write" | "dry-run" | "prod-unsupported" {
+  if (args.prod) return "prod-unsupported";
   if (args.dryRun) return "dry-run";
-  if (targetKind === "postgres" && !args.prod) return "need-prod";
   return "write";
 }
-
-/** Отказ записи в Postgres без --prod. */
-export const NEED_PROD_HINT = [
-  "Цель — Postgres (прод), в БД ничего не записано.",
-  "  Для записи в прод добавьте --prod: pnpm lab:private --prod",
-  "  Для локального сервера worktree (data/pglite): DATABASE_URL= pnpm lab:private",
-  "  (сервер worktree остановить: pnpm wt stop → запись → pnpm wt serve)",
-].join("\n");

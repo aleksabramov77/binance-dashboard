@@ -1,4 +1,4 @@
-import type { Market } from "./market";
+import type { BinanceMarket } from "./markets";
 
 // Правила символа из exchangeInfo демо-биржи (чистый разбор, без сети — сеть в demoTrading.ts).
 
@@ -27,6 +27,17 @@ export interface SymbolRules {
   /** Спот: разрешены составные заявки OTO (и OTOCO, если ещё и OCO). */
   otoAllowed: boolean;
   ocoAllowed: boolean;
+  /**
+   * COIN-M (spec 0056): количество ордера — в контрактах (шаг 1), контракт стоит size $ (BTC — 100, остальные — 10),
+   * маржа — в монете marginAsset. Нет — количество в монете (Spot, USDⓈ-M).
+   */
+  contract?: CoinmContract;
+}
+
+/** Бессрочный контракт COIN-M: размер в $ и монета маржи (exchangeInfo demo-dapi, проба 2026-10-17). */
+export interface CoinmContract {
+  size: number;
+  marginAsset: string;
 }
 
 type Filter = { filterType: string; [k: string]: unknown };
@@ -57,11 +68,13 @@ export function toPriceBand(filters: Filter[]): PriceBand | null {
 
 /** Правила символа из его фильтров; null — нет PRICE_FILTER / LOT_SIZE (торговать нельзя). */
 export function toRules(
-  market: Market,
+  market: BinanceMarket,
   symbol: {
     filters: Filter[];
     otoAllowed?: boolean;
     ocoAllowed?: boolean;
+    contractSize?: number;
+    marginAsset?: string;
   },
 ): SymbolRules | null {
   const { filters } = symbol;
@@ -70,6 +83,14 @@ export function toRules(
   const lot = get("LOT_SIZE");
   const notional = get("NOTIONAL") ?? get("MIN_NOTIONAL");
   if (!price || !lot) return null;
+  // COIN-M без размера контракта или монеты маржи — объём не перевести в контракты: торговать нельзя.
+  const contract =
+    market === "coinm"
+      ? symbol.contractSize && symbol.contractSize > 0 && symbol.marginAsset
+        ? { size: symbol.contractSize, marginAsset: symbol.marginAsset }
+        : null
+      : undefined;
+  if (contract === null) return null;
   return {
     tickSize: String(price.tickSize),
     stepSize: String(lot.stepSize),
@@ -78,5 +99,6 @@ export function toRules(
     priceBand: market === "spot" ? toPriceBand(filters) : null,
     otoAllowed: market === "spot" && symbol.otoAllowed === true,
     ocoAllowed: market === "spot" && symbol.ocoAllowed === true,
+    ...(contract && { contract }),
   };
 }

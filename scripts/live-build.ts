@@ -10,14 +10,15 @@ const root = process.cwd();
 
 /**
  * Пакеты, которых в бандле воркера быть не должно: React и TanStack (UI сущности тянется через её public API и
- * сейчас вырезается tree-shaking'ом — проверяем, а не надеемся), клиенты БД postgres и PGlite (воркер в БД не ходит).
+ * сейчас вырезается tree-shaking'ом — проверяем, а не надеемся), драйверы БД better-sqlite3 и postgres (воркер в БД не
+ * ходит, только в API приложения).
  */
 const FORBIDDEN_PACKAGES = [
   "react",
   "react-dom",
   "@tanstack/",
+  "better-sqlite3",
   "postgres",
-  "@electric-sql/pglite",
 ];
 
 /** Имя пакета из пути модуля в node_modules (с учётом .pnpm и scope); null — не из node_modules. */
@@ -82,7 +83,7 @@ async function main() {
     format: "esm",
     target: "node22",
     // Пути @/* — из tsconfig.json; всё — внутрь файла. drizzle-orm попадает только описанием таблицы из public API
-    // сущности (pg-core, без клиентов БД); запрещённые пакеты проверяются ниже по metafile.
+    // сущности (sqlite-core, без драйвера БД); запрещённые пакеты проверяются ниже по metafile.
     tsconfig: path.join(root, "tsconfig.json"),
     define: {
       "process.env.LIVE_WORKER_VERSION": JSON.stringify(workerVersion),

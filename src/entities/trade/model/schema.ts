@@ -1,13 +1,22 @@
 import { z } from "zod";
-import { demoProtectRefsSchema, tradeMarketSchema } from "@/shared/api/binance";
+import {
+  binanceMarketSchema,
+  demoProtectRefsSchema,
+  tradeMarketSchema,
+} from "@/shared/api/binance";
 
 export const MAX_LEVERAGE = 3;
 /** Максимальная потеря на стопе — доля баланса кошелька (2%). Проверяется и в UI, и на сервере. */
 export const MAX_RISK_PCT = 0.02;
 
+/**
+ * Заявка сделки на площадке: ручная с /signals (Spot, USDⓈ-M к USDT — manualTradeRequestSchema) или вход зеркала,
+ * у которого есть и COIN-M (бессрочные `…USD_PERP`, spec 0056). quantity — в монете у всех рынков: у COIN-M это
+ * монетный эквивалент paper-сделки (контракты × размер / цена), в контракты его переводит проверка заявки.
+ */
 export const tradeRequestSchema = z.object({
-  symbol: z.string().regex(/^[A-Z0-9]+USDT$/),
-  market: tradeMarketSchema,
+  symbol: z.string().regex(/^[A-Z0-9]+(USDT|USD_PERP)$/),
+  market: binanceMarketSchema,
   direction: z.enum(["long", "short"]),
   quantity: z.number().positive(),
   stopLoss: z.number().positive(),
@@ -30,6 +39,17 @@ export const tradeRequestSchema = z.object({
    * (у каждого свои TP/SL на свой объём). Ручной вход (без флага) — только на свободную сторону.
    */
   mirror: z.boolean().optional(),
+  /**
+   * COIN-M: цена, по которой посчитан quantity (вход paper-сделки, spec 0056). Контракты = quantity × цена / размер
+   * контракта — ровно как у paper; нет — по текущей цене.
+   */
+  referencePrice: z.number().positive().optional(),
+});
+
+/** Ручная сделка с /signals: только Spot и USDⓈ-M к USDT (COIN-M вручную не торгуется, spec 0056 — вне scope). */
+export const manualTradeRequestSchema = tradeRequestSchema.extend({
+  symbol: z.string().regex(/^[A-Z0-9]+USDT$/),
+  market: tradeMarketSchema,
 });
 
 export const tradeStepSchema = z.object({

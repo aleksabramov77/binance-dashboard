@@ -1,14 +1,10 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { desc, eq, isNull, sql } from "drizzle-orm";
+import { desc, eq, isNull } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import {
   experimentsTable as experiments,
-  demoMirrorOrdersTable as mirrorOrders,
   paperTradesTable as paperTrades,
   runsTable as runs,
-  skippedSignalsTable as skippedSignals,
 } from "./db.ts";
 import { mirrorProtectRefsSchema } from "./mirror.ts";
 
@@ -53,7 +49,7 @@ const trade = (id: string, runId: number) => ({
   checkedUntil: Date.parse("2026-10-10T10:00:00Z"),
 });
 
-describe("таблицы лаборатории (PGlite)", () => {
+describe("таблицы лаборатории (SQLite)", () => {
   it("сохраняет и читает сделку, закрытие обновляет поля", async () => {
     const [run] = await db.insert(runs).values({}).returning();
     await db.insert(paperTrades).values(trade("t1", run.id));
@@ -122,175 +118,7 @@ describe("таблицы лаборатории (PGlite)", () => {
   });
 });
 
-describe("миграция 0008 (spec 0030): контекст входа, MAE, отсечённые сигналы", () => {
-  const migration = readFileSync(
-    path.join(process.cwd(), "drizzle/0008_entry_context_mae_skipped.sql"),
-    "utf8",
-  )
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  it("сделка прод-формата (без новых колонок) получает entry_context = {} и mae = null", async () => {
-    const [run] = await db.insert(runs).values({}).returning();
-    await db.execute(
-      sql`insert into paper_trades (id, run_id, experiment_id, market, symbol, direction, opened_at, entry_price, quantity, atr, extreme, checked_until) values ('old', ${run.id}, 'F06', 'usdm', 'BTCUSDT', 'long', now(), 100, 1, 1, 100, 0)`,
-    );
-    const [old] = await db
-      .select()
-      .from(paperTrades)
-      .where(eq(paperTrades.id, "old"));
-    expect(old.entryContext).toEqual({});
-    expect(old.mae).toBeNull();
-  });
-
-  it("повторный запуск на применённой схеме с данными ничего не ломает", async () => {
-    const [run] = await db.insert(runs).values({}).returning();
-    await db.insert(paperTrades).values({
-      ...trade("t1", run.id),
-      mae: 99,
-      entryContext: { v: 1, adx14: 30 },
-    });
-    await db.insert(skippedSignals).values({
-      id: "s1",
-      runId: run.id,
-      experimentId: "F06",
-      market: "usdm",
-      symbol: "ETHUSDT",
-      direction: "long",
-      bar: 0,
-      at: new Date(),
-      reason: "max-open",
-      entryPrice: 100,
-      stop: 98,
-      takeProfit: null,
-    });
-    for (const statement of migration) await db.execute(sql.raw(statement));
-    const [t1] = await db.select().from(paperTrades);
-    expect(t1).toMatchObject({ mae: 99, entryContext: { v: 1, adx14: 30 } });
-    expect(await db.select().from(skippedSignals)).toHaveLength(1);
-  });
-});
-
-describe("миграция 0010 (spec 0046): варианты и причина выключения", () => {
-  const migration = readFileSync(
-    path.join(
-      process.cwd(),
-      "drizzle/0010_experiment_variants_disable_reason.sql",
-    ),
-    "utf8",
-  )
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  it("старая строка — без родителя и причины; повторный запуск не трогает данные", async () => {
-    const [before] = await db.select().from(experiments);
-    expect(before).toMatchObject({
-      parentId: null,
-      variantNote: null,
-      disabledReason: null,
-      disabledNote: null,
-      disabledAt: null,
-    });
-    await db
-      .update(experiments)
-      .set({
-        parentId: "F96",
-        variantNote: "цель 3R вместо 2R",
-        disabledReason: "loser",
-        disabledNote: "минус за две эпохи",
-        disabledAt: new Date("2026-10-16T10:00:00Z"),
-      })
-      .where(eq(experiments.id, "F06"));
-    for (const statement of migration) await db.execute(sql.raw(statement));
-    const [after] = await db.select().from(experiments);
-    expect(after).toMatchObject({
-      parentId: "F96",
-      variantNote: "цель 3R вместо 2R",
-      disabledReason: "loser",
-      disabledNote: "минус за две эпохи",
-      disabledAt: new Date("2026-10-16T10:00:00Z"),
-    });
-  });
-});
-
-describe("миграция 0007: futures → usdm (spec 0023, AC2)", () => {
-  const MIGRATION = new URL(
-    "../../../../drizzle/0007_futures_to_usdm.sql",
-    import.meta.url,
-  );
-  const migrate = async () => {
-    for (const statement of readFileSync(MIGRATION, "utf8").split(
-      "--> statement-breakpoint",
-    ))
-      await db.execute(sql.raw(statement));
-  };
-
-  it("переводит market и protect_refs старых строк в usdm; spot и повтор не меняются", async () => {
-    // Строки в формате прода до миграции (миграции PGlite уже применены — пишем старые значения сами).
-    await db
-      .update(experiments)
-      .set({ market: "futures" })
-      .where(eq(experiments.id, "F06"));
-    const [run] = await db.insert(runs).values({}).returning();
-    await db.insert(paperTrades).values([
-      { ...trade("t1", run.id), market: "futures" },
-      { ...trade("t2", run.id), market: "spot", symbol: "ETHUSDT" },
-    ]);
-    await db.insert(mirrorOrders).values([
-      {
-        tradeId: "t1",
-        experimentId: "F06",
-        market: "futures",
-        symbol: "BTCUSDT",
-        direction: "long",
-        status: "protected",
-        protectRefs: {
-          market: "futures",
-          entryOrderId: 1,
-          stop: { algoId: 2, clientAlgoId: "s" },
-          takeProfit: null,
-        },
-      },
-      {
-        tradeId: "t2",
-        experimentId: "F06",
-        market: "spot",
-        symbol: "ETHUSDT",
-        direction: "long",
-        status: "protected",
-        protectRefs: {
-          market: "spot",
-          orderListId: 5,
-          stop: null,
-          takeProfit: null,
-        },
-      },
-    ]);
-
-    await migrate();
-    await migrate();
-
-    const [e] = await db.select().from(experiments);
-    expect(e.market).toBe("usdm");
-    const tradesByid = Object.fromEntries(
-      (await db.select().from(paperTrades)).map((t) => [t.id, t.market]),
-    );
-    expect(tradesByid).toEqual({ t1: "usdm", t2: "spot" });
-    const mirrors = await db
-      .select()
-      .from(mirrorOrders)
-      .orderBy(mirrorOrders.tradeId);
-    expect(mirrors.map((m) => m.market)).toEqual(["usdm", "spot"]);
-    expect(mirrors[0].protectRefs).toMatchObject({
-      market: "usdm",
-      entryOrderId: 1,
-      stop: { algoId: 2, clientAlgoId: "s" },
-    });
-    expect(mirrors[1].protectRefs).toMatchObject({ market: "spot" });
-  });
-
+describe("protect_refs (spec 0023)", () => {
   it("protect_refs со старым market, который миграция не застала, читаются как usdm", () => {
     expect(
       mirrorProtectRefsSchema.parse({

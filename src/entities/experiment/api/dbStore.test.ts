@@ -70,7 +70,7 @@ const trade = (id: string, runId: number): PaperTrade => ({
   signal: { bar: 1 },
 });
 
-describe("хранилище лаборатории на Drizzle (PGlite)", () => {
+describe("хранилище лаборатории на Drizzle (SQLite)", () => {
   it("сид — upsert по id: описание обновляется, выключение пользователя сохраняется", async () => {
     await seedExperiments(db, [exp("F01"), exp("F02")]);
     await db.update(experimentsTable).set({ enabled: false });
@@ -168,7 +168,7 @@ describe("хранилище лаборатории на Drizzle (PGlite)", () =
   });
 });
 
-describe("отсечённые сигналы (spec 0030, PGlite)", () => {
+describe("отсечённые сигналы (spec 0030, SQLite)", () => {
   const skip = (
     id: string,
     runId: number,

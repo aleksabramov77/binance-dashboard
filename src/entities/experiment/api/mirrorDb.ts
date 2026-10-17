@@ -1,5 +1,5 @@
 import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { computeDemoStats } from "../lib/stats";
 import {
   DEMO_MIRROR_MARKETS,
@@ -19,11 +19,12 @@ import {
   OPEN_MIRROR_STATUSES,
 } from "../model/mirror";
 import type { DemoSummary } from "../model/view";
+import { MIN_TIME_MS } from "./accounting";
 
 // Demo-зеркало (spec 008): какие paper-сделки повторить на Binance Demo и какие демо-позиции закрыть.
 // Без @/… и node:* — как dbStore. Сделки с биржей делает композиция src/app/server/demoMirror.ts.
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = BaseSQLiteDatabase<"sync", unknown>;
 
 /** Paper-сделка, которую можно зеркалить. */
 export interface MirrorCandidate {
@@ -72,8 +73,8 @@ const toClose = (
 });
 
 /**
- * Тумблер зеркала. Включить можно только в группе, которую зеркало умеет (DEMO_MIRROR_MARKETS):
- * COIN-M — false, как и неизвестный id (композиция различает их по market эксперимента).
+ * Тумблер зеркала. Включить можно только в группе, которую зеркало умеет (DEMO_MIRROR_MARKETS: Spot, USDⓈ-M,
+ * COIN-M — spec 0056); другая группа — false, как и неизвестный id.
  */
 export async function setExperimentDemoMirror(
   db: Db,
@@ -82,7 +83,7 @@ export async function setExperimentDemoMirror(
 ): Promise<boolean> {
   const rows = await db
     .update(experimentsTable)
-    .set({ demoMirror, updatedAt: sql`now()` })
+    .set({ demoMirror, updatedAt: new Date() })
     .where(
       and(
         eq(experimentsTable.id, id),
@@ -128,7 +129,7 @@ export async function listMirrorCandidates(
     .where(
       and(
         eq(experimentsTable.demoMirror, true),
-        // COIN-M на демо не зеркалим (spec 0023) — даже если флаг включили в обход тумблера.
+        // Только группы, которые зеркало умеет (COIN-M — с spec 0056), даже если флаг включили в обход тумблера.
         inArray(paperTradesTable.market, [...DEMO_MIRROR_MARKETS]),
         isNull(paperTradesTable.closedAt),
         gte(paperTradesTable.openedAt, since),
@@ -146,7 +147,7 @@ export async function listMirrorCandidates(
 
 /** Зеркало, которое держит или открывает позицию на демо. */
 export interface ActiveMirrorRow {
-  market: "spot" | "usdm";
+  market: DemoMirrorMarket;
   symbol: string;
   direction: "long" | "short";
   /**
@@ -161,13 +162,15 @@ export interface ActiveMirrorRow {
 
 /**
  * Строка нового учёта: свои ссылки есть и ноги — на свой объём. Фьючерсы без метки legs "quantity" —
- * входы 2b (ноги с closePosition): сработавшая закроет всю сторону вместе с соседями — legacy.
+ * входы 2b (ноги с closePosition): сработавшая закроет всю сторону вместе с соседями — legacy. У COIN-M
+ * (spec 0056) метка есть всегда.
  */
 function ownLegsOnly(market: string, raw: unknown): boolean {
   const refs = parseProtectRefs(raw);
   if (!refs) return false;
+  if (market === "spot") return true;
   return (
-    market !== "usdm" || (refs.market === "usdm" && refs.legs === "quantity")
+    refs.market !== "spot" && refs.market === market && refs.legs === "quantity"
   );
 }
 
@@ -239,8 +242,8 @@ export async function updateMirror(
     .update(demoMirrorOrdersTable)
     .set({
       ...fields,
-      updatedAt: sql`now()`,
-      ...(closed && { closedAt: sql`now()` }),
+      updatedAt: new Date(),
+      ...(closed && { closedAt: new Date() }),
     })
     .where(eq(demoMirrorOrdersTable.tradeId, tradeId));
   if (patch.demoRef)
@@ -287,7 +290,7 @@ export async function claimMirrorToClose(
     .where(isNotNull(paperTradesTable.closedAt));
   const [row] = await db
     .update(demoMirrorOrdersTable)
-    .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
+    .set({ status: "closing" satisfies MirrorStatus, updatedAt: new Date() })
     .where(
       and(
         eq(demoMirrorOrdersTable.tradeId, tradeId),
@@ -305,7 +308,8 @@ export async function claimMirrorToClose(
 }
 
 /**
- * Открытые фьючерсные зеркала со своими ссылками — для сверки ног (своя нога сработала — снять вторую).
+ * Открытые фьючерсные зеркала (USDⓈ-M и COIN-M) со своими ссылками — для сверки ног (своя нога сработала — снять
+ * вторую).
  */
 export async function listOpenMirrorLegs(db: Db): Promise<
   {
@@ -326,7 +330,7 @@ export async function listOpenMirrorLegs(db: Db): Promise<
     .where(
       and(
         inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
-        eq(demoMirrorOrdersTable.market, "usdm"),
+        inArray(demoMirrorOrdersTable.market, ["usdm", "coinm"]),
         isNotNull(demoMirrorOrdersTable.protectRefs),
       ),
     );
@@ -362,8 +366,8 @@ export async function markMirrorClosedByExchange(
       message: patch.message,
       steps: patch.steps,
       exitPrice: patch.exitPrice,
-      updatedAt: sql`now()`,
-      closedAt: sql`now()`,
+      updatedAt: new Date(),
+      closedAt: new Date(),
     })
     .where(
       and(
@@ -391,7 +395,7 @@ export async function markMirrorUnprotected(
       status: "unprotected" satisfies MirrorStatus,
       message: patch.message,
       steps: patch.steps,
-      updatedAt: sql`now()`,
+      updatedAt: new Date(),
     })
     .where(
       and(
@@ -495,7 +499,7 @@ export async function mirrorSummaries(
     )
     .where(
       scope === "current"
-        ? sql`${demoMirrorOrdersTable.createdAt} >= coalesce((select ${experimentsTable.demoResetAt} from ${experimentsTable} where ${experimentsTable.id} = ${demoMirrorOrdersTable.experimentId}), '-infinity'::timestamptz)`
+        ? sql`${demoMirrorOrdersTable.createdAt} >= coalesce((select ${experimentsTable.demoResetAt} from ${experimentsTable} where ${experimentsTable.id} = ${demoMirrorOrdersTable.experimentId}), ${MIN_TIME_MS})`
         : scope === "all"
           ? undefined
           : eq(paperTradesTable.runId, scope.runId),
@@ -563,7 +567,7 @@ export async function claimOpenMirrors(
 ): Promise<MirrorToClose[]> {
   const rows = await db
     .update(demoMirrorOrdersTable)
-    .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
+    .set({ status: "closing" satisfies MirrorStatus, updatedAt: new Date() })
     .where(
       and(
         inArray(demoMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
@@ -591,7 +595,7 @@ export async function markDemoReset(
 ): Promise<number> {
   const rows = await db
     .update(experimentsTable)
-    .set({ demoResetAt: sql`now()`, updatedAt: sql`now()` })
+    .set({ demoResetAt: new Date(), updatedAt: new Date() })
     .where(
       scope === null
         ? undefined

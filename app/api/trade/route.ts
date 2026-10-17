@@ -1,5 +1,5 @@
 import { connection } from "next/server";
-import { tradeRequestSchema } from "@/entities/trade";
+import { manualTradeRequestSchema } from "@/entities/trade";
 import { getTradeOverview, placeTrade } from "@/features/execute-trade";
 import { withLogging } from "@/shared/lib/route.server";
 
@@ -9,7 +9,7 @@ export const GET = withLogging("trade.overview", async () => {
 });
 
 export const POST = withLogging("trade", async (request) => {
-  const parsed = tradeRequestSchema.safeParse(
+  const parsed = manualTradeRequestSchema.safeParse(
     await request.json().catch(() => null),
   );
   if (!parsed.success) {

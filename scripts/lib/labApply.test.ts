@@ -185,14 +185,14 @@ describe("diffApply", () => {
       },
     ]);
   });
-  it("«Вкл» и «Авто» для COIN-M — ошибка с причиной из UI; «Выкл» можно", () => {
-    for (const flag of ["mirror-on", "mirror-auto"] as const)
-      expect(() => diffApply(planApply({ [flag]: ["PC99"] }), current)).toThrow(
-        /PC99: Демо-зеркало COIN-M — позже/,
+  it("«Вкл», «Авто» и «Выкл» для COIN-M — как у остальных групп (spec 0056)", () => {
+    for (const [flag, to] of [
+      ["mirror-on", "on"],
+      ["mirror-off", "off"],
+    ] as const)
+      expect(diffApply(planApply({ [flag]: ["PC99"] }), current)).toMatchObject(
+        [{ id: "PC99", field: "demoMirrorMode", to }],
       );
-    expect(
-      diffApply(planApply({ "mirror-off": ["PC99"] }), current),
-    ).toMatchObject([{ id: "PC99", to: "off" }]);
   });
   it("неизвестный id — ошибка до записи", () => {
     expect(() =>

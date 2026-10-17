@@ -70,7 +70,8 @@ Zustand (клиентское состояние, если понадобитс�
   Deno, spec 007b): только `trading-core`, `zod` и свои модули, без `@/**` и `node:*` (Biome override).
   Сеть, БД и время внедряются через `TickDeps`; композиция — в `src/app/server/*`.
 - **Общая композиция тика** `src/app/server/engineTick.ts` (`runEngineTick`) — одна для VM
-  (`experimentEngine.ts`) и Edge Function `supabase/functions/engine-tick` (Deno): advisory lock в БД,
+  (`experimentEngine.ts`) и Edge Function `supabase/functions/engine-tick` (Deno): блокировка тика (с spec 0059 — в
+  памяти процесса; Edge Function после переезда базы в SQLite не используется),
   проверка раннера, хранилище Drizzle, `TickDeps`. Её и всё, что Deno грузит исходниками
   (`trading-core`, `paper-engine`, `entities/experiment`, `shared/api/binance/marketApi.ts`), пишется без
   `node:*`, Next и `*.server`, с явными расширениями `.ts` в относительных импортах (бандлер Supabase
@@ -97,7 +98,13 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - COIN-M в движке: юниверс — бессрочные `…USD_PERP` со статусом TRADING (`fetchPerpetuals("coinm")`, размер контракта),
   оборот в $ = контракты × размер (`coinmTicker`), сделка — целые контракты (`sizePosition({ contractSizeUsd })`), PnL и
   комиссии в $ по формулам USDⓈ-M. Рынок без тикеров (dapi недоступен) — его эксперименты ждут следующего тика, одна запись
-  `warn`; остальные группы торгуют. Демо-зеркало COIN-M — позже: `DEMO_MIRROR_MARKETS`, галочка выключена, API — 400.
+  `warn`; остальные группы торгуют.
+- Демо-зеркало COIN-M (spec 0056) — на `demo-dapi.binance.com` (`DEMO_MIRROR_MARKETS` = spot, usdm, coinm; реальный счёт —
+  свой `LIVE_MIRROR_MARKETS` = spot, usdm). Площадка демо знает рынок `coinm` (`shared/api/binance/venue.server.ts`): правила
+  с размером контракта и монетой маржи, режим позиций — свой, стоп и тейк — условные ордера `/dapi/v1/order` (не algo, как у
+  fapi; `coinmOrders.ts` приводит их к виду algo-ордера). Количество на бирже — контракты, сделка и строка зеркала — в монете
+  (контракты × размер / вход, как paper); контракты и размер — в `protect_refs`. Резерв — $50 свободной маржи в монете
+  контракта (`MIRROR.coinmMinFreeUsd`), а не $500 на кошелёк.
 
 ## Сервер и клиент
 - Всё, что использует секреты, `node:crypto` или `node:fs` (логгер), — **только сервер**.
@@ -163,8 +170,9 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   (после «восстановлено»): напоминания issue не заводят. Без токена
   монитор работает как раньше.
 - Свободное место в базе (spec 0021, `features/db-space`, `src/app/server/dbSpace.ts`): тот же cron замеряет размер
-  базы (`getDbUsage`: `pg_database_size` и топ таблиц по `pg_total_relation_size`; на этапе 3 миграции меняется только
-  она) относительно `DB_SIZE_LIMIT_MB` (500) и шлёт одно сообщение на каждый порог свободного места 50/40/30/20/10/5 %
+  базы (`getDbUsage`, spec 0059: занято — файл SQLite с `-wal`, лимит — занято + свободное место на диске базы по
+  `statfs`; топ таблиц с индексами — виртуальная таблица `dbstat`, нет её — без топа) и шлёт одно сообщение на каждый
+  порог свободного места 50/40/30/20/10/5 %
   (за прогон — о самом низком); свободно больше «порог + 2 п.п.» — порог перезаряжается. Состояние — `alert_state`
   (`db.space.<N>`, статусы `sent`/`cleared`; общий модуль `src/app/server/alertState.ts`), сбой замера не ломает
   монитор (`dbSpace: { error }`).
@@ -269,7 +277,7 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 
 ## Воркер реального счёта (spec 0047)
 - Отдельный Node-процесс `scripts/live-worker.ts`: единственный, у кого есть торговый ключ субсчёта. Входящих соединений
-  не принимает, `DATABASE_URL` и Telegram не знает; журнал — только stdout/stderr (`disableLogFiles()` в логгере: файлов
+  не принимает, базу не открывает (только API приложения) и Telegram не знает; журнал — только stdout/stderr (`disableLogFiles()` в логгере: файлов
   `data/logs` нет, приёмник БД не подключён). Env: `BINANCE_TRADE_API_KEY`, `BINANCE_TRADE_API_SECRET`,
   `LIVE_WORKER_SECRET`, `LIVE_APP_URL`; локально подхватывает `.env.local` из текущего каталога.
 - Цикл раз в минуту (`scripts/lib/liveWorker.ts`, `runCheck`): права ключа (`apiRestrictions`) при старте и каждые
@@ -337,7 +345,8 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   бывают ложные перезагрузки из-за перекомпиляции.
 
 ## Данные на диске
-`data/` в `.gitignore`: `snapshots/` (снимки Earn), `logs/`, `pglite/` (локальная БД).
+`data/` в `.gitignore`: `app.db` (локальная база SQLite, у каждого worktree своя; spec 0059), `prod.db` (снимок прода —
+`pnpm db:pull`), `import.db` (перенос из Supabase — `pnpm db:import-pg`), `snapshots/` (снимки Earn), `logs/`.
 Кэш истории Binance для бэктеста (`pnpm lab:backtest`, spec 0032) — вне репозитория: `~/.cache/binance-dashboard`
 (свечи и funding по месяцам, общий для всех worktree; `--cache <каталог>` — другой). В БД свечи не хранятся.
 `private/` в `.gitignore` — клон приватного репозитория (см. «Приватные эксперименты»).
@@ -354,21 +363,19 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   `name`, `hypothesis`, `config`; необязательные `initialBudget` (10 000), `enabled` (`true`), `demoMirror` (`false`; `true` — ручное «Вкл» демо-зеркала, иначе
   «Авто», spec 0043), `parentId` и `variantNote` — вариант контрольного эксперимента и что в нём изменено (spec 0046:
   один уровень; родитель — в файле, каталоге или БД и сам не вариант, иначе `lab:private` отклоняет файл до записи).
-  id — `P` + буква группы + номер: `PS01` (spot), `PF01` (usdm), `PC01` (coinm, spec 0023; `demoMirror: true` для него —
-  ошибка: демо-зеркало COIN-M позже); с id каталога (`S..`, `F..`) не пересекается.
-- `pnpm lab:private [--dry-run] [--prod] [--file <path>]` (`scripts/lab-private.ts`, чистая логика и тесты —
+  id — `P` + буква группы + номер: `PS01` (spot), `PF01` (usdm), `PC01` (coinm, spec 0023; `demoMirror: true` — с spec 0056,
+  как у остальных групп); с id каталога (`S..`, `F..`) не пересекается.
+- `pnpm lab:private [--dry-run] [--file <path>]` (`scripts/lab-private.ts`, чистая логика и тесты —
   `scripts/lib/labPrivate.ts`): проверяет файл целиком (схема, лишние поля, префикс ↔ рынок, повторы, пересечение
-  с каталогом) до подключения к БД, печатает цель (хост Postgres без пароля или «локальная PGlite») и план
-  («новый» / «обновится» / «без изменений»), затем пишет новые и изменённые эксперименты через `seedExperiments`
-  в одной транзакции. БД — как у `pnpm db:migrate`: `DATABASE_URL` из `.env.local`, без неё — PGlite (её скрипт
-  мигрирует сам; прод мигрирует деплой). `parentId`, `variantNote` обновляются, как `name`/`config`; `enabled`, `demoMirror`, `initialBudget` пишутся только при вставке —
-  тумблеры `/settings`, бюджеты и сделки повторный запуск не трогает.
-- **Защита прода:** цель Postgres (задан `DATABASE_URL`) — это прод; запись туда только с явным `--prod`
-  (`pnpm lab:private --prod`). Без него скрипт печатает цель и план, объясняет, как писать, и выходит с ошибкой —
-  в БД ничего не пишется (`decideLabPrivateWrite`). `--dry-run` работает без `--prod`, для PGlite `--prod` не нужен.
-  В worktree `.env.local` — ссылка на основной checkout с прод-`DATABASE_URL`, а локальный сервер worktree работает
-  на `data/pglite`: чтобы эксперимент появился на нём — `pnpm wt stop` → `DATABASE_URL= pnpm lab:private` →
-  `pnpm wt serve`.
+  с каталогом) до подключения к БД, печатает базу (`SQLite <путь>`) и план («новый» / «обновится» / «без изменений»),
+  затем пишет новые и изменённые эксперименты через `seedExperimentsSync` одной транзакцией SQLite. База — как у
+  `pnpm db:migrate`: `DATABASE_PATH`, по умолчанию `data/app.db` (скрипт мигрирует её сам) — в worktree это база
+  сервера `pnpm wt serve` (остановить сервер: `pnpm wt stop` → запись → `pnpm wt serve`). `parentId`, `variantNote`
+  обновляются, как `name`/`config`; `enabled`, `demoMirror`, `initialBudget` пишутся только при вставке — тумблеры
+  `/settings`, бюджеты и сделки повторный запуск не трогает.
+- **Прод** (spec 0059): база прода — файл SQLite на VM, скрипт с ноутбука в неё не пишет: `--prod` отказывает с
+  подсказкой (`PROD_WRITE_HINT`, до подключения к базе). Запись в прод-базу из скриптов лаборатории — отдельная задача
+  в очереди PRD; до неё новые приватные эксперименты в прод не попадают, тумблеры — на `/experiments` и `/settings`.
 - Дальше приватный эксперимент живёт только в таблице `experiments`: движок (VM и Edge Function), `/experiments`
   и `/experiments/[id]` (id вне каталога рендерятся по запросу) работают с ним как с экспериментом каталога. Сид
   каталога на тике делает upsert только своих id и приватные строки не трогает (тест в `engineTick.test.ts`).
@@ -376,15 +383,39 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
 - Параметры, гипотезы и результаты приватных экспериментов не пишутся в публичные файлы, spec, коммиты, описания
   PR и issue (правило — `conventions.md` → «Приватные эксперименты»).
 
-## База данных (spec 003, задача 2a)
-- Postgres через Drizzle ORM. `src/shared/db/client.server.ts` — доменно-нейтральное подключение:
-  `getDb`, `migrateDb`, `closeDb`, `createMemoryDb` (тесты). Только сервер. Схемы в клиент не
-  передаются: запросы явно указывают таблицу (`db.select().from(experimentsTable)`).
+## База данных (spec 003, задача 2a; SQLite — spec 0059)
+- SQLite через Drizzle ORM (`better-sqlite3` + `drizzle-orm/better-sqlite3`). `src/shared/db/client.server.ts` —
+  доменно-нейтральное подключение: `getDb`, `getDbPath`, `migrateDb`, `closeDb`, `openSqlite`, `migrateSqlite`,
+  `createMemoryDb` (тесты: база в памяти). Только сервер. Схемы в клиент не передаются: запросы явно указывают таблицу
+  (`db.select().from(experimentsTable)`).
 - Таблицы живут в слайсах своих доменов — `src/entities/<сущность>/model/db.ts` (лаборатория:
   `experiments`, `runs` — эпохи сброса, `paper_trades`, `engine_state`, `skipped_signals`) и экспортируются через public API
   сущности. Внешние ключи и джойны — только внутри домена.
-- Подключение: `DATABASE_URL` → postgres.js (прод — Supabase, пулер в режиме transaction, `prepare: false`);
-  без неё — встроенный PGlite в `PGLITE_DIR` (по умолчанию `data/pglite`), внешние сервисы не нужны.
+- Подключение: файл из `DATABASE_PATH` (на VM `/var/lib/binance/app.db`, локально по умолчанию `data/app.db`), одно на
+  процесс; `journal_mode = WAL` (читатели не ждут писателя, `.backup` без остановки), `synchronous = FULL`,
+  `busy_timeout = 5000`, `foreign_keys = ON`. На serverless (Vercel) приложение не стартует — файлу базы там негде жить.
+  `DATABASE_URL` (Supabase) приложение не читает: он нужен только `pnpm db:import-pg` и `pnpm *:supabase`.
+- Типы: время — целые миллисекунды UTC (`integer` `mode: "timestamp_ms"`, в коде `Date`; у журнала, снимков Earn и
+  `alert_state` в коде ISO-строка — свой тип колонки `isoTimestamp`), деньги и цены — `real`, JSON — `text`
+  `mode: "json"` (`->>` работает, слияние — `json_patch`), флаги — `integer` `mode: "boolean"`. В сыром SQL (шаблон `sql`) параметры
+  не проходят через тип колонки: `Date` и `boolean` передавать числом (`getTime()`, 1/0) — better-sqlite3 их не
+  принимает. Текущее время считает приложение (`new Date()`), не база.
+- Транзакции синхронные (better-sqlite3): внутри `db.transaction((tx) => …)` — только `.all()/.get()/.run()`, без
+  `await` и сети; асинхронный колбэк драйвер отклоняет. Атомарные шаги — сбросы капиталов (`settingsDb`), закрытие
+  реальной сделки с автовыключением (`closeLiveWithAuto`) и `pnpm lab:private` — с `behavior: "immediate"` (блокировка
+  записи сразу, вместо `SELECT … FOR UPDATE`).
+- Блокировки тика (`withEngineTickLock`) и прогона демо-зеркала (`withMirrorRunLock`) — в памяти процесса
+  (`entities/experiment/api/processLock.ts`, состояние в `globalThis`): база — файл одного процесса, второй вызов, пока
+  идёт первый, получает `acquired: false`. Тик в одну транзакцию не завёрнут (в нём сеть): упал посередине — записанное
+  остаётся, следующий тик продолжает с меток свечей. Воркер `binance-live` базу не открывает — ходит в API приложения.
+- Перенос из Supabase — `pnpm db:import-pg --to <файл> [--force]` (`scripts/db-import-pg.ts`, логика —
+  `scripts/lib/pgImport.ts`): 12 таблиц только чтением (READ ONLY, REPEATABLE READ — один снимок), новый файл с
+  миграциями, все строки одной транзакцией, сверка числа строк и сумм PnL; расхождение — код 1, файл `.part` остаётся.
+- Снимок прода для лаборатории — `pnpm db:pull [--out <файл>]` (`scripts/db-pull.ts`): по SSH на VM
+  `sudo -u binance sqlite3 /var/lib/binance/app.db ".backup …"` → `data/prod.db`, `quick_check` до замены прежнего снимка.
+  Адрес и ключ — `APPS_TOKYO_HOST`, `APPS_TOKYO_SSH_USER`, `APPS_TOKYO_SSH_KEY_FILE` (`.env.local`). `pnpm lab:report --prod`
+  сначала скачивает снимок, затем строит отчёт по нему; без `--prod` — локальная база. `pnpm lab:apply` пишет только в
+  локальную базу с `--local`, без него отказывает с подсказкой (прод — тумблеры на сайте).
 - Движок лаборатории (задача 2b): хранилище — `createDbExperimentStore(db)` из `entities/experiment`
   (структурно = `ExperimentStore` движка), сид каталога (`seedExperiments`, upsert по id; `enabled`,
   `demo_mirror`, `initial_budget` пишутся только при вставке) и первая эпоха (`ensureRun`). Композиция —
@@ -394,8 +425,9 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   `ENGINE_RUNNER` (`oracle` по умолчанию); тумблер — `engine_state.enabled` (по умолчанию выкл),
   `GET/POST /api/experiments/engine {enabled}`.
 - Хостинг прода (spec 0055): VM `apps-tokyo` — сайт, API, тик движка, фоновые задачи, бот Telegram, демо-зеркало;
-  выкатка — `.github/workflows/deploy.yml` после зелёного CI на `main`. Supabase — только Postgres (pg_cron и
-  Edge Function `engine-tick` выключены), Vercel — резерв без выкаток. Runbook переключения и отката —
+  выкатка — `.github/workflows/deploy.yml` после зелёного CI на `main`. С spec 0059 база — файл SQLite на VM; Supabase
+  (pg_cron и Edge Function `engine-tick` выключены) остаётся неделю для отката и отключается отдельной задачей (п. 24
+  очереди PRD), Vercel — резерв без выкаток (с базой SQLite на нём не работает). Runbook переключения и отката —
   `docs/ai/deploy-lightsail.md`.
 - Фоновые задачи (spec 0048) — кто и когда их запускает. При `engine_state.runner = supabase` (до переключения и при
   откате): pg_cron в Supabase вызывает роуты Vercel `/api/cron/{earn-snapshot,log-monitor,demo-mirror,mirror-auto}`
@@ -410,7 +442,10 @@ UI сущности — в `src/entities/experiment`. Подробно — `pack
   (БД недоступна) — пропуск «раннер неизвестен»: одна запись `warn` на серию, не `error` (spec 0055). Расписания
   разбираются один раз при старте (`scheduleJobs`). Сбой задачи — `log.error` с событием роута (`cron.earn`,
   `cron.monitor`, `cron.mirror`, `cron.mirror_auto`), процесс и другие задачи работают дальше. Логика общая с роутами;
-  роуты остаются для pg_cron и ручного запуска.
-- Миграции — `drizzle/`: `pnpm db:generate` собирает схемы из `src/entities/*/model/db.ts` (коммитятся).
+  роуты остаются для pg_cron и ручного запуска. `engine_state.runner` не задан (новая пустая база при переключении на
+  SQLite, spec 0059) — пропуск «runner не задан»: раннер по умолчанию совпал бы с ролью VM, и задачи заработали бы на
+  пустых таблицах; runner приходит с переносом данных.
+- Миграции — `drizzle/` (SQLite, заново с `0000_init.sql`; Postgres-миграции до spec 0059 — в истории git):
+  `pnpm db:generate` собирает схемы из `src/entities/*/model/db.ts` (коммитятся).
   Применяются `pnpm db:migrate` и автоматически при старте сервера (`instrumentation.ts`); сбой БД
   пишется в журнал и не роняет дашборд.

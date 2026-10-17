@@ -1,5 +1,9 @@
 packages:
   - "packages/*"
+# Нативный модуль SQLite (spec 0059): pnpm 10 по умолчанию не запускает сборочные скрипты пакетов — без этого
+# better-sqlite3 останется без .node-файла (prebuild под платформу или сборка из исходников).
+onlyBuiltDependencies:
+  - better-sqlite3
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver

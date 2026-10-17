@@ -10,11 +10,11 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { computeLiveStats, type LiveStatsRow } from "../lib/liveStats";
 import {
-  DEMO_MIRROR_MARKETS,
-  demoMirrorMarketSchema,
+  LIVE_MIRROR_MARKETS,
+  type LiveMirrorMarket,
+  liveMirrorMarketSchema,
 } from "../model/assetGroup";
 import {
   experimentsTable,
@@ -30,20 +30,25 @@ import {
 } from "../model/mirror";
 import type { LiveSummary } from "../model/view";
 import type { MirrorCandidate, MirrorToClose } from "./mirrorDb";
+import type { ExperimentDb } from "./tickLock";
 
 // Реальное зеркало (spec 0049): какие paper-сделки повторить на торговом субсчёте и какие реальные позиции закрыть.
 // Таблица live_mirror_orders — по образцу demo_mirror_orders; ордера отправляет только воркер реального счёта,
 // эти запросы вызывает композиция src/app/server/liveMirror.ts по его API. Без @/… и node:* — как mirrorDb.
 
-type Db = PgDatabase<PgQueryResultHKT>;
+type Db = ExperimentDb;
+
+/** Момент `seconds` секунд назад (время считает приложение, не база). */
+const secondsAgo = (seconds: number) => new Date(Date.now() - seconds * 1000);
 
 const parseProtectRefs = (raw: unknown): MirrorProtectRefs | null => {
   const parsed = mirrorProtectRefsSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 };
 
-/** Реальная позиция на закрытие: как у демо + когда открыта (окно исполнений для PnL). */
-export interface LiveMirrorToClose extends MirrorToClose {
+/** Реальная позиция на закрытие: как у демо + когда открыта (окно исполнений для PnL). Только Spot и USDⓈ-M. */
+export interface LiveMirrorToClose extends Omit<MirrorToClose, "market"> {
+  market: LiveMirrorMarket;
   experimentId: string;
   entryPrice: number | null;
   stopLoss: number | null;
@@ -56,7 +61,7 @@ const toClose = (
 ): LiveMirrorToClose => ({
   tradeId: r.tradeId,
   experimentId: r.experimentId,
-  market: demoMirrorMarketSchema.parse(r.market),
+  market: liveMirrorMarketSchema.parse(r.market),
   symbol: r.symbol,
   direction: r.direction as MirrorToClose["direction"],
   quantity: r.quantity ?? 0,
@@ -67,11 +72,16 @@ const toClose = (
   openedAt: r.createdAt.toISOString(),
 });
 
+/** Кандидат реального зеркала: как у демо, но только Spot и USDⓈ-M (COIN-M на реальном счёте не торгуется). */
+export type LiveMirrorCandidate = Omit<MirrorCandidate, "market"> & {
+  market: LiveMirrorMarket;
+};
+
 /** Открытые paper-сделки экспериментов с включённым «Реальным счётом», не раньше `since`, ещё без строки зеркала. */
 export async function listLiveCandidates(
   db: Db,
   since: Date,
-): Promise<(MirrorCandidate & { experimentId: string })[]> {
+): Promise<LiveMirrorCandidate[]> {
   const rows = await db
     .select({
       tradeId: paperTradesTable.id,
@@ -97,7 +107,7 @@ export async function listLiveCandidates(
     .where(
       and(
         eq(experimentsTable.liveMirror, true),
-        inArray(paperTradesTable.market, [...DEMO_MIRROR_MARKETS]),
+        inArray(paperTradesTable.market, [...LIVE_MIRROR_MARKETS]),
         isNull(paperTradesTable.closedAt),
         gte(paperTradesTable.openedAt, since),
         isNull(liveMirrorOrdersTable.tradeId),
@@ -106,7 +116,7 @@ export async function listLiveCandidates(
     .orderBy(paperTradesTable.openedAt);
   return rows.map((r) => ({
     ...r,
-    market: demoMirrorMarketSchema.parse(r.market),
+    market: liveMirrorMarketSchema.parse(r.market),
     direction: r.direction as MirrorCandidate["direction"],
     openedAt: r.openedAt.toISOString(),
   }));
@@ -137,7 +147,7 @@ export async function liveActiveRows(db: Db): Promise<LiveActiveRow[]> {
   return rows.map((r) => ({
     tradeId: r.tradeId,
     experimentId: r.experimentId,
-    market: demoMirrorMarketSchema.parse(r.market),
+    market: liveMirrorMarketSchema.parse(r.market),
     symbol: r.symbol,
     direction: r.direction as LiveActiveRow["direction"],
     status: r.status as MirrorStatus,
@@ -278,20 +288,24 @@ export interface LiveMirrorPatch {
   closed?: boolean;
 }
 
-/** Обновить строку реального зеркала; только из статусов `from` (если заданы). false — строка не в них. */
-export async function updateLiveMirror(
+/**
+ * Обновить строку реального зеркала; только из статусов `from` (если заданы). false — строка не в них. Синхронно —
+ * годится внутри транзакции SQLite (closeLiveWithAuto).
+ */
+export function updateLiveMirrorSync(
   db: Db,
   tradeId: string,
   patch: LiveMirrorPatch,
   from?: readonly MirrorStatus[],
-): Promise<boolean> {
+): boolean {
   const { closed, ...fields } = patch;
-  const rows = await db
+  const now = new Date();
+  const rows = db
     .update(liveMirrorOrdersTable)
     .set({
       ...fields,
-      updatedAt: sql`now()`,
-      ...(closed && { closedAt: sql`now()` }),
+      updatedAt: now,
+      ...(closed && { closedAt: now }),
     })
     .where(
       and(
@@ -299,8 +313,19 @@ export async function updateLiveMirror(
         from ? inArray(liveMirrorOrdersTable.status, [...from]) : undefined,
       ),
     )
-    .returning({ tradeId: liveMirrorOrdersTable.tradeId });
+    .returning({ tradeId: liveMirrorOrdersTable.tradeId })
+    .all();
   return rows.length > 0;
+}
+
+/** Обновить строку реального зеркала; только из статусов `from` (если заданы). false — строка не в них. */
+export async function updateLiveMirror(
+  db: Db,
+  tradeId: string,
+  patch: LiveMirrorPatch,
+  from?: readonly MirrorStatus[],
+): Promise<boolean> {
+  return updateLiveMirrorSync(db, tradeId, patch, from);
 }
 
 /** Строка по сделке: эксперимент и монета — для журнала и Telegram. */
@@ -339,17 +364,11 @@ function closeDue(db: Db) {
     ),
     and(
       inArray(liveMirrorOrdersTable.status, ["unprotected", "close_failed"]),
-      lt(
-        liveMirrorOrdersTable.updatedAt,
-        sql`now() - make_interval(secs => ${LIVE_CLOSE_RETRY_PAUSE_S})`,
-      ),
+      lt(liveMirrorOrdersTable.updatedAt, secondsAgo(LIVE_CLOSE_RETRY_PAUSE_S)),
     ),
     and(
       eq(liveMirrorOrdersTable.status, "closing"),
-      lt(
-        liveMirrorOrdersTable.updatedAt,
-        sql`now() - make_interval(secs => ${LIVE_CLOSING_STUCK_S})`,
-      ),
+      lt(liveMirrorOrdersTable.updatedAt, secondsAgo(LIVE_CLOSING_STUCK_S)),
     ),
   );
 }
@@ -371,7 +390,7 @@ export async function claimLiveToClose(
 ): Promise<LiveMirrorToClose | null> {
   const [row] = await db
     .update(liveMirrorOrdersTable)
-    .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
+    .set({ status: "closing" satisfies MirrorStatus, updatedAt: new Date() })
     .where(and(eq(liveMirrorOrdersTable.tradeId, tradeId), closeDue(db)))
     .returning();
   if (!row) return null;
@@ -386,16 +405,13 @@ export async function claimLiveToClose(
 export async function claimAllLiveOpen(db: Db): Promise<LiveMirrorToClose[]> {
   const rows = await db
     .update(liveMirrorOrdersTable)
-    .set({ status: "closing" satisfies MirrorStatus, updatedAt: sql`now()` })
+    .set({ status: "closing" satisfies MirrorStatus, updatedAt: new Date() })
     .where(
       or(
         inArray(liveMirrorOrdersTable.status, [...OPEN_MIRROR_STATUSES]),
         and(
           eq(liveMirrorOrdersTable.status, "closing"),
-          lt(
-            liveMirrorOrdersTable.updatedAt,
-            sql`now() - make_interval(secs => ${LIVE_CLOSING_STUCK_S})`,
-          ),
+          lt(liveMirrorOrdersTable.updatedAt, secondsAgo(LIVE_CLOSING_STUCK_S)),
         ),
       ),
     )
@@ -425,7 +441,8 @@ export async function markLiveCloseFailed(
   attempts: number;
   status: "close_failed" | "unprotected";
 } | null> {
-  const noProtection = sql`(${liveMirrorOrdersTable.noProtection} or ${patch.protectionRemoved})`;
+  // better-sqlite3 не принимает JS boolean параметром запроса — 1/0.
+  const noProtection = sql`(${liveMirrorOrdersTable.noProtection} or ${patch.protectionRemoved ? 1 : 0})`;
   const [row] = await db
     .update(liveMirrorOrdersTable)
     .set({
@@ -434,7 +451,7 @@ export async function markLiveCloseFailed(
       message: patch.message,
       steps: patch.steps,
       closeAttempts: sql`${liveMirrorOrdersTable.closeAttempts} + 1`,
-      updatedAt: sql`now()`,
+      updatedAt: new Date(),
     })
     .where(
       and(
@@ -474,16 +491,13 @@ export async function listStaleLivePending(db: Db): Promise<
     .where(
       and(
         eq(liveMirrorOrdersTable.status, "pending"),
-        lt(
-          liveMirrorOrdersTable.createdAt,
-          sql`now() - make_interval(secs => ${LIVE_PENDING_STALE_S})`,
-        ),
+        lt(liveMirrorOrdersTable.createdAt, secondsAgo(LIVE_PENDING_STALE_S)),
       ),
     );
   return rows.map((r) => ({
     tradeId: r.tradeId,
     experimentId: r.experimentId,
-    market: demoMirrorMarketSchema.parse(r.market),
+    market: liveMirrorMarketSchema.parse(r.market),
     symbol: r.symbol,
     direction: r.direction === "short" ? "short" : "long",
     openedAt: r.createdAt.toISOString(),

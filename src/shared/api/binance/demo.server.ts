@@ -11,7 +11,7 @@ export type {
   DemoSymbolOrders,
 } from "./demoOrders";
 export { clientIdGroup } from "./demoOrders";
-export type { PriceBand, SymbolRules } from "./demoRules";
+export type { CoinmContract, PriceBand, SymbolRules } from "./demoRules";
 export type {
   AlgoOrderQuery,
   FuturesOrder,
@@ -19,7 +19,7 @@ export type {
   SpotOpenOrder,
   SpotOrderQuery,
 } from "./demoSchemas";
-export type { AlgoRef, PublicVenue } from "./demoTrading";
+export type { AlgoRef, ProtectMarket, PublicVenue } from "./demoTrading";
 export {
   DEMO_PUBLIC_VENUE,
   type DemoFill,
@@ -41,6 +41,7 @@ export {
   demoSpotStopLossSell,
   enableOnewayMode,
   fetchDemoAlgoOrder,
+  fetchDemoCoinmAvailable,
   fetchDemoEquity,
   fetchDemoFills,
   fetchDemoFuturesAccountBusy,

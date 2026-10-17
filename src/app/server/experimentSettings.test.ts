@@ -9,7 +9,7 @@ import {
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { setDemoMirrorMode } from "./experimentSettings";
 
-// Положение демо-зеркала через сервер (spec 0043): БД — PGlite в памяти, движок, биржа и журнал — моки.
+// Положение демо-зеркала через сервер (spec 0043): БД — SQLite в памяти, движок, биржа и журнал — моки.
 let db: Db;
 let close: () => Promise<void>;
 
@@ -25,6 +25,7 @@ vi.mock("./experimentEngine", () => ({
 vi.mock("./mirrorAuto", () => ({ runMirrorAuto: vi.fn() }));
 vi.mock("@/shared/api/binance/demo.server", () => ({
   fetchDemoUsdtBalances: vi.fn(async () => ({ spot: 0, usdm: 0 })),
+  fetchDemoCoinmAvailable: vi.fn(async () => new Map()),
 }));
 vi.mock("@/shared/lib/logger.server", () => ({
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -75,12 +76,12 @@ describe("setDemoMirrorMode", () => {
     expect(await mode("S98")).toBe("auto");
   });
 
-  it("COIN-M — прежняя причина; «Выкл» без ключа можно; неизвестный id — null", async () => {
+  it("COIN-M — «Вкл» как у остальных (spec 0056); «Выкл» без ключа можно; неизвестный id — null", async () => {
     vi.stubEnv("BINANCE_DEMO_API_KEY", "k");
     vi.stubEnv("BINANCE_DEMO_API_SECRET", "s");
-    expect(await setDemoMirrorMode("PC99", "on")).toEqual({
-      blocked: expect.stringMatching(/COIN-M/),
-    });
+    const on = await setDemoMirrorMode("PC99", "on");
+    expect(on && "epoch" in on).toBe(true);
+    expect(await mode("PC99")).toBe("on");
     vi.stubEnv("BINANCE_DEMO_API_KEY", "");
     const off = await setDemoMirrorMode("S98", "off");
     expect(off && "epoch" in off).toBe(true);

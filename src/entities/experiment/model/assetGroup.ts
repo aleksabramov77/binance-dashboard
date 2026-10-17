@@ -23,9 +23,6 @@ export interface AssetGroup {
   demoMirrorBlocked: string | null;
 }
 
-/** Демо-зеркало COIN-M (demo-dapi) — отдельная задача после spec 0012 (spec 0023, AC7). */
-export const COINM_MIRROR_BLOCKED = "Демо-зеркало COIN-M — позже";
-
 /** Порядок ключей — порядок групп в шапке, фильтрах и сортировке по AG. */
 export const ASSET_GROUPS: Record<Market, AssetGroup> = {
   spot: {
@@ -50,7 +47,8 @@ export const ASSET_GROUPS: Record<Market, AssetGroup> = {
     description:
       "Бессрочные фьючерсы с маржой в монете (BTCUSD_PERP…), контракты по $100 (BTC) и $10: лонг и шорт, плечо 1; бюджет и PnL — в $.",
     kind: MARKET_KIND.coinm,
-    demoMirrorBlocked: COINM_MIRROR_BLOCKED,
+    // Демо-зеркало COIN-M — на demo-dapi (spec 0056).
+    demoMirrorBlocked: null,
   },
 };
 
@@ -67,15 +65,32 @@ export function parseMarketParam(value: string): Market | null {
   return parsed.success ? parsed.data : null;
 }
 
-/** Группы, которые демо-зеркало умеет повторять на Binance Demo (у них demoMirrorBlocked — null). */
+/** Группы, которые демо-зеркало умеет повторять на Binance Demo (у них demoMirrorBlocked — null; COIN-M — spec 0056). */
 export const DEMO_MIRROR_MARKETS = [
   "spot",
   "usdm",
+  "coinm",
 ] as const satisfies readonly Market[];
 export type DemoMirrorMarket = (typeof DEMO_MIRROR_MARKETS)[number];
+
+/**
+ * Группы реального счёта (spec 0049): Spot и USDⓈ-M. Отдельно от демо — COIN-M на реальном счёте не торгуется
+ * (spec 0056, AC9), хотя демо-зеркало его уже повторяет.
+ */
+export const LIVE_MIRROR_MARKETS = [
+  "spot",
+  "usdm",
+] as const satisfies readonly DemoMirrorMarket[];
+export type LiveMirrorMarket = (typeof LIVE_MIRROR_MARKETS)[number];
 
 /** market строки зеркала из БД; старое futures — usdm. */
 export const demoMirrorMarketSchema = z.preprocess(
   normalizeMarket,
   z.enum(DEMO_MIRROR_MARKETS),
+);
+
+/** market строки реального зеркала из БД; старое futures — usdm. */
+export const liveMirrorMarketSchema = z.preprocess(
+  normalizeMarket,
+  z.enum(LIVE_MIRROR_MARKETS),
 );

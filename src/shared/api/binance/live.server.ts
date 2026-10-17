@@ -7,6 +7,7 @@ import {
   assertLiveAllowed,
   LIVE_HOSTS,
   type LiveMarket,
+  LiveRequestDeniedError,
   type LiveRoute,
 } from "./liveAllowlist";
 import {
@@ -72,8 +73,19 @@ export function liveVenue(client: LiveClient): TradeVenue {
       spot: `https://${client.hosts.spot}`,
       usdm: `https://${client.hosts.usdm}`,
     },
-    signed: (market, method, path, schema, params = {}) =>
-      liveSignedRequest(client, { method, market, path }, schema, params),
+    signed: (market, method, path, schema, params = {}) => {
+      // COIN-M на реальном счёте не торгуется (spec 0056, AC9): отказ до подписи и сети, как вне белого списка.
+      if (market === "coinm")
+        throw new LiveRequestDeniedError(
+          `Live: COIN-M на реальном счёте не торгуется (${method} ${path})`,
+        );
+      return liveSignedRequest(
+        client,
+        { method, market, path },
+        schema,
+        params,
+      );
+    },
   };
 }
 

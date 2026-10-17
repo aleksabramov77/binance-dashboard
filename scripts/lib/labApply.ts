@@ -27,7 +27,7 @@ export interface ApplyPlan {
   /** Выключить контрольный, у которого идут варианты, — только с согласия пользователя. */
   forceControl: boolean;
   dryRun: boolean;
-  /** Разрешить запись в локальную PGlite (без DATABASE_URL); иначе скрипт отказывается — это не прод. */
+  /** Запись в локальную базу SQLite; без флага скрипт отказывается — в прод (SQLite на VM) он не пишет (spec 0059). */
   local: boolean;
   /** Каталог прогона: туда дописывается apply.md. */
   out?: string;
@@ -263,7 +263,8 @@ export function diffApply(
         reason: null,
       });
   }
-  // «Вкл» и «Авто» для группы без демо-зеркала (COIN-M) — ошибка с той же причиной, что в UI и API (spec 0043).
+  // «Вкл» и «Авто» для группы без демо-зеркала — ошибка с той же причиной, что в UI и API (spec 0043; с spec 0056
+  // зеркало есть у всех групп, COIN-M тоже).
   const mode = (ids: string[], to: DemoMirrorMode) => {
     for (const id of ids) {
       const e = get(id);

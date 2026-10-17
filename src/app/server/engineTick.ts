@@ -95,7 +95,7 @@ export function createPerpetualsSources(
   return (market) => sources[market]();
 }
 
-/** TickDeps движка поверх хранилища (Drizzle в транзакции блокировки) и публичных данных Binance. */
+/** TickDeps движка поверх хранилища (Drizzle) и публичных данных Binance. */
 export function buildTickDeps(
   env: EngineTickEnv,
   store: ExperimentStore,
@@ -153,9 +153,10 @@ const emptyResult = (
 });
 
 /**
- * Один тик под межпроцессной блокировкой (advisory lock в общей БД): занята — `locked`, ничего не
- * делаем. Тик чужого раннера (`engine_state.runner` ≠ env.runner) — `foreign-runner` без записей в БД,
- * даже без сида каталога. Тик — одна транзакция: упал посередине — в БД не остаётся половины тика.
+ * Один тик под блокировкой тика (в памяти процесса, spec 0059): занята — `locked`, ничего не делаем. Тик чужого
+ * раннера (`engine_state.runner` ≠ env.runner) — `foreign-runner` без записей в БД, даже без сида каталога. Тик не
+ * завёрнут в одну транзакцию (в нём сеть, а транзакции SQLite синхронные): упал посередине — записанное остаётся,
+ * следующий тик продолжает с меток свечей и checked_until сделок.
  */
 export async function runEngineTick(
   env: EngineTickEnv,
