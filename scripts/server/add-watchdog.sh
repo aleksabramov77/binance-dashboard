@@ -28,6 +28,7 @@ Description=$NAME: сторож тика и сайта (spec 0064)
 
 [Service]
 Type=oneshot
+TimeoutStartSec=5min
 ExecStart=$BIN --db /var/lib/$NAME/app.db --env-file /etc/$NAME/app.env --state-dir $STATE --service $NAME
 NoNewPrivileges=true
 PrivateTmp=true

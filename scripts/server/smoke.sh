@@ -55,8 +55,10 @@ if systemctl is-enabled --quiet binance-watchdog.timer 2>/dev/null; then
     bad "сторож binance-watchdog ещё ни разу не запускался"
   elif [ $(($(date +%s) - wd_s)) -gt 600 ]; then
     bad "сторож binance-watchdog не запускался больше 10 мин"
+  elif [ "$(systemctl show -p Result --value binance-watchdog.service)" != success ]; then
+    bad "последний запуск сторожа неуспешен — sudo journalctl -u binance-watchdog -n 20"
   else
-    say "OK: сторож запускался $(($(date +%s) - wd_s)) с назад ($(systemctl show -p Result --value binance-watchdog.service))"
+    say "OK: сторож запускался $(($(date +%s) - wd_s)) с назад"
   fi
 else
   say "WARN: сторож binance-watchdog не установлен (add-watchdog.sh, spec 0064)"

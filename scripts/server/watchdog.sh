@@ -68,18 +68,21 @@ tg() {
 mins() { echo $((($1 + 59) / 60)); }
 hhmm() { date -u -d "@$1" +%H:%M; }
 
-# Последний тик: «enabled|at_unix» или пусто/ошибка.
+# Тик: «enabled|ref_unix», где ref — последний тик или включение автоторговли, что позже (пока автоторговля выключена,
+# тик last_tick не пишет: после включения его возраст — от момента включения). ref пустой — ни тика, ни отметки.
 read_tick() {
-  local row at
-  row=$(sqlite3 -readonly "$DB" "select (select value from engine_state where key = 'enabled') || '|' ||
-    coalesce((select json_extract(value, '\$.at') from engine_state where key = 'last_tick'), '')" 2>&1) || return 1
-  at=${row#*|}
-  if [ -n "$at" ]; then at=$(date -d "$at" +%s 2>/dev/null) || return 1; fi
-  printf '%s|%s' "${row%%|*}" "$at"
+  local row enabled at on ref=""
+  row=$(sqlite3 -readonly "$DB" "select coalesce((select value from engine_state where key = 'enabled'), '') || '|' ||
+    coalesce((select json_extract(value, '\$.at') from engine_state where key = 'last_tick'), '') || '|' ||
+    coalesce((select updated_at / 1000 from engine_state where key = 'enabled'), '')" 2>&1) || return 1
+  IFS='|' read -r enabled at on <<<"$row"
+  if [ -n "$at" ]; then ref=$(date -d "$at" +%s 2>/dev/null) || return 1; fi
+  if [[ "$on" =~ ^[0-9]+$ ]] && { [ -z "$ref" ] || [ "$on" -gt "$ref" ]; }; then ref=$on; fi
+  printf '%s|%s' "$enabled" "$ref"
 }
 
 if [ "$TEST" = 1 ]; then
-  tick=$(read_tick) && age=$((NOW - ${tick#*|})) && note="последний тик ${age} с назад" || note="тик не прочитан"
+  if tick=$(read_tick) && [ -n "${tick#*|}" ]; then note="последний тик $((NOW - ${tick#*|})) с назад"; else note="тик не прочитан"; fi
   tg "🧪 проверка связи сторожа ($note)" && echo "Пробное сообщение отправлено ($note)"
   exit $?
 fi
@@ -88,7 +91,7 @@ fi
 tick_alerted=0 tick_since=0 tick_restart=0 site_fails=0 site_since=0 site_alerted=0
 if [ -f "$STATE" ]; then
   while IFS='=' read -r k v; do
-    [[ "$v" =~ ^[0-9]+$ ]] || continue
+    [[ "$v" =~ ^(0|[1-9][0-9]*)$ ]] || continue
     case "$k" in tick_alerted | tick_since | tick_restart | site_fails | site_since | site_alerted) printf -v "$k" '%s' "$v" ;; esac
   done <"$STATE"
 fi
@@ -115,17 +118,29 @@ if ! tick=$(read_tick); then
   report+=("тик не прочитан из $DB")
 elif [ "${tick%%|*}" != true ]; then
   [ "$tick_alerted" = 1 ] && tg "ℹ️ автоторговля выключена — тик больше не проверяется"
-  tick_alerted=0
+  tick_alerted=0 tick_since=0
   report+=("автоторговля выключена")
 else
   at=${tick#*|}
-  if [ -z "$at" ]; then age=$((TICK_RESTART_S + 1)); last="тиков ещё не было"; else age=$((NOW - at)); last="последний $(hhmm "$at") UTC"; fi
-  if [ "$age" -le "$TICK_ALERT_S" ]; then
+  no_ref=0
+  if [ -z "$at" ]; then
+    # Ни тика, ни отметки включения: возраст — от первого наблюдения сторожем (tick_since копится, не сбрасывается).
+    no_ref=1
+    [ "$tick_since" = 0 ] && tick_since=$NOW
+    at=$tick_since
+    last="тиков ещё не было"
+  else
+    last="последний $(hhmm "$at") UTC"
+  fi
+  age=$((NOW - at))
+  if [ "$age" -le "$TICK_ALERT_S" ] && [ "$no_ref" = 1 ]; then
+    report+=("тиков ещё не было, наблюдаю ${age} с")
+  elif [ "$age" -le "$TICK_ALERT_S" ]; then
     [ "$tick_alerted" = 1 ] && tg "✅ тик снова идёт (стоял ~$(mins $((at - tick_since))) мин, с $(hhmm "$tick_since") UTC)"
     tick_alerted=0 tick_since=0
     report+=("тик ${age} с назад")
   else
-    [ "$tick_since" = 0 ] && tick_since=${at:-$NOW}
+    [ "$tick_since" = 0 ] && tick_since=$at
     if [ "$tick_alerted" != 1 ]; then
       tg "⚠️ тик не идёт ~$(mins "$age") мин ($last); через $(mins "$TICK_RESTART_S") мин простоя — перезапуск сервиса" &&
         tick_alerted=1
