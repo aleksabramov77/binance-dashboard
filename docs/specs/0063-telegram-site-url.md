@@ -1,7 +1,7 @@
 # 0063 · Ссылки в Telegram ведут на старый адрес Vercel
 
 - **Тип:** bug
-- **Статус:** approved
+- **Статус:** in-progress
 - **Серьёзность:** major
 - **Дата:** 2026-10-17
 
@@ -49,3 +49,4 @@ https://binance-dashboard-gold.vercel.app/settings#live
 | Дата | Событие |
 |---|---|
 | 2026-10-17 | Баг заведён: ссылка в сообщении о реальной сделке ведёт на binance-dashboard-gold.vercel.app |
+| 2026-10-17 | Код: `getSiteUrl()` без запасного адреса Vercel (`null`), `getSiteLink(path)`; сообщения `notifyLive`, монитора журнала и места в БД без ссылки при пустом `SITE_URL`; `telegram:setup` требует `SITE_URL`; `SITE_URL` в `.env.example` и `deploy-lightsail.md`; тесты |

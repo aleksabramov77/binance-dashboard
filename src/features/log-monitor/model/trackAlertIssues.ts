@@ -23,7 +23,7 @@ export interface TrackIssuesInput {
   fresh: string[];
   analysis: string | null;
   samples: SampleLog[];
-  logsUrl: string;
+  logsUrl: string | null;
   now: number;
 }
 

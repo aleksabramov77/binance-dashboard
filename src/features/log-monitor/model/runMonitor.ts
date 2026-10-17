@@ -24,7 +24,7 @@ export interface MonitorDeps {
   /** Отправка уведомления; не задана — только состояние в БД. */
   notify?: (text: string) => Promise<void>;
   prune: () => Promise<number>;
-  logsUrl: string;
+  logsUrl: string | null;
 }
 
 export interface MonitorResult {

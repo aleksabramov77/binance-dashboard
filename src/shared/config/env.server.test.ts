@@ -8,6 +8,7 @@ import {
   getLiveSilentAfterMs,
   getLiveTradeCredentials,
   getLiveWorkerSecret,
+  getSiteUrl,
   getTelegramConfig,
   isServerless,
 } from "./env.server";
@@ -178,5 +179,15 @@ describe("реальный счёт (spec 0047)", () => {
       300_000,
     );
     expect(getLiveSilentAfterMs({ LIVE_SILENT_AFTER_SEC: "-5" })).toBe(300_000);
+  });
+});
+
+describe("getSiteUrl", () => {
+  it("адрес из SITE_URL без завершающего /; без него — null, не старый адрес Vercel", () => {
+    expect(getSiteUrl({})).toBeNull();
+    expect(getSiteUrl({ SITE_URL: "  " })).toBeNull();
+    expect(getSiteUrl({ SITE_URL: "https://binance.example.test/" })).toBe(
+      "https://binance.example.test",
+    );
   });
 });

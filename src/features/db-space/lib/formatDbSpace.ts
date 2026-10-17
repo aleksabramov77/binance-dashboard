@@ -56,14 +56,13 @@ export function formatDbSpace(usage: DbUsage): string {
 export function formatSpaceAlert(
   threshold: number,
   usage: DbUsage,
-  logsUrl: string,
+  logsUrl: string | null,
 ): string {
   const text = summary(usage);
   return [
     `⚠️ ${spaceAlertTitle(threshold)}`,
     `${text.charAt(0).toUpperCase()}${text.slice(1)}.`,
     ...tables(usage),
-    "",
-    `Журнал: ${logsUrl}`,
+    ...(logsUrl ? ["", `Журнал: ${logsUrl}`] : []),
   ].join("\n");
 }

@@ -185,14 +185,22 @@ export function getTelegramConfig(
   };
 }
 
-/** Адрес дашборда в production: ссылки в уведомлениях, адрес webhook бота. */
+/**
+ * Адрес дашборда в production (SITE_URL): ссылки в уведомлениях, адрес webhook бота. null — не задан: без запасного
+ * адреса, чтобы ссылки не вели на старый хостинг (spec 0063).
+ */
 export const getSiteUrl = (
   env: Record<string, string | undefined> = process.env,
-): string =>
-  (env.SITE_URL?.trim() || "https://binance-dashboard-gold.vercel.app").replace(
-    /\/+$/,
-    "",
-  );
+): string | null => env.SITE_URL?.trim().replace(/\/+$/, "") || null;
+
+/** Ссылка на страницу дашборда (`/logs`, `/settings#live`); null — SITE_URL не задан. */
+export const getSiteLink = (
+  path: string,
+  env: Record<string, string | undefined> = process.env,
+): string | null => {
+  const site = getSiteUrl(env);
+  return site ? `${site}${path}` : null;
+};
 
 /** Модель для разбора сбоев монитором логов: дешёвая, отдельно от разбора сетапов. */
 export const getLogAnalysisModel = (
