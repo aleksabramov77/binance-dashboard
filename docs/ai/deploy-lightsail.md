@@ -117,6 +117,7 @@ Homepage `https://binance.<ip>.sslip.io`, callback `https://binance.<ip>.sslip.i
 | Снимок прод-базы на Mac | `pnpm db:pull` → `data/prod.db` (`sqlite3 .backup` на VM по SSH, сервис не останавливается; `APPS_TOKYO_HOST` в `.env.local`); отчёт лаборатории по нему — `pnpm lab:report --prod` |
 | Смоук прода | `ssh claude@<ip> 'bash -s' < scripts/server/smoke.sh` — тик в SQLite свежий, `runner = oracle`, `binance` и включённый `binance-live` активны (этап smoke `/flow release`) |
 | Ночная копия базы на Mac | `pnpm db:pull --backup [ГГГГ-ММ-ДД]` → `data/backup-<дата\|latest>.db` (по умолчанию последняя; spec 0062) |
+| Сторож: пробное сообщение | `ssh claude@<ip> 'sudo /usr/local/bin/binance-watchdog --test'` (spec 0064) |
 | Журнал воркера | `ssh claude@<ip> 'sudo journalctl -u binance-live -n 100 --no-pager'` |
 | Запрос к базе на VM | `ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db "select key, value from engine_state"'` |
 | Новый проект (сайт) | `sudo bash add-project.sh <имя> --port <порт> [--stop-timeout <сек>]` → `https://<имя>.<ip>.sslip.io` |
@@ -177,6 +178,46 @@ ssh claude@<ip> 'd=<дата>; B=/var/lib/binance; ts=$(date -u +%Y%m%dT%H%M%SZ)
 `DATABASE_PATH=data/backup-latest.db pnpm dev` с `ENGINE_RUNNER=supabase` (чтобы не тикал).
 
 Вне AWS копии не уходят: при потере VM база возвращается из снимка Lightsail (в нём и свежая ночная копия).
+
+## Сторож (spec 0064)
+
+Отдельный от приложения процесс: `binance-watchdog.timer` каждые 2 мин (на 40-й секунде) запускает
+`binance-watchdog.service` (oneshot, от root) — `/usr/local/bin/binance-watchdog` (= `scripts/server/watchdog.sh`: bash +
+`sqlite3 -readonly` + `curl`, код приложения не используется). Зачем отдельно: 2026-10-16 тик, демо-зеркало и монитор
+журнала висели в одном процессе ~5 ч, и монитор сам тревогу не поднял.
+
+| Проверка | Порог | Действие |
+|---|---|---|
+| Тик (только при включённой автоторговле) | последний тик старше 5 мин (возраст — от более позднего из тика и включения автоторговли) | Telegram «⚠️ тик не идёт» — одно сообщение на эпизод |
+| Тик | старше 15 мин | `systemctl restart binance` + Telegram «🔄 перезапустил сервис»; не чаще раза в час |
+| Сайт: `binance` активен и `127.0.0.1:5000` отвечает (< 500) за 10 с | 2 неудачи подряд (~4 мин) | Telegram «⚠️ сайт не отвечает» |
+| Восстановление | — | Telegram «✅ тик снова идёт» / «✅ сайт снова отвечает» с длительностью простоя |
+
+Telegram — `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` из `/etc/binance/app.env` (токен передаётся `curl` через stdin).
+Состояние эпизодов — `/var/lib/binance-watchdog/state`. Пороги — в начале скрипта. Перезапуск обрывает зависший прогон
+демо-зеркала: строки `pending` после него сверить вручную. Воркер `binance-live` сторож не трогает. Если VM недоступна
+целиком, сторож сообщить не может.
+
+Установка и обновление (повтор безопасен):
+```sh
+scp -i ~/.ssh/lightsail_apps_tokyo -o IdentitiesOnly=yes scripts/server/watchdog.sh scripts/server/add-watchdog.sh claude@<ip>:server-scripts/
+ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-watchdog.sh binance'
+```
+
+Проверка:
+- пробное сообщение (ничего не перезапускает): `ssh claude@<ip> 'sudo /usr/local/bin/binance-watchdog --test'`;
+- запуски: `ssh claude@<ip> 'sudo journalctl -u binance-watchdog -n 5 --no-pager'` — «Сторож: сайт ok;тик N с назад»;
+- смоук падает, если таймер включён, а сторож не запускался больше 10 мин или последний запуск неуспешен (`Result`).
+
+Выключить: `ssh claude@<ip> 'sudo systemctl disable --now binance-watchdog.timer'`; включить обратно —
+`sudo systemctl enable --now binance-watchdog.timer`. **Выключать перед**:
+- долгой (дольше 15 мин) ручной остановкой `binance` при включённой автоторговле — иначе сторож его поднимет;
+- откатом на Supabase (spec 0059, раздел «Откат» ниже): старая версия не пишет `last_tick` в SQLite, и сторож слал бы
+  тревоги и перезапускал сервис раз в час.
+
+Если сторож не может прочитать базу — одно сообщение «⚠️ сторож не может прочитать базу», после восстановления —
+«✅ сторож снова читает базу». Сообщения о восстановлении и о перезапуске при сбое Telegram не повторяются (тревоги —
+повторяются).
 
 ## Воркер реального счёта (spec 0061)
 
@@ -367,7 +408,8 @@ Demo-ключи на VM при откате можно оставить: при 
 - сайт показывает те же цифры `/experiments` и `/stats`, что до переключения;
 - в Supabase после переключения новых записей нет: `pnpm engine:supabase status` — последний тик не двигается.
 
-**Откат** (в течение недели): ручная выкатка коммита до мержа PR 0059 — Actions → Deploy → **Run workflow** с этим
+**Откат** (в течение недели): сначала выключить сторожа (`sudo systemctl disable --now binance-watchdog.timer`,
+spec 0064), затем ручная выкатка коммита до мержа PR 0059 — Actions → Deploy → **Run workflow** с этим
 ref (`gh workflow run deploy.yml -f ref=<sha>`); `DATABASE_URL` в `app.env` ещё есть, старая версия снова работает с
 Supabase (там `runner = oracle`, тик пойдёт на VM). Paper-сделки и журнал, записанные в SQLite после переключения, при
 откате теряются. Демо-зеркало работает только со своими строками в базе, поэтому демо-счёт нужно сверить вручную —
