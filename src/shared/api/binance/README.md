@@ -5,7 +5,7 @@
 | Мир | Хосты | Ключ | Точка входа |
 |---|---|---|---|
 | Публичное API (рынок, Earn) | `api.binance.com`, `fapi.binance.com`, `dapi.binance.com` (COIN-M), `www.binance.com/bapi` | не нужен | `public.server.ts` |
-| Аккаунт (read-only) | `api.binance.com` (`/sapi`, `/api/v3/account`) | `BINANCE_API_KEY/SECRET` | `account.server.ts` |
+| Аккаунт (read-only) | `api.binance.com` (`/sapi`, `/api/v3/account`) | ключ основного аккаунта: из базы (введён в «Настройках», зашифрован, spec 0065), иначе `BINANCE_API_KEY/SECRET` | `account.server.ts` |
 | Demo Trading (сделки) | `demo-api.binance.com`, `demo-fapi.binance.com`, `demo-dapi.binance.com` (COIN-M: демо-зеркало, spec 0056) | `BINANCE_DEMO_API_KEY/SECRET` | `demo.server.ts` |
 | Live — реальный счёт (торговый субсчёт, spec 0047) | `api.binance.com` (`/sapi`, `/api/v3`), `fapi.binance.com` — только пути белого списка | `BINANCE_TRADE_API_KEY/SECRET` — **только у воркера на VM** (`scripts/live-worker.ts`), у веб-приложения его нет | `live.server.ts` |
 
@@ -14,6 +14,18 @@
   импортировать из UI.
 - `*.server.ts` — сетевые функции, только сервер (логгер на `node:fs`, подпись на `node:crypto`).
   Импорт из клиентского компонента утянет `node:*` в браузерный бандл и сломает сборку.
+
+## Источник read-only ключа (spec 0065)
+- Функции `account.server.ts` принимают ключ аргументом (`BinanceCredentials`) и не знают, откуда он. Источник —
+  `getMainCredentials()` платформы (`src/app/server/accountKey.ts`): запись `binance-main` таблицы `account_keys`
+  (AES-256-GCM, мастер-ключ — файл `SECRETS_KEY_FILE`) → `BINANCE_API_KEY/SECRET` из env (локально, `.env.local`) →
+  нет ключа. Кэш в процессе, сброс при сохранении и удалении. Роуты `/api/portfolio` и `/api/earn/advanced` передают
+  ключ в загрузчики доменов; UID основного счёта воркеру (`getMainAccountUid`) — тоже по нему.
+- Перед сохранением сервер проверяет права ключа: `fetchApiRestrictions(creds)` (`GET /sapi/v1/account/apiRestrictions`,
+  вес 1) → `readRestrictions.ts` → `evaluateReadKeyRestrictions` (клиент-безопасно): годится, если `enableReading` и
+  `ipRestrict` включены, а торговля (`enableSpotAndMarginTrading`, `enableFutures`), `enableMargin`, вывод и переводы
+  выключены. Флаги и схема — общие с `liveRestrictions.ts`, правила — свои (`READ_KEY_FLAG_RULES`), правила воркера не
+  меняются. Отказ Binance (`isKeyRejected`) — «Binance отклонил ключ» с текстом ошибки, ключ и секрет из текста вычищаются.
 
 ## Live: реальный счёт (spec 0047, 0049)
 - `liveAllowlist.ts` — белый список «метод + рынок + путь» клиента реального счёта (`LIVE_ALLOWLIST`, хост берёт

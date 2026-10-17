@@ -45,6 +45,11 @@ export {
 } from "./markets";
 export { resolveUsdPrice } from "./prices";
 export { type DemoProtectRefs, demoProtectRefsSchema } from "./protectRefs";
+export {
+  evaluateReadKeyRestrictions,
+  READ_KEY_FLAG_RULES,
+  type ReadKeyVerdict,
+} from "./readRestrictions";
 export type {
   EarnOverviewAsset,
   EarnOverviewProduct,
