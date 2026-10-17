@@ -225,9 +225,9 @@ Demo-ключи на VM при откате можно оставить: при 
    Есть `pending` или `closing` — прогон оборвался: записать `trade_id`, после переключения сверить эту позицию на
    демо-счёте со строкой вручную. С этого момента торговля на паузе и Supabase никто не пишет.
 3. Deploy (`systemctl restart`) поднимает новую версию на пустом файле `app.db`: миграции и сид каталога есть, но
-   `engine_state.runner` нет — фоновые задачи стоят (пропуск «engine_state.runner не задан»), тумблер движка
+   `engine_state.runner` нет — фоновые задачи стоят (пропуск «engine_state.runner не задан» пишется на уровне debug — в `journalctl` его нет), тумблер движка
    выключен — сделок нет. Дождаться конца Deploy и проверить, что модуль загрузился:
-   `ssh claude@<ip> 'sudo journalctl -u binance --since "-3 min" --no-pager | grep -E "db.migrate|не задан"'` —
+   `ssh claude@<ip> 'sudo journalctl -u binance --since "-3 min" --no-pager | grep db.migrate'` —
    «Миграции применены (sqlite)», а не «Миграции не применены».
 4. Остановить новую версию и перенести данные:
    ```sh
@@ -249,7 +249,7 @@ Demo-ключи на VM при откате можно оставить: при 
 
 **Проверки (через 2–3 мин):**
 - тики идут раз в минуту, `runner = oracle`, новые сделки пишутся в SQLite: `/logs` на сайте (`source = vm`) или
-  `ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db "select value from engine_state where key = '\''lastTick'\''"'`;
+  `ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db "select value from engine_state where key = '\''last_tick'\''"'`;
 - демо-зеркало прогоняется без ошибок, открытые демо-позиции на месте (не закрыты как «чужие»);
 - `/db` в Telegram отвечает размером файла базы и свободным местом диска;
 - сайт показывает те же цифры `/experiments` и `/stats`, что до переключения;
