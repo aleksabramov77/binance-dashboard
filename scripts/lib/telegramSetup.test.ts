@@ -62,10 +62,14 @@ describe("testTradeCards — пробная карточка сделки (spec 
     );
     expect(cards.map((c) => c.urgent)).toEqual([false, false, true]);
     expect(cards[0].text).not.toMatch(/<b>/);
-    for (const c of cards)
+    for (const c of cards) {
       expect(c.html).toMatch(
         /\n\n<i>🧪 Пробное сообщение: числа вымышленные, сделки нет<\/i>$/,
       );
+      // spec 0070, AC1: 🆔 — и в пробной цепочке.
+      expect(c.html).toMatch(/\n🆔 <code>0-S98-BTCUSDT-\d+<\/code>\n\n<i>/);
+      expect(c.text).toMatch(/\n🆔 0-S98-BTCUSDT-\d+\n\n🧪/);
+    }
   });
 });
 
