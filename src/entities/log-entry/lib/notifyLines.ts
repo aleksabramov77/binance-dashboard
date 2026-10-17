@@ -21,6 +21,6 @@ export function notifyLines(notify: NotifyRecord): string[] {
     const where = c.target
       ? `${c.target.topic} (${c.target.topicId === null ? "без темы" : `тема ${c.target.topicId}`}), ${soundText(c.target.silent)}`
       : `${notify.category}, ${soundText(!notify.urgent)}`;
-    return `${c.channel}: ${where} — ${outcomeText(c)}`;
+    return `${c.channel}: ${where} — ${outcomeText(c)}${c.note ? ` (${c.note})` : ""}`;
   });
 }

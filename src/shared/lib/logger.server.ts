@@ -228,7 +228,8 @@ function deliverAll(
 
 /**
  * Уведомление и запись одним вызовом (spec 0067): запись — после доставки, итог (поле notify) в ней и в ответе.
- * Сбой канала — ещё warn notify.failed. Не бросает: уведомление не должно ронять сценарий.
+ * Сбой канала — ещё warn notify.failed, доставка не туда, куда просили (тема не найдена), — warn notify.fallback.
+ * Не бросает: уведомление не должно ронять сценарий.
  */
 async function notify(input: NotifyInput): Promise<NotifyRecord> {
   const urgent = input.urgent ?? false;
@@ -256,14 +257,27 @@ async function notify(input: NotifyInput): Promise<NotifyRecord> {
     input.error,
     record,
   );
-  for (const d of deliveries)
+  for (const d of deliveries) {
+    const where = {
+      event: input.event,
+      category: input.category,
+      channel: d.channel,
+    };
     if (d.status === "failed")
       emit(
         "warn",
         "notify.failed",
         `Уведомление ${input.event} не доставлено (${d.channel}): ${d.reason ?? "без причины"}`,
-        { event: input.event, category: input.category, channel: d.channel },
+        where,
       );
+    else if (d.note)
+      emit(
+        "warn",
+        "notify.fallback",
+        `Уведомление ${input.event} (${d.channel}): ${d.note}`,
+        where,
+      );
+  }
   return record;
 }
 

@@ -43,6 +43,8 @@ describe("каналы приложения: log.notify → Bot API", () => {
       }),
     );
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("APP_HOST", "vm");
+    vi.stubEnv("VERCEL", "");
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "bot");
     vi.stubEnv("TELEGRAM_CHAT_ID", "-1001234");
     for (const t of Object.values(NOTIFY_TOPICS)) vi.stubEnv(t.env, "");
@@ -122,6 +124,21 @@ describe("каналы приложения: log.notify → Bot API", () => {
         link_preview_options: { is_disabled: true },
       },
     ]);
+  });
+
+  it("локальная прод-сборка (APP_HOST не vm) — Bot API не вызывается (ревью PR #105)", async () => {
+    vi.stubEnv("APP_HOST", "");
+    const r = await log.notify({
+      level: "info",
+      event: "engine.toggle",
+      message: "Автоторговля включена",
+      category: "lab",
+    });
+    expect(bodies).toEqual([]);
+    expect(r).toMatchObject({
+      status: "skipped",
+      reason: "не прод-сервер: production-сборка вне VM (APP_HOST ≠ vm)",
+    });
   });
 
   it("не production — Bot API не вызывается, итог «не production» с темой и звуком (сценарий 6)", async () => {

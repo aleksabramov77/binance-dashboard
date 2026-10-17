@@ -80,6 +80,8 @@ export const channelDeliverySchema = z.object({
   channel: z.string(),
   ...outcome,
   target: notifyTargetSchema.optional(),
+  /** Доставлено не так, как просили (тема не найдена — в чат без темы): логгер пишет warn notify.fallback. */
+  note: z.string().optional(),
 });
 export type ChannelDelivery = z.infer<typeof channelDeliverySchema>;
 
@@ -105,18 +107,27 @@ export interface NotifyChannel {
   deliver: (notification: Notification) => Promise<ChannelResult>;
 }
 
+/** Где работает процесс: production-сборка и прод-сервер (VM: APP_HOST=vm). */
+export interface NotifyHost {
+  production: boolean;
+  server: boolean;
+}
+
 /**
- * Отправлять ли из этого процесса: только production и не фикстуры — локальный сервер worktree и скрипты пишут только
- * журнал (.env.local общий с основным checkout). Явная проверка (test) отправляется и вне production. Возвращает
- * причину пропуска; null — отправлять.
+ * Отправлять ли из этого процесса: только прод-сервер (NODE_ENV=production и APP_HOST=vm) и не фикстуры. Локальный
+ * сервер worktree, локальная прод-сборка и скрипты пишут только журнал: .env.local общий с основным checkout. Явная
+ * проверка (test) отправляется откуда угодно. Возвращает причину пропуска; null — отправлять.
  */
 export function notifyGate(
   n: Pick<Notification, "fixture" | "test">,
-  nodeEnv: string | undefined,
+  host: NotifyHost,
 ): string | null {
   if (n.fixture) return "фикстура";
-  if (n.test || nodeEnv === "production") return null;
-  return "не production";
+  if (n.test) return null;
+  if (!host.production) return "не production";
+  if (!host.server)
+    return "не прод-сервер: production-сборка вне VM (APP_HOST ≠ vm)";
+  return null;
 }
 
 /** Канала нет — итог без отправки. */

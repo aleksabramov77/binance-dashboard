@@ -9,18 +9,29 @@ import {
 
 describe("notifyGate — отправлять ли из этого процесса (spec 0067)", () => {
   const plain = { fixture: false, test: false };
+  const vm = { production: true, server: true };
 
-  it("только production; локальный сервер worktree и скрипты — «не production»", () => {
-    expect(notifyGate(plain, "production")).toBeNull();
-    expect(notifyGate(plain, "development")).toBe("не production");
-    expect(notifyGate(plain, undefined)).toBe("не production");
+  it("только прод-сервер; локальный сервер worktree и скрипты — «не production»", () => {
+    expect(notifyGate(plain, vm)).toBeNull();
+    expect(notifyGate(plain, { production: false, server: false })).toBe(
+      "не production",
+    );
   });
 
-  it("фикстура — никогда; явная пробная команда — и вне production", () => {
-    expect(notifyGate({ ...plain, fixture: true }, "production")).toBe(
-      "фикстура",
+  it("локальная прод-сборка (pnpm build && pnpm start, APP_HOST не vm) — не отправляет (ревью PR #105)", () => {
+    expect(notifyGate(plain, { production: true, server: false })).toBe(
+      "не прод-сервер: production-сборка вне VM (APP_HOST ≠ vm)",
     );
-    expect(notifyGate({ ...plain, test: true }, "development")).toBeNull();
+  });
+
+  it("фикстура — никогда; явная пробная команда — откуда угодно", () => {
+    expect(notifyGate({ ...plain, fixture: true }, vm)).toBe("фикстура");
+    expect(
+      notifyGate(
+        { ...plain, test: true },
+        { production: false, server: false },
+      ),
+    ).toBeNull();
   });
 });
 

@@ -175,6 +175,37 @@ describe("log.notify", () => {
     });
   });
 
+  it("доставлено не туда, куда просили (тема не найдена) — sent и warn notify.fallback с категорией", async () => {
+    setNotifyChannels([
+      fakeChannel("telegram", async () => ({
+        status: "sent",
+        note: "тема 12 не найдена — отправлено в чат без темы",
+      })),
+    ]);
+    const r = await log.notify({
+      level: "error",
+      event: "live.unprotected",
+      message: "без защиты",
+      category: "trades",
+      urgent: true,
+    });
+    await flushLogs();
+    expect(r.status).toBe("sent");
+    expect(got.map((e) => [e.level, e.event])).toEqual([
+      ["error", "live.unprotected"],
+      ["warn", "notify.fallback"],
+    ]);
+    expect(got[1]).toMatchObject({
+      message:
+        "Уведомление live.unprotected (telegram): тема 12 не найдена — отправлено в чат без темы",
+      data: {
+        event: "live.unprotected",
+        category: "trades",
+        channel: "telegram",
+      },
+    });
+  });
+
   it("skip — каналы не вызываются, причина в записи", async () => {
     const channel = fakeChannel("test");
     setNotifyChannels([channel]);

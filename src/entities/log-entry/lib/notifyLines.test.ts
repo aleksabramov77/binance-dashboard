@@ -54,6 +54,31 @@ describe("notifyLines — уведомление в деталях записи 
     ]);
   });
 
+  it("отметка канала — в скобках после итога", () => {
+    expect(
+      notifyLines({
+        category: "trades",
+        urgent: true,
+        status: "sent",
+        channels: [
+          {
+            channel: "telegram",
+            status: "sent",
+            target: {
+              topic: "💰 Сделки",
+              topicId: null,
+              to: "-1001",
+              silent: false,
+            },
+            note: "тема 12 не найдена — отправлено в чат без темы",
+          },
+        ],
+      }),
+    ).toEqual([
+      "telegram: 💰 Сделки (без темы), со звуком — отправлено (тема 12 не найдена — отправлено в чат без темы)",
+    ]);
+  });
+
   it("канал не подключён — категория и запрошенный звук", () => {
     expect(
       notifyLines({
