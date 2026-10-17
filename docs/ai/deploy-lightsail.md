@@ -208,7 +208,15 @@ ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-watchdog.sh binance'
 - запуски: `ssh claude@<ip> 'sudo journalctl -u binance-watchdog -n 5 --no-pager'` — «Сторож: сайт ok;тик N с назад»;
 - смоук падает, если таймер включён, а сторож не запускался больше 10 мин.
 
-Выключить: `ssh claude@<ip> 'sudo systemctl disable --now binance-watchdog.timer'`.
+Выключить: `ssh claude@<ip> 'sudo systemctl disable --now binance-watchdog.timer'`; включить обратно —
+`sudo systemctl enable --now binance-watchdog.timer`. **Выключать перед**:
+- долгой (дольше 15 мин) ручной остановкой `binance` при включённой автоторговле — иначе сторож его поднимет;
+- откатом на Supabase (spec 0059, раздел «Откат» ниже): старая версия не пишет `last_tick` в SQLite, и сторож слал бы
+  тревоги и перезапускал сервис раз в час.
+
+Если сторож не может прочитать базу — одно сообщение «⚠️ сторож не может прочитать базу», после восстановления —
+«✅ сторож снова читает базу». Сообщения о восстановлении и о перезапуске при сбое Telegram не повторяются (тревоги —
+повторяются).
 
 ## Воркер реального счёта (spec 0061)
 
@@ -398,7 +406,8 @@ Demo-ключи на VM при откате можно оставить: при 
 - сайт показывает те же цифры `/experiments` и `/stats`, что до переключения;
 - в Supabase после переключения новых записей нет: `pnpm engine:supabase status` — последний тик не двигается.
 
-**Откат** (в течение недели): ручная выкатка коммита до мержа PR 0059 — Actions → Deploy → **Run workflow** с этим
+**Откат** (в течение недели): сначала выключить сторожа (`sudo systemctl disable --now binance-watchdog.timer`,
+spec 0064), затем ручная выкатка коммита до мержа PR 0059 — Actions → Deploy → **Run workflow** с этим
 ref (`gh workflow run deploy.yml -f ref=<sha>`); `DATABASE_URL` в `app.env` ещё есть, старая версия снова работает с
 Supabase (там `runner = oracle`, тик пойдёт на VM). Paper-сделки и журнал, записанные в SQLite после переключения, при
 откате теряются. Демо-зеркало работает только со своими строками в базе, поэтому демо-счёт нужно сверить вручную —

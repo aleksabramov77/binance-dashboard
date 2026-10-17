@@ -74,7 +74,7 @@ read_tick() {
   local row enabled at on ref=""
   row=$(sqlite3 -readonly "$DB" "select coalesce((select value from engine_state where key = 'enabled'), '') || '|' ||
     coalesce((select json_extract(value, '\$.at') from engine_state where key = 'last_tick'), '') || '|' ||
-    coalesce((select updated_at / 1000 from engine_state where key = 'enabled'), '')" 2>&1) || return 1
+    coalesce((select updated_at / 1000 from engine_state where key = 'enabled'), '')" 2>/dev/null) || return 1
   IFS='|' read -r enabled at on <<<"$row"
   if [ -n "$at" ]; then ref=$(date -d "$at" +%s 2>/dev/null) || return 1; fi
   if [[ "$on" =~ ^[0-9]+$ ]] && { [ -z "$ref" ] || [ "$on" -gt "$ref" ]; }; then ref=$on; fi
@@ -88,11 +88,11 @@ if [ "$TEST" = 1 ]; then
 fi
 
 # Состояние: только целые числа ключ=значение.
-tick_alerted=0 tick_since=0 tick_restart=0 site_fails=0 site_since=0 site_alerted=0
+db_alerted=0 tick_alerted=0 tick_since=0 tick_restart=0 site_fails=0 site_since=0 site_alerted=0
 if [ -f "$STATE" ]; then
   while IFS='=' read -r k v; do
     [[ "$v" =~ ^(0|[1-9][0-9]*)$ ]] || continue
-    case "$k" in tick_alerted | tick_since | tick_restart | site_fails | site_since | site_alerted) printf -v "$k" '%s' "$v" ;; esac
+    case "$k" in db_alerted | tick_alerted | tick_since | tick_restart | site_fails | site_since | site_alerted) printf -v "$k" '%s' "$v" ;; esac
   done <"$STATE"
 fi
 report=()
@@ -114,7 +114,15 @@ else
 fi
 
 # --- Тик ---
-if ! tick=$(read_tick); then
+tick_ok=1
+tick=$(read_tick) || tick_ok=0
+if [ "$tick_ok" = 1 ] && [ "$db_alerted" = 1 ]; then
+  tg "✅ сторож снова читает базу" || true
+  db_alerted=0
+fi
+if [ "$tick_ok" = 0 ]; then
+  # Сторож без базы слеп: одно сообщение на эпизод.
+  [ "$db_alerted" = 1 ] || { tg "⚠️ сторож не может прочитать базу $DB — тик не проверяется" && db_alerted=1; }
   report+=("тик не прочитан из $DB")
 elif [ "${tick%%|*}" != true ]; then
   [ "$tick_alerted" = 1 ] && tg "ℹ️ автоторговля выключена — тик больше не проверяется"
@@ -161,6 +169,7 @@ else
 fi
 
 mkdir -p "$STATE_DIR"
-printf 'tick_alerted=%s\ntick_since=%s\ntick_restart=%s\nsite_fails=%s\nsite_since=%s\nsite_alerted=%s\n' \
-  "$tick_alerted" "$tick_since" "$tick_restart" "$site_fails" "$site_since" "$site_alerted" >"$STATE.part" && mv -f "$STATE.part" "$STATE"
+printf 'db_alerted=%s\ntick_alerted=%s\ntick_since=%s\ntick_restart=%s\nsite_fails=%s\nsite_since=%s\nsite_alerted=%s\n' \
+  "$db_alerted" "$tick_alerted" "$tick_since" "$tick_restart" "$site_fails" "$site_since" "$site_alerted" >"$STATE.part" &&
+  mv -f "$STATE.part" "$STATE" || echo "ОШИБКА: состояние не записано в $STATE — повторные сообщения и перезапуск чаще раза в час" >&2
 (IFS=';'; echo "Сторож: ${report[*]}")
