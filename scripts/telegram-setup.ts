@@ -141,7 +141,7 @@ async function sendTestTrade(): Promise<boolean> {
       urgent: card.urgent,
       test: true,
       text: card.text,
-      html: true,
+      html: card.html,
       link,
       links: [
         ...(link ? [{ label: "📊 Эксперимент", url: link }] : []),

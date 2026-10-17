@@ -340,8 +340,9 @@ describe("вход, выход и дневной PnL", () => {
     );
     // Telegram — HTML (монета жирным); ссылки — кнопками: страница эксперимента (AC8) и монета на Binance.
     const first = channel.deliver.mock.calls[0][0];
-    expect(first.html).toBe(true);
-    expect(first.text).toMatch(/<b>LINK\/USDT<\/b>/);
+    expect(first.html).toMatch(/<b>LINK\/USDT<\/b>/);
+    // Журнал и каналы без разметки — простой текст, без тегов.
+    expect(first.text).not.toMatch(/<b>/);
     expect(first.links).toEqual([
       {
         label: "📊 Эксперимент",
@@ -558,10 +559,14 @@ describe("карточка сделки: баланс, замена, нет кл
           unrealizedProfit: 0,
         },
       },
-      receivedAt: "2026-10-18T12:40:05.000Z",
+      // Пульс минуту назад — свежий: только время (старше часа — с датой, старше порога молчания — «устарел»).
+      receivedAt: new Date(Date.now() - 60_000).toISOString(),
     });
     await closed(id);
-    expect(sent()[0]).toMatch(/\n🏦 Баланс: \$30,50 \(на 12:40 UTC\)$/);
+    // Дата — только если минуту назад были другие сутки UTC (запуск сразу после полуночи).
+    expect(sent()[0]).toMatch(
+      /\n🏦 Баланс: \$30,50 \(на (\d\d\.\d\d · )?\d\d:\d\d UTC\)$/,
+    );
   });
 
   it("сообщение «исполнен» потерялось — итог входа сразу даёт 🟡 (B1)", async () => {

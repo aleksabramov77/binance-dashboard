@@ -65,8 +65,34 @@ const utcDateTime = (iso: string) =>
 /** Баланс субсчёта: после закрытия (от воркера) или по последнему пульсу — с временем пульса. */
 export interface LiveBalance {
   usd: number;
-  /** «12:40 UTC» — баланс из последнего пульса воркера; null — прочитан после закрытия. */
+  /** «12:40 UTC» или «18.10 · 12:40 UTC» — баланс из последнего пульса воркера; null — прочитан после закрытия. */
   asOf: string | null;
+  /** Пульс старше порога «воркер молчит» — баланс устарел. */
+  stale?: boolean;
+}
+
+/** Старше часа или за другие сутки UTC — время пульса с датой. */
+const AS_OF_DATE_AFTER_MS = 60 * 60_000;
+
+/**
+ * Когда прочитан баланс из пульса (spec 0068): свежий — «12:40 UTC»; старше часа или вчерашний — «18.10 · 12:40 UTC»;
+ * старше порога «воркер молчит» — ещё и устарел.
+ */
+export function liveBalanceAsOf(
+  receivedAt: string,
+  now: number,
+  silentAfterMs: number,
+): Pick<LiveBalance, "asOf" | "stale"> {
+  const age = now - Date.parse(receivedAt);
+  const sameDay =
+    receivedAt.slice(0, 10) === new Date(now).toISOString().slice(0, 10);
+  return {
+    asOf:
+      age > AS_OF_DATE_AFTER_MS || !sameDay
+        ? utcDateTime(receivedAt)
+        : `${receivedAt.slice(11, 16)} UTC`,
+    stale: age > silentAfterMs,
+  };
 }
 
 /** Данные входа карточки — одинаковые во всех статусах. */
@@ -157,6 +183,19 @@ function headLine(s: LiveTradeSubject, status: LiveCardStatus): string {
   }
 }
 
+/** Длина причины в карточке: длинный ответ биржи не должен раздуть сообщение за лимит Telegram. */
+const REASON_MAX = 500;
+
+/** Причина — до REASON_MAX символов (до экранирования: обрезается простой текст, а не HTML). */
+const clip = (text: string) =>
+  text.length > REASON_MAX ? `${text.slice(0, REASON_MAX - 1)}…` : text;
+
+/** Конец предложения: «…(-1021)» → «…(-1021).», чтобы следующая фраза не слиплась. */
+const sentence = (text: string) => {
+  const t = text.trimEnd();
+  return /[.!?…]$/.test(t) ? t : `${t}.`;
+};
+
 /** Код ошибки Binance из текста: «… (-2010)» → «-2010». */
 const apiCode = (message: string) =>
   /\((-\d{3,5})\)/.exec(message)?.[1] ??
@@ -173,15 +212,16 @@ function statusLines(status: LiveCardStatus): string[] {
     case "close_failed": {
       const code = apiCode(status.message);
       // Что сделать — кнопка «✍️ Выставить вручную на Binance» под карточкой.
+      const message = clip(status.message);
       return [
         status.kind === "unprotected"
-          ? `⚠️ Причина: ${status.message}`
-          : `⚠️ Причина: позиция не закрылась — ${status.message} Повторяю каждый прогон воркера.`,
+          ? `⚠️ Причина: ${message}`
+          : `⚠️ Причина: позиция не закрылась — ${sentence(message)} Повторяю каждый прогон воркера.`,
         ...(code ? [`🧾 Код API: ${code}`] : []),
       ];
     }
     case "cancelled":
-      return [`↩️ ${status.message}`];
+      return [`↩️ ${clip(status.message)}`];
     case "closed": {
       const e = status.exit;
       return [
@@ -212,7 +252,7 @@ function ladder(s: LiveTradeSubject, e: LiveCardEntry): string[] {
   const level = (icon: string, price: number, sign: "+" | "−") =>
     `${icon} ${livePrice(price)}${entry ? `${GAP}${pctText(price, entry, sign)}` : ""}`;
   const tp = e.takeProfit === null ? null : level("🟩", e.takeProfit, "+");
-  const sl = stop === null ? "🟥 SL нет" : level("🟥", stop, "−");
+  const sl = stop === null ? "🟥 без стопа" : level("🟥", stop, "−");
   const mid = `➡️ ${entry === null ? "цена входа: нет данных" : livePrice(entry)}${amount}`;
   const rows = s.direction === "long" ? [tp, mid, sl] : [sl, mid, tp];
   return rows.filter((l) => l !== null);
@@ -259,7 +299,7 @@ function reportLines(status: LiveCardStatus, balance: LiveBalance | null) {
   return [
     ...fees,
     balance
-      ? `🏦 Баланс: ${liveUsd(balance.usd)}${balance.asOf ? ` (на ${balance.asOf})` : ""}`
+      ? `🏦 Баланс: ${liveUsd(balance.usd)}${balance.asOf ? ` (на ${balance.asOf}${balance.stale ? ", устарел" : ""})` : ""}`
       : "🏦 Баланс: нет данных",
   ];
 }

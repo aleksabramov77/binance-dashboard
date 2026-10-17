@@ -34,7 +34,7 @@ const note = (over: Partial<Notification> = {}): Notification => ({
   test: false,
   replaces: null,
   links: [],
-  html: false,
+  html: null,
   ...over,
 });
 
@@ -436,8 +436,8 @@ describe("HTML и ссылки-кнопки (spec 0068, вид — версия 
     const { ch } = channel({ send });
     const r = await ch.deliver(
       note({
-        text: "<b>BTC/USDT</b>",
-        html: true,
+        text: "BTC/USDT",
+        html: "<b>BTC/USDT</b>",
         link: "https://x.test/experiments/S98",
         links: [
           { label: "📊 Эксперимент", url: "https://x.test/experiments/S98" },
@@ -473,9 +473,9 @@ describe("HTML и ссылки-кнопки (spec 0068, вид — версия 
       telegramMessageText({
         text: "a",
         link: "https://x/?a=1&b=2",
-        html: true,
+        html: "<b>a</b>",
       }),
-    ).toBe("a\nhttps://x/?a=1&amp;b=2");
+    ).toBe("<b>a</b>\nhttps://x/?a=1&amp;b=2");
     expect(
       telegramMessageText({
         text: "a",
@@ -516,6 +516,166 @@ describe("HTML и ссылки-кнопки (spec 0068, вид — версия 
       "<b>old</b>\n⤵️ обновлено ниже",
       { html: true },
     );
+  });
+});
+
+describe("запасной вид: Telegram не принял разметку или кнопки (ревью PR #106)", () => {
+  const card = (over: Partial<Notification> = {}) =>
+    note({
+      category: "trades",
+      urgent: true,
+      text: "⚠️ 📈 LONG\nBTC/USDT · USDⓈ-M · S98",
+      html: "⚠️ 📈 LONG\n<b>BTC/USDT</b> · USDⓈ-M · S98",
+      link: "https://x.test/experiments/S98",
+      links: [
+        { label: "📊 Эксперимент", url: "https://x.test/experiments/S98" },
+      ],
+      ...over,
+    });
+
+  it("400 на HTML/кнопках — один повтор простым текстом без кнопок, ссылка строкой; отметка для warn notify.fallback", async () => {
+    const send = vi
+      .fn<NonNullable<TelegramChannelDeps["send"]>>()
+      .mockRejectedValueOnce(
+        new Error("Telegram sendMessage 400: Bad Request: BUTTON_URL_INVALID"),
+      )
+      .mockResolvedValueOnce({ messageId: 8 });
+    const { ch } = channel({ send });
+    const r = await ch.deliver(card());
+    expect(send.mock.calls[1][2]).toBe(
+      "⚠️ 📈 LONG\nBTC/USDT · USDⓈ-M · S98\nhttps://x.test/experiments/S98",
+    );
+    expect(send.mock.calls[1][3]).toEqual({
+      messageThreadId: 14,
+      silent: false,
+    });
+    expect(r).toMatchObject({
+      status: "sent",
+      note: "разметка или кнопки не приняты (Telegram sendMessage 400: Bad Request: BUTTON_URL_INVALID) — отправлено простым текстом",
+      ref: { messageId: 8, html: false },
+    });
+  });
+
+  it("тема удалена и разметку не приняли — обе замены, карточка всё равно ушла", async () => {
+    const send = vi
+      .fn<NonNullable<TelegramChannelDeps["send"]>>()
+      .mockRejectedValueOnce(
+        new Error("Telegram sendMessage 400: message thread not found"),
+      )
+      .mockRejectedValueOnce(
+        new Error("Telegram sendMessage 400: can't parse entities"),
+      )
+      .mockResolvedValueOnce({ messageId: 9 });
+    const { ch } = channel({ send });
+    const r = await ch.deliver(card());
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(r).toMatchObject({
+      status: "sent",
+      target: { topicId: null },
+      note: expect.stringMatching(
+        /^тема 14 не найдена — отправлено в чат без темы; разметка или кнопки не приняты/,
+      ),
+    });
+  });
+
+  it("не 400 (403, сеть) — без повтора простым текстом; простой текст без кнопок — тоже без повтора", async () => {
+    const forbidden = vi
+      .fn<NonNullable<TelegramChannelDeps["send"]>>()
+      .mockRejectedValue(new Error("Telegram sendMessage 403: Forbidden"));
+    expect((await channel({ send: forbidden }).ch.deliver(card())).status).toBe(
+      "failed",
+    );
+    expect(forbidden).toHaveBeenCalledTimes(1);
+    const bad = vi
+      .fn<NonNullable<TelegramChannelDeps["send"]>>()
+      .mockRejectedValue(new Error("Telegram sendMessage 400: chat not found"));
+    await channel({ send: bad }).ch.deliver(note());
+    expect(bad).toHaveBeenCalledTimes(1);
+  });
+
+  it("HTML длиннее лимита — сразу простым текстом (обрезка не режет тег)", async () => {
+    const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(async () => ({
+      messageId: 1,
+    }));
+    const { ch } = channel({ send });
+    const r = await ch.deliver(
+      card({ text: "x".repeat(3000), html: `<b>${"x".repeat(4100)}</b>` }),
+    );
+    expect(send.mock.calls[0][3]).not.toHaveProperty("html");
+    expect(send.mock.calls[0][3]).not.toHaveProperty("buttons");
+    expect(r).toMatchObject({
+      note: "HTML длиннее лимита — отправлено простым текстом",
+    });
+  });
+
+  it("«⤵️ обновлено ниже» к HTML: Telegram не принял разметку — правка простым текстом", async () => {
+    const edit = vi
+      .fn<NonNullable<TelegramChannelDeps["edit"]>>()
+      .mockRejectedValueOnce(
+        new Error("Telegram editMessageText 400: can't parse entities"),
+      )
+      .mockResolvedValueOnce(undefined);
+    const { ch } = channel({
+      send: async () => ({ messageId: 9 }),
+      remove: async () => {
+        throw new Error("Telegram deleteMessage 400: message can't be deleted");
+      },
+      edit,
+    });
+    const r = await ch.deliver(
+      note({
+        replaces: {
+          ref: {
+            chatId: "-1001234",
+            messageId: 3,
+            text: "<b>A &amp; B</b>",
+            html: true,
+          },
+          label: "карточка",
+        },
+      }),
+    );
+    expect(edit.mock.calls[1]).toEqual([
+      "bot-token",
+      "-1001234",
+      3,
+      "A & B\n⤵️ обновлено ниже",
+      { html: false },
+    ]);
+    expect(r.replaceError).toMatch(
+      /дописано «⤵️ обновлено ниже» простым текстом/,
+    );
+  });
+
+  it("«⤵️» к HTML на грани лимита — простым текстом с хвостом, без разрезанного тега", async () => {
+    const edit = vi.fn<NonNullable<TelegramChannelDeps["edit"]>>(
+      async () => {},
+    );
+    const { ch } = channel({
+      send: async () => ({ messageId: 9 }),
+      remove: async () => {
+        throw new Error("Telegram deleteMessage 400: message can't be deleted");
+      },
+      edit,
+    });
+    await ch.deliver(
+      note({
+        replaces: {
+          ref: {
+            chatId: "-1001234",
+            messageId: 3,
+            text: `<b>${"y".repeat(3990)}</b>`,
+            html: true,
+          },
+          label: "карточка",
+        },
+      }),
+    );
+    const [, , , text, opts] = edit.mock.calls[0];
+    expect(opts).toEqual({ html: false });
+    expect(text.length).toBeLessThanOrEqual(4000);
+    expect(text).not.toMatch(/</);
+    expect(text.endsWith("\n⤵️ обновлено ниже")).toBe(true);
   });
 });
 

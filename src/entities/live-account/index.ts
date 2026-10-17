@@ -49,6 +49,7 @@ export {
   type LiveHaltAction,
   type LiveSizeRaised,
   type LiveTradeSubject,
+  liveBalanceAsOf,
   liveBinanceUrl,
   liveCardProblem,
   liveCardText,

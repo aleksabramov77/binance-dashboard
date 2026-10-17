@@ -52,6 +52,7 @@ import {
   type LiveTrading,
   liveAdviceText,
   liveAutoDisableText,
+  liveBalanceAsOf,
   liveCardProblem,
   liveCardText,
   liveCardUrgent,
@@ -173,8 +174,7 @@ function announceCard(
       event: entry.event,
       // Журнал — простой текст, Telegram — HTML с кнопками (spec 0068, вид — версия 3).
       message: card("plain"),
-      text: card("html"),
-      html: true,
+      html: card("html"),
       // Для /logs без канала: была ли прежняя карточка (B6).
       data: {
         ...entry.data,
@@ -193,9 +193,6 @@ function announceCard(
   });
 }
 
-/** «12:40 UTC» — время пульса для баланса из него. */
-const utcClock = (iso: string) => `${iso.slice(11, 16)} UTC`;
-
 /**
  * Баланс субсчёта рынка сделки для итога (spec 0068, AC4): от воркера после закрытия, иначе — последний пульс с его
  * временем (USDⓈ-M — wallet balance, Spot — equity в $); нет и пульса — null («нет данных»).
@@ -209,7 +206,14 @@ async function exitBalance(
   const hb = state?.heartbeat;
   const usd = market === "usdm" ? hb?.usdm?.walletBalance : hb?.spot?.equityUsd;
   return state && usd != null
-    ? { usd, asOf: utcClock(state.receivedAt) }
+    ? {
+        usd,
+        ...liveBalanceAsOf(
+          state.receivedAt,
+          Date.now(),
+          getLiveSilentAfterMs(),
+        ),
+      }
     : null;
 }
 

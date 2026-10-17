@@ -137,8 +137,9 @@ const TEST_BALANCE = { usd: 512.4, asOf: null };
 export interface TestTradeCard {
   /** Для журнала и вывода: «⏳ вход исполнен». */
   label: string;
-  /** HTML, как у настоящей карточки. */
+  /** Простой текст и HTML, как у настоящей карточки. */
   text: string;
+  html: string;
   urgent: boolean;
   /** Кнопка «🔗 Binance». */
   binanceUrl: string;
@@ -184,7 +185,8 @@ export function testTradeCards(): TestTradeCard[] {
   ];
   return chain.map(([label, status]) => ({
     label,
-    text: `${liveCardText(subject, entry, status, TEST_BALANCE, "html")}\n\n<i>${TEST_MARK}</i>`,
+    text: `${liveCardText(subject, entry, status, TEST_BALANCE)}\n\n${TEST_MARK}`,
+    html: `${liveCardText(subject, entry, status, TEST_BALANCE, "html")}\n\n<i>${TEST_MARK}</i>`,
     urgent: liveCardUrgent(status),
     binanceUrl: liveBinanceUrl(subject),
   }));

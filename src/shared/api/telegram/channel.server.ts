@@ -83,22 +83,44 @@ const CANT_DELETE = /message can't be deleted/i;
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
+const escapeLink = (url: string) => url.replaceAll("&", "&amp;");
+
 /**
- * Текст сообщения: текст уведомления и ссылка строкой ниже. Есть ссылки-кнопки — ссылка не дублируется в тексте. В
- * HTML ссылка экранируется (& в адресе).
+ * Текст, как его шлёт канал: есть HTML-версия — она (ссылка экранирована), иначе простой текст; ссылка — строкой ниже,
+ * если нет кнопок (тогда она — кнопка).
  */
 export const telegramMessageText = (n: {
   text: string;
   link: string | null;
   links?: readonly unknown[];
-  html?: boolean;
-}) =>
-  [
-    n.text,
-    n.links?.length ? null : n.html ? n.link?.replaceAll("&", "&amp;") : n.link,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  html?: string | null;
+}) => {
+  const rich = n.html != null;
+  const link =
+    n.links?.length || !n.link ? null : rich ? escapeLink(n.link) : n.link;
+  return [rich ? n.html : n.text, link].filter(Boolean).join("\n");
+};
+
+/** Запасной вид: простой текст без кнопок, ссылка — строкой (если разметку или кнопки Telegram не принял). */
+const plainMessageText = (n: { text: string; link: string | null }) =>
+  [n.text, n.link].filter(Boolean).join("\n");
+
+/** HTML → простой текст: без тегов, сущности раскрыты (для запасной правки старой карточки). */
+const htmlToPlain = (html: string) =>
+  html
+    .replace(/<[^>]+>/g, "")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+
+/** Простой текст с хвостом: не длиннее лимита, хвост не обрезается. */
+function withTail(text: string, tail: string): string {
+  const room = TELEGRAM_TEXT_LIMIT - tail.length - 1;
+  return `${text.length > room ? `${text.slice(0, room - 1)}…` : text}\n${tail}`;
+}
+
+/** Bot API отклонил запрос (400): разметка (can't parse entities), кнопка (BUTTON_URL_INVALID) и т. п. */
+const BAD_REQUEST = /\b400\b/;
 
 /** Ссылки уведомления → один ряд кнопок; primary — синяя. */
 const buttonsOf = (n: Notification) =>
@@ -153,18 +175,36 @@ export function createTelegramChannel(
         return { replaced: `${label} заменена (прежней уже нет)` };
       const notRemoved = `прежняя ${label} не удалена: ${reason}`;
       if (!CANT_DELETE.test(reason)) return { replaceError: notRemoved };
+      // HTML с хвостом не длиннее лимита — правка с той же разметкой; иначе (или Telegram не принял разметку) —
+      // простым текстом: обрезка HTML могла бы разрезать тег.
+      const rich = `${ref.text}\n${UPDATED_BELOW}`;
+      const plain = withTail(
+        ref.html ? htmlToPlain(ref.text) : ref.text,
+        UPDATED_BELOW,
+      );
+      const asHtml = ref.html && rich.length <= TELEGRAM_TEXT_LIMIT;
       try {
-        await edit(
-          token,
-          ref.chatId,
-          ref.messageId,
-          `${ref.text}\n${UPDATED_BELOW}`,
-          { html: ref.html },
-        );
+        await edit(token, ref.chatId, ref.messageId, asHtml ? rich : plain, {
+          html: asHtml,
+        });
         return { replaceError: `${notRemoved}; дописано «${UPDATED_BELOW}»` };
       } catch (editError) {
+        const editReason = errorText(editError);
+        if (asHtml && BAD_REQUEST.test(editReason))
+          try {
+            await edit(token, ref.chatId, ref.messageId, plain, {
+              html: false,
+            });
+            return {
+              replaceError: `${notRemoved}; дописано «${UPDATED_BELOW}» простым текстом (${editReason})`,
+            };
+          } catch (plainError) {
+            return {
+              replaceError: `${notRemoved}; «${UPDATED_BELOW}» не дописано: ${editReason}; простым текстом — ${errorText(plainError)}`,
+            };
+          }
         return {
-          replaceError: `${notRemoved}; «${UPDATED_BELOW}» не дописано: ${errorText(editError)}`,
+          replaceError: `${notRemoved}; «${UPDATED_BELOW}» не дописано: ${editReason}`,
         };
       }
     }
@@ -203,64 +243,80 @@ export function createTelegramChannel(
             : noOld),
         };
       const { token, chatId } = config;
-      const text = telegramMessageText(n);
-      const format = {
-        ...(n.html && { html: true }),
-        ...(buttonsOf(n) && { buttons: buttonsOf(n) }),
+      const buttons = buttonsOf(n);
+      type Format = { text: string; html: boolean; buttons?: typeof buttons };
+      const rich: Format = {
+        text: telegramMessageText(n),
+        html: n.html !== null,
+        buttons,
       };
-      /** Отправлено: прежнее убирается только после успешной отправки нового (B2); ключ — нового. */
-      const sent = async (
-        message: Awaited<ReturnType<typeof send>>,
-        over: Partial<ChannelResult>,
-      ): Promise<ChannelResult> => ({
-        status: "sent",
-        target,
-        ...over,
-        ...(old && n.replaces
-          ? await removeOld(token, n.replaces.label, old)
-          : noOld),
-        ...(message.messageId !== null && {
-          // Тот текст, что ушёл в Telegram (обрезанный до лимита): к нему допишется «⤵️ обновлено ниже».
-          ref: {
-            chatId,
-            messageId: message.messageId,
-            text: text.slice(0, TELEGRAM_TEXT_LIMIT),
-            html: n.html,
-          } satisfies TelegramMessageRef,
-        }),
-      });
-      try {
-        return await sent(
-          await send(token, chatId, text, {
-            messageThreadId: policy.topicId,
+      const plain: Format = { text: plainMessageText(n), html: false };
+      const formatted = rich.html || buttons !== undefined;
+      const notes: string[] = [];
+      // HTML длиннее лимита — простым текстом: обрезка HTML могла бы разрезать тег.
+      let format = rich;
+      if (formatted && rich.html && rich.text.length > TELEGRAM_TEXT_LIMIT) {
+        format = plain;
+        notes.push("HTML длиннее лимита — отправлено простым текстом");
+      }
+      let topicId = policy.topicId;
+      let reasons = "";
+      // Попытки: как просили → тема не найдена — без темы → разметку или кнопки не приняли — простым текстом.
+      for (;;) {
+        try {
+          const message = await send(token, chatId, format.text, {
+            messageThreadId: topicId,
             silent,
-            ...format,
-          }),
-          {},
-        );
-      } catch (error) {
-        const reason = errorText(error);
-        if (policy.topicId === null || !THREAD_GONE.test(reason))
-          return { status: "failed", reason, target };
-        // Тему удалили или номер устарел: один повтор в чат без темы, чтобы срочное (например, «без защиты») не
-        // потерялось; логгер отметит это warn notify.fallback.
-        const fallback: NotifyTarget = { ...target, topicId: null };
-        return send(token, chatId, text, {
-          messageThreadId: null,
-          silent,
-          ...format,
-        }).then(
-          (message) =>
-            sent(message, {
-              target: fallback,
-              note: `тема ${policy.topicId} не найдена — отправлено в чат без темы`,
+            ...(format.html && { html: true }),
+            ...(format.buttons && { buttons: format.buttons }),
+          });
+          return {
+            status: "sent",
+            target: { ...target, topicId },
+            ...(notes.length && { note: notes.join("; ") }),
+            // Прежнее убирается только после успешной отправки нового (B2).
+            ...(old && n.replaces
+              ? await removeOld(token, n.replaces.label, old)
+              : noOld),
+            ...(message.messageId !== null && {
+              // Тот текст, что ушёл в Telegram: к нему допишется «⤵️ обновлено ниже».
+              ref: {
+                chatId,
+                messageId: message.messageId,
+                text: format.text.slice(0, TELEGRAM_TEXT_LIMIT),
+                html: format.html,
+              } satisfies TelegramMessageRef,
             }),
-          (retryError: unknown): ChannelResult => ({
+          };
+        } catch (error) {
+          const reason = errorText(error);
+          reasons = reasons ? `${reasons}; ${reason}` : reason;
+          if (topicId !== null && THREAD_GONE.test(reason)) {
+            // Тему удалили или номер устарел: один повтор в чат без темы, чтобы срочное (например, «без защиты») не
+            // потерялось; логгер отметит это warn notify.fallback.
+            notes.push(
+              `тема ${topicId} не найдена — отправлено в чат без темы`,
+            );
+            reasons += "; без темы —";
+            topicId = null;
+            continue;
+          }
+          if (format !== plain && formatted && BAD_REQUEST.test(reason)) {
+            // Разметку или кнопки Telegram не принял: карточка не должна потеряться (особенно ⚠️) — простым текстом,
+            // ссылка строкой; тоже warn notify.fallback.
+            notes.push(
+              `разметка или кнопки не приняты (${reason}) — отправлено простым текстом`,
+            );
+            reasons += "; простым текстом —";
+            format = plain;
+            continue;
+          }
+          return {
             status: "failed",
-            reason: `${reason}; без темы — ${errorText(retryError)}`,
-            target: fallback,
-          }),
-        );
+            reason: reasons.replace(/ —; /g, " — "),
+            target: { ...target, topicId },
+          };
+        }
       }
     },
   };

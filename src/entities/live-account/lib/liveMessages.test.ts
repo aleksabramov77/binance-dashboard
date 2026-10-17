@@ -5,6 +5,7 @@ import {
   type LiveCardEntry,
   type LiveCardExit,
   type LiveCardStatus,
+  liveBalanceAsOf,
   liveBinanceUrl,
   liveCardProblem,
   liveCardText,
@@ -130,7 +131,7 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
       { kind: "protected" },
       null,
     );
-    expect(unknown).toMatch(/\n➡️ цена входа: нет данных\n🟥 SL нет\n/);
+    expect(unknown).toMatch(/\n➡️ цена входа: нет данных\n🟥 без стопа\n/);
     expect(unknown).not.toMatch(/%/);
     expect(unknown).toMatch(/🏦 Баланс: нет данных$/);
   });
@@ -236,7 +237,7 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
       message: "Binance: Timestamp outside recvWindow. (-1021)",
     } as const;
     expect(blocks(liveCardText(short, entry, failed, balance))[1]).toBe(
-      "⚠️ Причина: позиция не закрылась — Binance: Timestamp outside recvWindow. (-1021) Повторяю каждый прогон воркера.\n🧾 Код API: -1021",
+      "⚠️ Причина: позиция не закрылась — Binance: Timestamp outside recvWindow. (-1021). Повторяю каждый прогон воркера.\n🧾 Код API: -1021",
     );
     expect(liveCardProblem(failed)).toBe(true);
     // Без кода в тексте — без строки кода.
@@ -283,6 +284,68 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
       /⚠️ Причина: ответ <html> & прочее/,
     );
     expect(escapeHtml("a<b>&c")).toBe("a&lt;b&gt;&amp;c");
+  });
+
+  it("длинная причина — до 500 символов с «…» до экранирования; HTML не разрезан; точка перед «Повторяю» — один раз", () => {
+    const long = "<".repeat(800);
+    const html = liveCardText(
+      { ...short, direction: "long" },
+      entry,
+      { kind: "unprotected", message: long },
+      balance,
+      "html",
+    );
+    const reason = html.split("\n\n")[1];
+    expect(reason).toBe(`⚠️ Причина: ${"&lt;".repeat(499)}…`);
+    const failed = (message: string) =>
+      liveCardText(
+        long === "" ? short : short,
+        entry,
+        { kind: "close_failed", message },
+        balance,
+      )
+        .split("\n\n")[1]
+        .split("\n")[0];
+    expect(failed("сеть недоступна")).toBe(
+      "⚠️ Причина: позиция не закрылась — сеть недоступна. Повторяю каждый прогон воркера.",
+    );
+    expect(failed("Ошибка!")).toMatch(/— Ошибка! Повторяю/);
+  });
+
+  it("баланс из пульса: свежий — время; старше часа или вчерашний — с датой; старше порога молчания — устарел", () => {
+    const now = Date.parse("2026-10-18T13:00:00.000Z");
+    const silent = 3 * 60 * 60_000;
+    expect(liveBalanceAsOf("2026-10-18T12:40:00.000Z", now, silent)).toEqual({
+      asOf: "12:40 UTC",
+      stale: false,
+    });
+    expect(liveBalanceAsOf("2026-10-18T11:40:00.000Z", now, silent)).toEqual({
+      asOf: "18.10 · 11:40 UTC",
+      stale: false,
+    });
+    expect(
+      liveBalanceAsOf(
+        "2026-10-17T23:50:00.000Z",
+        Date.parse("2026-10-18T00:10:00.000Z"),
+        silent,
+      ),
+    ).toEqual({ asOf: "17.10 · 23:50 UTC", stale: false });
+    expect(liveBalanceAsOf("2026-10-18T08:00:00.000Z", now, silent)).toEqual({
+      asOf: "18.10 · 08:00 UTC",
+      stale: true,
+    });
+    expect(
+      liveCardText(
+        long,
+        entry,
+        { kind: "protected" },
+        {
+          usd: 30,
+          asOf: "18.10 · 08:00 UTC",
+          stale: true,
+        },
+      ),
+    ).toMatch(/🏦 Баланс: \$30,00 \(на 18\.10 · 08:00 UTC, устарел\)$/);
   });
 
   it("ссылка на Binance: фьючерс и спот", () => {

@@ -59,7 +59,7 @@ describe("log.notify", () => {
       test: false,
       replaces: null,
       links: [],
-      html: false,
+      html: null,
     });
     expect(r).toEqual({
       category: "lab",

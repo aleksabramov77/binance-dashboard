@@ -268,7 +268,7 @@ async function notify(input: NotifyInput): Promise<NotifyResult> {
     text: input.text ?? input.message,
     link: input.link ?? null,
     links: input.links ?? [],
-    html: input.html ?? false,
+    html: input.html ?? null,
     level: input.level,
     event: input.event,
     fixture: input.fixture ?? false,

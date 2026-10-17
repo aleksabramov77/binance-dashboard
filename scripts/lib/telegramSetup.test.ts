@@ -52,7 +52,7 @@ describe("parseSetupArgs", () => {
 describe("testTradeCards — пробная карточка сделки (spec 0068, B7)", () => {
   it("цепочка ⏳ → 🟡 → 🟢: тексты как у реальной сделки, пометка «пробное», звук — только у итога", () => {
     const cards = testTradeCards();
-    expect(cards.map((c) => c.text.split("\n\n")[0])).toEqual([
+    expect(cards.map((c) => c.html.split("\n\n")[0])).toEqual([
       "⏳ 📈 LONG\n<b>BTC/USDT</b> · USDⓈ-M · S98",
       "🟡 📈 LONG\n<b>BTC/USDT</b> · USDⓈ-M · S98",
       "🟢 +$0,84 📈 LONG\n<b>BTC/USDT</b> · USDⓈ-M · S98",
@@ -61,8 +61,9 @@ describe("testTradeCards — пробная карточка сделки (spec 
       "https://www.binance.com/en/futures/BTCUSDT",
     );
     expect(cards.map((c) => c.urgent)).toEqual([false, false, true]);
+    expect(cards[0].text).not.toMatch(/<b>/);
     for (const c of cards)
-      expect(c.text).toMatch(
+      expect(c.html).toMatch(
         /\n\n<i>🧪 Пробное сообщение: числа вымышленные, сделки нет<\/i>$/,
       );
   });
