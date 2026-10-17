@@ -163,7 +163,10 @@ export function testTradeCards(): TestTradeCard[] {
     entryPrice: 80030,
     stopLoss: 78430,
     takeProfit: 83230,
+    trailAtr: null,
     openedAt: "2026-10-18T10:25:00.000Z",
+    // Вымышленный id пробной сделки (spec 0070, AC1): в формате настоящих — «<n>-<эксперимент>-<монета>-<время>».
+    tradeId: "0-S98-BTCUSDT-1792318500000",
   };
   const chain: [string, LiveCardStatus][] = [
     ["⏳ вход исполнен", { kind: "filled" }],

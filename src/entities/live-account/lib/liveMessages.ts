@@ -104,10 +104,17 @@ export interface LiveCardEntry {
   entryPrice: number | null;
   /** Свой стоп; null или ≤ 0 — нет. */
   stopLoss: number | null;
-  /** Свой тейк; null — без тейка (строки TP нет). */
+  /** Свой тейк; null — без тейка (на месте TP — строка «без тейка», spec 0070). */
   takeProfit: number | null;
+  /**
+   * Без тейка (spec 0070): скользящий стоп эксперимента, N ATR — «без тейка — скользящий стоп N ATR»; null — «без
+   * тейка — выход по стратегии» (трейлинга нет или конфиг не прочитан).
+   */
+  trailAtr: number | null;
   /** Время входа, ISO. */
   openedAt: string;
+  /** Идентификатор сделки — последней строкой карточки (spec 0070). */
+  tradeId: string;
 }
 
 /** Итог закрытой сделки. */
@@ -242,21 +249,37 @@ function statusLines(status: LiveCardStatus): string[] {
   }
 }
 
-/** Лесенка по цене (long: TP, вход, SL сверху вниз; short: SL, вход, TP); нет TP — без строки. */
+/** «2» / «1,5» — множитель ATR. */
+const multText = (v: number) => String(v).replace(".", ",");
+
+/**
+ * Лесенка по цене (long: TP, вход, SL сверху вниз; short: SL, вход, TP). У TP/SL — процент и сумма возможной
+ * прибыли/убытка по объёму и цене входа, без комиссий (spec 0070); нет TP — строка «без тейка» на его месте.
+ */
 function ladder(s: LiveTradeSubject, e: LiveCardEntry): string[] {
   const entry = e.entryPrice !== null && e.entryPrice > 0 ? e.entryPrice : null;
   const stop = e.stopLoss !== null && e.stopLoss > 0 ? e.stopLoss : null;
+  const notional =
+    e.notionalUsd !== null && e.notionalUsd > 0 ? e.notionalUsd : null;
   const amount =
     e.notionalUsd === null
       ? ""
       : `${GAP}${liveUsd(e.notionalUsd)}${e.raised ? ` (${RAISED[e.raised]})` : ""}`;
-  const level = (icon: string, price: number, sign: "+" | "−") =>
-    `${icon} ${livePrice(price)}${entry ? `${GAP}${pctText(price, entry, sign)}` : ""}`;
-  const tp = e.takeProfit === null ? null : level("🟩", e.takeProfit, "+");
+  const level = (icon: string, price: number, sign: "+" | "−") => {
+    if (!entry) return `${icon} ${livePrice(price)}`;
+    const usd =
+      notional === null
+        ? ""
+        : `${GAP}${liveUsd((sign === "+" ? 1 : -1) * notional * Math.abs((price - entry) / entry), true)}`;
+    return `${icon} ${livePrice(price)}${GAP}${pctText(price, entry, sign)}${usd}`;
+  };
+  const tp =
+    e.takeProfit === null
+      ? `🟩 без тейка — ${e.trailAtr !== null && e.trailAtr > 0 ? `скользящий стоп ${multText(e.trailAtr)} ATR` : "выход по стратегии"}`
+      : level("🟩", e.takeProfit, "+");
   const sl = stop === null ? "🟥 без стопа" : level("🟥", stop, "−");
   const mid = `➡️ ${entry === null ? "цена входа: нет данных" : livePrice(entry)}${amount}`;
-  const rows = s.direction === "long" ? [tp, mid, sl] : [sl, mid, tp];
-  return rows.filter((l) => l !== null);
+  return s.direction === "long" ? [tp, mid, sl] : [sl, mid, tp];
 }
 
 /** Чем закрыта (не TP/SL) — после времени у 🏁. */
@@ -307,7 +330,8 @@ function reportLines(status: LiveCardStatus, balance: LiveBalance | null) {
 
 /**
  * Карточка сделки (spec 0068, вид — версия 3): шапка в две строки (статус · PnL · направление / монета · рынок ·
- * эксперимент), строка статуса (у 🟡 и у 🟢/🔴 по TP/SL — нет), лесенка цен, время, комиссии и баланс. format html —
+ * эксперимент), строка статуса (у 🟡 и у 🟢/🔴 по TP/SL — нет), лесенка цен, время, комиссии, баланс и 🆔 сделки
+ * (spec 0070). format html —
  * для Telegram (монета жирным, текст экранирован), plain — для журнала. Ссылки — кнопками у канала, не в тексте.
  */
 export function liveCardText(
@@ -328,7 +352,13 @@ export function liveCardText(
     ],
     statusLines(status).map(esc),
     ladder(s, entry).map(esc),
-    [...timeLines(entry, status), ...reportLines(status, balance)].map(esc),
+    [
+      ...[...timeLines(entry, status), ...reportLines(status, balance)].map(
+        esc,
+      ),
+      // Идентификатор — последней строкой (spec 0070); в Telegram моноширинный: нажатие копирует.
+      `🆔 ${format === "html" ? `<code>${esc(entry.tradeId)}</code>` : entry.tradeId}`,
+    ],
   ];
   return blocks
     .filter((b) => b.length > 0)

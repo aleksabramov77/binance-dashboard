@@ -3,6 +3,7 @@
 // журнал live.* и уведомления — категория «Сделки» (spec 0067). Ордеров здесь нет — их отправляет только воркер.
 // Только сервер.
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import {
   claimAllLiveOpen,
   claimLiveMirror,
@@ -104,14 +105,47 @@ const cardRefOf = (row: LiveRow): NotifyRef | null => {
 const RAISED = ["minNotional", "minQty", "spotStop"] as const;
 const raisedOf = (v: string | null) => RAISED.find((r) => r === v) ?? null;
 
-/** Данные входа карточки — из строки сделки (одинаковые во всех статусах). */
-const cardEntryOf = (row: LiveRow): LiveCardEntry => ({
+/** Данные входа карточки — из строки сделки (одинаковые во всех статусах) и выхода эксперимента (spec 0070). */
+const cardEntryOf = (row: LiveRow, trailAtr: number | null): LiveCardEntry => ({
   notionalUsd: row.notionalUsd,
   raised: raisedOf(row.sizeRaised),
   entryPrice: row.entryPrice,
   stopLoss: row.stopLoss,
   takeProfit: row.takeProfit,
+  trailAtr,
   openedAt: (row.filledAt ?? row.createdAt).toISOString(),
+  tradeId: row.tradeId,
+});
+
+/**
+ * Скользящий стоп эксперимента без тейка (spec 0070): `exit.trailAtr`, если в конфиге нет `exit.takeProfit`; иначе
+ * или конфиг не прочитан — null («без тейка — выход по стратегии»). Сбой чтения карточку не останавливает.
+ */
+async function experimentTrailAtr(
+  experimentId: string,
+): Promise<number | null> {
+  try {
+    const [exp] = await getDb()
+      .select({ config: experimentsTable.config })
+      .from(experimentsTable)
+      .where(eq(experimentsTable.id, experimentId));
+    const parsed = experimentExitSchema.safeParse(exp?.config);
+    if (!parsed.success) return null;
+    const { takeProfit, trailAtr } = parsed.data.exit;
+    return takeProfit === null && trailAtr !== undefined && trailAtr > 0
+      ? trailAtr
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Только то, что нужно карточке из конфига (остальной конфиг не проверяется). */
+const experimentExitSchema = z.object({
+  exit: z.object({
+    takeProfit: z.unknown().nullable(),
+    trailAtr: z.number().optional(),
+  }),
 });
 
 type CardChains = Map<string, Promise<void>>;
@@ -168,8 +202,14 @@ function announceCard(
     const ref = cardRefOf(current);
     const s = subjectOf(current);
     const balance = await exitBalance(s.market, entry.balanceUsd);
+    const cardEntry = cardEntryOf(
+      current,
+      current.takeProfit === null
+        ? await experimentTrailAtr(current.experimentId)
+        : null,
+    );
     const card = (format: "html" | "plain") =>
-      liveCardText(s, cardEntryOf(current), status, balance, format);
+      liveCardText(s, cardEntry, status, balance, format);
     const sent = await log.notify({
       level: entry.level,
       event: entry.event,

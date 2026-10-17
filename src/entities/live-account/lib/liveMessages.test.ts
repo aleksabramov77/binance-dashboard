@@ -34,15 +34,18 @@ const entry: LiveCardEntry = {
   entryPrice: 80030,
   stopLoss: 78429.4,
   takeProfit: 83231.2,
+  trailAtr: null,
   openedAt: "2026-10-18T08:10:31.000Z",
+  tradeId: "1-S98-BTCUSDT-1792310400000",
 };
+const ID = "🆔 1-S98-BTCUSDT-1792310400000";
 const balance = { usd: 512.4, asOf: null };
 
 /** Лесенка long: TP сверху, вход, SL снизу. */
 const longLadder = [
-  `🟩 ${nb("83 231,2")}${G}+4,0 %`,
+  `🟩 ${nb("83 231,2")}${G}+4,0 %${G}+$2,00`,
   `➡️ ${nb("80 030")}${G}$50,00`,
-  `🟥 ${nb("78 429,4")}${G}−2,0 %`,
+  `🟥 ${nb("78 429,4")}${G}−2,0 %${G}−$1,00`,
 ];
 
 const exit: LiveCardExit = {
@@ -66,7 +69,7 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
       [
         "🟡 📈 LONG\nBTC/USDT · USDⓈ-M · S98",
         longLadder.join("\n"),
-        "➡️ 18.10 · 08:10 UTC\n🏦 Баланс: $512,40",
+        `➡️ 18.10 · 08:10 UTC\n🏦 Баланс: $512,40\n${ID}`,
       ].join("\n\n"),
     );
     expect(liveCardUrgent(status)).toBe(false);
@@ -92,13 +95,13 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
     );
     expect(blocks(text)[0]).toBe("🟡 📉 SHORT\nBTC/USDT · USDⓈ-M · S98");
     expect(blocks(text)[1].split("\n")).toEqual([
-      `🟥 ${nb("83 231,2")}${G}−4,0 %`,
+      `🟥 ${nb("83 231,2")}${G}−4,0 %${G}−$2,00`,
       `➡️ ${nb("80 030")}${G}$50,00`,
-      `🟩 ${nb("78 429,4")}${G}+2,0 %`,
+      `🟩 ${nb("78 429,4")}${G}+2,0 %${G}+$1,00`,
     ]);
   });
 
-  it("без TP — без строки TP; Spot — пара и рынок; объём поднят — с причиной", () => {
+  it("без TP — «без тейка — выход по стратегии» на месте TP; Spot — пара и рынок; объём поднят — с причиной", () => {
     const text = liveCardText(
       { ...long, market: "spot" },
       { ...entry, takeProfit: null, raised: "minNotional" },
@@ -107,8 +110,9 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
     );
     expect(blocks(text)[0]).toBe("🟡 📈 LONG\nBTC/USDT · Spot · S98");
     expect(blocks(text)[1].split("\n")).toEqual([
+      "🟩 без тейка — выход по стратегии",
       `➡️ ${nb("80 030")}${G}$50,00 (минимум биржи)`,
-      `🟥 ${nb("78 429,4")}${G}−2,0 %`,
+      `🟥 ${nb("78 429,4")}${G}−2,0 %${G}−$1,00`,
     ]);
   });
 
@@ -124,7 +128,7 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
       { kind: "protected" },
       balance,
     );
-    expect(text).toMatch(/\n➡️ 81,6622  \$50,00\n🟥 80,029  −2,0 %\n/);
+    expect(text).toMatch(/\n➡️ 81,6622  \$50,00\n🟥 80,029  −2,0 %  −\$1,00\n/);
     expect(livePrice(0.0000123456789)).toBe("0,0000123457");
     const unknown = liveCardText(
       long,
@@ -133,8 +137,10 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
       null,
     );
     expect(unknown).toMatch(/\n➡️ цена входа: нет данных\n🟥 без стопа\n/);
-    expect(unknown).not.toMatch(/%/);
-    expect(unknown).toMatch(/🏦 Баланс: нет данных$/);
+    expect(unknown).not.toMatch(/%|[−+]\$/);
+    expect(unknown).toMatch(
+      /🏦 Баланс: нет данных\n🆔 1-S98-BTCUSDT-1792310400000$/,
+    );
   });
 
   it("🟢 по TP: PnL в шапке, без строки статуса, 🟩 время закрытия, ⏱, 💸 без пустой строки, со звуком", () => {
@@ -148,6 +154,7 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
         "⏱ В сделке: 2 ч 15 мин",
         "💸 Комиссии: $0,05",
         "🏦 Баланс: $512,40",
+        ID,
       ].join("\n"),
     ]);
     expect(liveCardUrgent(closed())).toBe(true);
@@ -162,7 +169,7 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
     );
     expect(blocks(text)[0]).toBe("🔴 −$1,02 📉 SHORT\nBTC/USDT · USDⓈ-M · S98");
     expect(blocks(text)[2]).toMatch(
-      /^➡️ 18\.10 · 08:10 UTC\n🟥 18\.10 · 10:25 UTC\n⏱ В сделке: 47 мин\n💸 Комиссии: \$0,05\n🏦 Баланс: \$511,38 \(на 12:40 UTC\)$/,
+      /^➡️ 18\.10 · 08:10 UTC\n🟥 18\.10 · 10:25 UTC\n⏱ В сделке: 47 мин\n💸 Комиссии: \$0,05\n🏦 Баланс: \$511,38 \(на 12:40 UTC\)\n🆔 1-S98-BTCUSDT-1792310400000$/,
     );
   });
 
@@ -346,7 +353,7 @@ describe("карточка сделки, вид — версия 3 (spec 0068)",
           stale: true,
         },
       ),
-    ).toMatch(/🏦 Баланс: \$30,00 \(на 18\.10 · 08:00 UTC, устарел\)$/);
+    ).toMatch(/🏦 Баланс: \$30,00 \(на 18\.10 · 08:00 UTC, устарел\)\n🆔 /);
   });
 
   it("ссылка на Binance: фьючерс и спот", () => {
@@ -389,5 +396,104 @@ describe("liveSentence", () => {
     );
     expect(liveSentence("Ордер отклонён. ")).toBe("Ордер отклонён.");
     expect(liveSentence("Таймаут…")).toBe("Таймаут…");
+  });
+});
+
+describe("карточка сделки: идентификатор, «без тейка», суммы (spec 0070)", () => {
+  const statuses: LiveCardStatus[] = [
+    { kind: "filled" },
+    { kind: "protected" },
+    { kind: "unprotected", message: "сеть" },
+    { kind: "close_failed", message: "сеть" },
+    { kind: "cancelled", message: "позиции нет", at: entry.openedAt },
+    closed(),
+  ];
+
+  it("AC1: 🆔 — последней строкой во всех статусах, сразу после 🏦; HTML — в <code>, экранирован", () => {
+    for (const status of statuses) {
+      const plain = liveCardText(long, entry, status, balance).split("\n");
+      expect(plain.at(-1)).toBe(ID);
+      expect(plain.at(-2)).toMatch(/^🏦 Баланс: /);
+      const html = liveCardText(long, entry, status, balance, "html");
+      expect(html.split("\n").at(-1)).toBe(
+        "🆔 <code>1-S98-BTCUSDT-1792310400000</code>",
+      );
+    }
+    const odd = liveCardText(
+      long,
+      { ...entry, tradeId: "a<b>&c" },
+      { kind: "protected" },
+      null,
+      "html",
+    );
+    expect(odd.split("\n").at(-1)).toBe("🆔 <code>a&lt;b&gt;&amp;c</code>");
+  });
+
+  it("AC2: без тейка со скользящим стопом — на месте TP (long сверху, short снизу), без цены", () => {
+    const noTp = { ...entry, takeProfit: null, trailAtr: 2 };
+    const longRows = blocks(
+      liveCardText(long, noTp, { kind: "protected" }, balance),
+    )[1].split("\n");
+    expect(longRows[0]).toBe("🟩 без тейка — скользящий стоп 2 ATR");
+    expect(longRows).toHaveLength(3);
+    const shortRows = blocks(
+      liveCardText(
+        short,
+        { ...noTp, stopLoss: 83231.2, trailAtr: 1.5 },
+        { kind: "protected" },
+        balance,
+      ),
+    )[1].split("\n");
+    expect(shortRows[0]).toMatch(/^🟥 /);
+    expect(shortRows[2]).toBe("🟩 без тейка — скользящий стоп 1,5 ATR");
+    expect(
+      blocks(
+        liveCardText(
+          short,
+          { ...noTp, trailAtr: null },
+          { kind: "protected" },
+          balance,
+        ),
+      )[1]
+        .split("\n")
+        .at(-1),
+    ).toBe("🟩 без тейка — выход по стратегии");
+  });
+
+  it("AC3: сумма у 🟥 и 🟩 по объёму и цене входа; нет объёма — только процент (short ICNT)", () => {
+    const icnt = {
+      experimentId: "F16",
+      symbol: "ICNTUSDT",
+      market: "usdm" as const,
+      direction: "short" as const,
+    };
+    const icntEntry: LiveCardEntry = {
+      notionalUsd: 9.93,
+      raised: null,
+      entryPrice: 0.1712,
+      stopLoss: 0.212058,
+      takeProfit: null,
+      trailAtr: 2,
+      openedAt: "2026-10-18T06:40:00.000Z",
+      tradeId: "2-F16-ICNTUSDT-1792274400000",
+    };
+    const rows = blocks(
+      liveCardText(icnt, icntEntry, { kind: "protected" }, balance),
+    )[1].split("\n");
+    expect(rows).toEqual([
+      `🟥 0,212058${G}−23,9 %${G}−$2,37`,
+      `➡️ 0,1712${G}$9,93`,
+      "🟩 без тейка — скользящий стоп 2 ATR",
+    ]);
+    const noSize = blocks(
+      liveCardText(
+        long,
+        { ...entry, notionalUsd: null },
+        { kind: "protected" },
+        balance,
+      ),
+    )[1].split("\n");
+    expect(noSize[0]).toBe(`🟩 ${nb("83 231,2")}${G}+4,0 %`);
+    expect(noSize[2]).toBe(`🟥 ${nb("78 429,4")}${G}−2,0 %`);
   });
 });
