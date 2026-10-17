@@ -6,10 +6,12 @@
 #     старше TICK_RESTART_S → systemctl restart сервиса, не чаще RESTART_EVERY_S;
 #   - сайт: сервис активен и 127.0.0.1:5000 отвечает (< 500) за 10 с; SITE_FAILS неудач подряд → тревога;
 #   - на эпизод одно сообщение; восстановление — сообщение с длительностью простоя. Состояние — STATE_DIR/state.
+#   - сообщения — в тему «🖥 Сервер» группы (TELEGRAM_TOPIC_SERVER из env-файла; нет — в чат без темы, spec 0067):
+#     тревоги и перезапуск — со звуком, восстановление и пробное — тихо (disable_notification).
 #   watchdog.sh [--test] [--db FILE] [--env-file FILE] [--state-dir DIR] [--url URL] [--service NAME]
-# --test — пробное сообщение в Telegram, без проверок и перезапуска.
+# --test — пробное сообщение в Telegram (в тему «Сервер»), без проверок и перезапуска.
 # Для проверки без прода: WATCHDOG_SYSTEMCTL / WATCHDOG_CURL — заглушки вместо systemctl / curl,
-# WATCHDOG_TG_LOG=<файл> — сообщения пишутся в файл, а не в Telegram, WATCHDOG_NOW=<unix-время> — «сейчас».
+# WATCHDOG_TG_LOG=<файл> — сообщения с темой и звуком пишутся в файл, а не в Telegram, WATCHDOG_NOW=<unix-время> — «сейчас».
 set -uo pipefail
 
 TICK_ALERT_S=300
@@ -51,17 +53,35 @@ env_value() {
   printf '%s' "$v"
 }
 
-# Сообщение в Telegram. Токен — через stdin (`--config -`): аргументы процесса видны в списке процессов.
+# Тема «Сервер» (message_thread_id) из env-файла; не задана или не число — пусто (сообщение в чат без темы).
+server_topic() {
+  local t
+  t=$(env_value TELEGRAM_TOPIC_SERVER)
+  [[ "$t" =~ ^[1-9][0-9]*$ ]] && printf '%s' "$t"
+  return 0
+}
+
+# Где сообщение: «тема N» или «без темы».
+topic_label() { if [ -n "$1" ]; then printf 'тема %s' "$1"; else printf 'без темы'; fi; }
+
+# Сообщение в Telegram: tg loud|quiet "текст" — тревога со звуком или тихо (восстановление). Токен — через stdin
+# (`--config -`): аргументы процесса видны в списке процессов.
 tg() {
-  local text="🛡 $SERVICE: $1"
-  if [ -n "${WATCHDOG_TG_LOG:-}" ]; then printf '%s\n' "$text" >>"$WATCHDOG_TG_LOG"; return 0; fi
-  local token chat
+  local sound=$1 text="🛡 $SERVICE: $2" topic
+  topic=$(server_topic)
+  if [ -n "${WATCHDOG_TG_LOG:-}" ]; then
+    printf '[%s · %s] %s\n' "$(topic_label "$topic")" "$([ "$sound" = quiet ] && echo тихо || echo со звуком)" "$text" >>"$WATCHDOG_TG_LOG"
+    return 0
+  fi
+  local token chat extra=()
   token=$(env_value TELEGRAM_BOT_TOKEN)
   chat=$(env_value TELEGRAM_CHAT_ID)
   if [ -z "$token" ] || [ -z "$chat" ]; then echo "Telegram не настроен ($ENV_FILE): $text"; return 1; fi
+  [ -n "$topic" ] && extra+=(--data-urlencode "message_thread_id=$topic")
+  [ "$sound" = quiet ] && extra+=(--data-urlencode "disable_notification=true")
   printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$token" |
     "$CURL" -s -o /dev/null -w '%{http_code}' --max-time 15 --config - \
-      --data-urlencode "chat_id=$chat" --data-urlencode "text=$text" | grep -q '^200$' ||
+      --data-urlencode "chat_id=$chat" ${extra[@]+"${extra[@]}"} --data-urlencode "text=$text" | grep -q '^200$' ||
     { echo "Telegram не принял сообщение: $text"; return 1; }
 }
 
@@ -89,7 +109,7 @@ if [ "$TEST" = 1 ]; then
     IFS='|' read -r _ _ t_s <<<"$tick"
     if [ -n "$t_s" ]; then note="последний тик $((NOW - t_s)) с назад"; else note="тиков ещё не было"; fi
   fi
-  tg "🧪 проверка связи сторожа ($note)" && echo "Пробное сообщение отправлено ($note)"
+  tg quiet "🧪 проверка связи сторожа ($note)" && echo "Пробное сообщение отправлено ($(topic_label "$(server_topic)"), тихо; $note)"
   exit $?
 fi
 
@@ -106,14 +126,14 @@ report=()
 # --- Сайт ---
 code=$("$CURL" -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL" 2>/dev/null) || true
 if "$SYSTEMCTL" is-active --quiet "$SERVICE" && [[ "$code" =~ ^[234][0-9][0-9]$ ]]; then
-  [ "$site_alerted" = 1 ] && tg "✅ сайт снова отвечает (простой ~$(mins $((NOW - site_since))) мин)"
+  [ "$site_alerted" = 1 ] && tg quiet "✅ сайт снова отвечает (простой ~$(mins $((NOW - site_since))) мин)"
   site_fails=0 site_since=0 site_alerted=0
   report+=("сайт ok")
 else
   site_fails=$((site_fails + 1))
   [ "$site_since" = 0 ] && site_since=$NOW
   if [ "$site_fails" -ge "$SITE_FAILS" ] && [ "$site_alerted" != 1 ]; then
-    tg "⚠️ сайт не отвечает ~$(mins $((NOW - site_since))) мин (сервис: $("$SYSTEMCTL" is-active "$SERVICE" 2>/dev/null || true), HTTP: ${code:-нет ответа})" &&
+    tg loud "⚠️ сайт не отвечает ~$(mins $((NOW - site_since))) мин (сервис: $("$SYSTEMCTL" is-active "$SERVICE" 2>/dev/null || true), HTTP: ${code:-нет ответа})" &&
       site_alerted=1
   fi
   report+=("сайт НЕ ОТВЕЧАЕТ (${site_fails}-я проверка, HTTP ${code:-—})")
@@ -123,15 +143,15 @@ fi
 tick_ok=1
 tick=$(read_tick) || tick_ok=0
 if [ "$tick_ok" = 1 ] && [ "$db_alerted" = 1 ]; then
-  tg "✅ сторож снова читает базу" || true
+  tg quiet "✅ сторож снова читает базу" || true
   db_alerted=0
 fi
 if [ "$tick_ok" = 0 ]; then
   # Сторож без базы слеп: одно сообщение на эпизод.
-  [ "$db_alerted" = 1 ] || { tg "⚠️ сторож не может прочитать базу $DB — тик не проверяется" && db_alerted=1; }
+  [ "$db_alerted" = 1 ] || { tg loud "⚠️ сторож не может прочитать базу $DB — тик не проверяется" && db_alerted=1; }
   report+=("тик не прочитан из $DB")
 elif [ "${tick%%|*}" != true ]; then
-  [ "$tick_alerted" = 1 ] && tg "ℹ️ автоторговля выключена — тик больше не проверяется"
+  [ "$tick_alerted" = 1 ] && tg quiet "ℹ️ автоторговля выключена — тик больше не проверяется"
   tick_alerted=0 tick_since=0
   report+=("автоторговля выключена")
 else
@@ -153,21 +173,21 @@ else
     # Свежая только отметка включения (автоторговлю переключили во время эпизода), нового тика нет — эпизод идёт.
     report+=("автоторговля переключена, тика после простоя ещё нет")
   elif [ "$age" -le "$TICK_ALERT_S" ]; then
-    [ "$tick_alerted" = 1 ] && tg "✅ тик снова идёт (стоял ~$(mins $((at - tick_since))) мин, с $(hhmm "$tick_since") UTC)"
+    [ "$tick_alerted" = 1 ] && tg quiet "✅ тик снова идёт (стоял ~$(mins $((at - tick_since))) мин, с $(hhmm "$tick_since") UTC)"
     tick_alerted=0 tick_since=0
     report+=("тик ${age} с назад")
   else
     [ "$tick_since" = 0 ] && tick_since=$at
     if [ "$tick_alerted" != 1 ]; then
-      tg "⚠️ тик не идёт ~$(mins "$age") мин ($last); через $(mins "$TICK_RESTART_S") мин простоя — перезапуск сервиса" &&
+      tg loud "⚠️ тик не идёт ~$(mins "$age") мин ($last); через $(mins "$TICK_RESTART_S") мин простоя — перезапуск сервиса" &&
         tick_alerted=1
     fi
     if [ "$age" -ge "$TICK_RESTART_S" ] && [ $((NOW - tick_restart)) -ge "$RESTART_EVERY_S" ]; then
       if "$SYSTEMCTL" restart "$SERVICE"; then
-        tg "🔄 перезапустил сервис: тик стоял ~$(mins "$age") мин ($last). Прерванный прогон демо-зеркала — сверить строки pending"
+        tg loud "🔄 перезапустил сервис: тик стоял ~$(mins "$age") мин ($last). Прерванный прогон демо-зеркала — сверить строки pending"
         report+=("ПЕРЕЗАПУСК: тик стоял ${age} с")
       else
-        tg "❌ не удалось перезапустить сервис (тик стоит ~$(mins "$age") мин)"
+        tg loud "❌ не удалось перезапустить сервис (тик стоит ~$(mins "$age") мин)"
         report+=("перезапуск не удался")
       fi
       tick_restart=$NOW
