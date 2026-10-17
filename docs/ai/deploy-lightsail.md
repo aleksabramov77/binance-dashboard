@@ -39,7 +39,8 @@ claude@<ip>` (ключ владельца `~/.ssh/apps_tokyo` — только �
 `ENGINE_RUNNER=oracle` (роль «свой постоянный процесс»), `AUTH_URL`, `AUTH_GITHUB_ID/SECRET` (отдельное OAuth App под
 адрес VM), `AUTH_SECRET`, `AUTH_ALLOWED_GITHUB_LOGINS`, `DATABASE_PATH=/var/lib/binance/app.db` (база SQLite, spec 0059;
 `DATABASE_URL` Supabase остаётся неделю для отката — новая версия его не читает), `CRON_SECRET`, `OPENROUTER_API_KEY`,
-`ANALYSIS_MODEL`, `TELEGRAM_*` (в т.ч. `TELEGRAM_WEBHOOK_SECRET` — тот же, что на Vercel), `SITE_URL=https://binance.<ip>.sslip.io`
+`ANALYSIS_MODEL`, `TELEGRAM_*` (в т.ч. `TELEGRAM_WEBHOOK_SECRET` — тот же, что на Vercel; группа с темами — `TELEGRAM_OWNER_ID`,
+`TELEGRAM_TOPIC_*`, раздел [«Группа и темы Telegram»](#группа-и-темы-telegram-spec-0067)), `SITE_URL=https://binance.<ip>.sslip.io`
 (ссылки в сообщениях бота; без него — сообщения без ссылки, spec 0063), `LOG_DIR=/var/lib/binance/logs`
 (файловый журнал `app-YYYY-MM-DD.jsonl` с debug: каталог кода только для чтения, писать можно только в `/var/lib/binance`;
 без `LOG_DIR` файл не пишется), с переключения — `BINANCE_DEMO_API_KEY` / `BINANCE_DEMO_API_SECRET` (демо-зеркало,
@@ -236,7 +237,9 @@ ssh claude@<ip> 'd=<дата>; B=/var/lib/binance; ts=$(date -u +%Y%m%dT%H%M%SZ)
 | Сайт: `binance` активен и `127.0.0.1:5000` отвечает (< 500) за 10 с | 2 неудачи подряд (~4 мин) | Telegram «⚠️ сайт не отвечает» |
 | Восстановление | — | Telegram «✅ тик снова идёт» / «✅ сайт снова отвечает» с длительностью простоя |
 
-Telegram — `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` из `/etc/binance/app.env` (токен передаётся `curl` через stdin).
+Telegram — `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` и тема «🖥 Сервер» `TELEGRAM_TOPIC_SERVER` (spec 0067; не задана — в чат
+без темы) из `/etc/binance/app.env` (токен передаётся `curl` через stdin). Тревоги и перезапуск — со звуком, восстановление и
+пробное сообщение — тихо (`disable_notification`).
 Состояние эпизодов — `/var/lib/binance-watchdog/state`. Пороги — в начале скрипта. Перезапуск обрывает зависший прогон
 демо-зеркала: строки `pending` после него сверить вручную. Воркер `binance-live` сторож не трогает. Если VM недоступна
 целиком, сторож сообщить не может.
@@ -248,7 +251,9 @@ ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-watchdog.sh binance'
 ```
 
 Проверка:
-- пробное сообщение (ничего не перезапускает): `ssh claude@<ip> 'sudo /usr/local/bin/binance-watchdog --test'`;
+- пробное сообщение в тему «Сервер», тихо (ничего не перезапускает): `ssh claude@<ip> 'sudo /usr/local/bin/binance-watchdog --test'`
+  — печатает, куда ушло («тема N» или «без темы»);
+- без Telegram (заглушки, spec 0064): `WATCHDOG_TG_LOG=<файл>` — сообщения в файл строками `[тема N · тихо] 🛡 binance: …`;
 - запуски: `ssh claude@<ip> 'sudo journalctl -u binance-watchdog -n 5 --no-pager'` — «Сторож: сайт ok;тик N с назад»;
 - смоук падает, если таймер включён, а сторож не запускался больше 10 мин или последний запуск неуспешен (`Result`).
 
@@ -261,6 +266,44 @@ ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-watchdog.sh binance'
 Если сторож не может прочитать базу — одно сообщение «⚠️ сторож не может прочитать базу», после восстановления —
 «✅ сторож снова читает базу». Сообщения о восстановлении и о перезапуске при сбое Telegram не повторяются (тревоги —
 повторяются).
+
+## Группа и темы Telegram (spec 0067)
+
+Уведомления идут в закрытую группу с темами «💰 Сделки», «🧪 Лаборатория», «🖥 Сервер», «🚨 Ошибки»: у каждой темы свои
+настройки уведомлений в Telegram (звук, «без звука»). Код уведомляет только через `log.notify` с категорией и срочностью
+(`architecture.md` → «Логирование и ошибки»): срочное — со звуком, рутина — тихо (`disable_notification`). Темы не заданы —
+всё, как раньше, в `TELEGRAM_CHAT_ID`, рутина — тихо. Отправляет только production-сервер.
+
+| Переменная (`/etc/binance/app.env`) | Что |
+|---|---|
+| `TELEGRAM_CHAT_ID` | id группы (отрицательный); до переезда — личный чат владельца |
+| `TELEGRAM_OWNER_ID` | id владельца — прежний `TELEGRAM_CHAT_ID` (личный чат): бот отвечает на его команды в личке и в группе. Не задан, а `TELEGRAM_CHAT_ID` — группа: бот перестанет отвечать в личке (`telegram:setup` предупреждает) |
+| `TELEGRAM_TOPIC_TRADES` / `_LAB` / `_SERVER` / `_ERRORS` | номера тем (`message_thread_id`), печатает `pnpm telegram:setup --topics`; сторож берёт `TELEGRAM_TOPIC_SERVER` |
+
+Выкатка — по шагам, на промежуточных ничего не теряется:
+1. Код в `main` и на VM (выкатка из CI): без тем всё как раньше, только рутина приходит тихо. Сторожа обновить вручную
+   (раздел [«Сторож»](#сторож-spec-0064) → установка и обновление): CI его не выкатывает.
+2. Владелец в Telegram (шаги для iPhone с точными названиями кнопок — при выкатке, после проверки в приложении): создать
+   закрытую группу с ботом, включить в ней темы, сделать бота администратором с правом управлять темами. Написать в
+   группе `/help`: бот группу ещё не знает, её id попадёт в `/logs` записью `telegram.foreign` («Команда боту из незнакомой
+   группы -100… (от <id владельца>)»).
+3. Сессия на Mac из основного checkout (токен — из `.env.local`, значения не выводить):
+   ```sh
+   TELEGRAM_CHAT_ID=<id группы> TELEGRAM_OWNER_ID=<прежний TELEGRAM_CHAT_ID> pnpm telegram:setup --topics --test
+   ```
+   `--topics` проверяет группу (`getChat` → темы включены, `getChatMember` → бот — админ с `can_manage_topics`; иначе —
+   что включить и где), создаёт недостающие темы (заданные в env `TELEGRAM_TOPIC_*` не пересоздаёт; Bot API не умеет
+   перечислить темы — повторный запуск без этих строк создаст вторые) и печатает строки `TELEGRAM_TOPIC_*=` для `app.env`;
+   `--test` — по одному тихому пробному сообщению в каждую тему (явная проверка — отправляется и с Mac).
+4. VM: `ssh claude@<ip>`, `sudoedit /etc/binance/app.env` — `TELEGRAM_OWNER_ID=<прежний TELEGRAM_CHAT_ID>`,
+   `TELEGRAM_CHAT_ID=<id группы>` и строки `TELEGRAM_TOPIC_*` из шага 3; `sudo systemctl restart binance`. Сторож читает
+   `app.env` на каждом запуске.
+5. Проверка: `/db` в теме группы и в личке — ответ туда же, в ту же тему; чужой в группе — без ответа (`telegram.foreign`);
+   `ssh claude@<ip> 'sudo /usr/local/bin/binance-watchdog --test'` — пробное в «🖥 Сервер»; в `/logs` у записей с
+   уведомлением в деталях — тема, звук и «отправлено».
+
+Откат: убрать строки `TELEGRAM_TOPIC_*` — сообщения пойдут в группу без тем; вернуть `TELEGRAM_CHAT_ID` = личный чат — как
+до 0067 (рутина остаётся тихой). После правки — `sudo systemctl restart binance`.
 
 ## Воркер реального счёта (spec 0061)
 
