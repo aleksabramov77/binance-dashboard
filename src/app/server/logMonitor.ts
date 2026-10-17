@@ -28,6 +28,7 @@ import {
 } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import type { NotifyStatus } from "@/shared/notify";
 import { loadAlertState, saveAlertState } from "./alertState";
 import { checkLiveSilence } from "./liveAccount";
 import { pruneLogs } from "./logs";
@@ -194,9 +195,9 @@ async function loadAlerts(): Promise<AlertRow[]> {
 
 /**
  * Уведомление монитора — запись monitor.alert: новая тревога — со звуком; напоминание, «восстановлено» — тихо.
- * Ответ — доставлено ли: нет — состояние без lastSent, повтор в следующий прогон.
+ * Ответ — итог доставки: failed — монитор повторит недоставленное в следующий прогон, skipped — без повторов.
  */
-export async function notifyAlert(alert: MonitorAlert): Promise<boolean> {
+export async function notifyAlert(alert: MonitorAlert): Promise<NotifyStatus> {
   const notice = await log.notify({
     level: alert.issues.length ? "warn" : "info",
     event: "monitor.alert",
@@ -208,7 +209,7 @@ export async function notifyAlert(alert: MonitorAlert): Promise<boolean> {
     urgent: alert.urgent,
     text: alert.text,
   });
-  return notice.status === "sent";
+  return notice.status;
 }
 
 /** Прогон монитора по расписанию. */

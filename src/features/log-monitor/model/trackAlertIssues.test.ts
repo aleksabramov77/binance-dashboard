@@ -319,7 +319,7 @@ describe("runMonitor + задачи в GitHub", () => {
       analyze: async () => "Упал Binance.",
       notify: async (alert) => {
         sent.push(alert.text);
-        return true;
+        return "sent";
       },
       trackIssues: (i) => trackAlertIssues(CFG, i),
       prune: async () => 0,
@@ -378,9 +378,9 @@ describe("runMonitor + задачи в GitHub", () => {
     let fail = true;
     const m = deps({
       notify: async (alert) => {
-        if (fail) return false;
+        if (fail) return "failed";
         m.sent.push(alert.text);
-        return true;
+        return "sent";
       },
     });
     expect((await runMonitor(m.d, NOW)).sent).toBe(false);

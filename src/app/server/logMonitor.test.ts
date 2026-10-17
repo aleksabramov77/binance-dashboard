@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe("notifyAlert", () => {
-  it("тревога — запись monitor.alert (warn) с уведомлением «Ошибки»; доставлено — true", async () => {
+  it("тревога — запись monitor.alert (warn) с уведомлением «Ошибки»; ответ — итог доставки", async () => {
     expect(
       await notifyAlert({
         text: "⚠️ Binance Dashboard: проблема",
@@ -39,7 +39,7 @@ describe("notifyAlert", () => {
         issues: ["http5xx:/api/x"],
         resolved: [],
       }),
-    ).toBe(true);
+    ).toBe("sent");
     expect(vi.mocked(log.notify).mock.calls[0][0]).toEqual({
       level: "warn",
       event: "monitor.alert",
@@ -51,7 +51,7 @@ describe("notifyAlert", () => {
     });
   });
 
-  it("только «восстановлено» — info, тихо; не доставлено — false (повтор в следующий прогон)", async () => {
+  it("только «восстановлено» — info, тихо; не доставлено — failed (монитор повторит)", async () => {
     channel.deliver.mockResolvedValueOnce({ status: "failed", reason: "502" });
     expect(
       await notifyAlert({
@@ -60,7 +60,7 @@ describe("notifyAlert", () => {
         issues: [],
         resolved: ["http5xx:/api/x"],
       }),
-    ).toBe(false);
+    ).toBe("failed");
     expect(vi.mocked(log.notify).mock.calls[0][0]).toMatchObject({
       level: "info",
       message: "Монитор: восстановлено — http5xx:/api/x",
