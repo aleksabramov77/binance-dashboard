@@ -1,7 +1,11 @@
 // Чистая логика `pnpm telegram:setup` (spec 0021, 0067): аргументы, проверка группы с темами, план тем, строки env и
 // предупреждение о владельце. Сеть и печать — scripts/telegram-setup.ts.
 import type { TelegramChat, TelegramChatMember } from "@/shared/api/telegram";
-import { isPrivateChatId } from "@/shared/config/env.server";
+import {
+  isPrivateChatId,
+  type TelegramConfig,
+  telegramOwnerProblem,
+} from "@/shared/config/env.server";
 
 export interface SetupMode {
   /** Снять webhook. */
@@ -94,14 +98,16 @@ export const topicEnvLines = (topics: readonly { env: string; id: number }[]) =>
   topics.map((t) => `${t.env}=${t.id}`);
 
 /**
- * Чат уведомлений — группа, а владелец не задан: команды в личке бот перестанет принимать (владелец по умолчанию —
- * только личный TELEGRAM_CHAT_ID). null — всё в порядке.
+ * Предупреждения о владельце: TELEGRAM_OWNER_ID не id пользователя (игнорируется) и чат уведомлений — группа, а
+ * владельца нет — команды в личке бот перестанет принимать (владелец по умолчанию — только личный TELEGRAM_CHAT_ID).
  */
-export function ownerWarning(
-  env: Record<string, string | undefined>,
-): string | null {
-  const chatId = env.TELEGRAM_CHAT_ID?.trim() || null;
-  if (!chatId || isPrivateChatId(chatId) || env.TELEGRAM_OWNER_ID?.trim())
-    return null;
-  return `TELEGRAM_CHAT_ID (${chatId}) — группа, а TELEGRAM_OWNER_ID не задан: бот перестанет отвечать на команды в личке. Задайте TELEGRAM_OWNER_ID — ваш id в Telegram (прежний TELEGRAM_CHAT_ID личного чата).`;
+export function ownerWarnings(config: TelegramConfig): string[] {
+  const warnings: string[] = [];
+  const problem = telegramOwnerProblem(config);
+  if (problem) warnings.push(problem);
+  if (config.chatId && !isPrivateChatId(config.chatId) && !config.ownerId)
+    warnings.push(
+      `TELEGRAM_CHAT_ID (${config.chatId}) — группа, а TELEGRAM_OWNER_ID не задан или не принят: бот перестанет отвечать на команды в личке. Задайте TELEGRAM_OWNER_ID — ваш id в Telegram (прежний TELEGRAM_CHAT_ID личного чата).`,
+    );
+  return warnings;
 }

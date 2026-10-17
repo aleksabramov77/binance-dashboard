@@ -199,10 +199,16 @@ export interface TelegramConfig {
    */
   chatId: string | null;
   /**
-   * Владелец — id пользователя Telegram (TELEGRAM_OWNER_ID): бот отвечает на его команды в личке и в группе. По
-   * умолчанию — TELEGRAM_CHAT_ID, если это личный чат (положительный id). null — бот не отвечает никому.
+   * Владелец — id пользователя Telegram (TELEGRAM_OWNER_ID, только положительный id): бот отвечает на его команды в
+   * личке и в группе. По умолчанию — TELEGRAM_CHAT_ID, если это личный чат (положительный id). null — бот не отвечает
+   * никому.
    */
   ownerId: string | null;
+  /**
+   * TELEGRAM_OWNER_ID задан, но это не id пользователя (не целое > 0 — например, id группы): значение игнорируется,
+   * иначе бот отвечал бы любому участнику группы. null — всё в порядке или не задан.
+   */
+  invalidOwnerId: string | null;
   /** Секрет webhook команд бота (заголовок X-Telegram-Bot-Api-Secret-Token). null — не задан. */
   webhookSecret: string | null;
 }
@@ -218,14 +224,21 @@ export function getTelegramConfig(
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return null;
   const chatId = env.TELEGRAM_CHAT_ID?.trim() || null;
+  const owner = env.TELEGRAM_OWNER_ID?.trim() || null;
+  const ownerValid = isPrivateChatId(owner);
   return {
     token,
     chatId,
-    ownerId:
-      env.TELEGRAM_OWNER_ID?.trim() ||
-      (isPrivateChatId(chatId) ? chatId : null),
+    ownerId: ownerValid ? owner : isPrivateChatId(chatId) ? chatId : null,
+    invalidOwnerId: owner && !ownerValid ? owner : null,
     webhookSecret: env.TELEGRAM_WEBHOOK_SECRET?.trim() || null,
   };
+}
+
+/** Почему TELEGRAM_OWNER_ID не принят (журнал бота, pnpm telegram:setup); null — принят или не задан. */
+export function telegramOwnerProblem(config: TelegramConfig): string | null {
+  if (!config.invalidOwnerId) return null;
+  return `TELEGRAM_OWNER_ID (${config.invalidOwnerId}) — не id пользователя: нужен положительный id личного чата с ботом (у группы id отрицательный). Значение игнорируется, владелец — ${config.ownerId ?? "не задан"}.`;
 }
 
 const topicIdSchema = z.coerce.number().int().positive();

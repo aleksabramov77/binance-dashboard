@@ -14,6 +14,7 @@ import {
   getTelegramTopicId,
   isPrivateChatId,
   isServerless,
+  telegramOwnerProblem,
 } from "./env.server";
 
 const URL =
@@ -104,6 +105,7 @@ describe("getTelegramConfig", () => {
       token: "t",
       chatId: null,
       ownerId: null,
+      invalidOwnerId: null,
       webhookSecret: null,
     });
     expect(
@@ -112,7 +114,13 @@ describe("getTelegramConfig", () => {
         TELEGRAM_CHAT_ID: "42",
         TELEGRAM_WEBHOOK_SECRET: "s",
       }),
-    ).toEqual({ token: "t", chatId: "42", ownerId: "42", webhookSecret: "s" });
+    ).toEqual({
+      token: "t",
+      chatId: "42",
+      ownerId: "42",
+      invalidOwnerId: null,
+      webhookSecret: "s",
+    });
     expect(getTelegramConfig({ TELEGRAM_WEBHOOK_SECRET: "s" })).toBeNull();
   });
 
@@ -131,6 +139,32 @@ describe("getTelegramConfig", () => {
     expect(getTelegramConfig({ ...bot, TELEGRAM_CHAT_ID: "42" })?.ownerId).toBe(
       "42",
     );
+  });
+
+  it("TELEGRAM_OWNER_ID — только положительный id; id группы или мусор — игнорируется с причиной (ревью PR #105)", () => {
+    const bot = { TELEGRAM_BOT_TOKEN: "t" };
+    const groupOwner = getTelegramConfig({
+      ...bot,
+      TELEGRAM_CHAT_ID: "-1001234",
+      TELEGRAM_OWNER_ID: "-1001234",
+    });
+    expect(groupOwner).toMatchObject({
+      ownerId: null,
+      invalidOwnerId: "-1001234",
+    });
+    expect(groupOwner && telegramOwnerProblem(groupOwner)).toMatch(
+      /^TELEGRAM_OWNER_ID \(-1001234\) — не id пользователя.*владелец — не задан\.$/,
+    );
+    // Личный TELEGRAM_CHAT_ID остаётся владельцем по умолчанию.
+    expect(
+      getTelegramConfig({
+        ...bot,
+        TELEGRAM_CHAT_ID: "42",
+        TELEGRAM_OWNER_ID: "@owner",
+      }),
+    ).toMatchObject({ ownerId: "42", invalidOwnerId: "@owner" });
+    const ok = getTelegramConfig({ ...bot, TELEGRAM_OWNER_ID: "42" });
+    expect(ok && telegramOwnerProblem(ok)).toBeNull();
   });
 
   it("личный чат — положительный id", () => {

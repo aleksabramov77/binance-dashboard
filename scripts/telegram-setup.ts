@@ -35,7 +35,7 @@ import {
 import { log, setNotifyChannels } from "@/shared/lib/logger.server";
 import {
   forumProblems,
-  ownerWarning,
+  ownerWarnings,
   parseSetupArgs,
   planTopics,
   topicEnvLines,
@@ -129,8 +129,7 @@ async function main() {
 
   const telegram = getTelegramConfig();
   if (!telegram) fail("TELEGRAM_BOT_TOKEN не задан");
-  const warning = ownerWarning(process.env);
-  if (warning) console.warn(`⚠️ ${warning}`);
+  for (const warning of ownerWarnings(telegram)) console.warn(`⚠️ ${warning}`);
 
   if (mode.delete) {
     await deleteTelegramWebhook(telegram.token);

@@ -9,7 +9,10 @@ import {
   type TelegramCommand,
   telegramUpdateSchema,
 } from "@/shared/api/telegram";
-import type { TelegramConfig } from "@/shared/config/env.server";
+import {
+  type TelegramConfig,
+  telegramOwnerProblem,
+} from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { getDbUsage } from "./dbSpace";
 
@@ -42,8 +45,9 @@ export function decideBotReply(
   const command = parseTelegramCommand(message.text);
   if (!message.isPrivate && command === null) return "ignored";
   if (!who.ownerId) return "foreign";
+  // Личка владельца — только личный чат: id группы по ошибке в TELEGRAM_OWNER_ID не пускает всех её участников.
   const owner =
-    message.chatId === who.ownerId ||
+    (message.isPrivate && message.chatId === who.ownerId) ||
     (message.fromId === who.ownerId && message.chatId === who.groupChatId);
   if (!owner) return "foreign";
   return command === "db" ? "db" : "help";
@@ -77,6 +81,8 @@ export interface BotDeps {
   ownerId: string | null;
   /** Чат уведомлений (TELEGRAM_CHAT_ID): в группе с темами бот тоже отвечает владельцу. */
   groupChatId: string | null;
+  /** TELEGRAM_OWNER_ID не принят (не id пользователя) — warn telegram.config при каждой команде; null — в порядке. */
+  ownerProblem: string | null;
   send: (to: ReplyTarget, text: string) => Promise<void>;
   /** Текст ответа на /db. */
   dbReport: () => Promise<string>;
@@ -85,6 +91,7 @@ export interface BotDeps {
 export const createBotDeps = (telegram: TelegramConfig): BotDeps => ({
   ownerId: telegram.ownerId,
   groupChatId: telegram.chatId,
+  ownerProblem: telegramOwnerProblem(telegram),
   send: (to, text) =>
     sendTelegramMessage(telegram.token, to.chatId, text, {
       messageThreadId: to.threadId,
@@ -115,6 +122,8 @@ export async function handleTelegramUpdate(
     groupChatId: deps.groupChatId,
   });
   if (action === "ignored") return action;
+  if (deps.ownerProblem)
+    log.warn("telegram.config", deps.ownerProblem, { chatId: info.chatId });
   if (action === "foreign") {
     // Id чата — в журнал: так владелец узнаёт id новой группы (spec 0067, «Действия владельца при выкатке»).
     log.warn("telegram.foreign", foreignText(info, deps.groupChatId), {

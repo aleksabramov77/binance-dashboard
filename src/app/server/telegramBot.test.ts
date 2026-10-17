@@ -23,7 +23,14 @@ const GROUP = "-1001234567890";
 function deps(over: Partial<BotDeps> = {}) {
   const send = vi.fn<BotDeps["send"]>(async () => {});
   const dbReport = vi.fn<BotDeps["dbReport"]>(async () => "💾 База: …");
-  return { send, dbReport, ownerId: OWNER, groupChatId: GROUP, ...over };
+  return {
+    send,
+    dbReport,
+    ownerId: OWNER,
+    groupChatId: GROUP,
+    ownerProblem: null,
+    ...over,
+  };
 }
 
 const privateUpdate = (chatId: number, text?: string) => ({
@@ -65,6 +72,16 @@ describe("decideBotReply", () => {
     expect(decideBotReply(priv("/unknown"), who)).toBe("help");
     expect(decideBotReply(priv("привет"), who)).toBe("help");
     expect(decideBotReply(priv(undefined), who)).toBe("help");
+  });
+
+  it("владелец по ошибке — id группы: участники группы не становятся владельцем (ревью PR #105)", () => {
+    const groupAsOwner = { ownerId: GROUP, groupChatId: GROUP };
+    expect(
+      decideBotReply(
+        { chatId: GROUP, fromId: "7", isPrivate: false, text: "/db" },
+        groupAsOwner,
+      ),
+    ).toBe("foreign");
   });
 
   it("чужая личка или владелец не задан — не отвечаем", () => {
@@ -171,6 +188,24 @@ describe("handleTelegramUpdate", () => {
       "Команда боту из незнакомой группы -100777 (от 42)",
       expect.objectContaining({ chatId: "-100777", fromId: "42" }),
     );
+  });
+
+  it("TELEGRAM_OWNER_ID не принят — warn telegram.config на команду, бот работает с владельцем по умолчанию", async () => {
+    const d = deps({
+      ownerProblem: "TELEGRAM_OWNER_ID (-100) — не id пользователя",
+    });
+    expect(await handleTelegramUpdate(privateUpdate(42, "/help"), d)).toBe(
+      "help",
+    );
+    expect(log.warn).toHaveBeenCalledWith(
+      "telegram.config",
+      "TELEGRAM_OWNER_ID (-100) — не id пользователя",
+      { chatId: OWNER },
+    );
+    // Обычное сообщение в группе — без записей.
+    vi.clearAllMocks();
+    await handleTelegramUpdate(groupUpdate(42, "заметка"), d);
+    expect(log.warn).not.toHaveBeenCalled();
   });
 
   it("не сообщение, мусор или не команда в группе — игнорируем", async () => {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { getTelegramConfig } from "@/shared/config/env.server";
 import {
   forumProblems,
-  ownerWarning,
+  ownerWarnings,
   parseSetupArgs,
   planTopics,
   topicEnvLines,
@@ -99,15 +100,31 @@ describe("planTopics", () => {
   });
 });
 
-describe("ownerWarning", () => {
+describe("ownerWarnings", () => {
+  const warn = (env: Record<string, string>) => {
+    const config = getTelegramConfig({ TELEGRAM_BOT_TOKEN: "t", ...env });
+    return config ? ownerWarnings(config) : [];
+  };
+
   it("группа без TELEGRAM_OWNER_ID — предупреждение; личный чат или владелец задан — нет", () => {
-    expect(ownerWarning({ TELEGRAM_CHAT_ID: GROUP })).toMatch(
-      /бот перестанет отвечать на команды в личке/,
+    expect(warn({ TELEGRAM_CHAT_ID: GROUP })).toEqual([
+      expect.stringMatching(/бот перестанет отвечать на команды в личке/),
+    ]);
+    expect(warn({ TELEGRAM_CHAT_ID: GROUP, TELEGRAM_OWNER_ID: "42" })).toEqual(
+      [],
     );
-    expect(
-      ownerWarning({ TELEGRAM_CHAT_ID: GROUP, TELEGRAM_OWNER_ID: "42" }),
-    ).toBeNull();
-    expect(ownerWarning({ TELEGRAM_CHAT_ID: "42" })).toBeNull();
-    expect(ownerWarning({})).toBeNull();
+    expect(warn({ TELEGRAM_CHAT_ID: "42" })).toEqual([]);
+    expect(warn({})).toEqual([]);
+  });
+
+  it("TELEGRAM_OWNER_ID — id группы: не принят и, значит, владельца нет (ревью PR #105)", () => {
+    expect(warn({ TELEGRAM_CHAT_ID: GROUP, TELEGRAM_OWNER_ID: GROUP })).toEqual(
+      [
+        expect.stringMatching(
+          /^TELEGRAM_OWNER_ID \(-1001234567890\) — не id пользователя/,
+        ),
+        expect.stringMatching(/не задан или не принят/),
+      ],
+    );
   });
 });
