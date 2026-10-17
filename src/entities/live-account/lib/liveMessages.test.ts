@@ -12,6 +12,7 @@ import {
   liveCardUrgent,
   liveDailyLimitText,
   liveHeldText,
+  liveSentence,
 } from "./liveMessages";
 import { livePrice } from "./money";
 
@@ -378,5 +379,15 @@ describe("сутки UTC", () => {
     const now = Date.parse("2026-10-16T21:30:00+03:00");
     expect(utcDayStart(now).toISOString()).toBe("2026-10-16T00:00:00.000Z");
     expect(nextUtcMidnight(now).toISOString()).toBe("2026-10-17T00:00:00.000Z");
+  });
+});
+
+describe("liveSentence", () => {
+  it("ставит точку в конце фразы, если её нет", () => {
+    expect(liveSentence("-2010 Account has insufficient balance")).toBe(
+      "-2010 Account has insufficient balance.",
+    );
+    expect(liveSentence("Ордер отклонён. ")).toBe("Ордер отклонён.");
+    expect(liveSentence("Таймаут…")).toBe("Таймаут…");
   });
 });

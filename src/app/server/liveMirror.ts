@@ -60,6 +60,7 @@ import {
   liveDailyLimitText,
   liveHaltText,
   liveModeText,
+  liveSentence,
   loadLiveHalt,
   lossStreakText,
   nextUtcMidnight,
@@ -651,7 +652,7 @@ export async function saveLiveClose(body: LiveCloseRequest): Promise<void> {
     unprotected
       ? {
           kind: "unprotected",
-          message: `${e.message} ${body.protectionRemoved ? "Свои TP/SL уже сняты" : "Своего стопа нет"} — закрытие повторяется каждый прогон.`,
+          message: `${liveSentence(e.message)} ${body.protectionRemoved ? "Свои TP/SL уже сняты" : "Своего стопа нет"} — закрытие повторяется каждый прогон.`,
         }
       : { kind: "close_failed", message: e.message },
     {

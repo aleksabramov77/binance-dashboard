@@ -191,7 +191,8 @@ const clip = (text: string) =>
   text.length > REASON_MAX ? `${text.slice(0, REASON_MAX - 1)}…` : text;
 
 /** Конец предложения: «…(-1021)» → «…(-1021).», чтобы следующая фраза не слиплась. */
-const sentence = (text: string) => {
+/** Фраза с точкой в конце: «-1001 Internal error» → «-1001 Internal error.» (уже с . ! ? … — как есть). */
+export const liveSentence = (text: string) => {
   const t = text.trimEnd();
   return /[.!?…]$/.test(t) ? t : `${t}.`;
 };
@@ -216,7 +217,7 @@ function statusLines(status: LiveCardStatus): string[] {
       return [
         status.kind === "unprotected"
           ? `⚠️ Причина: ${message}`
-          : `⚠️ Причина: позиция не закрылась — ${sentence(message)} Повторяю каждый прогон воркера.`,
+          : `⚠️ Причина: позиция не закрылась — ${liveSentence(message)} Повторяю каждый прогон воркера.`,
         ...(code ? [`🧾 Код API: ${code}`] : []),
       ];
     }
