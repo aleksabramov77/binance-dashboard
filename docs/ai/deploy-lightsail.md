@@ -272,12 +272,14 @@ ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-watchdog.sh binance'
 Уведомления идут в закрытую группу с темами «💰 Сделки», «🧪 Лаборатория», «🖥 Сервер», «🚨 Ошибки»: у каждой темы свои
 настройки уведомлений в Telegram (звук, «без звука»). Код уведомляет только через `log.notify` с категорией и срочностью
 (`architecture.md` → «Логирование и ошибки»): срочное — со звуком, рутина — тихо (`disable_notification`). Темы не заданы —
-всё, как раньше, в `TELEGRAM_CHAT_ID`, рутина — тихо. Отправляет только production-сервер.
+всё, как раньше, в `TELEGRAM_CHAT_ID`, рутина — тихо. Отправляет только прод-сервер VM (`NODE_ENV=production` и
+`APP_HOST=vm`): локальные `next dev` и прод-сборка с общим `.env.local` только пишут в журнал, куда ушло бы. Тему удалили —
+сообщение уходит в чат без темы (`warn notify.fallback` в `/logs`): заново создать тему — `--topics` без её строки в env.
 
 | Переменная (`/etc/binance/app.env`) | Что |
 |---|---|
 | `TELEGRAM_CHAT_ID` | id группы (отрицательный); до переезда — личный чат владельца |
-| `TELEGRAM_OWNER_ID` | id владельца — прежний `TELEGRAM_CHAT_ID` (личный чат): бот отвечает на его команды в личке и в группе. Не задан, а `TELEGRAM_CHAT_ID` — группа: бот перестанет отвечать в личке (`telegram:setup` предупреждает) |
+| `TELEGRAM_OWNER_ID` | id владельца — прежний `TELEGRAM_CHAT_ID` (личный чат, положительный id): бот отвечает на его команды в личке и в группе. Отрицательный (id группы) или не число — игнорируется (`warn telegram.config`, предупреждение `telegram:setup`). Не задан, а `TELEGRAM_CHAT_ID` — группа: бот перестанет отвечать в личке (`telegram:setup` предупреждает) |
 | `TELEGRAM_TOPIC_TRADES` / `_LAB` / `_SERVER` / `_ERRORS` | номера тем (`message_thread_id`), печатает `pnpm telegram:setup --topics`; сторож берёт `TELEGRAM_TOPIC_SERVER` |
 
 Выкатка — по шагам, на промежуточных ничего не теряется:
