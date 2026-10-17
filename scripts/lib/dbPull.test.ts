@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   dbPullConfig,
   parseDbPullArgs,
-  remoteBackupFetchCommand,
   remoteBackupCommand,
+  remoteBackupFetchCommand,
   sshArgs,
 } from "./dbPull";
 
@@ -99,11 +99,13 @@ describe("ночные копии (spec 0062)", () => {
     });
   });
   it("--backup с датой — копия дня; --out главнее пути по умолчанию", () => {
-    expect(parseDbPullArgs(["--backup", "2026-10-16"], "data/prod.db")).toEqual({
-      ok: true,
-      out: "data/backup-2026-10-16.db",
-      backup: "2026-10-16",
-    });
+    expect(parseDbPullArgs(["--backup", "2026-10-16"], "data/prod.db")).toEqual(
+      {
+        ok: true,
+        out: "data/backup-2026-10-16.db",
+        backup: "2026-10-16",
+      },
+    );
     expect(
       parseDbPullArgs(["--backup=2026-10-16", "--out", "z.db"], "data/prod.db"),
     ).toEqual({ ok: true, out: "z.db", backup: "2026-10-16" });
