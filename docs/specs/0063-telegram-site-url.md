@@ -1,7 +1,7 @@
 # 0063 · Ссылки в Telegram ведут на старый адрес Vercel
 
 - **Тип:** bug
-- **Статус:** in-progress
+- **Статус:** done
 - **Серьёзность:** major
 - **Дата:** 2026-10-17
 
@@ -28,14 +28,14 @@ https://binance-dashboard-gold.vercel.app/settings#live
 вместо Vercel нельзя: IP в репозиторий не пишется (`.env.example` → «Своя VM apps-tokyo»).
 
 ## Критерии приёмки
-- [ ] AC1. В коде нет запасного адреса Vercel: `getSiteUrl()` возвращает адрес из `SITE_URL` без завершающего `/`,
+- [x] AC1. В коде нет запасного адреса Vercel: `getSiteUrl()` возвращает адрес из `SITE_URL` без завершающего `/`,
   а без него — `null`.
-- [ ] AC2. Без `SITE_URL` сообщения бота уходят без строки-ссылки (текст тот же), ссылка на Vercel не появляется.
+- [x] AC2. Без `SITE_URL` сообщения бота уходят без строки-ссылки (текст тот же), ссылка на Vercel не появляется.
   С `SITE_URL` — ссылка `${SITE_URL}/settings#live` (и `/logs` у монитора и места в БД), как раньше.
-- [ ] AC3. `pnpm telegram:setup` без `SITE_URL` не регистрирует webhook, а пишет, что нужен `SITE_URL`.
-- [ ] AC4. `SITE_URL` описан в `.env.example` (раздел Telegram): что это и где задаётся (env сервиса на VM); в
+- [x] AC3. `pnpm telegram:setup` без `SITE_URL` не регистрирует webhook, а пишет, что нужен `SITE_URL`.
+- [x] AC4. `SITE_URL` описан в `.env.example` (раздел Telegram): что это и где задаётся (env сервиса на VM); в
   `docs/ai/deploy-lightsail.md` — строка `SITE_URL` в env VM при переезде и явный адрес Vercel в инструкции отката.
-- [ ] AC5. Есть тесты, которые падали до фикса и проходят после (`getSiteUrl` без `SITE_URL`, текст сообщения без
+- [x] AC5. Есть тесты, которые падали до фикса и проходят после (`getSiteUrl` без `SITE_URL`, текст сообщения без
   ссылки).
 - [ ] AC6. Выкатка: `SITE_URL=https://binance.<ip>.sslip.io` в `/etc/binance/app.env`, сервис перезапущен;
   следующее сообщение бота ведёт на VM.
@@ -50,3 +50,4 @@ https://binance-dashboard-gold.vercel.app/settings#live
 |---|---|
 | 2026-10-17 | Баг заведён: ссылка в сообщении о реальной сделке ведёт на binance-dashboard-gold.vercel.app |
 | 2026-10-17 | Код: `getSiteUrl()` без запасного адреса Vercel (`null`), `getSiteLink(path)`; сообщения `notifyLive`, монитора журнала и места в БД без ссылки при пустом `SITE_URL`; `telegram:setup` требует `SITE_URL`; `SITE_URL` в `.env.example` и `deploy-lightsail.md`; тесты |
+| 2026-10-17 | Проверка на локальном сервере worktree: PASS (AC1–AC5, шаги воспроизведения). PR #102: ревью круг 1 — конфликт HISTORY, `.env.local`, 2 nit — исправлено; круг 2 — APPROVED. AC6 — при выкатке |
