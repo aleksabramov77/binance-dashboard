@@ -27,6 +27,7 @@ permissions:
 env:
   PROJECT: binance # /srv/binance/app, binance.service (scripts/server/add-project.sh)
   PORT: 5000
+  LIVE_PROJECT: binance-live # /srv/binance-live/app/live-worker.mjs, binance-live.service (spec 0061)
 
 jobs:
   deploy:
@@ -69,6 +70,12 @@ jobs:
         env:
           BUILD_STANDALONE: "1" # output: "standalone" (next.config.ts) — только для VM
 
+      # Воркер реального счёта (spec 0047, 0061): один файл dist/live-worker.mjs без node_modules.
+      - name: Build live-worker
+        # Коммиты до spec 0047 (откат далеко назад) воркера не содержат — шаг и выкатка воркера пропускаются.
+        run: |
+          if [ -f scripts/live-build.ts ]; then pnpm live:build; else echo "нет scripts/live-build.ts — воркер не собирается"; fi
+
       # server.js + трассированные node_modules + миграции drizzle/; static и public standalone не копирует сам.
       - name: Бандл
         run: |
@@ -105,5 +112,29 @@ jobs:
           done
           sudo /usr/bin/journalctl -u $PROJECT -n 80 --no-pager
           echo "::error::$PROJECT не ответил 2xx–4xx за 2 минуты (последний код: \$code)"
+          exit 1
+          EOF
+
+      # Воркер реального счёта (spec 0061): файл обновляется всегда, сервис перезапускается, только если включён
+      # (systemctl enable — шаг владельца или Claude, docs/ai/deploy-lightsail.md → «Воркер реального счёта»).
+      # restart ждёт выхода по SIGTERM до 120 с: начатая сделка доделывается.
+      - name: Воркер binance-live
+        run: |
+          if [ ! -f dist/live-worker.mjs ]; then echo "воркер не собран — пропуск"; exit 0; fi
+          rsync -ptz --chmod=F644 dist/live-worker.mjs "$VM_USER@$VM_HOST:/srv/$LIVE_PROJECT/app/live-worker.mjs"
+          ssh "$VM_USER@$VM_HOST" bash -s <<EOF
+          set -e
+          if ! systemctl is-enabled --quiet $LIVE_PROJECT; then
+            echo "$LIVE_PROJECT выключен: файл обновлён, рестарта нет"
+            exit 0
+          fi
+          sudo /usr/bin/systemctl restart $LIVE_PROJECT
+          before=\$(systemctl show -p NRestarts --value $LIVE_PROJECT)
+          sleep 15
+          after=\$(systemctl show -p NRestarts --value $LIVE_PROJECT)
+          # active и без автоперезапусков за 15 с (падение на старте systemd поднимает заново через 10 с).
+          if systemctl is-active --quiet $LIVE_PROJECT && [ "\$before" = "\$after" ]; then echo "OK: $LIVE_PROJECT active"; exit 0; fi
+          sudo /usr/bin/journalctl -u $LIVE_PROJECT -n 80 --no-pager
+          echo "::error::$LIVE_PROJECT не активен или перезапускается через 15 с после рестарта"
           exit 1
           EOF

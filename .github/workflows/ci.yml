@@ -41,3 +41,7 @@ jobs:
       # Ключи Binance/OpenRouter не нужны: сборка не ходит в сеть, тесты — чистые функции.
       - name: Build
         run: pnpm build
+
+      # Воркер реального счёта (spec 0061): поломка его сборки ловится до мержа, а не в Deploy.
+      - name: Build live-worker
+        run: pnpm live:build

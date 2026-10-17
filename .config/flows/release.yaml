@@ -48,7 +48,7 @@ stages:
     uses: [changes]
     note: >
       Только если в .env.example появилась переменная, нужная в проде. Прод — VM: Claude дописывает значение в
-      /etc/binance/app.env по ssh (claude@<ip>, файл 640 root:binance, значения не выводить, не через аргументы
+      /etc/binance/app.env по ssh (`ssh -i ~/.ssh/lightsail_apps_tokyo -o IdentitiesOnly=yes claude@$APPS_TOKYO_HOST`, файл 640 root:binance, значения не выводить, не через аргументы
       командной строки) и перезапускает сервис (`sudo systemctl restart binance`, на 25–50-й секунде минуты) —
       docs/ai/deploy-lightsail.md. Значение секрета, которого нет у Claude, кладёт пользователь.
     gate: user-approval
@@ -67,10 +67,14 @@ stages:
 
   - id: smoke
     note: >
-      Тик идёт с VM: последний тик свежий (не старше 2 минут), раннер oracle, без ошибок. Сайт отвечает — проверяет
-      сама выкатка (шаг vm). Ручной прогон зеркала — не через Vercel: смотри журнал VM
-      (`ssh claude@<ip> 'sudo journalctl -u binance --since "-5 min"'`), ошибок cron.* нет.
+      Прод на VM, база — SQLite (spec 0059): scripts/server/smoke.sh по SSH проверяет, что последний тик в
+      /var/lib/binance/app.db не старше 150 с, раннер oracle, статус ok, сервис binance активен, а binance-live —
+      активен, если включён (spec 0061). Supabase заморожен — engine:supabase status для смоука не годится. Сайт
+      отвечает — проверяет сама выкатка (шаг vm). Журнал VM при сомнениях:
+      `ssh -i ~/.ssh/lightsail_apps_tokyo -o IdentitiesOnly=yes claude@$APPS_TOKYO_HOST 'sudo journalctl -u binance --since "-5 min" --no-pager'`.
+      APPS_TOKYO_HOST — в .env.local.
     run: >-
-      pnpm -s engine:supabase status | grep -Eq "runner: 'oracle'" &&
-      pnpm -s engine:supabase status | grep -Eq "status: 'ok'"
+      set -a && . ./.env.local && set +a &&
+      ssh -i ~/.ssh/lightsail_apps_tokyo -o IdentitiesOnly=yes -o BatchMode=yes "claude@$APPS_TOKYO_HOST" 'bash -s'
+      < scripts/server/smoke.sh
     produces: отчёт о выкатке

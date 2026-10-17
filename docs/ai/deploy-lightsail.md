@@ -10,7 +10,9 @@ Supabase — только база Postgres ([deploy-supabase.md](deploy-supabas
 файл SQLite на VM `/var/lib/binance/app.db`; Supabase неделю остаётся для отката, потом отключается (очередь PRD, п. 24).
 
 Репозиторий публичный: IP VM, ключи и секреты сюда не пишем. Они в секретах GitHub Actions и в
-`/etc/<проект>/app.env` на VM. Ниже `<ip>` — static IP инстанса (Lightsail → Networking).
+`/etc/<проект>/app.env` на VM. Ниже `<ip>` — static IP инстанса (Lightsail → Networking; на Mac — `APPS_TOKYO_HOST`
+в `.env.local`). `ssh claude@<ip>` везде ниже — с ключом AI: `ssh -i ~/.ssh/lightsail_apps_tokyo -o IdentitiesOnly=yes
+claude@<ip>` (ключ владельца `~/.ssh/apps_tokyo` — только для `aleksandr@<ip>`).
 
 ## Устройство
 
@@ -20,8 +22,8 @@ Supabase — только база Postgres ([deploy-supabase.md](deploy-supabas
 | Общая настройка | `scripts/server/bootstrap.sh`: пользователи, Node 22, Caddy, sqlite3, swap 2 ГБ, TCP BBR (быстрее на длинном маршруте, решение владельца 2026-10-17), unattended-upgrades, fail2ban, SSH только по ключам |
 | Проекты | `scripts/server/add-project.sh`: свой Linux-пользователь, `/srv/<проект>/app` (код), `/var/lib/<проект>` (данные), `/etc/<проект>/app.env` (секреты, 640), `<проект>.service` с `MemoryMax`, сайт `/etc/caddy/sites/<проект>.caddy` |
 | binance | сайт `https://binance.<ip>.sslip.io` → 127.0.0.1:5000, `MemoryMax=300M`, `--stop-timeout 30` |
-| binance-live | фоновый `live-worker.mjs` эпика «Реальные деньги» (spec 0047): без порта и Caddy, `MemoryMax=128M`, `--stop-timeout 120` |
-| Выкатка | `.github/workflows/deploy.yml`: сама после зелёного CI на `main` (`workflow_run`, коммит, который проверил CI) и вручную с выбором ветки или коммита. `next build` (`output: "standalone"`) в CI → rsync бандла под `deploy` → `systemctl restart` → проверка ответа. Vercel из `main` не выкатывается (`vercel.json` → `git.deploymentEnabled`, spec 0055) |
+| binance-live | фоновый `live-worker.mjs` эпика «Реальные деньги» (spec 0047): без порта и Caddy, `MemoryMax=128M`, `--stop-timeout 120`; выкатка из CI и запуск — [«Воркер реального счёта»](#воркер-реального-счёта-spec-0061) |
+| Выкатка | `.github/workflows/deploy.yml`: сама после зелёного CI на `main` (`workflow_run`, коммит, который проверил CI) и вручную с выбором ветки или коммита. `next build` (`output: "standalone"`) в CI → rsync бандла под `deploy` → `systemctl restart` → проверка ответа; затем `pnpm live:build` → `live-worker.mjs` в `/srv/binance-live/app` и рестарт `binance-live`, если он включён (spec 0061). Vercel из `main` не выкатывается (`vercel.json` → `git.deploymentEnabled`, spec 0055) |
 
 Пользователи VM:
 - `claude` — администратор (sudo), через него работает AI, ключ `~/.ssh/lightsail_apps_tokyo` на Mac владельца;
@@ -112,6 +114,8 @@ Homepage `https://binance.<ip>.sslip.io`, callback `https://binance.<ip>.sslip.i
 | Рестарт | `ssh claude@<ip> 'sudo systemctl restart binance'` |
 | Секреты | `ssh claude@<ip> 'sudoedit /etc/binance/app.env'` → рестарт |
 | Снимок прод-базы на Mac | `pnpm db:pull` → `data/prod.db` (`sqlite3 .backup` на VM по SSH, сервис не останавливается; `APPS_TOKYO_HOST` в `.env.local`); отчёт лаборатории по нему — `pnpm lab:report --prod` |
+| Смоук прода | `ssh claude@<ip> 'bash -s' < scripts/server/smoke.sh` — тик в SQLite свежий, `runner = oracle`, `binance` и включённый `binance-live` активны (этап smoke `/flow release`) |
+| Журнал воркера | `ssh claude@<ip> 'sudo journalctl -u binance-live -n 100 --no-pager'` |
 | Запрос к базе на VM | `ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db "select key, value from engine_state"'` |
 | Новый проект (сайт) | `sudo bash add-project.sh <имя> --port <порт> [--stop-timeout <сек>]` → `https://<имя>.<ip>.sslip.io` |
 | Новый фоновый сервис | `sudo bash add-project.sh <имя> --no-web --exec <файл> --memory 128M --heap 96 [--stop-timeout <сек>]` |
@@ -119,6 +123,56 @@ Homepage `https://binance.<ip>.sslip.io`, callback `https://binance.<ip>.sslip.i
 | Повторить общую настройку | `sudo CLAUDE_KEY=… DEPLOY_KEY=… [OWNER_KEY=…] bash bootstrap.sh` (повторный запуск сам держит `ubuntu` закрытым) |
 
 Скрипты лежат в `scripts/server/`; на VM их копия — `~claude/server-scripts/`.
+
+## Воркер реального счёта (spec 0061)
+
+Сервис `binance-live` (пользователь `binance-live`, без входа и sudo) запускает `node /srv/binance-live/app/live-worker.mjs`
+(бандл `pnpm live:build`, spec 0047). Входящих соединений нет: воркер раз в минуту шлёт пульс и прогон реального зеркала
+в приложение на той же VM (`LIVE_APP_URL=http://127.0.0.1:5000`, Bearer `LIVE_WORKER_SECRET`). Торговый ключ субсчёта —
+только у него. Реальные ордера — только у экспериментов с реальным зеркалом «Вкл» или «Авто» (spec 0049, 0053).
+
+Переменные `/etc/binance-live/app.env` (root:binance-live 640, значения не выводить):
+- `LIVE_WORKER_SECRET` — тот же, что в `/etc/binance/app.env` (по нему приложение принимает пульс);
+- `LIVE_APP_URL=http://127.0.0.1:5000` — http разрешён только для localhost (`scripts/lib/liveWorker.ts`);
+- `BINANCE_TRADE_API_KEY`, `BINANCE_TRADE_API_SECRET` — ключ субсчёта. Вписывает только владелец; Claude эти строки не
+  читает и не меняет.
+
+Выкатка — из CI (`deploy.yml`, шаг «Воркер binance-live»): файл обновляется при каждой выкатке, рестарт — только если
+сервис включён; restart ждёт выхода по SIGTERM до 120 с (начатая сделка доделывается).
+
+Первый запуск (Claude, порядок важен):
+1. Строки `LIVE_*` — до `add-project.sh` (значение секрета копируется из файла сайта, на экран не выводится):
+   ```sh
+   ssh claude@<ip> 'E=/etc/binance-live/app.env
+     sudo grep -q "^LIVE_WORKER_SECRET=" $E || sudo grep "^LIVE_WORKER_SECRET=" /etc/binance/app.env | sudo tee -a $E >/dev/null
+     sudo grep -q "^LIVE_APP_URL=" $E || echo "LIVE_APP_URL=http://127.0.0.1:5000" | sudo tee -a $E >/dev/null
+     sudo grep -cE "^(LIVE_WORKER_SECRET|LIVE_APP_URL)=" $E'   # → 2 (только число строк, без значений)
+   ```
+2. Unit с таймаутом остановки:
+   `ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-project.sh binance-live --no-web --exec live-worker.mjs --memory 128M --heap 96 --stop-timeout 120'`
+   (копию скрипта на VM сначала обновить из `scripts/server/`). **Внимание:** если `live-worker.mjs` уже лежит в
+   `/srv/binance-live/app`, `add-project.sh` сам делает `enable` и `restart` — воркер с ключом стартует сразу, а
+   выключенный владельцем сервис включается снова. Повторять его при выключенном воркере — только с последующим
+   `sudo systemctl disable --now binance-live`.
+3. Перед `enable --now` — проверка, что реальных входов не будет (оба числа — 0, только чтение):
+   ```sh
+   ssh claude@<ip> 'sudo -u binance sqlite3 -readonly /var/lib/binance/app.db "select count(*) from experiments where live_mirror = 1 or live_mirror_mode <> '\''off'\''; select count(*) from live_mirror_orders where status in ('\''pending'\'','\''protected'\'','\''unprotected'\'','\''closing'\'','\''close_failed'\'')"'
+   ```
+4. `ssh claude@<ip> 'sudo systemctl enable --now binance-live'`.
+
+Ключ субсчёта (владелец):
+1. На Binance у ключа субсчёта: права «чтение» + Spot + Futures, без вывода, переводов и займов; **Restrict access to
+   trusted IPs only** — static IP VM.
+2. `ssh -i ~/.ssh/apps_tokyo aleksandr@<ip>` → `sudoedit /etc/binance-live/app.env` → строки
+   `BINANCE_TRADE_API_KEY=…` и `BINANCE_TRADE_API_SECRET=…` (без кавычек и пробелов).
+3. `sudo systemctl restart binance-live` (если сервис уже включён) — карточка «Реальный счёт» на `/settings` показывает
+   проверку ключа и прав.
+
+Включить / выключить: `sudo systemctl enable --now binance-live` / `sudo systemctl disable --now binance-live`. Останавливать
+надолго — только `disable --now`: после простого `stop` следующая выкатка из CI снова запустит включённый сервис.
+Проверка: `sudo journalctl -u binance-live -n 30 --no-pager` — «Воркер реального счёта …: ключ задан, пульс →
+http://127.0.0.1:5000», пульсы без 401; остановка без SIGKILL: `sudo journalctl -u binance-live -n 20 --no-pager | grep -E "stop-sigterm|SIGKILL"`
+— пусто.
 
 ## Переключение прода на VM
 
