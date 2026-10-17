@@ -507,7 +507,7 @@ bStocks, но публичного торгового API для них не н�
 | 20 | Выкатка `binance-live` из CI (`pnpm live:build` → VM); сервис не запускать до секретов владельца ([spec 0061](specs/0061-live-deploy.md)) | «Реальные деньги» на VM | lightsail-migration | ✅ 0061, #100 |
 | 21 | SQLite вместо Supabase Postgres + перенос данных (пауза ~5 мин) ([spec 0059](specs/0059-sqlite.md)) | уход с Supabase ($25) | lightsail-migration | ✅ 0059, #99 |
 | 22 | Ключ реального аккаунта в базе в зашифрованном виде (AES-GCM, решение 2026-10-15) | «Портфель» и Earn на VM | lightsail-migration | ⏭ |
-| 23 | Бэкапы SQLite: ночной `.backup` (7 дней) + снимки Lightsail | сохранность данных | lightsail-migration | ⏭ |
+| 23 | Бэкапы SQLite: ночной `.backup` (7 дней) + снимки Lightsail ([spec 0062](specs/0062-db-backups.md)) | сохранность данных | lightsail-migration | 🚧 0062 |
 | 24 | Отключение Supabase и Vercel после недели на VM — только с согласия владельца (деньги, удаление) | экономия | lightsail-migration | ⏭ |
 | 25 | Запись в прод-базу из скриптов лаборатории (`lab:apply`, `lab:private --prod`) после SQLite ([spec 0059](specs/0059-sqlite.md): сейчас отказывают с подсказкой, тумблеры — на сайте) | `/flow lab` применяет решения и заводит приватные эксперименты без ручных тумблеров | lightsail-migration | ⏭ |
 | 26 | Медленный сайт на VM из сети владельца: маршрут до AWS Tokyo через Европу, RTT ~340 мс, загрузка 1–16 с, бывают обрывы (замер 2026-10-16/17). Решение владельца 2026-10-17: регион остаётся Tokyo, только серверные правки без доплаты — TCP BBR (включён 2026-10-17, `bootstrap.sh`) и HTTP/3 (UDP 443 в файрволе Lightsail, `deploy-lightsail.md`); Cloudflare и смена региона — не сейчас | сайт открывается быстро | lightsail-migration | ⏭ после 0059 |
