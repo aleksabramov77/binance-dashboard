@@ -1,7 +1,7 @@
 # 0059 · SQLite на VM вместо Supabase Postgres, перенос данных
 
 - **Тип:** feature
-- **Статус:** approved
+- **Статус:** done
 - **Раздел PRD:** §3.4 Авто-бот (хостинг)
 - **Дата:** 2026-10-17
 
@@ -120,3 +120,4 @@ Supabase не знает — закрыть их на Binance Demo вручну�
 |---|---|
 | 2026-10-17 | ТЗ заведено и утверждено владельцем |
 | 2026-10-17 | Код (ветка `feature/0059-sqlite`): `better-sqlite3` 13 + `drizzle-orm/better-sqlite3`, схемы на `sqlite-core`, миграции заново (`drizzle/0000_init.sql`), `DATABASE_PATH`, PGlite удалён (AC1); запросы без Postgres-SQL: время из JS, `json_patch`, `cast(… as integer)`, булевы и даты в сыром SQL — числом (AC2); блокировки тика и зеркала в памяти процесса, синхронные транзакции сбросов и `closeLiveWithAuto` с `BEGIN IMMEDIATE`, тесты на `acquired: false` и откат (AC3); `/db` и монитор — файл с WAL и свободный диск (`statfs`), топ таблиц через `dbstat` (AC4); `pnpm db:import-pg` — на прод-данных все 12 таблиц и суммы PnL совпали, локальный сервер на этом файле: `/experiments` по 68 экспериментам совпал с Supabase по числу сделок и PnL (AC5); `pnpm db:pull`, `lab:report --prod`, отказ `lab:apply` без `--local` и `lab:private --prod` (AC6); документация, `.env.*`, PRD — строка 25 очереди (AC7); фоновые задачи стоят на пустой базе без `engine_state.runner` (опора шага 2 AC9) |
+| 2026-10-17 | Тестер PASS (2 круга: замечания по `db:pull` и тестам отката; ключ `last_tick` в runbook), владелец принял; ревью PR #99 — 2 круга (порядок переключения 25–50 с, откат с демо-сиротами, `synchronous=FULL`, ошибка без `DATABASE_PATH` на VM) → APPROVED. Переключение (AC9–AC10) — после мержа по runbook |

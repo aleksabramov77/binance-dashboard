@@ -222,8 +222,11 @@ Demo-ключи на VM при откате можно оставить: при 
    ssh claude@<ip> 'sudo systemctl stop binance'
    pnpm mirror:supabase status   # в demo_mirror_orders нет pending и closing
    ```
-   Есть `pending` или `closing` — прогон оборвался: записать `trade_id`, после переключения сверить эту позицию на
-   демо-счёте со строкой вручную. С этого момента торговля на паузе и Supabase никто не пишет.
+   Есть `pending` или `closing` — прогон оборвался: после шага 4 взять их из `data/import.db`
+   (`sqlite3 data/import.db "select trade_id, symbol, status from demo_mirror_orders where status in ('pending','closing')"`)
+   и после переключения сверить эти позиции на демо-счёте со строками вручную. Если Deploy уже дошёл до шага
+   «Перезапуск и проверка» (новая версия поднята) — этот шаг пропустить: `stop` остановил бы новую версию, и проверка
+   Deploy упала бы. С этого момента торговля на паузе и Supabase никто не пишет.
 3. Deploy (`systemctl restart`) поднимает новую версию на пустом файле `app.db`: миграции и сид каталога есть, но
    `engine_state.runner` нет — фоновые задачи стоят (пропуск «engine_state.runner не задан» пишется на уровне debug — в `journalctl` его нет), тумблер движка
    выключен — сделок нет. Дождаться конца Deploy и проверить, что модуль загрузился:
