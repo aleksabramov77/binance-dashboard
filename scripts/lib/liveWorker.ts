@@ -151,7 +151,8 @@ async function refreshRestrictions(
   }
 }
 
-async function spotBalance(
+/** Spot субсчёта: USDT и equity в $ (пульс и баланс после закрытия, spec 0068). */
+export async function spotBalance(
   deps: WorkerDeps,
   account: LiveSpotAccount,
 ): Promise<NonNullable<LiveHeartbeat["spot"]>> {

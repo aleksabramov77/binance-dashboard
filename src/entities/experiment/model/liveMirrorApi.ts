@@ -156,6 +156,11 @@ export const liveExitSchema = z.object({
     .object({ qty: z.number(), asset: z.string(), usd: z.number() })
     .nullable()
     .default(null),
+  /**
+   * Баланс субсчёта рынка сделки после закрытия, $ (spec 0068): USDⓈ-M — wallet balance, Spot — equity. null — воркер
+   * не прочитал (приложение возьмёт последний пульс). Старый воркер поля не шлёт.
+   */
+  balanceUsd: z.number().nullish(),
 });
 
 export const liveCloseRequestSchema = liveTradeIdSchema.extend({

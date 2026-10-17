@@ -308,6 +308,13 @@ export const liveMirrorOrdersTable = sqliteTable(
       .default([]),
     /** Свои защитные ордера (как protect_refs демо-зеркала). */
     protectRefs: text("protect_refs", { mode: "json" }),
+    /**
+     * Ключ уведомления о входе (spec 0068): итог и тревоги этой сделки уходят ответом на него. Непрозрачен — его
+     * вернул канал уведомлений; null — вход не отправлялся или сделка открыта до 0068.
+     */
+    entryNotifyRef: text("entry_notify_ref", { mode: "json" }).$type<
+      Record<string, unknown>
+    >(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()
       .default(NOW_MS),

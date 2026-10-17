@@ -234,6 +234,10 @@ export interface LiveExchange {
   } | null>;
   price: (market: Market, symbol: string) => Promise<number>;
   balances: () => Promise<{ spot: number; usdm: number }>;
+  /**
+   * Баланс субсчёта рынка после закрытия, $ (spec 0068): USDⓈ-M — wallet balance, Spot — equity; null — не прочитан.
+   */
+  balanceUsd: (market: "spot" | "usdm") => Promise<number | null>;
   positionMode: () => Promise<"oneway" | "hedge">;
   /** Счёт фьючерсов пуст (нет позиций и ордеров) — можно переключить режим. */
   futuresBusy: () => Promise<boolean>;
@@ -428,6 +432,18 @@ async function exitByFills(
   }
 }
 
+/** Баланс субсчёта для итога закрытия: не прочитан — null, закрытие от этого не ломается. */
+async function balanceAfterClose(
+  ex: LiveExchange,
+  market: "spot" | "usdm",
+): Promise<number | null> {
+  try {
+    return await ex.balanceUsd(market);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Одна попытка закрыть реальную позицию. Не вышло — status failed (строка вернётся в очередь и повторится на
  * следующем прогоне); исключение биржи — тоже failed, а не обрыв прогона. protectionRemoved — свои TP/SL в этой
@@ -476,6 +492,8 @@ export async function closeOne(
         r.status === "closed"
           ? closedByOf(r.message, fills.realizedPnl, fallback)
           : null,
+      balanceUsd:
+        r.status === "closed" ? await balanceAfterClose(ex, item.market) : null,
     },
   };
 }
@@ -844,6 +862,10 @@ export async function runLiveMirror(
             pnlEstimated: fills?.pnlEstimated ?? false,
             leftover: fills?.leftover ?? null,
             closedBy: m.closedBy === "stop" ? "sl" : "tp",
+            balanceUsd:
+              m.status === "closed"
+                ? await balanceAfterClose(ex, "usdm")
+                : null,
           },
         });
       }

@@ -328,6 +328,18 @@ export async function updateLiveMirror(
   return updateLiveMirrorSync(db, tradeId, patch, from);
 }
 
+/** Запомнить ключ уведомления о входе (spec 0068): итог и тревоги сделки уйдут ответом на него. */
+export async function setLiveEntryNotifyRef(
+  db: Db,
+  tradeId: string,
+  ref: Record<string, unknown>,
+): Promise<void> {
+  await db
+    .update(liveMirrorOrdersTable)
+    .set({ entryNotifyRef: ref })
+    .where(eq(liveMirrorOrdersTable.tradeId, tradeId));
+}
+
 /** Строка по сделке: эксперимент и монета — для журнала и Telegram. */
 export async function getLiveMirror(
   db: Db,

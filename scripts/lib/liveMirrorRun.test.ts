@@ -117,6 +117,7 @@ function fakeExchange(over: Partial<LiveExchange> = {}): LiveExchange {
     })),
     price: vi.fn(async () => 2000),
     balances: vi.fn(async () => ({ spot: 100, usdm: 100 })),
+    balanceUsd: vi.fn(async () => 512.4),
     positionMode: vi.fn(async () => "oneway" as const),
     futuresBusy: vi.fn(async () => false),
     enableOneway: vi.fn(async () => "switched"),
@@ -337,6 +338,20 @@ const item: LiveToClose = {
 };
 
 describe("runLiveMirror: закрытия и «Закрыть всё»", () => {
+  it("баланс субсчёта не прочитан — итог закрытия без баланса, закрытие не ломается (spec 0068, AC4)", async () => {
+    const api = fakeApi(state({ candidates: [], toClose: ["c1"] }), [item]);
+    const ex = fakeExchange();
+    vi.mocked(ex.balanceUsd).mockRejectedValue(new Error("сеть"));
+    await run(api, ex);
+    expect(api.close).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "closed",
+        exit: expect.objectContaining({ balanceUsd: null }),
+      }),
+    );
+    expect(ex.balanceUsd).toHaveBeenCalledWith("usdm");
+  });
+
   it("paper-сделка закрылась — закрытие по рынку, PnL и комиссии по исполнениям", async () => {
     const api = fakeApi(state({ candidates: [], toClose: ["c1"] }), [item]);
     await run(api, fakeExchange());
@@ -348,6 +363,8 @@ describe("runLiveMirror: закрытия и «Закрыть всё»", () => {
         exitPrice: 2100,
         closedBy: "mirror",
         leftover: null,
+        // Баланс субсчёта после закрытия — вместе с итогом (spec 0068, AC4).
+        balanceUsd: 512.4,
       }),
     });
     const [body] = api.close.mock.calls[0] as unknown as [

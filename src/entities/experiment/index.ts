@@ -43,6 +43,7 @@ export {
   liveSummaries,
   markLiveCloseFailed,
   recentLiveClosed,
+  setLiveEntryNotifyRef,
   skipLiveMirror,
   updateLiveMirror,
 } from "./api/liveMirrorDb";

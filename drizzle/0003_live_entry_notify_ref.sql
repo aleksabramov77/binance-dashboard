@@ -1,0 +1,1 @@
+ALTER TABLE `live_mirror_orders` ADD `entry_notify_ref` text;
