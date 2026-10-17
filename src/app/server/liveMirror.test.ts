@@ -18,7 +18,11 @@ import {
   paperTradesTable,
   seedExperiments,
 } from "@/entities/experiment";
-import { liveWorkerStateTable, saveLiveState } from "@/entities/live-account";
+import {
+  liveWorkerStateTable,
+  loadLiveState,
+  saveLiveState,
+} from "@/entities/live-account";
 import { telegramMessageText } from "@/shared/api/telegram";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { log, setNotifyChannels } from "@/shared/lib/logger.server";
@@ -303,6 +307,12 @@ describe("вход, выход и дневной PnL", () => {
     const a = await newTrade("S98", "LINKUSDT");
     await claimLive(a);
     vi.clearAllMocks();
+    vi.stubEnv("SITE_URL", "https://binance.example.test");
+    // Канал возвращает ключ сообщения о входе (spec 0068, AC9): код сделок хранит его, не разбирая.
+    channel.deliver.mockImplementationOnce(async () => ({
+      status: "sent",
+      ref: { chat: "42", id: 70 },
+    }));
     await saveLiveOpen({
       tradeId: a,
       result: {
@@ -316,9 +326,20 @@ describe("вход, выход и дневной PnL", () => {
       },
       order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: null },
     });
-    expect(sent()[0]).toMatch(
-      /🟢 Реальная сделка: S98 LINKUSDT \(USDⓈ-M\) long \$10,00, SL 95, TP 110/,
+    expect(sent()[0]).toBe(
+      [
+        "🟡 Вход · S98 LINKUSDT long · USDⓈ-M",
+        "Объём: $10,00",
+        "Цена входа: 100",
+        "SL: 95 (−5,0 %)",
+        "TP: 110 (+10,0 %)",
+        // Ссылка — на страницу эксперимента сделки, а не на /settings#live (AC8).
+        "https://binance.example.test/experiments/S98",
+      ].join("\n"),
     );
+    expect((await getLiveMirror(db, a))?.entryNotifyRef).toEqual({
+      test: { chat: "42", id: 70 },
+    });
     let trading = await getLiveTradingView();
     expect(trading.positions).toHaveLength(1);
 
@@ -345,14 +366,23 @@ describe("вход, выход и дневной PnL", () => {
       protectionRemoved: false,
     });
     expect((await getLiveMirror(db, a))?.status).toBe("closed");
+    // Итог — ответом на вход (ключ канала тот же), со строкой «Итог» и отметкой 👎 для сообщения о входе (AC3, AC5).
+    const exitNote = channel.deliver.mock.calls[1][0];
+    expect(exitNote.thread).toEqual({
+      ref: { chat: "42", id: 70 },
+      label: "сообщение о входе",
+      reply: true,
+      append: "Итог: 🔴 −$16,00 (закрыта paper-сделка)",
+      mark: "bad",
+    });
     expect(sent()[1]).toMatch(
-      /🔴 Закрыта: S98 LINKUSDT .* −\$16,00 \(закрыта paper-сделка\)/,
+      /^🔴 −\$16,00 · S98 LINKUSDT long\nЗакрыта вслед за paper-сделкой: 100 → 90\nКомиссии: \$0,10 · в сделке меньше минуты\nБаланс: нет данных\nhttps:\/\/binance\.example\.test\/experiments\/S98$/,
     );
     expect((await liveMirrorState()).dailyPnl).toEqual({ S98: -16 });
-    // Вход, выход без остатка и подсказка ручному «Вкл» (убыток −$16 ≥ порога $15) — тихо.
+    // Вход и подсказка ручному «Вкл» (убыток −$16 ≥ порога $15) — тихо; итог — со звуком (ответ на вход).
     expect(notices().map((n) => [n.event, n.urgent])).toEqual([
       ["live.entry", false],
-      ["live.exit", false],
+      ["live.exit", true],
       ["live.advice", false],
     ]);
     trading = await getLiveTradingView();
@@ -412,6 +442,92 @@ describe("вход, выход и дневной PnL", () => {
         .filter((n) => n.event === "live.halt")
         .map((n) => n.urgent),
     ).toEqual([true, false]);
+  });
+});
+
+describe("итог сделки: баланс и ответ на вход (spec 0068)", () => {
+  const open = async (symbol: string) => {
+    await toggleOn("S98");
+    const id = await newTrade("S98", symbol);
+    await claimLive(id);
+    await saveLiveOpen({
+      tradeId: id,
+      result: {
+        id: `r-${id}`,
+        status: "protected",
+        message: "ok",
+        entryPrice: 100,
+        filledQuantity: 0.1,
+        steps: [],
+        protectRefs: null,
+      },
+      order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: null },
+    });
+    await db
+      .update(paperTradesTable)
+      .set({ closedAt: new Date(), exitPrice: 110, exitReason: "takeProfit" })
+      .where(eq(paperTradesTable.id, id));
+    await claimLiveClose(id);
+    vi.clearAllMocks();
+    return id;
+  };
+  const closed = (tradeId: string, balanceUsd?: number) =>
+    saveLiveClose({
+      tradeId,
+      status: "closed",
+      protectionRemoved: false,
+      exit: {
+        message: "ok",
+        steps: [],
+        exitPrice: 110,
+        feesUsd: 0.01,
+        realizedPnl: 0.99,
+        pnlEstimated: false,
+        leftover: null,
+        closedBy: "tp",
+        ...(balanceUsd !== undefined && { balanceUsd }),
+      },
+    });
+
+  it("баланс от воркера после закрытия — без пометки времени (AC4)", async () => {
+    const id = await open("NEARUSDT");
+    await closed(id, 512.4);
+    expect(sent()[0]).toMatch(/\nБаланс субсчёта: \$512,40$/);
+    expect(noticeData("live.exit")).toMatchObject({
+      balance: { usd: 512.4, asOf: null },
+    });
+  });
+
+  it("воркер баланс не прислал — последний пульс (USDⓈ-M — wallet balance) с временем (AC4)", async () => {
+    const id = await open("APTUSDT");
+    const state = await loadLiveState(db);
+    if (!state) throw new Error("нет пульса");
+    await saveLiveState(db, {
+      ...state,
+      heartbeat: {
+        ...state.heartbeat,
+        usdm: {
+          walletBalance: 30.5,
+          availableBalance: 20,
+          unrealizedProfit: 0,
+        },
+      },
+      receivedAt: "2026-10-18T12:40:05.000Z",
+    });
+    await closed(id);
+    expect(sent()[0]).toMatch(/\nБаланс субсчёта: \$30,50 \(на 12:40 UTC\)$/);
+  });
+
+  it("ключа сообщения о входе нет (сделка до 0068) — итог обычным сообщением с полным заголовком (AC6)", async () => {
+    const id = await open("SUIUSDT");
+    await closed(id, 1);
+    expect(channel.deliver.mock.calls[0][0].thread).toMatchObject({
+      ref: null,
+      reply: true,
+      mark: "good",
+    });
+    expect(sent()[0]).toMatch(/^🟢 \+\$0,99 · S98 SUIUSDT long · USDⓈ-M\n/);
+    expect(noticeData("live.exit")).toMatchObject({ entryMessage: false });
   });
 });
 
@@ -497,10 +613,15 @@ describe("повтор закрытий (приёмка 0049)", () => {
     expect((await getLiveMirror(db, a))?.status).toBe("closed");
     expect(channel.deliver).toHaveBeenCalledTimes(2);
     const text = sent()[1];
-    expect(text).toMatch(/закрыта после 3 попыток/);
+    expect(text).toMatch(/\nЗакрыта после 3 попыток/);
     expect(text).toMatch(
-      /остаток 0\.00000986 AVAX ≈ \$0,00 на субсчёте, в PnL не входит/,
+      /\nОстаток 0\.00000986 AVAX ≈ \$0,00 на субсчёте, в PnL не входит/,
     );
+    // Тревога «не закрылась» — ответом на сообщение о входе (AC7); у этой сделки ключа входа нет — обычным.
+    expect(channel.deliver.mock.calls[0][0].thread).toMatchObject({
+      ref: null,
+      reply: true,
+    });
     expect(noticeData("live.exit")).toMatchObject({
       attempts: 3,
       leftover: { asset: "AVAX" },
@@ -542,7 +663,9 @@ describe("повтор закрытий (приёмка 0049)", () => {
       protectionRemoved: true,
     });
     expect((await getLiveMirror(db, a))?.status).toBe("unprotected");
-    expect(sent()[0]).toMatch(/без защиты.*Свои TP\/SL уже сняты/);
+    expect(sent()[0]).toMatch(
+      /^⚠️ Реальная сделка без защиты · S98 DOGEUSDT long · USDⓈ-M\nЧто случилось: .*Свои TP\/SL уже сняты/,
+    );
     await minuteLater(a);
     expect((await liveMirrorState()).toClose).toContain(a);
   });
@@ -772,7 +895,10 @@ describe("PnL — оценка (исполнения не прочитаны)", 
       realizedPnl: -0.51,
       pnlEstimated: true,
     });
-    expect(sent()[0]).toMatch(/≈.*\(оценка\)/);
+    expect(sent()[0]).toMatch(/^🔴 ≈ −\$0,51 · /);
+    expect(sent()[0]).toMatch(
+      /\n≈ PnL — оценка по ценам входа и выхода \(исполнения не прочитаны\)/,
+    );
   });
 });
 

@@ -43,7 +43,8 @@ function Row({ entry }: { entry: LogEntry }) {
         <span className="w-40 shrink-0 font-mono text-xs text-muted-foreground">
           {entry.event}
         </span>
-        <span className="min-w-0 flex-1">
+        {/* Сообщения о сделках — по строкам (spec 0068): переносы текста сохраняются. */}
+        <span className="min-w-0 flex-1 whitespace-pre-line">
           {entry.message}
           {entry.error && (
             <span className="text-destructive"> — {entry.error.message}</span>

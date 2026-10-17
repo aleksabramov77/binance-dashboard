@@ -41,6 +41,7 @@ export {
   type LiveSkipDecision,
 } from "./lib/liveGate";
 export {
+  type LiveBalance,
   type LiveHaltAction,
   type LiveTradeSubject,
   liveCloseAllDoneText,
@@ -49,10 +50,13 @@ export {
   liveEntryText,
   liveExitText,
   liveHaltText,
+  liveHeldText,
   liveLeftoverText,
+  liveOutcomeLine,
+  liveOutcomeMark,
   liveUnprotectedText,
 } from "./lib/liveMessages";
-export { liveUsd } from "./lib/money";
+export { livePrice, liveUsd } from "./lib/money";
 export {
   deriveLiveStatus,
   isHandshake,

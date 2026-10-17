@@ -91,6 +91,18 @@ export const liveNotice = (
   link: getSiteLink(`/settings#${anchor}`),
 });
 
+/**
+ * Текст и ссылка уведомления о сделке (вход, итог, без защиты, не закрылась — spec 0068, AC8): текст как есть (по
+ * строкам, начинается со значка) и ссылка на страницу эксперимента сделки. Сообщения о счёте целиком — liveNotice.
+ */
+export const liveTradeNotice = (
+  text: string,
+  experimentId: string,
+): { text: string; link: string | null } => ({
+  text,
+  link: getSiteLink(`/experiments/${encodeURIComponent(experimentId)}`),
+});
+
 async function emit(events: LiveEvent[], heartbeat: LiveHeartbeat) {
   const data = {
     verdict: heartbeat.verdict,

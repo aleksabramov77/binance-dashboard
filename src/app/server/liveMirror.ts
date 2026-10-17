@@ -33,6 +33,7 @@ import {
   recentLiveClosed,
   setExperimentLiveMode,
   setExperimentLiveThresholds,
+  setLiveEntryNotifyRef,
   skipLiveMirror,
   updateLiveMirror,
 } from "@/entities/experiment";
@@ -41,6 +42,7 @@ import {
   LIVE,
   LIVE_MODE_LABEL,
   LIVE_SKIP,
+  type LiveBalance,
   type LiveHaltAction,
   type LiveTradeSubject,
   type LiveTrading,
@@ -53,6 +55,8 @@ import {
   liveExitText,
   liveHaltText,
   liveModeText,
+  liveOutcomeLine,
+  liveOutcomeMark,
   liveUnprotectedText,
   loadLiveHalt,
   lossStreakText,
@@ -66,8 +70,9 @@ import {
 import { getLiveSilentAfterMs } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import { type NotifyRef, notifyRefSchema } from "@/shared/notify";
 import { actorLabel, type EngineToggleActor } from "./engineToggleNotice";
-import { liveNotice, loadLastLiveState } from "./liveAccount";
+import { liveNotice, liveTradeNotice, loadLastLiveState } from "./liveAccount";
 import {
   liveAutoLogData,
   liveAutoOffReason,
@@ -81,6 +86,42 @@ const CANDIDATES_WINDOW_MS = 60 * 60_000;
 /** Уведомление о том же уже было — запись без отправки (итог skipped с этой причиной). */
 const REPEAT = "повтор (сообщение было)";
 const OPEN_STATUSES = ["protected", "unprotected", "close_failed"] as const;
+
+/** Как называется сообщение о входе в журнале (ответ на него, дописать, отметить). */
+const ENTRY_MESSAGE = "сообщение о входе";
+
+/** Ключ уведомления о входе из строки сделки; не задан (сделка до 0068, вход не отправился) — null. */
+const entryRefOf = (row: { entryNotifyRef: unknown }): NotifyRef | null => {
+  const ref = notifyRefSchema.safeParse(row.entryNotifyRef);
+  return ref.success ? ref.data : null;
+};
+
+/** Тревога сделки — ответом на её сообщение о входе (spec 0068, AC7); входа нет — обычным сообщением. */
+const replyToEntry = (row: { entryNotifyRef: unknown }) => ({
+  ref: entryRefOf(row),
+  label: ENTRY_MESSAGE,
+  reply: true,
+});
+
+/** «12:40 UTC» — время пульса для баланса из него. */
+const utcClock = (iso: string) => `${iso.slice(11, 16)} UTC`;
+
+/**
+ * Баланс субсчёта рынка сделки для итога (spec 0068, AC4): от воркера после закрытия, иначе — последний пульс с его
+ * временем (USDⓈ-M — wallet balance, Spot — equity в $); нет и пульса — null («нет данных»).
+ */
+async function exitBalance(
+  market: LiveTradeSubject["market"],
+  balanceUsd: number | null | undefined,
+): Promise<LiveBalance | null> {
+  if (balanceUsd != null) return { usd: balanceUsd, asOf: null };
+  const state = await loadLastLiveState().catch(() => null);
+  const hb = state?.heartbeat;
+  const usd = market === "usdm" ? hb?.usdm?.walletBalance : hb?.spot?.equityUsd;
+  return state && usd != null
+    ? { usd, asOf: utcClock(state.receivedAt) }
+    : null;
+}
 
 const subjectOf = (row: {
   experimentId: string;
@@ -292,24 +333,27 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
       data,
       category: "trades",
       urgent: true,
-      ...liveNotice(text),
+      ...liveTradeNotice(text, row.experimentId),
     });
     return;
   }
   const text = liveEntryText(s, {
     notionalUsd: notionalUsd ?? body.order.notionalUsd,
     raised: body.order.raised,
+    entryPrice: r.entryPrice,
     stopLoss: body.order.stopLoss,
     takeProfit: body.order.takeProfit,
   });
-  await log.notify({
+  const sent = await log.notify({
     level: "info",
     event: "live.entry",
     message: text,
     data,
     category: "trades",
-    ...liveNotice(text),
+    ...liveTradeNotice(text, row.experimentId),
   });
+  // Ключ сообщения о входе — в строку сделки: итог и тревоги уйдут ответом на него (spec 0068, AC9).
+  if (sent.ref) await setLiveEntryNotifyRef(db, body.tradeId, sent.ref);
 }
 
 export async function claimLiveClose(
@@ -318,6 +362,11 @@ export async function claimLiveClose(
   return claimLiveToClose(getDb(), tradeId);
 }
 
+/**
+ * Итог сделки (spec 0068): ответом на сообщение о входе со звуком, к сообщению о входе — строка «Итог: …» и отметка
+ * 👍/👎. Ключа входа нет — обычное сообщение с полным заголовком (AC6). Повтор итога сюда не доходит — его отсекает
+ * переход статуса строки (closeLiveWithAuto).
+ */
 async function announceExit(
   tradeId: string,
   exit: LiveCloseRequest["exit"],
@@ -325,7 +374,19 @@ async function announceExit(
 ): Promise<void> {
   const row = await getLiveMirror(getDb(), tradeId);
   if (!row) return;
-  const text = liveExitText(subjectOf(row), { ...exit, attempts });
+  const s = subjectOf(row);
+  const ref = entryRefOf(row);
+  const balance = await exitBalance(s.market, exit.balanceUsd);
+  const text = liveExitText(s, {
+    ...exit,
+    entryPrice: row.entryPrice,
+    heldMs: row.closedAt
+      ? row.closedAt.getTime() - row.createdAt.getTime()
+      : null,
+    balance,
+    attempts,
+    reply: ref !== null,
+  });
   await log.notify({
     level: "info",
     event: "live.exit",
@@ -340,13 +401,23 @@ async function announceExit(
       pnlEstimated: exit.pnlEstimated,
       closedBy: exit.closedBy,
       leftover: exit.leftover,
+      balance,
       attempts,
       steps: exit.steps,
+      // Для /logs без канала: известно ли сообщение о входе, на которое отвечает итог (AC10).
+      entryMessage: ref !== null,
     },
     category: "trades",
-    // Выход — тихо, но нераспроданный остаток монеты на субсчёте — со звуком: его убирают руками.
-    urgent: exit.leftover != null,
-    ...liveNotice(text),
+    // Итог — со звуком: звук даёт только ответ, реакция на входе уведомления не даёт.
+    urgent: true,
+    ...liveTradeNotice(text, row.experimentId),
+    thread: {
+      ref,
+      label: ENTRY_MESSAGE,
+      reply: true,
+      append: liveOutcomeLine(exit),
+      mark: liveOutcomeMark(exit.realizedPnl),
+    },
   });
 }
 
@@ -482,7 +553,8 @@ export async function saveLiveClose(body: LiveCloseRequest): Promise<void> {
     },
     category: "trades",
     urgent: true,
-    ...liveNotice(text),
+    ...liveTradeNotice(text, row.experimentId),
+    thread: replyToEntry(row),
     skip: notify ? undefined : REPEAT,
   });
 }
@@ -519,7 +591,8 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
         data: { experimentId: row.experimentId, tradeId: item.tradeId },
         category: "trades",
         urgent: true,
-        ...liveNotice(text),
+        ...liveTradeNotice(text, row.experimentId),
+        thread: replyToEntry(row),
       });
     }
   }
@@ -586,7 +659,7 @@ export async function saveLiveReconcile(
       data,
       category: "trades",
       urgent: true,
-      ...liveNotice(text),
+      ...liveTradeNotice(text, row.experimentId),
     });
     return;
   }
