@@ -80,6 +80,8 @@ export function remoteBackupFetchCommand(
       : `f=${dir}/app-${date}.db.gz`;
   return [
     "set -e",
+    // cwd claude закрыт для binance: без cd / find от его имени пишет «Failed to restore initial working directory».
+    "cd /",
     pick,
     `[ -n "$f" ] && sudo -u ${owner} test -f "$f" || { echo "нет ночной копии \${f:-в ${dir}}" >&2; exit 3; }`,
     `echo "копия: $f" >&2`,

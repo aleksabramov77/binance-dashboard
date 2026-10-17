@@ -149,13 +149,17 @@ ssh claude@<ip> 'sudo bash ~claude/server-scripts/add-backup.sh binance'
 Восстановление базы из копии дня `<дата>` (на секундах 25–50 минуты; пауза торговли ~1 мин):
 ```sh
 ssh claude@<ip> 'set -e; d=<дата>; B=/var/lib/binance
+  live=$(systemctl is-active binance-live || true)
+  [ "$live" != active ] || sudo systemctl stop binance-live
   sudo systemctl stop binance
-  sudo -u binance cp $B/app.db $B/app.db.before-restore      # текущая — на всякий случай
-  sudo rm -f $B/app.db-wal $B/app.db-shm
+  # текущая база — на всякий случай, через .backup: сервер не сливает WAL при остановке
+  sudo -u binance sqlite3 $B/app.db ".backup $B/app.db.before-restore"
   sudo -u binance sh -c "gunzip -c $B/backups/app-$d.db.gz > $B/app.db.restore"
-  sudo -u binance sqlite3 $B/app.db.restore "pragma integrity_check"   # → ok
+  [ "$(sudo -u binance sqlite3 $B/app.db.restore "pragma integrity_check")" = ok ]
+  sudo rm -f $B/app.db-wal $B/app.db-shm
   sudo -u binance mv $B/app.db.restore $B/app.db
-  sudo systemctl start binance'
+  sudo systemctl start binance
+  [ "$live" != active ] || sudo systemctl start binance-live'
 ```
 Затем смоук и `/experiments` на сайте. Всё, что записано после 23:30 дня копии, теряется (сделки paper, журнал);
 демо- и реальные позиции на бирже остаются — сверить их со строками зеркал вручную (как в «Откат» spec 0059).

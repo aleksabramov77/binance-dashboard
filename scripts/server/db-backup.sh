@@ -15,6 +15,9 @@ LOGS=/var/lib/binance/logs
 KEEP=7
 LOG_DAYS=14
 while [ $# -gt 0 ]; do
+  case "$1" in --db | --dir | --logs | --keep | --log-days)
+    [ $# -ge 2 ] || { echo "ОШИБКА: $1 — нужно значение" >&2; exit 1; } ;;
+  esac
   case "$1" in
     --db) DB=$2; shift 2 ;;
     --dir) DIR=$2; shift 2 ;;
@@ -39,7 +42,7 @@ rm -f "$PART" "$PART.gz"
 
 [ -f "$DB" ] || fail "нет базы $DB"
 sqlite3 "$DB" ".backup '$PART'" || fail "sqlite3 .backup не удался"
-check=$(sqlite3 "$PART" "pragma integrity_check" 2>&1) || fail "integrity_check не выполнился: $check"
+check=$(sqlite3 "$PART" "pragma integrity_check" 2>&1) || fail "integrity_check не выполнился: $(printf '%s' "$check" | head -3 | tr '\n' ' ')"
 [ "$check" = ok ] || fail "integrity_check копии: $(printf '%s' "$check" | head -3 | tr '\n' ' ')"
 gzip -9 "$PART" || fail "gzip не удался"
 chmod 600 "$PART.gz"
