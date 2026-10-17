@@ -283,8 +283,9 @@ export async function saveAccountKey(
     error: string,
     reasons: string[],
     flags: ReadKeyFlags | null,
+    detail = error,
   ): SaveAccountKeyResult => {
-    log.warn("account-key.rejected", `Ключ …${hint} не сохранён: ${error}`, {
+    log.warn("account-key.rejected", `Ключ …${hint} не сохранён: ${detail}`, {
       hint,
       reasons,
       by: context.by,
@@ -315,6 +316,7 @@ export async function saveAccountKey(
       "Ключ не сохранён: права не подходят для ключа «только чтение»",
       verdict.reasons,
       verdict.flags,
+      "права не подходят для ключа «только чтение»",
     );
 
   const sealed = encrypt(master.key, JSON.stringify(creds), NAME);

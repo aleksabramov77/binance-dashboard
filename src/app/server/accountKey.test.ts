@@ -213,6 +213,9 @@ describe("saveAccountKey", () => {
     expect(result.flags?.enableWithdrawals).toBe(true);
     expect(db.select().from(accountKeysTable).all()).toHaveLength(0);
     expect(events("warn")).toEqual(["account-key.rejected"]);
+    expect(vi.mocked(log.warn).mock.calls[0][1]).toBe(
+      "Ключ …AB12 не сохранён: права не подходят для ключа «только чтение»",
+    );
     expect(vi.mocked(log.warn).mock.calls[0][2]).toMatchObject({
       hint: "AB12",
       reasons: result.reasons,

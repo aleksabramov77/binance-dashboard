@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { type ReactNode, useEffect, useState } from "react";
-import { reportClientError } from "@/shared/lib";
+import { reportClientError, shouldReportMutationError } from "@/shared/lib";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -20,10 +20,13 @@ export function Providers({ children }: { children: ReactNode }) {
             reportClientError("query", error, { queryKey: query.queryKey }),
         }),
         mutationCache: new MutationCache({
-          onError: (error, _vars, _ctx, mutation) =>
+          // Ожидаемые отказы (meta EXPECTED_ERRORS_META) видны в форме, сервер пишет их сам — не error `client`.
+          onError: (error, _vars, _ctx, mutation) => {
+            if (!shouldReportMutationError(mutation.meta)) return;
             reportClientError("mutation", error, {
               mutationKey: mutation.options.mutationKey ?? null,
-            }),
+            });
+          },
         }),
         defaultOptions: {
           queries: { staleTime: 60_000, refetchOnWindowFocus: true },

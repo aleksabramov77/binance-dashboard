@@ -19,9 +19,11 @@ export {
 export {
   type AppVersion,
   appVersionSchema,
+  EXPECTED_ERRORS_META,
   getPageVersion,
   isStaleVersion,
   reportClientError,
+  shouldReportMutationError,
 } from "./client";
 export {
   formatAmount,

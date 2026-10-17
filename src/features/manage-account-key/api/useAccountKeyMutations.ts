@@ -7,6 +7,7 @@ import {
   accountKeyQueryKey,
   readAccountKeyResponse,
 } from "@/entities/account-key";
+import { EXPECTED_ERRORS_META } from "@/shared/lib";
 
 function useAfterChange() {
   const queryClient = useQueryClient();
@@ -28,6 +29,8 @@ export function useSaveAccountKey() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
       }).then(readAccountKeyResponse),
+    // Отказ по правам или ответ Binance — ожидаемый: причины в карточке, сервер пишет warn account-key.rejected.
+    meta: EXPECTED_ERRORS_META,
     onSuccess,
   });
 }

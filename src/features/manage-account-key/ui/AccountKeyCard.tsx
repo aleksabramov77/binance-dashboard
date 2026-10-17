@@ -202,7 +202,8 @@ function SourceNote({ status }: { status: AccountKeyStatus }) {
     return (
       <p className="text-sm text-muted-foreground">
         Сейчас используется ключ из env (<code>BINANCE_API_KEY</code> в{" "}
-        <code>.env.local</code>). Ключ, введённый здесь, главнее.
+        <code>.env.local</code>).
+        {status.input.available && " Ключ, введённый здесь, главнее."}
       </p>
     );
   if (status.source === "none" && !status.stored)

@@ -211,7 +211,17 @@ describe("/api/account-key", () => {
     expect((await read(bad)).error).toMatch(/только латинские буквы и цифры/);
     const extra = await put({ apiKey: API_KEY, apiSecret: API_SECRET, x: 1 });
     expect(extra.status).toBe(400);
-    await read(extra);
+    expect((await read(extra)).error).toBe(
+      "Неверный запрос: нужны поля apiKey и apiSecret",
+    );
+    const notJson = await put("не json");
+    expect(notJson.status).toBe(400);
+    expect((await read(notJson)).error).toBe(
+      "Неверный запрос: нужны поля apiKey и apiSecret",
+    );
+    const missing = await put({ apiKey: API_KEY });
+    expect(missing.status).toBe(400);
+    expect((await read(missing)).error).toBe("Вставьте Secret Key");
     expect(fetchApiRestrictions).not.toHaveBeenCalled();
   });
 

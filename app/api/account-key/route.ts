@@ -36,15 +36,21 @@ export const PUT = withLogging("account-key", async (request) => {
   const parsed = accountKeyInputSchema.safeParse(
     await request.json().catch(() => null),
   );
-  // Текст ошибки — из сообщений схемы: введённое значение в них не попадает.
-  if (!parsed.success)
+  // Ошибка поля — своё русское сообщение схемы (введённое значение в нём не повторяется); остальное (не объект,
+  // лишние поля) — общий текст, без английских сообщений Zod.
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const field = issue?.path[0];
     return Response.json(
       {
         error:
-          parsed.error.issues[0]?.message ?? "Ожидается { apiKey, apiSecret }",
+          issue && (field === "apiKey" || field === "apiSecret")
+            ? issue.message
+            : "Неверный запрос: нужны поля apiKey и apiSecret",
       },
       { status: 400 },
     );
+  }
   const result = await saveAccountKey(parsed.data, { by: await by() });
   if (result.ok) return Response.json(result.status);
   return Response.json(
