@@ -9,12 +9,13 @@ import {
   runsTable,
   seedExperiments,
 } from "@/entities/experiment";
-import { sendTelegramMessage } from "@/shared/api/telegram";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { log } from "@/shared/lib/logger.server";
+import { log, setNotifyChannels } from "@/shared/lib/logger.server";
+import type { NotifyChannel } from "@/shared/notify";
 import { runMirrorAuto } from "./mirrorAuto";
 
-// Авто-зеркало без биржи и Telegram (spec 0043): БД — SQLite в памяти, Telegram и журнал — моки.
+// Авто-зеркало без биржи (spec 0043): БД — SQLite в памяти, журнал — моки, уведомление — настоящий log.notify с
+// фиктивным каналом (spec 0067).
 let db: Db;
 let close: () => Promise<void>;
 
@@ -22,15 +23,30 @@ vi.mock("@/shared/db/client.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/shared/db/client.server")>()),
   getDb: () => db,
 }));
-vi.mock("@/shared/api/telegram", () => ({ sendTelegramMessage: vi.fn() }));
 // Чтение данных для решения — настоящее; тесты гонок вклиниваются между чтением и записью.
 vi.mock("@/entities/experiment", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/entities/experiment")>();
   return { ...actual, readMirrorAutoRows: vi.fn(actual.readMirrorAutoRows) };
 });
-vi.mock("@/shared/lib/logger.server", () => ({
-  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
+vi.mock("@/shared/lib/logger.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/shared/lib/logger.server")>();
+  return {
+    ...actual,
+    log: {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      notify: vi.fn(actual.log.notify),
+    },
+  };
+});
+
+const channel = {
+  name: "test",
+  deliver: vi.fn<NotifyChannel["deliver"]>(),
+};
 
 const ENV = {
   BINANCE_DEMO_API_KEY: "k",
@@ -43,12 +59,16 @@ beforeEach(async () => {
   ({ db, close } = await createMemoryDb());
   for (const [k, v] of Object.entries(ENV)) vi.stubEnv(k, v);
   vi.stubEnv("NODE_ENV", "production");
-  vi.mocked(sendTelegramMessage).mockReset();
+  channel.deliver.mockReset();
+  channel.deliver.mockImplementation(async () => ({ status: "sent" }));
+  setNotifyChannels([channel]);
   vi.mocked(log.info).mockClear();
   vi.mocked(log.warn).mockClear();
+  vi.mocked(log.notify).mockClear();
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
+  setNotifyChannels([]);
   await close();
 });
 
@@ -143,7 +163,7 @@ const flags = async () =>
   );
 
 describe("runMirrorAuto", () => {
-  it("dry-run — тот же план без записи в БД, журнал и Telegram", async () => {
+  it("dry-run — тот же план без записи в БД, журнала и уведомлений", async () => {
     await setup();
     const r = await runMirrorAuto({ dryRun: true });
     expect(r.changes.map((c) => c.message)).toEqual([
@@ -154,35 +174,44 @@ describe("runMirrorAuto", () => {
       S98: { demoMirror: false },
       PS99: { advice: null },
     });
-    expect(log.info).not.toHaveBeenCalled();
-    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect(log.notify).not.toHaveBeenCalled();
+    expect(channel.deliver).not.toHaveBeenCalled();
   });
 
-  it("включает «Авто», ручное не трогает; журнал и Telegram; подсказка не повторяется", async () => {
+  it("включает «Авто», ручное не трогает; запись с уведомлением «Лаборатория», тихо; подсказка не повторяется", async () => {
     await setup();
     const r = await runMirrorAuto();
     expect(await flags()).toMatchObject({
       S98: { demoMirror: true },
       PS99: { demoMirror: false, advice: "on" },
     });
-    expect(r.telegram).toEqual({ sent: 2, failed: 0, skipped: null });
-    expect(log.info).toHaveBeenCalledWith(
-      "mirror.auto",
-      "S98 → демо-зеркало включено: 30 сделок, средний R +0.20",
-      expect.objectContaining({ experimentId: "S98" }),
+    expect(r.notify).toEqual({ sent: 2, failed: 0, skipped: null });
+    expect(log.notify).toHaveBeenCalledWith({
+      level: "info",
+      event: "mirror.auto",
+      message: "S98 → демо-зеркало включено: 30 сделок, средний R +0.20",
+      data: expect.objectContaining({ experimentId: "S98" }),
+      category: "lab",
+    });
+    expect(log.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "mirror.advice",
+        message: expect.stringContaining("💡 PS99"),
+        data: expect.objectContaining({ experimentId: "PS99" }),
+        category: "lab",
+      }),
     );
-    expect(log.info).toHaveBeenCalledWith(
-      "mirror.advice",
-      expect.stringContaining("💡 PS99"),
-      expect.objectContaining({ experimentId: "PS99" }),
-    );
+    expect(channel.deliver.mock.calls.map(([n]) => n.urgent)).toEqual([
+      false,
+      false,
+    ]);
 
-    vi.mocked(sendTelegramMessage).mockClear();
+    channel.deliver.mockClear();
     const again = await runMirrorAuto();
     // S98 теперь вкл с новым окном (сделок после включения нет), PS99 — подсказка уже отправлена.
     expect(again.changes).toEqual([]);
     expect(again.advice).toEqual([]);
-    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect(channel.deliver).not.toHaveBeenCalled();
 
     // «Оставил включённым» не затирает, почему автомат включил: последнее изменение — прежнее, проверка — новая.
     const [s98] = await db
@@ -195,24 +224,29 @@ describe("runMirrorAuto", () => {
     });
   });
 
-  it("не production — только журнал; сбой Telegram не отменяет изменения (warn)", async () => {
+  it("канал не отправил (не production) — только журнал; сбой канала не отменяет изменения", async () => {
     await setup();
-    vi.stubEnv("NODE_ENV", "development");
+    channel.deliver.mockResolvedValue({
+      status: "skipped",
+      reason: "не production",
+    });
     const local = await runMirrorAuto({ ids: ["S98"] });
-    expect(local.telegram.skipped).toMatch(/не production/);
-    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect(local.notify).toEqual({
+      sent: 0,
+      failed: 0,
+      skipped: "не production",
+    });
     expect((await flags()).S98.demoMirror).toBe(true);
 
-    vi.stubEnv("NODE_ENV", "production");
-    vi.mocked(sendTelegramMessage).mockRejectedValue(new Error("сеть"));
+    channel.deliver.mockRejectedValue(new Error("сеть"));
     const failed = await runMirrorAuto({ ids: ["PS99"] });
-    expect(failed.telegram).toMatchObject({ sent: 0, failed: 1 });
+    expect(failed.notify).toMatchObject({ sent: 0, failed: 1 });
     expect((await flags()).PS99.advice).toBe("on");
-    expect(log.warn).toHaveBeenCalledWith(
-      "mirror.telegram",
-      expect.any(String),
-      expect.any(Object),
+    // Итог — в записи журнала: «не отправлено: сеть».
+    const records = await Promise.all(
+      vi.mocked(log.notify).mock.results.map((r) => r.value),
     );
+    expect(records.at(-1)).toMatchObject({ status: "failed", reason: "сеть" });
   });
 
   it("без ключа Binance Demo ничего не включает и пишет причину", async () => {
@@ -225,7 +259,7 @@ describe("runMirrorAuto", () => {
     expect((await flags()).S98.demoMirror).toBe(false);
   });
 
-  it("положение переключили между чтением и записью — подсказки нет ни в журнале, ни в Telegram", async () => {
+  it("положение переключили между чтением и записью — подсказки нет ни в журнале, ни в уведомлениях", async () => {
     await setup();
     const read = vi.mocked(readMirrorAutoRows);
     const actual = read.getMockImplementation();
@@ -239,12 +273,8 @@ describe("runMirrorAuto", () => {
     });
     const r = await runMirrorAuto({ ids: ["PS99"] });
     expect(r.advice).toEqual([]);
-    expect(log.info).not.toHaveBeenCalledWith(
-      "mirror.advice",
-      expect.anything(),
-      expect.anything(),
-    );
-    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect(log.notify).not.toHaveBeenCalled();
+    expect(channel.deliver).not.toHaveBeenCalled();
     expect((await flags()).PS99.advice).toBeNull();
   });
 
@@ -262,6 +292,6 @@ describe("runMirrorAuto", () => {
     const first = await runMirrorAuto({ ids: ["PS99"] });
     expect(second).toMatchObject({ advice: [{ id: "PS99", advice: "on" }] });
     expect(first.advice).toEqual([]);
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(channel.deliver).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,6 @@
 // Композиция реального счёта (spec 0047): приём пульса воркера, UID основного счёта по read-only ключу,
-// уведомления о смене состояния (журнал live.status + Telegram), «молчит» для монитора, данные карточки.
-// Только сервер. Торгового ключа здесь нет — он только у воркера (scripts/live-worker.ts).
+// уведомления о смене состояния (журнал live.status с уведомлением, spec 0067), «молчит» для монитора, данные
+// карточки. Только сервер. Торгового ключа здесь нет — он только у воркера (scripts/live-worker.ts).
 import {
   deriveLiveStatus,
   type LiveEvent,
@@ -15,12 +15,7 @@ import {
 } from "@/entities/live-account";
 import type { MainAccountUid } from "@/shared/api/binance";
 import { fetchAccountUid } from "@/shared/api/binance/account.server";
-import { sendTelegramMessage } from "@/shared/api/telegram";
-import {
-  getLiveSilentAfterMs,
-  getSiteLink,
-  getTelegramConfig,
-} from "@/shared/config/env.server";
+import { getLiveSilentAfterMs, getSiteLink } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { getMainCredentials } from "./accountKey";
@@ -84,42 +79,17 @@ export function clearMainAccountUidCache() {
 }
 
 /**
- * Почему Telegram не отправляется; null — отправлять. Фикстуры и локальные серверы worktree (не production) в чат
- * владельца не пишут: там настоящие тревоги, а .env.local у worktree общий с основным checkout.
+ * Текст и ссылка уведомления о реальном счёте (пульс 0047, реальное зеркало 0049) для log.notify: «Binance Dashboard ·
+ * …» и ссылка на карточку (`/settings#live`, «Стоп входов» — `#live-stop`). Только production и не фикстуры — решает
+ * канал (spec 0067).
  */
-function telegramSkip(fixture: LiveHeartbeat["fixture"]): string | null {
-  if (fixture) return "фикстура";
-  if (process.env.NODE_ENV !== "production") return "не production";
-  return getTelegramConfig()?.chatId ? null : "Telegram не настроен";
-}
-
-/**
- * Сообщение о реальном счёте в Telegram (пульс 0047, реальное зеркало 0049): только production и не фикстуры.
- * Возвращает итог для записи журнала: «отправлен» / «не отправлен: причина».
- */
-export async function notifyLive(
+export const liveNotice = (
   text: string,
-  fixture: LiveHeartbeat["fixture"] = null,
   anchor = "live",
-): Promise<string> {
-  const skip = telegramSkip(fixture);
-  const config = getTelegramConfig();
-  if (skip || !config?.chatId) return `не отправлен: ${skip}`;
-  const link = getSiteLink(`/settings#${anchor}`);
-  try {
-    await sendTelegramMessage(
-      config.token,
-      config.chatId,
-      [`Binance Dashboard · ${text}`, link].filter(Boolean).join("\n"),
-    );
-    return "отправлен";
-  } catch (error) {
-    log.warn("live.telegram", "Сообщение о реальном счёте не отправлено", {
-      error: message(error),
-    });
-    return `не отправлен: ${message(error)}`;
-  }
-}
+): { text: string; link: string | null } => ({
+  text: `Binance Dashboard · ${text}`,
+  link: getSiteLink(`/settings#${anchor}`),
+});
 
 async function emit(events: LiveEvent[], heartbeat: LiveHeartbeat) {
   const data = {
@@ -129,15 +99,26 @@ async function emit(events: LiveEvent[], heartbeat: LiveHeartbeat) {
     version: heartbeat.version,
   };
   for (const event of events) {
-    const telegram = event.notify
-      ? await notifyLive(event.message, heartbeat.fixture)
-      : undefined;
-    log[event.level]("live.status", event.message, { ...data, telegram });
+    if (!event.notify) {
+      log[event.level]("live.status", event.message, data);
+      continue;
+    }
+    // Состояние воркера — тема «Сервер»: «годится» — тихо, блокировка и «ключ не задан» (warn) — со звуком.
+    await log.notify({
+      level: event.level,
+      event: "live.status",
+      message: event.message,
+      data,
+      category: "server",
+      urgent: event.level !== "info",
+      fixture: heartbeat.fixture !== null,
+      ...liveNotice(event.message),
+    });
   }
 }
 
 /**
- * Приём пульса: последний пульс → БД, смена оценки → live.status + Telegram, ответ воркеру с UID основного
+ * Приём пульса: последний пульс → БД, смена оценки → live.status с уведомлением, ответ воркеру с UID основного
  * счёта (для фикстур и без ключа не нужен).
  */
 export async function ingestHeartbeat(
@@ -166,7 +147,7 @@ export async function ingestHeartbeat(
 }
 
 /**
- * Монитор: воркер молчит дольше порога → одна запись live.status (Telegram — тревогой монитора). Возвращает
+ * Монитор: воркер молчит дольше порога → одна запись live.status (уведомление — тревогой монитора). Возвращает
  * время последнего пульса для правила монитора; null — пульса не было (правило не срабатывает).
  */
 export async function checkLiveSilence(now = Date.now()): Promise<{

@@ -1,6 +1,7 @@
 // Композиция реального зеркала в приложении (spec 0049): хранилище для воркера реального счёта (маршруты
 // /api/live/mirror/*, Bearer LIVE_WORKER_SECRET), переключатель «Реальный счёт» эксперимента, аварийный стоп,
-// журнал live.* и Telegram. Ордеров здесь нет — их отправляет только воркер. Только сервер.
+// журнал live.* и уведомления — категория «Сделки» (spec 0067). Ордеров здесь нет — их отправляет только воркер.
+// Только сервер.
 import { eq } from "drizzle-orm";
 import {
   claimAllLiveOpen,
@@ -66,7 +67,7 @@ import { getLiveSilentAfterMs } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import { actorLabel, type EngineToggleActor } from "./engineToggleNotice";
-import { loadLastLiveState, notifyLive } from "./liveAccount";
+import { liveNotice, loadLastLiveState } from "./liveAccount";
 import {
   liveAutoLogData,
   liveAutoOffReason,
@@ -77,6 +78,8 @@ import { cachedTickerPrices } from "./tickerPrices";
 
 /** Свежие paper-входы за этот срок — кандидаты (окно свежести проверяет сам прогон: 10 минут, как у демо). */
 const CANDIDATES_WINDOW_MS = 60 * 60_000;
+/** Уведомление о том же уже было — запись без отправки (итог skipped с этой причиной). */
+const REPEAT = "повтор (сообщение было)";
 const OPEN_STATUSES = ["protected", "unprotected", "close_failed"] as const;
 
 const subjectOf = (row: {
@@ -191,7 +194,7 @@ export async function claimLive(tradeId: string): Promise<{
   return { claimed, reason: claimed ? null : "taken" };
 }
 
-/** Пропуск входа: строка skipped, запись live.skipped; дневной лимит — Telegram один раз за сутки на эксперимент. */
+/** Пропуск входа: строка skipped, запись live.skipped; дневной лимит — уведомление один раз за сутки на эксперимент. */
 export async function skipLive(
   tradeId: string,
   reason: string,
@@ -220,15 +223,18 @@ export async function skipLive(
     return;
   const pnl = (await liveDailyPnl(db, dayStart)).get(c.experimentId) ?? 0;
   const text = liveDailyLimitText(c.experimentId, pnl);
-  const telegram = await notifyLive(text);
-  log.warn("live.limit", text, {
-    experimentId: c.experimentId,
-    dailyPnl: pnl,
-    telegram,
+  await log.notify({
+    level: "warn",
+    event: "live.limit",
+    message: text,
+    data: { experimentId: c.experimentId, dailyPnl: pnl },
+    category: "trades",
+    urgent: true,
+    ...liveNotice(text),
   });
 }
 
-/** Итог входа: строка, журнал, Telegram (вход; без защиты — ⚠️). */
+/** Итог входа: строка, журнал и уведомление (вход — тихо; без защиты — ⚠️ со звуком). */
 export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
   const db = getDb();
   const r = body.result;
@@ -237,7 +243,7 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
       ? r.entryPrice * r.filledQuantity
       : null;
   // Только из pending: повтор того же итога (ответ потерялся по таймауту, досылка outbox после сверки) не пишет
-  // журнал и не шлёт Telegram второй раз.
+  // журнал и не шлёт уведомление второй раз.
   const changed = await updateLiveMirror(
     db,
     body.tradeId,
@@ -279,9 +285,14 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
   }
   if (r.status === "unprotected") {
     const text = liveUnprotectedText(s, r.message);
-    log.error("live.unprotected", text, {
-      ...data,
-      telegram: await notifyLive(text),
+    await log.notify({
+      level: "error",
+      event: "live.unprotected",
+      message: text,
+      data,
+      category: "trades",
+      urgent: true,
+      ...liveNotice(text),
     });
     return;
   }
@@ -291,7 +302,14 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
     stopLoss: body.order.stopLoss,
     takeProfit: body.order.takeProfit,
   });
-  log.info("live.entry", text, { ...data, telegram: await notifyLive(text) });
+  await log.notify({
+    level: "info",
+    event: "live.entry",
+    message: text,
+    data,
+    category: "trades",
+    ...liveNotice(text),
+  });
 }
 
 export async function claimLiveClose(
@@ -308,19 +326,27 @@ async function announceExit(
   const row = await getLiveMirror(getDb(), tradeId);
   if (!row) return;
   const text = liveExitText(subjectOf(row), { ...exit, attempts });
-  log.info("live.exit", text, {
-    experimentId: row.experimentId,
-    tradeId,
-    symbol: row.symbol,
-    exitPrice: exit.exitPrice,
-    feesUsd: exit.feesUsd,
-    realizedPnl: exit.realizedPnl,
-    pnlEstimated: exit.pnlEstimated,
-    closedBy: exit.closedBy,
-    leftover: exit.leftover,
-    attempts,
-    steps: exit.steps,
-    telegram: await notifyLive(text),
+  await log.notify({
+    level: "info",
+    event: "live.exit",
+    message: text,
+    data: {
+      experimentId: row.experimentId,
+      tradeId,
+      symbol: row.symbol,
+      exitPrice: exit.exitPrice,
+      feesUsd: exit.feesUsd,
+      realizedPnl: exit.realizedPnl,
+      pnlEstimated: exit.pnlEstimated,
+      closedBy: exit.closedBy,
+      leftover: exit.leftover,
+      attempts,
+      steps: exit.steps,
+    },
+    category: "trades",
+    // Выход — тихо, но нераспроданный остаток монеты на субсчёте — со звуком: его убирают руками.
+    urgent: exit.leftover != null,
+    ...liveNotice(text),
   });
 }
 
@@ -341,7 +367,7 @@ const closedPatch = (e: LiveCloseRequest["exit"]) => ({
 
 /**
  * Закрытие строки и пороги эксперимента одной транзакцией (spec 0053, AC3): «Авто» / «Вкл + автовыкл» — выключить
- * (положение «Выкл» с причиной), ручное «Вкл» — подсказка. Потом — Telegram о закрытии, о выключении и подсказка.
+ * (положение «Выкл» с причиной), ручное «Вкл» — подсказка. Потом — уведомления о закрытии, о выключении и подсказка.
  * Повтор того же итога (строка уже не в from) ничего не пишет и не шлёт.
  */
 async function closeAndCheck(
@@ -374,15 +400,22 @@ async function closeAndCheck(
       auto.mode,
       auto.disabledReason,
     );
-    log.info("live.auto", text, {
-      ...liveAutoLogData(
-        auto.experimentId,
-        auto.mode,
-        auto.plan,
-        auto.disabledReason,
-      ),
-      tradeId,
-      telegram: await notifyLive(text),
+    await log.notify({
+      level: "info",
+      event: "live.auto",
+      message: text,
+      data: {
+        ...liveAutoLogData(
+          auto.experimentId,
+          auto.mode,
+          auto.plan,
+          auto.disabledReason,
+        ),
+        tradeId,
+      },
+      category: "trades",
+      urgent: true,
+      ...liveNotice(text),
     });
     return;
   }
@@ -391,18 +424,25 @@ async function closeAndCheck(
     : null;
   if (reason) {
     const text = liveAdviceText(auto.experimentId, reason);
-    log.info("live.advice", text, {
-      ...liveAutoLogData(auto.experimentId, auto.mode, auto.plan, null),
-      tradeId,
-      telegram: await notifyLive(text),
+    await log.notify({
+      level: "info",
+      event: "live.advice",
+      message: text,
+      data: {
+        ...liveAutoLogData(auto.experimentId, auto.mode, auto.plan, null),
+        tradeId,
+      },
+      category: "trades",
+      ...liveNotice(text),
     });
   }
 }
 
 /**
- * Итог попытки закрытия. closed — строка закрыта с PnL по исполнениям, Telegram (после неудачных попыток — «закрыто
+ * Итог попытки закрытия. closed — строка закрыта с PnL по исполнениям, уведомление (после неудачных попыток — «закрыто
  * после N попыток»). failed — строка снова в очереди и повторяется каждый прогон: close_failed, или «без защиты», если
- * свои TP/SL уже сняты. Telegram о неудаче — один раз на позицию (первая неудача или снятие защиты), журнал — каждый раз.
+ * свои TP/SL уже сняты. Уведомление о неудаче — один раз на позицию (первая неудача или снятие защиты), журнал —
+ * каждый раз.
  */
 export async function saveLiveClose(body: LiveCloseRequest): Promise<void> {
   const db = getDb();
@@ -429,15 +469,21 @@ export async function saveLiveClose(body: LiveCloseRequest): Promise<void> {
     : liveCloseFailedText(s, e.message);
   // Один раз на позицию: первая неудача или защита снята именно сейчас.
   const notify = failed.attempts === 1 || body.protectionRemoved;
-  log.error(unprotected ? "live.unprotected" : "live.close_failed", text, {
-    experimentId: row.experimentId,
-    tradeId: body.tradeId,
-    symbol: row.symbol,
-    attempts: failed.attempts,
-    steps: e.steps,
-    telegram: notify
-      ? await notifyLive(text)
-      : "не отправлен: повтор (сообщение было)",
+  await log.notify({
+    level: "error",
+    event: unprotected ? "live.unprotected" : "live.close_failed",
+    message: text,
+    data: {
+      experimentId: row.experimentId,
+      tradeId: body.tradeId,
+      symbol: row.symbol,
+      attempts: failed.attempts,
+      steps: e.steps,
+    },
+    category: "trades",
+    urgent: true,
+    ...liveNotice(text),
+    skip: notify ? undefined : REPEAT,
   });
 }
 
@@ -466,10 +512,14 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
       const row = await getLiveMirror(db, item.tradeId);
       if (!row) continue;
       const text = liveUnprotectedText(subjectOf(row), e.message);
-      log.error("live.unprotected", text, {
-        experimentId: row.experimentId,
-        tradeId: item.tradeId,
-        telegram: await notifyLive(text),
+      await log.notify({
+        level: "error",
+        event: "live.unprotected",
+        message: text,
+        data: { experimentId: row.experimentId, tradeId: item.tradeId },
+        category: "trades",
+        urgent: true,
+        ...liveNotice(text),
       });
     }
   }
@@ -529,9 +579,14 @@ export async function saveLiveReconcile(
   };
   if (body.outcome === "unprotected") {
     const text = liveUnprotectedText(subjectOf(row), body.message);
-    log.error("live.reconcile", text, {
-      ...data,
-      telegram: await notifyLive(text),
+    await log.notify({
+      level: "error",
+      event: "live.reconcile",
+      message: text,
+      data,
+      category: "trades",
+      urgent: true,
+      ...liveNotice(text),
     });
     return;
   }
@@ -544,7 +599,7 @@ export async function saveLiveReconcile(
 
 /**
  * «Закрыть всё»: захват всех открытых позиций (claim) и итог прогона воркера (done). Позиции остались — запрос
- * держится и повторяется следующим прогоном; Telegram — при первом прогоне с остатком и когда закрыто всё.
+ * держится и повторяется следующим прогоном; уведомление — при первом прогоне с остатком и когда закрыто всё.
  */
 export async function liveCloseAll(
   body:
@@ -570,11 +625,16 @@ export async function liveCloseAll(
   await saveLiveCloseAllRun(db, result);
   const text = liveCloseAllDoneText(result);
   const notify = result.remaining === 0 || runs === 1;
-  log[result.remaining ? "error" : "info"]("live.halt", text, {
-    ...result,
-    telegram: notify
-      ? await notifyLive(text, null, "live-stop")
-      : "не отправлен: повтор (сообщение было)",
+  await log.notify({
+    level: result.remaining ? "error" : "info",
+    event: "live.halt",
+    message: text,
+    data: result,
+    category: "trades",
+    // «Закрыть всё» выполнено — тихо; позиции остались (не закрылись) — со звуком, как сбой закрытия.
+    urgent: result.remaining > 0,
+    ...liveNotice(text, "live-stop"),
+    skip: notify ? undefined : REPEAT,
   });
   return [];
 }
@@ -682,13 +742,19 @@ export async function setLiveMode(
     by,
     thresholds ?? { lossUsd: exp.lossUsd, streak: exp.streak },
   );
-  log.info("live.toggle", text, {
-    experimentId: input.id,
-    mode: input.mode,
-    liveMirror: row.liveMirror,
-    by,
-    ...(thresholds && { thresholds }),
-    telegram: await notifyLive(text),
+  await log.notify({
+    level: "info",
+    event: "live.toggle",
+    message: text,
+    data: {
+      experimentId: input.id,
+      mode: input.mode,
+      liveMirror: row.liveMirror,
+      by,
+      ...(thresholds && { thresholds }),
+    },
+    category: "trades",
+    ...liveNotice(text),
   });
   // Перевод в «Авто» — правило сразу, без ожидания суток (AC4).
   const liveMirror =
@@ -720,7 +786,7 @@ async function applyLiveAutoNow(
   }
 }
 
-/** «Стоп входов» / «Возобновить» / «Закрыть всё» — состояние в БД, журнал live.halt и Telegram. */
+/** «Стоп входов» / «Возобновить» / «Закрыть всё» — состояние в БД, журнал live.halt и уведомление со звуком. */
 export async function liveHaltAction(
   action: LiveHaltAction,
   actor: EngineToggleActor,
@@ -741,10 +807,14 @@ export async function liveHaltAction(
   if (action === "close_all") await requestLiveCloseAll(db, by);
   else await setLiveStopped(db, action === "stop", by);
   const text = liveHaltText(action, by);
-  log.warn("live.halt", text, {
-    action,
-    by,
-    telegram: await notifyLive(text, null, "live-stop"),
+  await log.notify({
+    level: "warn",
+    event: "live.halt",
+    message: text,
+    data: { action, by },
+    category: "trades",
+    urgent: true,
+    ...liveNotice(text, "live-stop"),
   });
   return { ok: true };
 }

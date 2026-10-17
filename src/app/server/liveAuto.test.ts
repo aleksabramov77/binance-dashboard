@@ -23,9 +23,10 @@ import {
   saveLiveState,
   setLiveStopped,
 } from "@/entities/live-account";
-import { sendTelegramMessage } from "@/shared/api/telegram";
+import { telegramMessageText } from "@/shared/api/telegram";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { log } from "@/shared/lib/logger.server";
+import { log, setNotifyChannels } from "@/shared/lib/logger.server";
+import type { NotifyChannel } from "@/shared/notify";
 import { runLiveAuto } from "./liveAuto";
 import {
   claimLive,
@@ -36,7 +37,7 @@ import {
   setLiveMode,
 } from "./liveMirror";
 
-// Режимы реального счёта (spec 0053) без биржи: SQLite в памяти, Telegram — мок. Id — фиктивные (S96–S98, PS99).
+// Режимы реального счёта (spec 0053) без биржи: SQLite в памяти, канал уведомлений — мок. Id — фиктивные (S96–S98, PS99).
 let db: Db;
 let close: () => Promise<void>;
 
@@ -44,13 +45,43 @@ vi.mock("@/shared/db/client.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/shared/db/client.server")>()),
   getDb: () => db,
 }));
-vi.mock("@/shared/api/telegram", () => ({ sendTelegramMessage: vi.fn() }));
 vi.mock("./tickerPrices", () => ({
   cachedTickerPrices: vi.fn(async () => new Map()),
 }));
-vi.mock("@/shared/lib/logger.server", () => ({
-  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
+// Журнал — моки, уведомление — настоящий log.notify с фиктивным каналом (spec 0067): Telegram не вызывается.
+vi.mock("@/shared/lib/logger.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/shared/lib/logger.server")>();
+  return {
+    ...actual,
+    log: {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      notify: vi.fn(actual.log.notify),
+    },
+  };
+});
+
+const channel = {
+  name: "test",
+  deliver: vi.fn<NotifyChannel["deliver"]>(async () => ({ status: "sent" })),
+};
+/** Тексты, которые получил канал (текст + ссылка — как в Telegram). */
+const sent = () =>
+  channel.deliver.mock.calls.map(([n]) => telegramMessageText(n));
+/** Записи с уведомлением: событие, категория и звук. */
+const notices = () =>
+  vi.mocked(log.notify).mock.calls.map(([n]) => ({
+    event: n.event,
+    category: n.category,
+    urgent: n.urgent ?? false,
+    skip: n.skip,
+  }));
+/** Данные записи с уведомлением по событию. */
+const noticeData = (event: string) =>
+  vi.mocked(log.notify).mock.calls.find(([n]) => n.event === event)?.[0].data;
 
 const exp = (id: string, market: Experiment["market"]): Experiment => ({
   id,
@@ -199,8 +230,7 @@ const experiment = async (id: string) => {
     .where(eq(experimentsTable.id, id));
   return row;
 };
-const telegramTexts = () =>
-  vi.mocked(sendTelegramMessage).mock.calls.map((c) => String(c[2]));
+const telegramTexts = sent;
 const logEvents = (level: "info" | "warn") =>
   vi.mocked(log[level]).mock.calls.map((c) => c[0]);
 
@@ -241,10 +271,13 @@ beforeEach(async () => {
   });
   await okPulse();
   vi.clearAllMocks();
+  channel.deliver.mockImplementation(async () => ({ status: "sent" }));
+  setNotifyChannels([channel]);
 });
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.clearAllMocks();
+  setNotifyChannels([]);
 });
 
 const mode = (
@@ -310,7 +343,7 @@ describe("переключатель на четыре положения (AC1, 
 });
 
 describe("автовыключение по порогам при закрытии (AC3)", () => {
-  it("«Вкл + автовыкл»: −$10,40 при пороге $10 → «Выкл» с причиной, live.auto и Telegram; открытая позиция доживает", async () => {
+  it("«Вкл + автовыкл»: −$10,40 при пороге $10 → «Выкл» с причиной, live.auto и уведомление со звуком; открытая позиция доживает", async () => {
     await mode("S97", "on_autooff", { lossUsd: 10, streak: 5 });
     const open = await newTrade("S97");
     await claimLive(open);
@@ -329,14 +362,15 @@ describe("автовыключение по порогам при закрыти
     expect(telegramTexts().at(-1)).toMatch(
       /⛔ S97 → реальный счёт выключен \(Вкл \+ автовыкл\): убыток −\$10,40 ≥ порога \$10/,
     );
-    const auto = vi
-      .mocked(log.info)
-      .mock.calls.find((c) => c[0] === "live.auto");
-    expect(auto?.[2]).toMatchObject({
+    expect(noticeData("live.auto")).toMatchObject({
       experimentId: "S97",
       mode: "on_autooff",
       decision: "disable_loss",
       pnlUsd: -10.4,
+    });
+    expect(notices().find((n) => n.event === "live.auto")).toMatchObject({
+      category: "trades",
+      urgent: true,
     });
     // Захваченная до выключения позиция не закрывается.
     expect((await getLiveMirror(db, open))?.status).toBe("pending");
@@ -377,7 +411,7 @@ describe("автовыключение по порогам при закрыти
         closedBy: "mirror",
       },
     });
-    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect(channel.deliver).not.toHaveBeenCalled();
   });
 
   it("сделки до включения не считаются; прибыльная обрывает серию", async () => {
@@ -441,6 +475,8 @@ describe("автовыключение по порогам при закрыти
     expect((await experiment("S97")).liveMirror).toBe(true);
     expect(telegramTexts().some((t) => /PnL неизвестен/.test(t))).toBe(true);
     expect(logEvents("warn")).toContain("live.advice");
+    // Выход с неизвестным PnL — тихо (это выход, не сбой).
+    expect(notices().find((n) => n.event === "live.exit")?.urgent).toBe(false);
     await liveTrade("S97", -0.2);
     expect(await experiment("S97")).toMatchObject({
       liveMirrorMode: "off",
@@ -448,8 +484,8 @@ describe("автовыключение по порогам при закрыти
     });
   });
 
-  it("сбой Telegram не отменяет выключение (AC10)", async () => {
-    vi.mocked(sendTelegramMessage).mockRejectedValue(new Error("telegram"));
+  it("сбой канала уведомлений не отменяет выключение (AC10)", async () => {
+    channel.deliver.mockRejectedValue(new Error("telegram"));
     await mode("S97", "on_autooff", { lossUsd: 1, streak: 50 });
     await liveTrade("S97", -2);
     expect((await experiment("S97")).liveMirrorMode).toBe("off");
@@ -468,6 +504,10 @@ describe("ручное «Вкл»: только подсказка (AC6)", () =>
       liveMirrorAdvice: "streak",
     });
     const advice = telegramTexts().filter((t) => t.includes("включён вручную"));
+    // Подсказка — тихо.
+    expect(notices().find((n) => n.event === "live.advice")?.urgent).toBe(
+      false,
+    );
     expect(advice).toEqual([
       expect.stringContaining(
         "⚠️ S96 — реальный счёт включён вручную: 5 убыточных сделок подряд. Вкл + автовыкл бы выключил",
@@ -509,7 +549,7 @@ describe("«Авто» по демо — суточная проверка и п
     });
   });
 
-  it("перевод в «Авто» с ≥ 30 демо-сделками и средним R > 0 — сразу включает; Telegram 🤖", async () => {
+  it("перевод в «Авто» с ≥ 30 демо-сделками и средним R > 0 — сразу включает; уведомление 🤖 со звуком", async () => {
     await demoTrades("S98", [...Array(16).fill(1), ...Array(15).fill(-0.8)]);
     expect(await mode("S98", "auto")).toMatchObject({
       ok: true,
@@ -523,15 +563,13 @@ describe("«Авто» по демо — суточная проверка и п
     expect(telegramTexts().at(-1)).toMatch(
       /🤖 S98 → реальный счёт включён \(Авто\): 31 демо-сделка, средний R \+0,13/,
     );
-    const auto = vi
-      .mocked(log.info)
-      .mock.calls.find((c) => c[0] === "live.auto");
-    expect(auto?.[2]).toMatchObject({
+    expect(noticeData("live.auto")).toMatchObject({
       experimentId: "S98",
       mode: "auto",
       decision: "enable",
       demoTrades: 31,
     });
+    expect(notices().find((n) => n.event === "live.auto")?.urgent).toBe(true);
   });
 
   it("стоп входов: автовключение помечено «торговли не будет до «Возобновить»» (AC7)", async () => {
@@ -573,7 +611,7 @@ describe("«Авто» по демо — суточная проверка и п
     expect((await experiment("S98")).liveMirror).toBe(false);
   });
 
-  it("dryRun — тот же план без записи и Telegram; ручные «Вкл» и «Выкл» не меняются", async () => {
+  it("dryRun — тот же план без записи и уведомлений; ручные «Вкл» и «Выкл» не меняются", async () => {
     await db
       .update(experimentsTable)
       .set({ liveMirrorMode: "auto" })
@@ -586,7 +624,7 @@ describe("«Авто» по демо — суточная проверка и п
     const dry = await runLiveAuto({ dryRun: true });
     expect(dry.changes.map((c) => c.id)).toEqual(["S98"]);
     expect((await experiment("S98")).liveMirror).toBe(false);
-    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect(channel.deliver).not.toHaveBeenCalled();
     await runLiveAuto();
     expect((await experiment("S98")).liveMirror).toBe(true);
     expect((await experiment("S96")).liveMirror).toBe(true);

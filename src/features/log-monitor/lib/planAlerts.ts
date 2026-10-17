@@ -14,6 +14,11 @@ export interface AlertPlan {
   notify: Issue[];
   /** Ключи новых проблем из notify (не напоминаний): по ним заводится задача в GitHub. */
   fresh: string[];
+  /**
+   * В уведомлении есть проблема, о которой ещё не сообщали (новая или прошлое сообщение не дошло) — со звуком;
+   * только напоминания и «восстановлено» — тихо (spec 0067).
+   */
+  urgent: boolean;
   /** Были активны, теперь пропали — «восстановлено». */
   resolved: AlertRow[];
   /** Что записать в alert_state. */
@@ -36,6 +41,7 @@ export function planAlerts(
   const notify: Issue[] = [];
   const fresh: string[] = [];
   const rows: AlertRow[] = [];
+  let urgent = false;
 
   for (const issue of issues) {
     const prev = byKey.get(issue.key);
@@ -46,6 +52,7 @@ export function planAlerts(
       (issue.repeat !== false && now - Date.parse(prev.lastSent) >= repeatMs);
     if (due) notify.push(issue);
     if (isNew) fresh.push(issue.key);
+    if (isNew || prev.lastSent === null) urgent = true;
     rows.push({
       key: issue.key,
       status: "active",
@@ -61,5 +68,5 @@ export function planAlerts(
   );
   for (const r of resolved)
     rows.push({ ...r, status: "resolved", lastSeen: at });
-  return { notify, fresh, resolved, rows };
+  return { notify, fresh, urgent, resolved, rows };
 }

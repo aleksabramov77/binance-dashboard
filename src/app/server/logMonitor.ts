@@ -1,5 +1,5 @@
 // Композиция монитора журнала (платформа): данные из БД (журнал, движок, Earn), разбор ИИ
-// через OpenRouter, задача в приватном репозитории GitHub (spec 0037), уведомление в Telegram.
+// через OpenRouter, задача в приватном репозитории GitHub (spec 0037), уведомление — категория «Ошибки» (spec 0067).
 // Только сервер; вызывает POST /api/cron/log-monitor.
 import { and, desc, gte, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -11,6 +11,7 @@ import {
   githubWarnings,
   type Issue,
   MONITOR,
+  type MonitorAlert,
   type MonitorResult,
   type MonitorSnapshot,
   runMonitor,
@@ -19,13 +20,11 @@ import {
 } from "@/features/log-monitor";
 import { ENGINE_KEYS } from "@/features/paper-engine";
 import { completeJson } from "@/shared/api/openrouter";
-import { sendTelegramMessage } from "@/shared/api/telegram";
 import {
   getGithubAlertsConfig,
   getLlmConfig,
   getLogAnalysisModel,
   getSiteLink,
-  getTelegramConfig,
 } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
@@ -193,10 +192,27 @@ async function loadAlerts(): Promise<AlertRow[]> {
   );
 }
 
+/**
+ * Уведомление монитора — запись monitor.alert: новая тревога — со звуком; напоминание, «восстановлено» — тихо.
+ * Ответ — доставлено ли: нет — состояние без lastSent, повтор в следующий прогон.
+ */
+export async function notifyAlert(alert: MonitorAlert): Promise<boolean> {
+  const notice = await log.notify({
+    level: alert.issues.length ? "warn" : "info",
+    event: "monitor.alert",
+    message: alert.issues.length
+      ? `Тревога монитора: ${alert.issues.join(", ")}${alert.resolved.length ? `; восстановлено: ${alert.resolved.join(", ")}` : ""}`
+      : `Монитор: восстановлено — ${alert.resolved.join(", ")}`,
+    data: { issues: alert.issues, resolved: alert.resolved },
+    category: "errors",
+    urgent: alert.urgent,
+    text: alert.text,
+  });
+  return notice.status === "sent";
+}
+
 /** Прогон монитора по расписанию. */
 export async function runLogMonitor(): Promise<MonitorResult> {
-  const telegram = getTelegramConfig();
-  const chatId = telegram?.chatId;
   const github = getGithubAlertsConfig();
   const result = await runMonitor({
     collect,
@@ -207,18 +223,10 @@ export async function runLogMonitor(): Promise<MonitorResult> {
     trackIssues: github
       ? (input) => trackAlertIssues(github, input)
       : undefined,
-    notify:
-      telegram && chatId
-        ? (text) => sendTelegramMessage(telegram.token, chatId, text)
-        : undefined,
+    notify: notifyAlert,
     prune: () => pruneLogs(),
     logsUrl: getSiteLink("/logs"),
   });
-  if (!telegram || !chatId)
-    log.warn(
-      "monitor.config",
-      "Telegram не настроен: уведомления не отправляются",
-    );
   if (result.analysisError)
     log.warn("monitor.ai", `Разбор ИИ не удался: ${result.analysisError}`);
   for (const w of githubWarnings({
@@ -241,24 +249,24 @@ export async function runLogMonitor(): Promise<MonitorResult> {
   return result;
 }
 
-/** Тестовое сообщение в Telegram: проверить бота и chat id. */
+/**
+ * Пробное сообщение монитора (POST /api/cron/log-monitor?test=1): проверить канал, тему «Ошибки» и chat id. Явная
+ * команда — отправляется и вне production, тихо.
+ */
 export async function sendMonitorTest(): Promise<{
   sent: boolean;
   reason?: string;
 }> {
-  const telegram = getTelegramConfig();
-  if (!telegram) return { sent: false, reason: "TELEGRAM_BOT_TOKEN не задан" };
-  if (!telegram.chatId)
-    return { sent: false, reason: "TELEGRAM_CHAT_ID не задан" };
-  await sendTelegramMessage(
-    telegram.token,
-    telegram.chatId,
-    [
-      "✅ Binance Dashboard: уведомления работают. Монитор проверяет журнал каждые 15 минут.",
-      getSiteLink("/logs"),
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  );
-  return { sent: true };
+  const notice = await log.notify({
+    level: "info",
+    event: "monitor.test",
+    message: "Пробное сообщение монитора",
+    category: "errors",
+    test: true,
+    text: "✅ Binance Dashboard: уведомления работают. Монитор проверяет журнал каждые 15 минут.",
+    link: getSiteLink("/logs"),
+  });
+  return notice.status === "sent"
+    ? { sent: true }
+    : { sent: false, reason: notice.reason };
 }

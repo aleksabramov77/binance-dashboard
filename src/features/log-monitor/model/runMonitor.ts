@@ -21,10 +21,23 @@ export interface MonitorDeps {
    * в текст; ошибка не мешает уведомлению.
    */
   trackIssues?: (input: TrackIssuesInput) => Promise<TrackIssuesResult>;
-  /** Отправка уведомления; не задана — только состояние в БД. */
-  notify?: (text: string) => Promise<void>;
+  /**
+   * Уведомление; ответ — доставлено ли (нет — повторим в следующий прогон). Не задана — только состояние в БД.
+   */
+  notify?: (alert: MonitorAlert) => Promise<boolean>;
   prune: () => Promise<number>;
   logsUrl: string | null;
+}
+
+/** Уведомление прогона: текст, срочность и что в нём — для записи журнала. */
+export interface MonitorAlert {
+  text: string;
+  /** Есть проблема, о которой ещё не сообщали, — со звуком; напоминания и «восстановлено» — тихо. */
+  urgent: boolean;
+  /** Ключи проблем в уведомлении (новые и напоминания). */
+  issues: string[];
+  /** Ключи восстановленных. */
+  resolved: string[];
 }
 
 export interface MonitorResult {
@@ -89,10 +102,13 @@ export async function runMonitor(
     tracked,
   });
   let sent = false;
-  if (text && deps.notify) {
-    await deps.notify(text);
-    sent = true;
-  }
+  if (text && deps.notify)
+    sent = await deps.notify({
+      text,
+      urgent: plan.urgent,
+      issues: plan.notify.map((i) => i.key),
+      resolved: plan.resolved.map((r) => r.key),
+    });
   // Состояние — после отправки: не дошло уведомление — повторим в следующий прогон.
   await deps.saveAlerts(
     sent || !text

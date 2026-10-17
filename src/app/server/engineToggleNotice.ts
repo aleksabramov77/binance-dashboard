@@ -1,6 +1,8 @@
-// Журнал и Telegram при переключении «Автоторговли» (spec 0044): кто, когда, что осталось без проверки.
-// Чистые функции + отправка с внедрённым send — тестируются без сети. Композиция — experimentEngine.ts.
+// Журнал и уведомление при переключении «Автоторговли» (spec 0044): кто, когда, что осталось без проверки.
+// Одна запись engine.toggle с уведомлением — категория «Лаборатория», тихо (spec 0067). Чистые функции + внедрённый
+// log.notify — тестируются без сети. Композиция — experimentEngine.ts.
 import { describeExposure, type EngineExposure } from "@/entities/experiment";
+import type { NotifyInput, NotifyRecord } from "@/shared/notify";
 
 /** Кто переключил: логин GitHub из сессии; authEnabled — настроен ли вход вообще. */
 export interface EngineToggleActor {
@@ -47,8 +49,8 @@ export function engineToggleLogEntry(event: EngineToggleEvent): {
   };
 }
 
-/** Текст уведомления в Telegram. */
-export function engineToggleTelegramText(event: EngineToggleEvent): string {
+/** Текст уведомления. */
+export function engineToggleNoticeText(event: EngineToggleEvent): string {
   const head = `Автоторговля ${stateWord(event.enabled)} в ${formatUtcTime(event.at)} (${actorLabel(event)}).`;
   if (event.enabled) return `▶️ ${head}`;
   const tail = event.exposure
@@ -57,51 +59,36 @@ export function engineToggleTelegramText(event: EngineToggleEvent): string {
   return `⏸ ${head} ${tail}`;
 }
 
-export type NotifyOutcome = "sent" | "skipped" | "failed";
-
-/**
- * Отправить уведомление; send = null — Telegram не настроен, молча пропускаем. Ошибка Telegram не
- * пробрасывается: переключение уже сделано, о сбое — warn через onError.
- */
-export async function notifyEngineToggle(
-  text: string,
-  send: ((text: string) => Promise<void>) | null,
-  onError: (error: unknown) => void,
-): Promise<NotifyOutcome> {
-  if (!send) return "skipped";
-  try {
-    await send(text);
-    return "sent";
-  } catch (error) {
-    onError(error);
-    return "failed";
-  }
+/** Вызов log.notify для переключения: запись engine.toggle и тихое уведомление в категории «Лаборатория». */
+export function engineToggleNotice(event: EngineToggleEvent): NotifyInput {
+  const entry = engineToggleLogEntry(event);
+  return {
+    level: "info",
+    event: "engine.toggle",
+    message: entry.message,
+    data: entry.data,
+    category: "lab",
+    text: engineToggleNoticeText(event),
+  };
 }
 
 export interface AnnounceDeps {
-  info: (event: string, message: string, data: Record<string, unknown>) => void;
-  warn: (event: string, message: string, data: Record<string, unknown>) => void;
-  /** Telegram настроен (токен и chat id) — отправка; иначе null. */
-  send: ((text: string) => Promise<void>) | null;
-  /** Отложить отправку до после ответа (next/server after), чтобы тумблер не ждал Telegram. */
+  /** log.notify: запись с итогом доставки; сбой канала — warn notify.failed, без исключения. */
+  notify: (input: NotifyInput) => Promise<NotifyRecord>;
+  /** Отложить до после ответа (next/server after), чтобы тумблер не ждал отправки. */
   defer: (task: () => Promise<void>) => void;
 }
 
-/** Записать переключение в журнал сразу и отложенно уведомить Telegram; сбой Telegram — warn engine.toggle.notify. */
+/**
+ * Переключение — запись engine.toggle с уведомлением после ответа: запись пишется, когда известен итог доставки (он в
+ * её поле notify).
+ */
 export function announceEngineToggle(
   event: EngineToggleEvent,
   deps: AnnounceDeps,
 ): void {
-  const entry = engineToggleLogEntry(event);
-  deps.info("engine.toggle", entry.message, entry.data);
-  const text = engineToggleTelegramText(event);
+  const notice = engineToggleNotice(event);
   deps.defer(async () => {
-    await notifyEngineToggle(text, deps.send, (error) =>
-      deps.warn(
-        "engine.toggle.notify",
-        `Telegram: уведомление о переключении автоторговли не отправлено — ${error instanceof Error ? error.message : String(error)}`,
-        { enabled: event.enabled },
-      ),
-    );
+    await deps.notify(notice);
   });
 }

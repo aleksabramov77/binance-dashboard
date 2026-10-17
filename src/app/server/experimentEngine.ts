@@ -31,11 +31,9 @@ import {
   fetchKlines,
   fetchPerpetuals,
 } from "@/shared/api/binance/public.server";
-import { sendTelegramMessage } from "@/shared/api/telegram";
 import {
   getDemoTradingConfig,
   getRunnerRole,
-  getTelegramConfig,
 } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { flushLogs, log } from "@/shared/lib/logger.server";
@@ -255,17 +253,10 @@ export async function getEngineExposure(): Promise<EngineExposure> {
   return readEngineExposure(getDb());
 }
 
-function telegramSender(): ((text: string) => Promise<void>) | null {
-  const telegram = getTelegramConfig();
-  const chatId = telegram?.chatId;
-  if (!telegram || !chatId) return null;
-  return (text) => sendTelegramMessage(telegram.token, chatId, text);
-}
-
 /**
  * Тумблер «Автоторговля» лаборатории. Включили — первый тик сразу, не дожидаясь минуты.
- * Каждое переключение — запись engine.toggle (кто, сколько позиций осталось без проверки) и
- * уведомление в Telegram после ответа (spec 0044); сбой подсчёта или Telegram тумблер не роняет.
+ * Каждое переключение — запись engine.toggle (кто, сколько позиций осталось без проверки) с уведомлением после
+ * ответа (spec 0044, 0067); сбой подсчёта или отправки тумблер не роняет.
  */
 export async function setEngineEnabled(
   enabled: boolean,
@@ -288,10 +279,8 @@ export async function setEngineEnabled(
   announceEngineToggle(
     { enabled, ...actor, at: new Date(), exposure },
     {
-      info: (event, message, data) => log.info(event, message, data),
-      warn: (event, message, data) => log.warn(event, message, data),
-      send: telegramSender(),
-      // warn о сбое Telegram появляется уже после ответа — дописываем журнал сами.
+      notify: (input) => log.notify(input),
+      // Запись с итогом доставки появляется уже после ответа — дописываем журнал сами.
       defer: (task) => defer(() => task().then(flushLogs)),
     },
   );

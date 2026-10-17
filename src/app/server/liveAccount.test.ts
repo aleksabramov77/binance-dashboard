@@ -14,17 +14,19 @@ import {
 } from "@/entities/live-account";
 import { MAIN_UID_PENDING_REASON } from "@/shared/api/binance";
 import { fetchAccountUid } from "@/shared/api/binance/account.server";
-import { sendTelegramMessage } from "@/shared/api/telegram";
+import { telegramMessageText } from "@/shared/api/telegram";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
-import { log } from "@/shared/lib/logger.server";
+import { log, setNotifyChannels } from "@/shared/lib/logger.server";
+import type { NotifyChannel } from "@/shared/notify";
 import { resetMainCredentialsCache } from "./accountKey";
 import {
   checkLiveSilence,
   clearMainAccountUidCache,
   getLiveStatusView,
   ingestHeartbeat,
-  notifyLive,
+  liveNotice,
 } from "./liveAccount";
+import { createNotifyChannels } from "./notify";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -36,10 +38,34 @@ vi.mock("@/shared/db/client.server", async (importOriginal) => ({
 vi.mock("@/shared/api/binance/account.server", () => ({
   fetchAccountUid: vi.fn(),
 }));
-vi.mock("@/shared/api/telegram", () => ({ sendTelegramMessage: vi.fn() }));
-vi.mock("@/shared/lib/logger.server", () => ({
-  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
+// Журнал — моки, уведомление — настоящий log.notify с фиктивным каналом (spec 0067): Telegram не вызывается.
+vi.mock("@/shared/lib/logger.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/shared/lib/logger.server")>();
+  return {
+    ...actual,
+    log: {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      notify: vi.fn(actual.log.notify),
+    },
+  };
+});
+
+const channel = {
+  name: "test",
+  deliver: vi.fn<NotifyChannel["deliver"]>(async () => ({ status: "sent" })),
+};
+/** Что получил канал: текст сообщения (текст + ссылка) и как слать. */
+const delivered = () =>
+  channel.deliver.mock.calls.map(([n]) => ({
+    text: telegramMessageText(n),
+    category: n.category,
+    urgent: n.urgent,
+    fixture: n.fixture,
+  }));
 
 const T0 = Date.parse("2026-10-16T12:00:00Z");
 const MIN = 60_000;
@@ -61,10 +87,16 @@ const pulse = (over: Partial<LiveHeartbeat> = {}): LiveHeartbeat => ({
   ...over,
 });
 
-const statusLogs = () =>
-  [...vi.mocked(log.info).mock.calls, ...vi.mocked(log.warn).mock.calls]
+/** Записи live.status: простые (без уведомления) и с уведомлением (log.notify). */
+const statusLogs = () => [
+  ...[...vi.mocked(log.info).mock.calls, ...vi.mocked(log.warn).mock.calls]
     .filter(([event]) => event === "live.status")
-    .map(([, message, data]) => ({ message, telegram: data?.telegram }));
+    .map(([, message]) => ({ message, notified: false })),
+  ...vi
+    .mocked(log.notify)
+    .mock.calls.filter(([n]) => n.event === "live.status")
+    .map(([n]) => ({ message: n.message, notified: true })),
+];
 
 // Одна SQLite с миграциями на файл (создание медленное), строка пульса чистится перед каждым тестом.
 beforeAll(async () => {
@@ -84,14 +116,17 @@ beforeEach(async () => {
   vi.stubEnv("BINANCE_API_SECRET", "ro-secret");
   vi.stubEnv("LIVE_SILENT_AFTER_SEC", "");
   vi.mocked(fetchAccountUid).mockResolvedValue(777);
+  setNotifyChannels([channel]);
 });
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
+  setNotifyChannels([]);
 });
 
 describe("ingestHeartbeat", () => {
-  it("первый пульс — запись и Telegram; тот же — без повторов; смена — снова одно сообщение", async () => {
+  it("первый пульс — запись и уведомление; тот же — без повторов; смена — снова одно сообщение", async () => {
     await ingestHeartbeat(pulse(), T0);
     await ingestHeartbeat(pulse(), T0 + MIN);
     await ingestHeartbeat(
@@ -108,8 +143,12 @@ describe("ingestHeartbeat", () => {
       }),
       T0 + 3 * MIN,
     );
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(sendTelegramMessage).mock.calls[1][2]).toMatch(
+    // Тема «Сервер»: «годится» — тихо, блокировка (warn) — со звуком.
+    expect(delivered()).toEqual([
+      expect.objectContaining({ category: "server", urgent: false }),
+      expect.objectContaining({ category: "server", urgent: true }),
+    ]);
+    expect(delivered()[1].text).toMatch(
       /ключ заблокирован: у ключа разрешён вывод средств\nhttps:\/\/binance\.example\.test\/settings#live$/,
     );
     expect(statusLogs()).toHaveLength(2);
@@ -180,13 +219,13 @@ describe("ingestHeartbeat", () => {
     const reply = await ingestHeartbeat(handshake, T0 + MIN);
     expect(reply.mainAccount).toEqual({ uid: 777 });
     expect(statusLogs()).toEqual([]);
-    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect(channel.deliver).not.toHaveBeenCalled();
     const view = await getLiveStatusView(T0 + MIN);
     expect(view.state?.status).toBe("ok");
     expect(view.state?.receivedAt).toBe(new Date(T0).toISOString());
   });
 
-  it("фикстура и ключ не задан — UID не запрашивается; фикстура в Telegram не пишет", async () => {
+  it("фикстура и ключ не задан — UID не запрашивается; уведомление фикстуры помечено (канал его не отправит)", async () => {
     const r = await ingestHeartbeat(pulse({ fixture: "ok" }), T0);
     expect(r.mainAccount).toBeUndefined();
     expect(
@@ -196,31 +235,59 @@ describe("ingestHeartbeat", () => {
     expect(fetchAccountUid).not.toHaveBeenCalled();
     expect(statusLogs()[0]).toEqual({
       message: expect.stringMatching(/фикстура ok/),
-      telegram: "не отправлен: фикстура",
+      notified: true,
     });
-    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(delivered().map((d) => d.fixture)).toEqual([true, false]);
   });
 
-  it("не production (сервер worktree) — Telegram не отправляется, запись в журнале есть", async () => {
+  it("не production (сервер worktree) с каналами приложения — не отправлено, в записи тема и звук", async () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("TELEGRAM_TOPIC_SERVER", "7");
+    // Bot API не вызывается: канал отказывает до отправки.
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("сеть в тестах запрещена");
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    setNotifyChannels(createNotifyChannels());
     await ingestHeartbeat(pulse(), T0);
-    expect(sendTelegramMessage).not.toHaveBeenCalled();
-    expect(statusLogs()[0].telegram).toBe("не отправлен: не production");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const record = await vi.mocked(log.notify).mock.results[0]?.value;
+    expect(record).toMatchObject({
+      category: "server",
+      urgent: false,
+      status: "skipped",
+      reason: "не production",
+      channels: [
+        {
+          channel: "telegram",
+          status: "skipped",
+          target: { topic: "🖥 Сервер", topicId: 7, to: "42", silent: true },
+        },
+      ],
+    });
   });
 });
 
-describe("notifyLive", () => {
-  it("ссылка — на адрес из SITE_URL", async () => {
-    expect(await notifyLive("🟢 Реальная сделка")).toBe("отправлен");
-    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toBe(
+describe("liveNotice", () => {
+  it("ссылка — на адрес из SITE_URL; текст сообщения тот же, что раньше", () => {
+    const notice = liveNotice("🟢 Реальная сделка");
+    expect(notice).toEqual({
+      text: "Binance Dashboard · 🟢 Реальная сделка",
+      link: "https://binance.example.test/settings#live",
+    });
+    expect(telegramMessageText(notice)).toBe(
       "Binance Dashboard · 🟢 Реальная сделка\nhttps://binance.example.test/settings#live",
+    );
+    expect(liveNotice("⏸ стоп", "live-stop").link).toBe(
+      "https://binance.example.test/settings#live-stop",
     );
   });
 
-  it("без SITE_URL — сообщение без ссылки, не на старый адрес Vercel", async () => {
+  it("без SITE_URL — сообщение без ссылки, не на старый адрес Vercel", () => {
     vi.stubEnv("SITE_URL", "");
-    expect(await notifyLive("🟢 Реальная сделка")).toBe("отправлен");
-    expect(vi.mocked(sendTelegramMessage).mock.calls[0][2]).toBe(
+    const notice = liveNotice("🟢 Реальная сделка");
+    expect(notice.link).toBeNull();
+    expect(telegramMessageText(notice)).toBe(
       "Binance Dashboard · 🟢 Реальная сделка",
     );
   });
@@ -248,7 +315,7 @@ describe("checkLiveSilence", () => {
     expect(statusLogs()).toEqual([
       {
         message: "Воркер реального счёта молчит: последний пульс 6 мин назад",
-        telegram: undefined,
+        notified: false,
       },
     ]);
 
@@ -257,6 +324,6 @@ describe("checkLiveSilence", () => {
       "Воркер реального счёта снова на связи: молчал 30 мин",
       "Воркер реального счёта молчит: последний пульс 6 мин назад",
     ]);
-    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect(channel.deliver).not.toHaveBeenCalled();
   });
 });

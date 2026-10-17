@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MonitorSnapshot } from "../lib/detectIssues";
 import type { AlertRow } from "../lib/planAlerts";
-import { type MonitorDeps, runMonitor } from "./runMonitor";
+import { type MonitorAlert, type MonitorDeps, runMonitor } from "./runMonitor";
 
 const NOW = Date.parse("2026-10-11T12:00:00Z");
 const snapshot = (
@@ -18,6 +18,7 @@ const snapshot = (
 function deps(snap: MonitorSnapshot, patch: Partial<MonitorDeps> = {}) {
   let rows: AlertRow[] = [];
   const sent: string[] = [];
+  const alerts: MonitorAlert[] = [];
   const d: MonitorDeps = {
     collect: async () => snap,
     samples: async () => [
@@ -28,14 +29,16 @@ function deps(snap: MonitorSnapshot, patch: Partial<MonitorDeps> = {}) {
       rows = r;
     },
     analyze: async () => "Упал Binance — проверьте ответы /api/x.",
-    notify: async (t) => {
-      sent.push(t);
+    notify: async (alert) => {
+      alerts.push(alert);
+      sent.push(alert.text);
+      return true;
     },
     prune: async () => 0,
     logsUrl: "https://example.test/logs",
     ...patch,
   };
-  return { d, sent, rows: () => rows };
+  return { d, sent, alerts, rows: () => rows };
 }
 
 describe("runMonitor", () => {
@@ -65,6 +68,36 @@ describe("runMonitor", () => {
     const r = await runMonitor(m.d, NOW);
     expect(r.sent).toBe(false);
     expect(m.rows()[0].lastSent).toBeNull();
+  });
+
+  it("срочность (spec 0067): новая тревога — со звуком, «восстановлено» — тихо; в уведомлении — ключи", async () => {
+    const m = deps(snapshot([{ path: "/api/x", window: 5 }]));
+    await runMonitor(m.d, NOW);
+    expect(m.alerts[0]).toMatchObject({
+      urgent: true,
+      issues: ["http5xx:/api/x"],
+      resolved: [],
+    });
+    const calm = deps(snapshot([]), { loadAlerts: async () => m.rows() });
+    await runMonitor(calm.d, NOW + 15 * 60_000);
+    expect(calm.alerts[0]).toMatchObject({
+      urgent: false,
+      issues: [],
+      resolved: ["http5xx:/api/x"],
+    });
+  });
+
+  it("уведомление не доставлено — состояние без lastSent, повтор в следующий прогон со звуком", async () => {
+    const m = deps(snapshot([{ path: "/api/x", window: 5 }]), {
+      notify: async () => false,
+    });
+    expect((await runMonitor(m.d, NOW)).sent).toBe(false);
+    expect(m.rows()[0].lastSent).toBeNull();
+    const retry = deps(snapshot([{ path: "/api/x", window: 5 }]), {
+      loadAlerts: async () => m.rows(),
+    });
+    await runMonitor(retry.d, NOW + 15 * 60_000);
+    expect(retry.alerts[0]).toMatchObject({ urgent: true });
   });
 
   it("всё спокойно — ничего не отправляет", async () => {

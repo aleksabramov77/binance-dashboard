@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  type AnnounceDeps,
   actorLabel,
   announceEngineToggle,
   type EngineToggleEvent,
   engineToggleLogEntry,
-  engineToggleTelegramText,
+  engineToggleNotice,
+  engineToggleNoticeText,
   formatUtcTime,
-  notifyEngineToggle,
 } from "./engineToggleNotice";
 
 const AT = new Date("2026-10-16T07:05:42.000Z");
@@ -70,104 +71,73 @@ describe("запись engine.toggle", () => {
   });
 });
 
-describe("текст в Telegram", () => {
+describe("текст уведомления", () => {
   it("выключение — с числами открытых позиций", () => {
-    expect(engineToggleTelegramText(off())).toBe(
+    expect(engineToggleNoticeText(off())).toBe(
       "⏸ Автоторговля выключена в 07:05 UTC (octocat). Открыто 12 paper-сделок и 3 демо-позиции — стопы и тейки не проверяются до включения.",
     );
   });
 
   it("выключение без чисел, если подсчёт не удался", () => {
-    expect(engineToggleTelegramText(off({ exposure: null }))).toBe(
+    expect(engineToggleNoticeText(off({ exposure: null }))).toBe(
       "⏸ Автоторговля выключена в 07:05 UTC (octocat). Стопы и тейки открытых paper-сделок и демо-позиций не проверяются до включения.",
     );
   });
 
   it("включение", () => {
     expect(
-      engineToggleTelegramText(
+      engineToggleNoticeText(
         off({ enabled: true, by: null, authEnabled: false, exposure: null }),
       ),
     ).toBe("▶️ Автоторговля включена в 07:05 UTC (вход выключен).");
   });
 });
 
-describe("отправка уведомления", () => {
-  it("Telegram не настроен — ничего не шлём и не ругаемся", async () => {
-    const onError = vi.fn();
-    expect(await notifyEngineToggle("текст", null, onError)).toBe("skipped");
-    expect(onError).not.toHaveBeenCalled();
-  });
-
-  it("шлёт текст как есть", async () => {
-    const send = vi.fn(async () => undefined);
-    expect(await notifyEngineToggle("текст", send, vi.fn())).toBe("sent");
-    expect(send).toHaveBeenCalledWith("текст");
-  });
-
-  it("ошибка Telegram не пробрасывается, а уходит в onError", async () => {
-    const error = new Error("Telegram sendMessage 400: chat not found");
-    const onError = vi.fn();
-    await expect(
-      notifyEngineToggle(
-        "текст",
-        async () => {
-          throw error;
-        },
-        onError,
-      ),
-    ).resolves.toBe("failed");
-    expect(onError).toHaveBeenCalledWith(error);
-  });
-});
-
-describe("журнал и уведомление при переключении", () => {
-  const deps = (send: ((text: string) => Promise<void>) | null) => {
+describe("уведомление при переключении (spec 0067)", () => {
+  const deps = () => {
     const tasks: (() => Promise<void>)[] = [];
+    const notify = vi.fn<AnnounceDeps["notify"]>(async (input) => ({
+      category: input.category,
+      urgent: input.urgent ?? false,
+      status: "sent",
+      channels: [],
+    }));
     return {
       tasks,
-      info: vi.fn(),
-      warn: vi.fn(),
-      send,
+      notify,
       defer: (task: () => Promise<void>) => {
         tasks.push(task);
       },
     };
   };
 
-  it("пишет engine.toggle сразу, а Telegram — отложенно", async () => {
-    const send = vi.fn(async () => undefined);
-    const d = deps(send);
+  it("одна запись engine.toggle с уведомлением «Лаборатория», тихо — после ответа", async () => {
+    const d = deps();
     announceEngineToggle(off(), d);
-    expect(d.info).toHaveBeenCalledWith(
-      "engine.toggle",
-      "Автоторговля выключена (octocat)",
-      expect.objectContaining({ enabled: false, origin: "ui" }),
-    );
-    expect(send).not.toHaveBeenCalled();
+    expect(d.notify).not.toHaveBeenCalled();
     await Promise.all(d.tasks.map((t) => t()));
-    expect(send).toHaveBeenCalledWith(engineToggleTelegramText(off()));
-    expect(d.warn).not.toHaveBeenCalled();
-  });
-
-  it("сбой Telegram — warn engine.toggle.notify с текстом ошибки, без исключения", async () => {
-    const d = deps(async () => {
-      throw new Error("Telegram sendMessage 401: Unauthorized");
+    expect(d.notify).toHaveBeenCalledTimes(1);
+    expect(d.notify).toHaveBeenCalledWith({
+      level: "info",
+      event: "engine.toggle",
+      message: "Автоторговля выключена (octocat)",
+      data: {
+        enabled: false,
+        by: "octocat",
+        origin: "ui",
+        openPaper: 12,
+        openDemo: 3,
+      },
+      category: "lab",
+      text: engineToggleNoticeText(off()),
     });
-    announceEngineToggle(off({ enabled: true, exposure: null }), d);
-    await expect(Promise.all(d.tasks.map((t) => t()))).resolves.toBeDefined();
-    expect(d.warn).toHaveBeenCalledWith(
-      "engine.toggle.notify",
-      expect.stringContaining("Telegram sendMessage 401: Unauthorized"),
-      { enabled: true },
-    );
+    // Тихо: срочность не задана.
+    expect(d.notify.mock.calls[0][0].urgent).toBeUndefined();
   });
 
-  it("Telegram не настроен — только запись в журнал", async () => {
-    const d = deps(null);
-    announceEngineToggle(off(), d);
-    await Promise.all(d.tasks.map((t) => t()));
-    expect(d.info).toHaveBeenCalledTimes(1);
-    expect(d.warn).not.toHaveBeenCalled();
+  it("вызов — без канала: ни Telegram, ни chat id, ни темы", () => {
+    const input = engineToggleNotice(off({ enabled: true, exposure: null }));
+    expect(JSON.stringify(input)).not.toMatch(/telegram|chat|thread/i);
+    expect(input).toMatchObject({ category: "lab", event: "engine.toggle" });
   });
 });
