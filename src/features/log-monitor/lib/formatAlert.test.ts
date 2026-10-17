@@ -30,7 +30,9 @@ describe("ссылка на журнал в тревоге", () => {
       analysis: null,
       logsUrl: null,
     });
-    expect(text).toBe("⚠️ Binance Dashboard: проблема\n🔴 Тик движка молчит: нет тика 10 мин");
+    expect(text).toBe(
+      "⚠️ Binance Dashboard: проблема\n🔴 Тик движка молчит: нет тика 10 мин",
+    );
     expect(formatAlertIssue(issue, null, [], null).body).not.toContain(
       "Журнал на сайте",
     );
