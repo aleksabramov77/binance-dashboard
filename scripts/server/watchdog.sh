@@ -7,7 +7,8 @@
 #   - сайт: сервис активен и 127.0.0.1:5000 отвечает (< 500) за 10 с; SITE_FAILS неудач подряд → тревога;
 #   - на эпизод одно сообщение; восстановление — сообщение с длительностью простоя. Состояние — STATE_DIR/state.
 #   - сообщения — в тему «🖥 Сервер» группы (TELEGRAM_TOPIC_SERVER из env-файла; нет — в чат без темы, spec 0067):
-#     тревоги и перезапуск — со звуком, восстановление и пробное — тихо (disable_notification).
+#     тревоги и перезапуск — со звуком, восстановление и пробное — тихо (disable_notification); тему удалили или номер
+#     устарел (Bot API «message thread not found») — один повтор в чат без темы, с тем же звуком.
 #   watchdog.sh [--test] [--db FILE] [--env-file FILE] [--state-dir DIR] [--url URL] [--service NAME]
 # --test — пробное сообщение в Telegram (в тему «Сервер»), без проверок и перезапуска.
 # Для проверки без прода: WATCHDOG_SYSTEMCTL / WATCHDOG_CURL — заглушки вместо systemctl / curl,
@@ -64,8 +65,20 @@ server_topic() {
 # Где сообщение: «тема N» или «без темы».
 topic_label() { if [ -n "$1" ]; then printf 'тема %s' "$1"; else printf 'без темы'; fi; }
 
-# Сообщение в Telegram: tg loud|quiet "текст" — тревога со звуком или тихо (восстановление). Токен — через stdin
-# (`--config -`): аргументы процесса видны в списке процессов.
+# sendMessage: tg_send ТОКЕН ЧАТ loud|quiet "текст" [тема] — печатает ответ Bot API и код HTTP последней строкой. Токен —
+# через stdin (`--config -`): аргументы процесса видны в списке процессов.
+tg_send() {
+  local extra=()
+  [ -n "${5:-}" ] && extra+=(--data-urlencode "message_thread_id=$5")
+  [ "$3" = quiet ] && extra+=(--data-urlencode "disable_notification=true")
+  printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$1" |
+    "$CURL" -s -w '\n%{http_code}' --max-time 15 --config - \
+      --data-urlencode "chat_id=$2" ${extra[@]+"${extra[@]}"} --data-urlencode "text=$4"
+}
+
+# Сообщение в Telegram: tg loud|quiet "текст" — тревога со звуком или тихо (восстановление). Тему «Сервер» удалили или
+# номер устарел — один повтор в чат без темы с тем же звуком, чтобы тревога не потерялась (как у канала приложения);
+# другие ошибки не повторяются.
 tg() {
   local sound=$1 text="🛡 $SERVICE: $2" topic
   topic=$(server_topic)
@@ -73,16 +86,21 @@ tg() {
     printf '[%s · %s] %s\n' "$(topic_label "$topic")" "$([ "$sound" = quiet ] && echo тихо || echo со звуком)" "$text" >>"$WATCHDOG_TG_LOG"
     return 0
   fi
-  local token chat extra=()
+  local token chat out nl=$'\n'
   token=$(env_value TELEGRAM_BOT_TOKEN)
   chat=$(env_value TELEGRAM_CHAT_ID)
   if [ -z "$token" ] || [ -z "$chat" ]; then echo "Telegram не настроен ($ENV_FILE): $text"; return 1; fi
-  [ -n "$topic" ] && extra+=(--data-urlencode "message_thread_id=$topic")
-  [ "$sound" = quiet ] && extra+=(--data-urlencode "disable_notification=true")
-  printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$token" |
-    "$CURL" -s -o /dev/null -w '%{http_code}' --max-time 15 --config - \
-      --data-urlencode "chat_id=$chat" ${extra[@]+"${extra[@]}"} --data-urlencode "text=$text" | grep -q '^200$' ||
-    { echo "Telegram не принял сообщение: $text"; return 1; }
+  out=$(tg_send "$token" "$chat" "$sound" "$text" "$topic")
+  [ "${out##*$nl}" = 200 ] && return 0
+  if [ -n "$topic" ] && printf '%s' "${out%$nl*}" | grep -qiE 'message thread not found|TOPIC_DELETED'; then
+    out=$(tg_send "$token" "$chat" "$sound" "$text")
+    if [ "${out##*$nl}" = 200 ]; then
+      echo "Тема $topic не найдена — отправлено без темы: $text"
+      return 0
+    fi
+  fi
+  echo "Telegram не принял сообщение: $text"
+  return 1
 }
 
 mins() { echo $((($1 + 59) / 60)); }

@@ -239,7 +239,10 @@ ssh claude@<ip> 'd=<дата>; B=/var/lib/binance; ts=$(date -u +%Y%m%dT%H%M%SZ)
 
 Telegram — `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` и тема «🖥 Сервер» `TELEGRAM_TOPIC_SERVER` (spec 0067; не задана — в чат
 без темы) из `/etc/binance/app.env` (токен передаётся `curl` через stdin). Тревоги и перезапуск — со звуком, восстановление и
-пробное сообщение — тихо (`disable_notification`).
+пробное сообщение — тихо (`disable_notification`). Тему «Сервер» удалили или номер устарел (Bot API «message thread not
+found») — один повтор в чат без темы с тем же звуком, в журнале сторожа — «Тема N не найдена — отправлено без темы: …»;
+другие ошибки не повторяются. Проверка без Telegram — заглушка `WATCHDOG_CURL`, которая на запрос с темой отвечает «message
+thread not found», а без темы — 200.
 Состояние эпизодов — `/var/lib/binance-watchdog/state`. Пороги — в начале скрипта. Перезапуск обрывает зависший прогон
 демо-зеркала: строки `pending` после него сверить вручную. Воркер `binance-live` сторож не трогает. Если VM недоступна
 целиком, сторож сообщить не может.
