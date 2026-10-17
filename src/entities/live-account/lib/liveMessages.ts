@@ -21,13 +21,12 @@ export interface LiveTradeSubject {
   direction: "long" | "short";
 }
 
-/** «S98 BTCUSDT long» — в ответе на сообщение о входе рынок уже виден выше. */
-const shortSubject = (s: LiveTradeSubject) =>
-  `${s.experimentId} ${s.symbol} ${s.direction}`;
-
-/** «S98 BTCUSDT long · USDⓈ-M» — заголовок самостоятельного сообщения. */
+/**
+ * «S98 BTCUSDT long · USDⓈ-M» — заголовок любого сообщения о сделке, и итога тоже: ответ может уйти без цитаты (вход
+ * удалён — Telegram шлёт без ответа), и тогда рынок виден только из заголовка.
+ */
 const fullSubject = (s: LiveTradeSubject) =>
-  `${shortSubject(s)} · ${MARKET[s.market]}`;
+  `${s.experimentId} ${s.symbol} ${s.direction} · ${MARKET[s.market]}`;
 
 /** «−2,0 %» — уровень от цены входа. */
 function pctFrom(level: number, entry: number): string {
@@ -156,8 +155,7 @@ const optionalPrice = (v: number | null) =>
 /**
  * Итог сделки (spec 0068, AC3): «🟢 +$0,84 · S98 BTCUSDT long», чем закрыта и цены входа → выхода, комиссии и время в
  * сделке, баланс субсчёта; пометки — оценка PnL, PnL неизвестен (в порогах — убыток, spec 0053), остаток монеты (в PnL
- * не входит), «после N попыток» — каждая своей строкой. reply — ответ на сообщение о входе: заголовок короче (рынок
- * виден во входе); нет — полный заголовок (AC6).
+ * не входит), «после N попыток» — каждая своей строкой. Заголовок всегда полный, с рынком (AC6).
  */
 export function liveExitText(
   s: LiveTradeSubject,
@@ -170,7 +168,6 @@ export function liveExitText(
     balance: LiveBalance | null;
     leftover?: { qty: number; asset: string; usd: number } | null;
     attempts?: number;
-    reply: boolean;
   },
 ): string {
   const closed = o.closedBy
@@ -180,7 +177,7 @@ export function liveExitText(
   const fees = `Комиссии: ${o.feesUsd === null ? "нет данных" : liveUsd(o.feesUsd)}`;
   const leftover = o.leftover ? liveLeftoverText(o.leftover) : null;
   return [
-    `${outcomeHead(o)} · ${o.reply ? shortSubject(s) : fullSubject(s)}`,
+    `${outcomeHead(o)} · ${fullSubject(s)}`,
     `${closed}: ${optionalPrice(o.entryPrice)} → ${optionalPrice(o.exitPrice)}`,
     held ? `${fees} · ${held}` : fees,
     o.balance

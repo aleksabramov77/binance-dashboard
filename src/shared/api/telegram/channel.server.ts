@@ -16,6 +16,7 @@ import {
   editTelegramMessageText,
   sendTelegramMessage,
   setTelegramMessageReaction,
+  TELEGRAM_TEXT_LIMIT,
 } from "./client.server";
 
 /** Политика категории: тема, звук, включена ли. */
@@ -116,9 +117,8 @@ export function createTelegramChannel(
     thread: NotificationThread,
     ref: TelegramMessageRef | null,
   ): Promise<Pick<ChannelResult, "amend" | "amendError">> {
-    if (!thread.append && !thread.mark) return {};
-    if (!ref)
-      return { amendError: `${thread.label} не известно — не к чему дописать` };
+    // Ключа нет — дописывать некуда; это не сбой: в журнале уже «без ответа: … не известно».
+    if (!ref || (!thread.append && !thread.mark)) return {};
     const done: string[] = [];
     const errors: string[] = [];
     if (thread.append)
@@ -187,7 +187,12 @@ export function createTelegramChannel(
           ...(note && { reply: note }),
           ...(n.thread && (await amend(token, n.thread, ref))),
           ...(messageId !== null && {
-            ref: { chatId, messageId, text } satisfies TelegramMessageRef,
+            // Тот текст, что ушёл в Telegram (обрезанный до лимита): дописывание продолжает его.
+            ref: {
+              chatId,
+              messageId,
+              text: text.slice(0, TELEGRAM_TEXT_LIMIT),
+            } satisfies TelegramMessageRef,
           }),
         };
       };

@@ -337,11 +337,14 @@ describe("Telegram-канал: ответ, дописать, отметка (spe
 
   it("номер входа не известен — обычное сообщение, «без ответа», дописывать нечего (AC6)", async () => {
     const { ch, send, edit, react } = tradesChannel();
-    expect(await ch.deliver(exitNote({ ref: null }))).toMatchObject({
+    const r = await ch.deliver(exitNote({ ref: null }));
+    expect(r).toMatchObject({
       status: "sent",
       reply: "без ответа: сообщение о входе не известно",
-      amendError: "сообщение о входе не известно — не к чему дописать",
     });
+    // Не сбой: warn notify.amend на каждом итоге старых сделок не нужен.
+    expect(r).not.toHaveProperty("amendError");
+    expect(r).not.toHaveProperty("amend");
     expect(send.mock.calls[0][3]).not.toHaveProperty("replyTo");
     expect(edit).not.toHaveBeenCalled();
     expect(react).not.toHaveBeenCalled();
@@ -415,6 +418,24 @@ describe("Telegram-канал: ответ, дописать, отметка (spe
     expect(r).not.toHaveProperty("amendError");
     expect(edit).not.toHaveBeenCalled();
     expect(react).not.toHaveBeenCalled();
+  });
+});
+
+describe("ключ сообщения — отправленный текст (обрезанный до лимита)", () => {
+  it("длинный текст — в ключе ровно то, что ушло в Telegram", async () => {
+    const send = vi.fn<NonNullable<TelegramChannelDeps["send"]>>(async () => ({
+      messageId: 9,
+      replied: false,
+    }));
+    const { ch } = channel({ send });
+    const long = "x".repeat(5000);
+    const r = await ch.deliver(note({ text: long }));
+    expect(r.ref).toEqual({
+      chatId: "-1001234",
+      messageId: 9,
+      text: "x".repeat(4000),
+    });
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });
 

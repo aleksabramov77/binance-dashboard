@@ -376,7 +376,7 @@ describe("вход, выход и дневной PnL", () => {
       mark: "bad",
     });
     expect(sent()[1]).toMatch(
-      /^🔴 −\$16,00 · S98 LINKUSDT long\nЗакрыта вслед за paper-сделкой: 100 → 90\nКомиссии: \$0,10 · в сделке меньше минуты\nБаланс: нет данных\nhttps:\/\/binance\.example\.test\/experiments\/S98$/,
+      /^🔴 −\$16,00 · S98 LINKUSDT long · USDⓈ-M\nЗакрыта вслед за paper-сделкой: 100 → 90\nКомиссии: \$0,10 · в сделке меньше минуты\nБаланс: нет данных\nhttps:\/\/binance\.example\.test\/experiments\/S98$/,
     );
     expect((await liveMirrorState()).dailyPnl).toEqual({ S98: -16 });
     // Вход и подсказка ручному «Вкл» (убыток −$16 ≥ порога $15) — тихо; итог — со звуком (ответ на вход).
@@ -516,6 +516,44 @@ describe("итог сделки: баланс и ответ на вход (spec 
     });
     await closed(id);
     expect(sent()[0]).toMatch(/\nБаланс субсчёта: \$30,50 \(на 12:40 UTC\)$/);
+  });
+
+  it("вход «без защиты» — его сообщение и есть сообщение о входе: ключ сохранён, итог отвечает на него", async () => {
+    await toggleOn("S98");
+    const id = await newTrade("S98", "INJUSDT");
+    await claimLive(id);
+    channel.deliver.mockImplementationOnce(async () => ({
+      status: "sent",
+      ref: { chat: "42", id: 80 },
+    }));
+    await saveLiveOpen({
+      tradeId: id,
+      result: {
+        id: `r-${id}`,
+        status: "unprotected",
+        message: "Стоп не поставлен.",
+        entryPrice: 100,
+        filledQuantity: 0.1,
+        steps: [],
+        protectRefs: null,
+      },
+      order: { stopLoss: 95, takeProfit: 110, notionalUsd: 10, raised: null },
+    });
+    expect((await getLiveMirror(db, id))?.entryNotifyRef).toEqual({
+      test: { chat: "42", id: 80 },
+    });
+    // «Без защиты» — в очереди закрытия после паузы между повторами: «прошла минута».
+    db.run(
+      `update live_mirror_orders set updated_at = ${Date.now() - 2 * 60_000} where trade_id = '${id}'`,
+    );
+    expect(await claimLiveClose(id)).not.toBeNull();
+    vi.clearAllMocks();
+    await closed(id, 1);
+    expect(channel.deliver.mock.calls[0][0].thread).toMatchObject({
+      // Канал получает свою часть ключа.
+      ref: { chat: "42", id: 80 },
+      reply: true,
+    });
   });
 
   it("ключа сообщения о входе нет (сделка до 0068) — итог обычным сообщением с полным заголовком (AC6)", async () => {

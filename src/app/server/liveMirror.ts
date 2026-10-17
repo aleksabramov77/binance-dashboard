@@ -326,7 +326,7 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
   }
   if (r.status === "unprotected") {
     const text = liveUnprotectedText(s, r.message);
-    await log.notify({
+    const sent = await log.notify({
       level: "error",
       event: "live.unprotected",
       message: text,
@@ -335,6 +335,8 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
       urgent: true,
       ...liveTradeNotice(text, row.experimentId),
     });
+    // Позиция открыта и без защиты: это сообщение и есть сообщение о входе — итог и тревоги ответят на него.
+    if (sent.ref) await setLiveEntryNotifyRef(db, body.tradeId, sent.ref);
     return;
   }
   const text = liveEntryText(s, {
@@ -385,7 +387,6 @@ async function announceExit(
       : null,
     balance,
     attempts,
-    reply: ref !== null,
   });
   await log.notify({
     level: "info",

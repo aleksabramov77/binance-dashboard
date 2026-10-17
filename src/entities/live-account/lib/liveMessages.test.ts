@@ -92,13 +92,12 @@ describe("итог (spec 0068, AC3)", () => {
     feesUsd: 0.05,
     heldMs: (2 * 60 + 15) * 60_000,
     balance: { usd: 512.4, asOf: null },
-    reply: true,
   };
 
-  it("прибыль — 🟢 +$X, причина и цены, комиссии и время, баланс; в ответе — без рынка", () => {
+  it("прибыль — 🟢 +$X, причина и цены, комиссии и время, баланс", () => {
     expect(liveExitText(s, exit)).toBe(
       [
-        "🟢 +$0,84 · S98 BTCUSDT long",
+        "🟢 +$0,84 · S98 BTCUSDT long · USDⓈ-M",
         `Закрыта по TP: ${nb("80 030")} → ${nb("83 230")}`,
         "Комиссии: $0,05 · в сделке 2 ч 15 мин",
         "Баланс субсчёта: $512,40",
@@ -109,7 +108,7 @@ describe("итог (spec 0068, AC3)", () => {
   it("убыток — 🔴 −$X по SL; «Закрыть всё» и paper-сделка — своими словами", () => {
     expect(
       liveExitText(s, { ...exit, realizedPnl: -1.02, closedBy: "sl" }),
-    ).toMatch(/^🔴 −\$1,02 · S98 BTCUSDT long\nЗакрыта по SL: /);
+    ).toMatch(/^🔴 −\$1,02 · S98 BTCUSDT long · USDⓈ-M\nЗакрыта по SL: /);
     expect(liveExitText(s, { ...exit, closedBy: "close_all" })).toMatch(
       /\nЗакрыта по «Закрыть всё»: /,
     );
@@ -154,9 +153,12 @@ describe("итог (spec 0068, AC3)", () => {
     ]);
   });
 
-  it("не ответом (сообщение о входе не известно) — полный заголовок с рынком (AC6)", () => {
-    expect(liveExitText(s, { ...exit, reply: false })).toMatch(
+  it("заголовок итога всегда полный, с рынком: ответ может уйти без цитаты (вход удалён, AC6)", () => {
+    expect(liveExitText(s, exit)).toMatch(
       /^🟢 \+\$0,84 · S98 BTCUSDT long · USDⓈ-M\n/,
+    );
+    expect(liveExitText({ ...s, market: "spot" }, exit)).toMatch(
+      /^🟢 \+\$0,84 · S98 BTCUSDT long · Spot\n/,
     );
   });
 

@@ -53,7 +53,9 @@ describe("testTradeMessages — пробная пара для темы «Сде
   it("вход и итог как у реальной сделки, с пометкой «пробное»; строка итога и отметка 👍", () => {
     const m = testTradeMessages();
     expect(m.entry).toMatch(/^🟡 Вход · S98 BTCUSDT long · USDⓈ-M\n/);
-    expect(m.exit).toMatch(/^🟢 \+\$0,84 · S98 BTCUSDT long\nЗакрыта по TP: /);
+    expect(m.exit).toMatch(
+      /^🟢 \+\$0,84 · S98 BTCUSDT long · USDⓈ-M\nЗакрыта по TP: /,
+    );
     for (const text of [m.entry, m.exit])
       expect(text).toMatch(
         /\n🧪 Пробное сообщение: числа вымышленные, сделки нет$/,

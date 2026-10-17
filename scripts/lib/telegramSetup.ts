@@ -162,7 +162,6 @@ export function testTradeMessages(): {
     feesUsd: 0.05,
     heldMs: (2 * 60 + 15) * 60_000,
     balance: { usd: 512.4, asOf: null },
-    reply: true,
   });
   return {
     entry: `${entry}\n${TEST_MARK}`,
