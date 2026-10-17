@@ -6,7 +6,8 @@ export {
   isStaleVersion,
 } from "./appVersion";
 export {
-  EXPECTED_ERRORS_META,
+  type ExpectedErrorPredicate,
+  expectedErrorsMeta,
   shouldReportMutationError,
 } from "./mutationErrors";
 export { reportClientError } from "./reportClientError";

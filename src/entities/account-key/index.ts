@@ -8,13 +8,13 @@ export {
   loadAccountKeyRow,
   saveAccountKeyRow,
 } from "./api/accountKeyDb";
+export { accountKeyQueryKey, useAccountKeyStatus } from "./api/useAccountKey";
+export { hintText, keyHint, scrubSecrets } from "./lib/hint";
 export {
   AccountKeyError,
-  accountKeyQueryKey,
+  isExpectedAccountKeyRejection,
   readAccountKeyResponse,
-  useAccountKeyStatus,
-} from "./api/useAccountKey";
-export { hintText, keyHint, scrubSecrets } from "./lib/hint";
+} from "./lib/response";
 // Таблица (Drizzle) — запросы делает сервер через shared/db.
 export { accountKeysTable } from "./model/db";
 export {

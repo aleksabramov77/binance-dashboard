@@ -68,11 +68,13 @@ describe("encrypt / decrypt", () => {
   });
 
   it("текст ошибки не содержит ни данных, ни ключа", () => {
+    expect.assertions(3);
     const sealed = encrypt(key, SECRET, AAD);
     try {
       decrypt(randomBytes(32), sealed, AAD);
     } catch (error) {
       const text = String(error);
+      expect(text).toMatch(/не расшифровывается/);
       expect(text).not.toContain(SECRET);
       expect(text).not.toContain(key.toString("base64"));
     }

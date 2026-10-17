@@ -67,16 +67,26 @@ interface Resolved {
   creds: BinanceCredentials | null;
   source: AccountKeyStatus["source"];
   decryptFailed: boolean;
+  /** Ключ в базе есть, а мастер-ключ не читается (нет SECRETS_KEY_FILE, файла, прав): причина; иначе null. */
+  masterUnavailable: string | null;
 }
 
 // Кэш в процессе: в dev роуты и instrumentation — разные бандлы, поэтому в globalThis. Сбрасывается при сохранении
 // и удалении — «Портфель» и Earn берут новый ключ без перезапуска сервиса.
 const cacheKey = Symbol.for("binance-dashboard.mainAccountKey");
-const g = globalThis as typeof globalThis & { [cacheKey]?: Resolved };
+/** Уже записали «мастер-ключ недоступен» (один раз на процесс, до восстановления). */
+const masterWarnKey = Symbol.for(
+  "binance-dashboard.mainAccountKeyMasterWarned",
+);
+const g = globalThis as typeof globalThis & {
+  [cacheKey]?: Resolved;
+  [masterWarnKey]?: boolean;
+};
 
 /** Для тестов и после записи: забыть ключ процесса. */
 export function resetMainCredentialsCache(): void {
   delete g[cacheKey];
+  delete g[masterWarnKey];
 }
 
 /** Что лежит в шифротексте. */
@@ -85,17 +95,20 @@ const sealedCredsSchema = z.object({
   apiSecret: z.string().min(1),
 });
 
-function decryptRow(row: AccountKeyRow, master: MasterKey): BinanceCredentials {
-  if (!master.key) throw new Error(master.reason);
-  const parsed = sealedCredsSchema.safeParse(
-    JSON.parse(
-      decrypt(
-        master.key,
-        { iv: row.iv, tag: row.tag, ciphertext: row.ciphertext },
-        NAME,
-      ),
-    ),
+function decryptRow(row: AccountKeyRow, key: Buffer): BinanceCredentials {
+  const plaintext = decrypt(
+    key,
+    { iv: row.iv, tag: row.tag, ciphertext: row.ciphertext },
+    NAME,
   );
+  let json: unknown;
+  try {
+    json = JSON.parse(plaintext);
+  } catch {
+    // Текст ошибки JSON.parse цитирует начало открытого текста — свой текст без него.
+    throw new Error("расшифрованная запись не распознана (не JSON)");
+  }
+  const parsed = sealedCredsSchema.safeParse(json);
   if (!parsed.success) throw new Error("расшифрованная запись не распознана");
   return parsed.data;
 }
@@ -116,15 +129,41 @@ function resolve(): Resolved {
       },
     );
     const creds = getBinanceCredentials();
-    return { creds, source: creds ? "env" : "none", decryptFailed: false };
+    return {
+      creds,
+      source: creds ? "env" : "none",
+      decryptFailed: false,
+      masterUnavailable: null,
+    };
   }
   let decryptFailed = false;
   if (row) {
+    const master = loadMasterKey();
+    if (!master.key) {
+      // Мастер-ключ не читается (env, путь, права) — запись цела, это не «ключ не подходит»: decrypt-failed не пишем,
+      // ничего не удаляем и не кэшируем — после исправления на сервере ключ снова заработает без ввода.
+      if (!g[masterWarnKey])
+        log.warn(
+          "account-key.master-unavailable",
+          "Мастер-ключ недоступен — сохранённый ключ основного аккаунта не используется до исправления на сервере",
+          { hint: row.keyHint, reason: master.reason },
+        );
+      g[masterWarnKey] = true;
+      const creds = getBinanceCredentials();
+      return {
+        creds,
+        source: creds ? "env" : "none",
+        decryptFailed: false,
+        masterUnavailable: master.reason,
+      };
+    }
+    g[masterWarnKey] = false;
     try {
       const resolved: Resolved = {
-        creds: decryptRow(row, loadMasterKey()),
+        creds: decryptRow(row, master.key),
         source: "db",
         decryptFailed: false,
+        masterUnavailable: null,
       };
       g[cacheKey] = resolved;
       return resolved;
@@ -143,6 +182,7 @@ function resolve(): Resolved {
     creds,
     source: creds ? "env" : "none",
     decryptFailed,
+    masterUnavailable: null,
   };
   g[cacheKey] = resolved;
   return resolved;
@@ -179,6 +219,7 @@ export function getAccountKeyStatus(): AccountKeyStatus {
         }
       : null,
     decryptFailed: resolved.decryptFailed,
+    masterUnavailable: row ? resolved.masterUnavailable : null,
     input: { available: master.key !== null, reason: master.reason },
     hosting: hosting(),
   };

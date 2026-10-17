@@ -1,17 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
-  EXPECTED_ERRORS_META,
+  expectedErrorsMeta,
   shouldReportMutationError,
 } from "./mutationErrors";
 
+class Rejected extends Error {}
+
 describe("shouldReportMutationError", () => {
-  it("мутация с ожидаемыми отказами — в журнал не пишется", () => {
-    expect(shouldReportMutationError(EXPECTED_ERRORS_META)).toBe(false);
+  const meta = expectedErrorsMeta((e) => e instanceof Rejected);
+
+  it("ошибка, которую предикат мутации считает ожидаемой, — в журнал не пишется", () => {
+    expect(shouldReportMutationError(meta, new Rejected("422"))).toBe(false);
+  });
+
+  it("другие ошибки той же мутации (сеть, 5xx) — пишутся", () => {
+    expect(shouldReportMutationError(meta, new TypeError("fetch"))).toBe(true);
   });
 
   it("без meta и с другой meta — пишется, как раньше", () => {
-    expect(shouldReportMutationError(undefined)).toBe(true);
-    expect(shouldReportMutationError({})).toBe(true);
-    expect(shouldReportMutationError({ expectedErrors: "yes" })).toBe(true);
+    expect(shouldReportMutationError(undefined, new Rejected())).toBe(true);
+    expect(shouldReportMutationError({}, new Rejected())).toBe(true);
+    expect(
+      shouldReportMutationError({ isExpectedError: true }, new Rejected()),
+    ).toBe(true);
   });
 });

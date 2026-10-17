@@ -31,6 +31,7 @@ import {
   useDeleteAccountKey,
   useSaveAccountKey,
 } from "../api/useAccountKeyMutations";
+import { accountKeyView } from "../lib/view";
 
 // Карточка «Основной аккаунт — read-only ключ» (spec 0065): ввод ключа на сайте, проверка прав в Binance, статус
 // «…AB12», замена и удаление. Сам ключ после сохранения не показывается нигде — только последние 4 символа.
@@ -222,7 +223,7 @@ export function AccountKeyCard() {
   const [replacing, setReplacing] = useState(false);
   const status = query.data;
   const stored = status?.stored ?? null;
-  const usable = stored !== null && !status?.decryptFailed;
+  const view = status ? accountKeyView(status) : null;
 
   // Карточка рендерится после загрузки — к якорю (ссылка из «Портфеля» и Earn) браузер ещё не прокрутил.
   useEffect(() => {
@@ -248,13 +249,20 @@ export function AccountKeyCard() {
         )}
         {status && (
           <>
-            {status.decryptFailed && stored && (
+            {view === "master-unavailable" && stored && (
+              <p className="font-medium text-destructive">
+                ⚠️ Мастер-ключ на сервере недоступен ({status.masterUnavailable})
+                — сохранённый ключ {hintText(stored.hint)} цел, после
+                исправления на сервере снова заработает.
+              </p>
+            )}
+            {view === "decrypt-failed" && stored && (
               <p className="font-medium text-destructive">
                 ⚠️ Сохранённый ключ {hintText(stored.hint)} не расшифровывается —
                 введите его заново.
               </p>
             )}
-            {usable && stored && (
+            {view === "saved" && stored && (
               <div className="flex flex-col gap-2">
                 <p className="font-medium text-positive">
                   ✅ Ключ {hintText(stored.hint)}
@@ -277,7 +285,8 @@ export function AccountKeyCard() {
               </div>
             )}
             <SourceNote status={status} />
-            {usable && !replacing ? (
+            {view === "master-unavailable" ? null : view === "saved" &&
+              !replacing ? (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
@@ -296,7 +305,9 @@ export function AccountKeyCard() {
                   onDone={() => setReplacing(false)}
                   onCancel={replacing ? () => setReplacing(false) : undefined}
                 />
-                {!usable && stored && <DeleteKey hint={stored.hint} />}
+                {view === "decrypt-failed" && stored && (
+                  <DeleteKey hint={stored.hint} />
+                )}
               </>
             )}
           </>

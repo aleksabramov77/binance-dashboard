@@ -63,6 +63,10 @@ if [ "$WEB" = 1 ] && [ ! -s "$ETC/master.key" ]; then
   install -m 640 -o root -g "$NAME" /dev/null "$ETC/master.key"
   head -c 32 /dev/urandom | base64 >"$ETC/master.key"
   echo "Мастер-ключ: создан $ETC/master.key (root:$NAME 640)"
+elif [ "$WEB" = 1 ]; then
+  # Уже есть: содержимое не трогаем, только выравниваем владельца и права (сервис должен читать, другие — нет).
+  chown root:"$NAME" "$ETC/master.key"
+  chmod 640 "$ETC/master.key"
 fi
 # Сайт на Next.js пишет кэш в .next/cache: выкатка делает его ссылкой сюда (код только для чтения).
 [ "$WEB" = 1 ] && install -d -m 700 -o "$NAME" -g "$NAME" "$DATA/cache"

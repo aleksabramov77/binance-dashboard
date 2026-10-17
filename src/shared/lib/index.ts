@@ -19,7 +19,8 @@ export {
 export {
   type AppVersion,
   appVersionSchema,
-  EXPECTED_ERRORS_META,
+  type ExpectedErrorPredicate,
+  expectedErrorsMeta,
   getPageVersion,
   isStaleVersion,
   reportClientError,

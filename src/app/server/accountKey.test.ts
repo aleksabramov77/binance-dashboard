@@ -15,6 +15,7 @@ import {
 import { accountKeysTable } from "@/entities/account-key";
 import type { ReadKeyFlags } from "@/shared/api/binance";
 import { BinanceApiError } from "@/shared/api/binance/account.server";
+import { encrypt, readMasterKeyFile } from "@/shared/crypto/aesGcm.server";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
 import {
@@ -166,6 +167,7 @@ describe("saveAccountKey", () => {
           flags: READ_ONLY,
         },
         decryptFailed: false,
+        masterUnavailable: null,
         input: { available: true, reason: null },
         hosting: "cloud",
       },
@@ -328,16 +330,58 @@ describe("мастер-ключ пропал или сменился", () => {
     });
   });
 
-  it("файла мастер-ключа больше нет — тоже decrypt-failed, приложение работает", async () => {
+  it.each([
+    ["нет SECRETS_KEY_FILE", () => "", /SECRETS_KEY_FILE/],
+    ["нет файла", () => path.join(dir, "missing.key"), /ENOENT/],
+    ["файл не читается (права, каталог вместо файла)", () => dir, /EISDIR/],
+  ])("мастер-ключ недоступен (%s): запись цела, не decrypt-failed, после исправления снова работает", async (_, file, reason) => {
     await saveAccountKey(INPUT, { by: null }, deps());
-    vi.stubEnv("SECRETS_KEY_FILE", "");
+    vi.stubEnv("SECRETS_KEY_FILE", file());
     resetMainCredentialsCache();
     expect(getMainCredentials()).toBeNull();
+    expect(getMainCredentials()).toBeNull();
     expect(getAccountKeyStatus()).toMatchObject({
-      decryptFailed: true,
+      source: "none",
+      decryptFailed: false,
+      masterUnavailable: expect.stringMatching(reason),
+      stored: { hint: "AB12" },
       input: { available: false },
     });
+    expect(events("error")).toEqual([]);
+    // Одна запись warn на процесс, без ключа и секрета.
+    expect(events("warn")).toEqual(["account-key.master-unavailable"]);
+    expect(db.select().from(accountKeysTable).all()).toHaveLength(1);
+    // Исправили на сервере — тот же ключ снова работает без повторного ввода.
+    vi.stubEnv("SECRETS_KEY_FILE", MASTER);
+    expect(getMainCredentials()).toEqual(INPUT);
+    expect(getAccountKeyStatus()).toMatchObject({
+      source: "db",
+      masterUnavailable: null,
+    });
+  });
+
+  it("сохранённый ключ при доступном мастер-ключе — masterUnavailable null", async () => {
+    await saveAccountKey(INPUT, { by: null }, deps());
+    expect(getAccountKeyStatus().masterUnavailable).toBeNull();
+  });
+
+  it("расшифровалось, но не JSON — decrypt-failed без цитаты открытого текста", () => {
+    const plaintext = `not-json ${API_SECRET}`;
+    db.insert(accountKeysTable)
+      .values({
+        name: "binance-main",
+        ...encrypt(readMasterKeyFile(MASTER), plaintext, "binance-main"),
+        keyHint: "AB12",
+        restrictions: READ_ONLY,
+        savedAt: SAVED_AT,
+      })
+      .run();
+    expect(getMainCredentials()).toBeNull();
     expect(events("error")).toEqual(["account-key.decrypt-failed"]);
+    expect(vi.mocked(log.error).mock.calls[0][2]).toMatchObject({
+      reason: "расшифрованная запись не распознана (не JSON)",
+    });
+    expect(logged()).not.toContain(API_SECRET);
   });
 
   it("ввод ключа заново после смены мастер-ключа — снова работает", async () => {

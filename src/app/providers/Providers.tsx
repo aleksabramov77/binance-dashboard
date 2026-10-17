@@ -20,9 +20,9 @@ export function Providers({ children }: { children: ReactNode }) {
             reportClientError("query", error, { queryKey: query.queryKey }),
         }),
         mutationCache: new MutationCache({
-          // Ожидаемые отказы (meta EXPECTED_ERRORS_META) видны в форме, сервер пишет их сам — не error `client`.
+          // Ожидаемые отказы (meta expectedErrorsMeta) видны в форме, сервер пишет их сам — не error `client`.
           onError: (error, _vars, _ctx, mutation) => {
-            if (!shouldReportMutationError(mutation.meta)) return;
+            if (!shouldReportMutationError(mutation.meta, error)) return;
             reportClientError("mutation", error, {
               mutationKey: mutation.options.mutationKey ?? null,
             });

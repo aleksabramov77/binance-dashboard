@@ -40,8 +40,13 @@ export const accountKeyStatusSchema = z.object({
       flags: readKeyFlagsSchema.nullable(),
     })
     .nullable(),
-  /** Ключ в базе есть, но не расшифровывается (мастер-ключ пропал или сменился). */
+  /** Ключ в базе есть, мастер-ключ читается, но не подходит (сменился) — ключ надо ввести заново. */
   decryptFailed: z.boolean(),
+  /**
+   * Ключ в базе есть, а мастер-ключ на сервере не читается (нет SECRETS_KEY_FILE, файла, прав) — причина. Запись цела,
+   * после исправления на сервере снова работает; null — не тот случай.
+   */
+  masterUnavailable: z.string().nullable(),
   /** Можно ли ввести ключ на сайте; нет — причина (на сервере не задан мастер-ключ). */
   input: z.object({ available: z.boolean(), reason: z.string().nullable() }),
   hosting: z.enum(["local", "cloud"]),
