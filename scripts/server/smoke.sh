@@ -46,6 +46,22 @@ else
   [ "$bk_age" -le $((26 * 3600)) ] || bad "последней копии базы больше 26 ч — проверь binance-backup.timer"
 fi
 
+# Сторож (spec 0064): таймер включён и последний запуск не старше 10 мин. Не установлен — предупреждение.
+if systemctl is-enabled --quiet binance-watchdog.timer 2>/dev/null; then
+  wd_last=$(systemctl show -p ExecMainExitTimestamp --value binance-watchdog.service)
+  wd_s=""
+  [ -z "$wd_last" ] || [ "$wd_last" = n/a ] || wd_s=$(date -d "$wd_last" +%s 2>/dev/null || true)
+  if [ -z "$wd_s" ]; then
+    bad "сторож binance-watchdog ещё ни разу не запускался"
+  elif [ $(($(date +%s) - wd_s)) -gt 600 ]; then
+    bad "сторож binance-watchdog не запускался больше 10 мин"
+  else
+    say "OK: сторож запускался $(($(date +%s) - wd_s)) с назад ($(systemctl show -p Result --value binance-watchdog.service))"
+  fi
+else
+  say "WARN: сторож binance-watchdog не установлен (add-watchdog.sh, spec 0064)"
+fi
+
 if systemctl is-enabled --quiet binance-live; then
   if systemctl is-active --quiet binance-live; then say "OK: binance-live active"; else bad "binance-live включён, но не активен"; fi
 else
