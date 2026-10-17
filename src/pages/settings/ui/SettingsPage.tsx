@@ -1,6 +1,7 @@
 "use client";
 
 import { useLabSettings } from "@/entities/experiment";
+import { AccountKeyCard } from "@/features/manage-account-key";
 import { BudgetCard } from "./BudgetCard";
 import { DemoAccountsCard } from "./DemoAccountsCard";
 import { EngineCard } from "./EngineCard";
@@ -44,7 +45,9 @@ export function SettingsPage() {
           <GroupResetsCard settings={settings.data} />
         </>
       )}
-      {/* Реальный счёт не зависит от настроек лаборатории — свой запрос, видна и при их ошибке. */}
+      {/* Ключ основного аккаунта и реальный счёт не зависят от настроек лаборатории — свои запросы, видны и при их ошибке. */}
+      <h2 className="text-lg font-semibold">Основной аккаунт Binance</h2>
+      <AccountKeyCard />
       <h2 className="text-lg font-semibold">Реальный счёт — субсчёт Binance</h2>
       <LiveAccountCard />
     </div>

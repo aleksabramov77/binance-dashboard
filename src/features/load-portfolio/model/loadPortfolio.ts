@@ -13,7 +13,6 @@ import { fetchTickerPrices } from "@/shared/api/binance/public.server";
 import {
   type BinanceCredentials,
   getAppHost,
-  getBinanceCredentials,
 } from "@/shared/config/env.server";
 import { log } from "@/shared/lib/logger.server";
 import { createKeyedCache } from "./keyedCache";
@@ -55,8 +54,13 @@ function loadYesterdayRewards(
   );
 }
 
-export async function loadPortfolio(): Promise<Portfolio> {
-  const creds = getBinanceCredentials();
+/**
+ * Портфель по read-only ключу основного аккаунта. Ключ передаёт роут (`getMainCredentials` платформы, spec 0065:
+ * база → env → нет), домен не знает, откуда он.
+ */
+export async function loadPortfolio(
+  creds: BinanceCredentials | null,
+): Promise<Portfolio> {
   // Без ключа — инструкция по подключению; облачный хостинг отличается только полем hosting.
   if (!creds)
     return {

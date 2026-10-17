@@ -17,13 +17,13 @@ import type { MainAccountUid } from "@/shared/api/binance";
 import { fetchAccountUid } from "@/shared/api/binance/account.server";
 import { sendTelegramMessage } from "@/shared/api/telegram";
 import {
-  getBinanceCredentials,
   getLiveSilentAfterMs,
   getSiteLink,
   getTelegramConfig,
 } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import { getMainCredentials } from "./accountKey";
 
 /** UID основного счёта не меняется — достаточно перечитывать раз в час. */
 const MAIN_UID_TTL_MS = 60 * 60_000;
@@ -47,11 +47,12 @@ const g = globalThis as typeof globalThis & { [uidKey]?: UidCache };
 export async function getMainAccountUid(
   now = Date.now(),
 ): Promise<NonNullable<MainAccountUid>> {
-  const creds = getBinanceCredentials();
+  const creds = getMainCredentials();
   if (!creds)
     return {
       uid: null,
-      reason: "у приложения не задан read-only ключ (BINANCE_API_KEY)",
+      reason:
+        "у приложения нет read-only ключа основного аккаунта (не введён в «Настройках»)",
       transient: false,
     };
   g[uidKey] ??= { at: 0, uid: null, pending: null };

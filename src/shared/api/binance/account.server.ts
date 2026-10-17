@@ -2,6 +2,7 @@
 export {
   type FlexibleRewardsType,
   fetchAccountUid,
+  fetchApiRestrictions,
   fetchFlexiblePositions,
   fetchFlexibleRewards,
   fetchFundingAssets,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Проект на VM apps-tokyo (spec 0017): Linux-пользователь, каталоги, секреты, systemd-сервис с лимитами, сайт в Caddy.
-# Запуск — от root после bootstrap.sh; повторный запуск обновляет unit и сайт, секреты и данные не трогает.
+# Запуск — от root после bootstrap.sh; повторный запуск обновляет unit и сайт, секреты, мастер-ключ и данные не трогает.
 #   sudo bash add-project.sh binance --port 5000 --stop-timeout 30  сайт: https://binance.<ip>.sslip.io
 #   sudo bash add-project.sh binance-live --no-web --exec live-worker.mjs --memory 128M --heap 96 --stop-timeout 120
 # Параметры:
@@ -56,6 +56,20 @@ install -d -m 755 -o deploy -g "$NAME" "$APP"
 install -d -m 700 -o "$NAME" -g "$NAME" "$DATA"
 install -d -m 750 -o root -g "$NAME" "$ETC"
 [ -f "$ETC/app.env" ] || install -m 640 -o root -g "$NAME" /dev/null "$ETC/app.env"
+# Мастер-ключ секретов в базе (spec 0065): 32 случайных байта в base64, читает только сервис. Есть непустой — не
+# трогаем никогда: новый ключ сделал бы сохранённые в базе секреты нерасшифровываемыми. Не входит в бэкапы базы.
+# Сайту нужен путь в app.env: SECRETS_KEY_FILE=$ETC/master.key. Фоновым сервисам (--no-web) не создаётся.
+if [ "$WEB" = 1 ] && [ ! -s "$ETC/master.key" ]; then
+  install -m 640 -o root -g "$NAME" /dev/null "$ETC/master.key"
+  head -c 32 /dev/urandom | base64 >"$ETC/master.key"
+  echo "Мастер-ключ: создан $ETC/master.key (root:$NAME 640)"
+elif [ "$WEB" = 1 ]; then
+  # Уже есть: содержимое не трогаем, только выравниваем владельца и права (сервис должен читать, другие — нет).
+  # Символическая ссылка — не наш файл: chown/chmod ушли бы на цель ссылки.
+  [ ! -L "$ETC/master.key" ] || fail "$ETC/master.key — символическая ссылка; нужен обычный файл (содержимое не тронуто)"
+  chown root:"$NAME" "$ETC/master.key"
+  chmod 640 "$ETC/master.key"
+fi
 # Сайт на Next.js пишет кэш в .next/cache: выкатка делает его ссылкой сюда (код только для чтения).
 [ "$WEB" = 1 ] && install -d -m 700 -o "$NAME" -g "$NAME" "$DATA/cache"
 
@@ -134,3 +148,6 @@ CADDY
 fi
 
 echo "Проект $NAME: код $APP (выкатка deploy), данные $DATA, секреты $ETC/app.env, сервис $NAME.service ($MEMORY)"
+if [ "$WEB" = 1 ] && ! grep -q "^SECRETS_KEY_FILE=" "$ETC/app.env"; then
+  echo "Добавьте в $ETC/app.env строку SECRETS_KEY_FILE=$ETC/master.key и перезапустите $NAME"
+fi

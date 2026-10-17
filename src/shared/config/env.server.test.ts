@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getAccountKeyFixture,
   getAppHost,
   getDatabaseConfig,
   getDeploymentVersion,
@@ -189,5 +190,32 @@ describe("getSiteUrl", () => {
     expect(getSiteUrl({ SITE_URL: "https://binance.example.test/" })).toBe(
       "https://binance.example.test",
     );
+  });
+});
+
+describe("getAccountKeyFixture (spec 0065)", () => {
+  const dev = { NODE_ENV: "development", ACCOUNT_KEY_FIXTURE: "read-only" };
+
+  it("локально в dev — заданная заглушка", () => {
+    expect(getAccountKeyFixture(dev)).toBe("read-only");
+    expect(
+      getAccountKeyFixture({ ...dev, ACCOUNT_KEY_FIXTURE: " trading " }),
+    ).toBe("trading");
+    expect(
+      getAccountKeyFixture({ ...dev, ACCOUNT_KEY_FIXTURE: "rejected" }),
+    ).toBe("rejected");
+  });
+
+  it("на VM, на Vercel и в production — всегда null", () => {
+    expect(getAccountKeyFixture({ ...dev, APP_HOST: "vm" })).toBeNull();
+    expect(getAccountKeyFixture({ ...dev, VERCEL: "1" })).toBeNull();
+    expect(getAccountKeyFixture({ ...dev, NODE_ENV: "production" })).toBeNull();
+  });
+
+  it("не задана или неизвестное значение — null", () => {
+    expect(getAccountKeyFixture({ NODE_ENV: "development" })).toBeNull();
+    expect(
+      getAccountKeyFixture({ ...dev, ACCOUNT_KEY_FIXTURE: "ok" }),
+    ).toBeNull();
   });
 });

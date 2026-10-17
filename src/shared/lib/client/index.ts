@@ -5,4 +5,9 @@ export {
   getPageVersion,
   isStaleVersion,
 } from "./appVersion";
+export {
+  type ExpectedErrorPredicate,
+  expectedErrorsMeta,
+  shouldReportMutationError,
+} from "./mutationErrors";
 export { reportClientError } from "./reportClientError";

@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/Card";
 
-/** Почему нет полного каталога: без ключа локально — как включить; в облаке — только на компьютере. */
+/** Почему нет полного каталога: без ключа локально — как вписать его в .env.local; на сервере — ввести в «Настройках». */
 export function AdvancedAccessNotice({
   hosting,
 }: {
@@ -10,19 +11,23 @@ export function AdvancedAccessNotice({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Полный каталог — только на компьютере с ключом</CardTitle>
+          <CardTitle>
+            Полный каталог появится с ключом «только чтение»
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p>
             Конкретные предложения (целевые цены, сроки, квоты) Binance отдаёт
-            только по ключу аккаунта, а ключ в облако не загружается — так
-            безопаснее. Ниже — общие диапазоны ставок из открытой сводки
-            Binance.
+            только по ключу аккаунта. Ниже — общие диапазоны ставок из открытой
+            сводки Binance.
           </p>
-          <p className="text-muted-foreground">
-            Полный каталог — в дашборде на своём компьютере (
-            <code>pnpm dev</code>
-            ), где ключ лежит в <code>.env.local</code>.
+          <p>
+            Введите read-only ключ основного аккаунта в{" "}
+            <Link href="/settings#account-key" className="underline">
+              Настройках
+            </Link>{" "}
+            → «Основной аккаунт — read-only ключ» — каталог появится без
+            перезапуска. Тот же ключ использует раздел «Портфель».
           </p>
         </CardContent>
       </Card>

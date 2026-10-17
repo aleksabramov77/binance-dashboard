@@ -17,6 +17,7 @@ import { fetchAccountUid } from "@/shared/api/binance/account.server";
 import { sendTelegramMessage } from "@/shared/api/telegram";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import { resetMainCredentialsCache } from "./accountKey";
 import {
   checkLiveSilence,
   clearMainAccountUidCache,
@@ -74,6 +75,7 @@ afterAll(() => close());
 beforeEach(async () => {
   await db.delete(liveWorkerStateTable);
   clearMainAccountUidCache();
+  resetMainCredentialsCache();
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("TELEGRAM_BOT_TOKEN", "bot");
   vi.stubEnv("TELEGRAM_CHAT_ID", "42");
@@ -127,6 +129,7 @@ describe("ingestHeartbeat", () => {
 
     clearMainAccountUidCache();
     vi.stubEnv("BINANCE_API_KEY", "");
+    resetMainCredentialsCache();
     const reply = await ingestHeartbeat(pulse(), T0 + 2 * MIN);
     expect(reply.mainAccount).toEqual({
       uid: null,

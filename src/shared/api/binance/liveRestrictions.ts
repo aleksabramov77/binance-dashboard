@@ -32,7 +32,7 @@ export const liveKeyFlagsSchema = z.object({
 }) satisfies z.ZodType<Record<LiveKeyFlag, boolean>>;
 export type LiveKeyFlags = z.infer<typeof liveKeyFlagsSchema>;
 
-interface FlagRule {
+export interface FlagRule {
   /** Какое значение нужно. */
   expected: boolean;
   /** Название переключателя в интерфейсе Binance (Edit restrictions). */

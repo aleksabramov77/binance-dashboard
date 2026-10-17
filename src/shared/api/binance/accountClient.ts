@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 import type { BinanceCredentials } from "@/shared/config/env.server";
 import {
   accountUidSchema,
@@ -31,6 +31,21 @@ function signedRequest<T extends z.ZodType>(
   params: SignedParams = {},
 ): Promise<z.infer<T>> {
   return signed(API_URL, creds, method, path, schema, params);
+}
+
+/**
+ * Права read-only ключа (`GET /sapi/v1/account/apiRestrictions`, вес 1) — проверка перед сохранением ключа в базе
+ * (spec 0065). Ответ как есть: разбор и оценка — `evaluateReadKeyRestrictions`.
+ */
+export function fetchApiRestrictions(
+  creds: BinanceCredentials,
+): Promise<unknown> {
+  return signedRequest(
+    creds,
+    "GET",
+    "/sapi/v1/account/apiRestrictions",
+    z.unknown(),
+  );
 }
 
 export async function fetchSpotAccount(

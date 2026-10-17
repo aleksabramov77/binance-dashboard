@@ -18,6 +18,33 @@ export function getBinanceCredentials(): BinanceCredentials | null {
   };
 }
 
+/**
+ * Файл мастер-ключа для секретов в базе (spec 0065): 32 байта в base64, на VM — /etc/binance/master.key. null — не
+ * задан: ввод ключа основного аккаунта на сайте недоступен, ключ из env работает как раньше.
+ */
+export const getSecretsKeyFile = (
+  env: Record<string, string | undefined> = process.env,
+): string | null => env.SECRETS_KEY_FILE?.trim() || null;
+
+export const ACCOUNT_KEY_FIXTURES = [
+  "read-only",
+  "trading",
+  "rejected",
+] as const;
+export type AccountKeyFixture = (typeof ACCOUNT_KEY_FIXTURES)[number];
+
+/**
+ * Заглушка Binance для проверки ключа основного аккаунта на локальном сервере (тестировщик, `pnpm wt serve`): права
+ * не запрашиваются у биржи, а берутся готовые. Только на Mac и не в production — на VM и Vercel всегда null.
+ */
+export function getAccountKeyFixture(
+  env: Record<string, string | undefined> = process.env,
+): AccountKeyFixture | null {
+  if (getAppHost(env) !== "local" || env.NODE_ENV === "production") return null;
+  const value = env.ACCOUNT_KEY_FIXTURE?.trim();
+  return ACCOUNT_KEY_FIXTURES.find((f) => f === value) ?? null;
+}
+
 const demoEnvSchema = z.object({
   BINANCE_DEMO_API_KEY: z.string().min(1),
   BINANCE_DEMO_API_SECRET: z.string().min(1),

@@ -47,20 +47,25 @@ function SetupInstructions() {
   );
 }
 
+/** На сервере ключ вводится на сайте (spec 0065): в «Настройках», хранится в базе в зашифрованном виде. */
 function CloudNotice() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Портфель доступен только на компьютере</CardTitle>
+        <CardTitle>Подключите аккаунт Binance (только чтение)</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
         <p>
-          Ключ вашего аккаунта Binance в облако не загружается: так безопаснее
-          для аккаунта. Поэтому балансы и план перекладки здесь не показываются.
+          Балансы и план перекладки появятся, когда read-only ключ основного
+          аккаунта будет введён в{" "}
+          <Link href="/settings#account-key" className="underline">
+            Настройках
+          </Link>{" "}
+          → «Основной аккаунт — read-only ключ». Перезапуск не нужен.
         </p>
         <p className="text-muted-foreground">
-          Чтобы посмотреть портфель, запустите дашборд на своём компьютере (
-          <code>pnpm dev</code>) — там ключ лежит в <code>.env.local</code>.
+          Сервер проверяет, что у ключа только чтение и ограничение по IP, и
+          хранит его в базе в зашифрованном виде.
         </p>
       </CardContent>
     </Card>
