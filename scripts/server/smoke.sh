@@ -12,13 +12,17 @@ bad() { say "FAIL: $*"; fail=1; }
 
 if systemctl is-active --quiet binance; then say "OK: binance active"; else bad "binance не активен"; fi
 
-tick=$(sudo -u binance sqlite3 -readonly "$DB" "select json_extract(value, '\$.at') || '|' ||
-  json_extract(value, '\$.runner') || '|' || json_extract(value, '\$.status') from engine_state where key = 'last_tick'")
+tick=$(sudo -u binance sqlite3 -readonly "$DB" "select coalesce(json_extract(value, '\$.at'), '') || '|' ||
+  coalesce(json_extract(value, '\$.runner'), '') || '|' || coalesce(json_extract(value, '\$.status'), '')
+  from engine_state where key = 'last_tick'")
 IFS='|' read -r at runner status <<<"$tick"
-if [ -z "${at:-}" ]; then
+at_s=$(date -d "${at:-x}" +%s 2>/dev/null || true)
+if [ -z "$tick" ]; then
   bad "в engine_state нет last_tick"
+elif [ -z "$at_s" ]; then
+  bad "в last_tick нет времени тика (at='${at:-}')"
 else
-  age=$(($(date +%s) - $(date -d "$at" +%s)))
+  age=$(($(date +%s) - at_s))
   say "тик: $at (${age} с назад), runner=$runner, status=$status"
   [ "$age" -le 150 ] || bad "последний тик старше 150 с"
   [ "$runner" = oracle ] || bad "runner=$runner, ожидается oracle"

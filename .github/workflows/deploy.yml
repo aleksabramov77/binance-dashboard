@@ -72,7 +72,9 @@ jobs:
 
       # Воркер реального счёта (spec 0047, 0061): один файл dist/live-worker.mjs без node_modules.
       - name: Build live-worker
-        run: pnpm live:build
+        # Коммиты до spec 0047 (откат далеко назад) воркера не содержат — шаг и выкатка воркера пропускаются.
+        run: |
+          if [ -f scripts/live-build.ts ]; then pnpm live:build; else echo "нет scripts/live-build.ts — воркер не собирается"; fi
 
       # server.js + трассированные node_modules + миграции drizzle/; static и public standalone не копирует сам.
       - name: Бандл
@@ -118,7 +120,8 @@ jobs:
       # restart ждёт выхода по SIGTERM до 120 с: начатая сделка доделывается.
       - name: Воркер binance-live
         run: |
-          rsync -tz --chmod=F644 dist/live-worker.mjs "$VM_USER@$VM_HOST:/srv/$LIVE_PROJECT/app/live-worker.mjs"
+          if [ ! -f dist/live-worker.mjs ]; then echo "воркер не собран — пропуск"; exit 0; fi
+          rsync -ptz --chmod=F644 dist/live-worker.mjs "$VM_USER@$VM_HOST:/srv/$LIVE_PROJECT/app/live-worker.mjs"
           ssh "$VM_USER@$VM_HOST" bash -s <<EOF
           set -e
           if ! systemctl is-enabled --quiet $LIVE_PROJECT; then
