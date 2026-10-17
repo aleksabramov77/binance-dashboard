@@ -1,7 +1,7 @@
 # 0061 · Выкатка воркера реального счёта `binance-live` на VM из CI
 
 - **Тип:** feature
-- **Статус:** approved
+- **Статус:** done
 - **Раздел PRD:** §3.7 Реальные деньги (хостинг)
 - **Дата:** 2026-10-17
 
@@ -32,14 +32,15 @@
     у `deploy` уже есть (0017).
   - Сбой выкатки воркера роняет job, но сайт уже выкачен; в журнале шага видна причина. Сборка воркера
     (`pnpm live:build`) идёт и в CI на каждом PR, поэтому её поломка ловится до мержа.
-- **Сервис на VM** (делает Claude один раз после мержа):
-  - `add-project.sh binance-live --no-web --exec live-worker.mjs --memory 128M --heap 96 --stop-timeout 120`
-    повторно: unit получает `TimeoutStopSec=120` и `KillSignal=SIGTERM`, которых в нём сейчас нет;
-  - в `/etc/binance-live/app.env` (root:binance-live 640):
-    - `LIVE_WORKER_SECRET` — тот же, что в `/etc/binance/app.env`;
-    - `LIVE_APP_URL=http://127.0.0.1:5000` — приложение на той же VM, без TLS и без выхода в интернет;
-  - строки ключа (`BINANCE_TRADE_API_*`), вписанные владельцем, не трогаются и не выводятся;
-  - `systemctl enable --now binance-live`.
+- **Сервис на VM** (делает Claude один раз; порядок — `deploy-lightsail.md` → «Воркер реального счёта»):
+  1. в `/etc/binance-live/app.env` (root:binance-live 640) — `LIVE_WORKER_SECRET` (тот же, что в `/etc/binance/app.env`)
+     и `LIVE_APP_URL=http://127.0.0.1:5000` (приложение на той же VM, без TLS); строки ключа (`BINANCE_TRADE_API_*`),
+     вписанные владельцем, не трогаются и не выводятся;
+  2. `add-project.sh binance-live --no-web --exec live-worker.mjs --memory 128M --heap 96 --stop-timeout 120`
+     повторно: unit получает `TimeoutStopSec=120` и `KillSignal=SIGTERM` (если `live-worker.mjs` уже на VM, скрипт сам
+     включает и запускает сервис);
+  3. проверка базы: ни одного эксперимента с включённым реальным зеркалом и ни одной незакрытой реальной позиции;
+  4. `systemctl enable --now binance-live`.
 - **Ключ владельца:** `BINANCE_TRADE_API_KEY` и `BINANCE_TRADE_API_SECRET` уже в том же файле (`sudoedit`, под
   `aleksandr`); замена — так же, затем `sudo systemctl restart binance-live`. В ключе на Binance — белый список IP: static IP VM.
   Claude ключ не видит и не вписывает.
@@ -80,3 +81,4 @@
 | 2026-10-17 | ТЗ заведено; ключ владельца уже на VM — ТЗ уточнено (запуск с ключом при «Выкл» у всех 68 экспериментов), утверждено |
 | 2026-10-17 | Код: `deploy.yml` (сборка и выкатка воркера, рестарт только включённого), `ci.yml` (`pnpm live:build`), `scripts/server/smoke.sh` и этап smoke `/flow release` по SQLite, раздел «Воркер реального счёта» в `deploy-lightsail.md`, PRD (п. 20 🚧, п. 27). На VM до мержа: unit `TimeoutStopSec=120`, `KillSignal=SIGTERM`; `LIVE_WORKER_SECRET`, `LIVE_APP_URL` в `app.env`; сервис выключен |
 | 2026-10-17 | Тестер PASS (5/5, мелочи исправлены); ревью PR #100 — 4 minor (сборка воркера в CI, порядок шагов и автозапуск у `add-project.sh`, команды `LIVE_*`, журнал spec) и nits — исправлены |
+| 2026-10-17 | Перепроверка: FAIL — smoke проходил при пустом времени тика (GNU date принимает пустую строку); исправлено (разбор только непустого, тик из будущего — ошибка, свой флаг сбоя sqlite3), проверено на VM 4 случаями. Ревью PR #100 — APPROVED (2 круга). Запуск сервиса (AC6–AC8) — после мержа |
