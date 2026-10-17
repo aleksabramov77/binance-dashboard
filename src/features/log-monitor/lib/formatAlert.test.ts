@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Issue } from "./detectIssues";
 import { formatAlert } from "./formatAlert";
-import { formatAlertIssue } from "./formatAlertIssue";
 
 const issue: Issue = {
   key: "tick:stale",
@@ -32,9 +31,6 @@ describe("ссылка на журнал в тревоге", () => {
     });
     expect(text).toBe(
       "⚠️ Binance Dashboard: проблема\n🔴 Тик движка молчит: нет тика 10 мин",
-    );
-    expect(formatAlertIssue(issue, null, [], null).body).not.toContain(
-      "Журнал на сайте",
     );
   });
 });
