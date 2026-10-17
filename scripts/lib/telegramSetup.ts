@@ -1,5 +1,11 @@
 // Чистая логика `pnpm telegram:setup` (spec 0021, 0067): аргументы, проверка группы с темами, план тем, строки env и
 // предупреждение о владельце. Сеть и печать — scripts/telegram-setup.ts.
+import {
+  type LiveCardStatus,
+  liveBinanceUrl,
+  liveCardText,
+  liveCardUrgent,
+} from "@/entities/live-account";
 import type { TelegramChat, TelegramChatMember } from "@/shared/api/telegram";
 import {
   isPrivateChatId,
@@ -14,9 +20,16 @@ export interface SetupMode {
   topics: boolean;
   /** Пробное сообщение в каждую тему. */
   test: boolean;
+  /** Пробная карточка сделки в тему «Сделки»: ⏳ → 🟡 → 🟢 с заменой прежней (spec 0068, B7). */
+  testTrade: boolean;
 }
 
-const FLAGS: ReadonlySet<string> = new Set(["--delete", "--topics", "--test"]);
+const FLAGS: ReadonlySet<string> = new Set([
+  "--delete",
+  "--topics",
+  "--test",
+  "--test-trade",
+]);
 
 export function parseSetupArgs(args: string[]): SetupMode | { error: string } {
   const unknown = args.filter((a) => !FLAGS.has(a));
@@ -28,9 +41,12 @@ export function parseSetupArgs(args: string[]): SetupMode | { error: string } {
     delete: args.includes("--delete"),
     topics: args.includes("--topics"),
     test: args.includes("--test"),
+    testTrade: args.includes("--test-trade"),
   };
-  if (mode.delete && (mode.topics || mode.test))
-    return { error: "--delete — только отдельно, без --topics и --test" };
+  if (mode.delete && (mode.topics || mode.test || mode.testTrade))
+    return {
+      error: "--delete — только отдельно, без --topics, --test и --test-trade",
+    };
   return mode;
 }
 
@@ -110,4 +126,68 @@ export function ownerWarnings(config: TelegramConfig): string[] {
       `TELEGRAM_CHAT_ID (${config.chatId}) — группа, а TELEGRAM_OWNER_ID не задан или не принят: бот перестанет отвечать на команды в личке. Задайте TELEGRAM_OWNER_ID — ваш id в Telegram (прежний TELEGRAM_CHAT_ID личного чата).`,
     );
   return warnings;
+}
+
+/** Пометка пробной пары: числа вымышленные, сделки нет. */
+const TEST_MARK = "🧪 Пробное сообщение: числа вымышленные, сделки нет";
+/** Пробный баланс субсчёта. */
+const TEST_BALANCE = { usd: 512.4, asOf: null };
+
+/** Пробная карточка: текст и звук (как у настоящей сделки с тем же статусом). */
+export interface TestTradeCard {
+  /** Для журнала и вывода: «⏳ вход исполнен». */
+  label: string;
+  /** Простой текст и HTML, как у настоящей карточки. */
+  text: string;
+  html: string;
+  urgent: boolean;
+  /** Кнопка «🔗 Binance». */
+  binanceUrl: string;
+}
+
+/**
+ * Пробная цепочка карточек для темы «Сделки» (spec 0068, B7): ⏳ вход исполнен → 🟡 защищена → 🟢 закрыта в прибыль —
+ * той же функцией текста, что у реальных сделок, с вымышленными числами и пометкой «пробное». Каждая следующая
+ * заменяет прежнюю (отправить новую, удалить прежнюю).
+ */
+export function testTradeCards(): TestTradeCard[] {
+  const subject = {
+    experimentId: "S98",
+    symbol: "BTCUSDT",
+    market: "usdm" as const,
+    direction: "long" as const,
+  };
+  const entry = {
+    notionalUsd: 50,
+    raised: "minNotional" as const,
+    entryPrice: 80030,
+    stopLoss: 78430,
+    takeProfit: 83230,
+    openedAt: "2026-10-18T10:25:00.000Z",
+  };
+  const chain: [string, LiveCardStatus][] = [
+    ["⏳ вход исполнен", { kind: "filled" }],
+    ["🟡 защищена", { kind: "protected" }],
+    [
+      "🟢 закрыта",
+      {
+        kind: "closed",
+        exit: {
+          realizedPnl: 0.84,
+          closedBy: "tp",
+          exitPrice: 83230,
+          feesUsd: 0.05,
+          closedAt: "2026-10-18T12:40:00.000Z",
+          heldMs: (2 * 60 + 15) * 60_000,
+        },
+      },
+    ],
+  ];
+  return chain.map(([label, status]) => ({
+    label,
+    text: `${liveCardText(subject, entry, status, TEST_BALANCE)}\n\n${TEST_MARK}`,
+    html: `${liveCardText(subject, entry, status, TEST_BALANCE, "html")}\n\n<i>${TEST_MARK}</i>`,
+    urgent: liveCardUrgent(status),
+    binanceUrl: liveBinanceUrl(subject),
+  }));
 }

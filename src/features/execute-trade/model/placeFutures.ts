@@ -61,8 +61,10 @@ import {
   type Done,
   errorText,
   type Finish,
+  type OnFilled,
   type RefsHolder,
   recheckUntil,
+  reportFilled,
   withPositionRetry,
 } from "./tradeSteps";
 
@@ -86,6 +88,8 @@ export interface FuturesContext {
    * контрактах, режим позиций — свой).
    */
   market: VenueFuturesMarket;
+  /** Вход исполнен — до выставления защиты (spec 0068, B1). */
+  onFilled?: OnFilled;
 }
 
 /** Свои ордера фьючерсной сделки: заполняются по ходу входа (тот же объект — в RefsHolder). */
@@ -418,6 +422,14 @@ export async function placeFutures(c: FuturesContext): Promise<TradeResult> {
       });
     }
   }
+  // Объём — в монете, как у итога сделки (у COIN-M исполнено в контрактах, spec 0056).
+  reportFilled(c.onFilled, {
+    entryPrice,
+    filledQuantity:
+      market === "coinm" && rules.contract && entryPrice
+        ? (filled * rules.contract.size) / entryPrice
+        : filled,
+  });
   // Защита — на свой исполненный объём (без closePosition): у каждого зеркала свои TP/SL.
   const protectQty = floorToStep(filled, rules.stepSize);
   if (futuresRefs.market === "coinm")

@@ -473,10 +473,10 @@ describe("автовыключение по порогам при закрыти
     // Стоп 95 при входе 100 × 0.1 → −$0,50; вместе с −$0,40 — −$0,90 < $1: ещё включён.
     await liveTrade("S97", null);
     expect((await experiment("S97")).liveMirror).toBe(true);
-    expect(telegramTexts().some((t) => /PnL неизвестен/.test(t))).toBe(true);
+    expect(telegramTexts().some((t) => /PnL \?/.test(t))).toBe(true);
     expect(logEvents("warn")).toContain("live.advice");
-    // Выход с неизвестным PnL — тихо (это выход, не сбой).
-    expect(notices().find((n) => n.event === "live.exit")?.urgent).toBe(false);
+    // Итог сделки — карточка со звуком (spec 0068, вариант B).
+    expect(notices().find((n) => n.event === "live.exit")?.urgent).toBe(true);
     await liveTrade("S97", -0.2);
     expect(await experiment("S97")).toMatchObject({
       liveMirrorMode: "off",

@@ -99,6 +99,21 @@ export const liveSkipRequestSchema = liveTradeIdSchema.extend({
   reason: z.string().min(1).max(500),
 });
 
+/**
+ * Вход исполнен, защита ещё ставится (spec 0068, B1): карточка ⏳. Только из pending и один раз; потерялся — итог
+ * входа (open) всё равно даст правильную карточку. Уровни заявки — те же, что потом в open.
+ */
+export const liveFilledRequestSchema = liveTradeIdSchema.extend({
+  entryPrice: z.number().positive(),
+  quantity: z.number().positive(),
+  order: z.object({
+    stopLoss: z.number(),
+    takeProfit: z.number().nullable(),
+    raised: z.enum(["minNotional", "minQty", "spotStop"]).nullable(),
+  }),
+});
+export type LiveFilledRequest = z.infer<typeof liveFilledRequestSchema>;
+
 export const liveOpenRequestSchema = liveTradeIdSchema.extend({
   result: z.object({
     id: z.string(),
@@ -156,6 +171,11 @@ export const liveExitSchema = z.object({
     .object({ qty: z.number(), asset: z.string(), usd: z.number() })
     .nullable()
     .default(null),
+  /**
+   * Баланс субсчёта рынка сделки после закрытия, $ (spec 0068): USDⓈ-M — wallet balance, Spot — equity. null — воркер
+   * не прочитал (приложение возьмёт последний пульс). Старый воркер поля не шлёт.
+   */
+  balanceUsd: z.number().nullish(),
 });
 
 export const liveCloseRequestSchema = liveTradeIdSchema.extend({

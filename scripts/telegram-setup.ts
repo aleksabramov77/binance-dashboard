@@ -6,6 +6,9 @@
 //                                   заданные TELEGRAM_TOPIC_* не пересоздаются
 //   pnpm telegram:setup --test    — по одному тихому пробному сообщению в каждую тему (вместе с --topics — и в только
 //                                   что созданные); явная проверка — отправляется и вне production
+//   pnpm telegram:setup --test-trade
+//                                 — пробная карточка сделки в тему «Сделки» (spec 0068): ⏳ → 🟡 → 🟢, каждая новая
+//                                   заменяет прежнюю (отправить, потом удалить); числа вымышленные
 // Env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_OWNER_ID, TELEGRAM_TOPIC_*, TELEGRAM_WEBHOOK_SECRET (тот же, что
 // у прода), SITE_URL (адрес прода, обязателен для setWebhook). Берутся из .env.local и
 // ~/.config/vercel/binance-dashboard-prod.env; заданные в окружении — главнее. Значения секретов не печатаем.
@@ -28,16 +31,19 @@ import {
   setTelegramWebhook,
 } from "@/shared/api/telegram";
 import {
+  getSiteLink,
   getSiteUrl,
   getTelegramConfig,
   type TelegramConfig,
 } from "@/shared/config/env.server";
 import { log, setNotifyChannels } from "@/shared/lib/logger.server";
+import type { NotifyRef } from "@/shared/notify";
 import {
   forumProblems,
   ownerWarnings,
   parseSetupArgs,
   planTopics,
+  testTradeCards,
   topicEnvLines,
 } from "./lib/telegramSetup";
 
@@ -117,6 +123,46 @@ async function sendTests(): Promise<boolean> {
   return ok;
 }
 
+/**
+ * Пробная цепочка карточек в тему «Сделки» (spec 0068, B7) — тем же каналом и той же заменой, что у реальных сделок:
+ * ⏳ и 🟡 тихо, 🟢 со звуком, каждая следующая заменяет прежнюю. Явная проверка — отправляется и вне production.
+ */
+async function sendTestTrade(): Promise<boolean> {
+  setNotifyChannels(createNotifyChannels());
+  const link = getSiteLink("/experiments");
+  let ref: NotifyRef | null = null;
+  let ok = true;
+  for (const card of testTradeCards()) {
+    const r = await log.notify({
+      level: "info",
+      event: "telegram.test",
+      message: `Пробная карточка сделки: ${card.label}`,
+      category: "trades",
+      urgent: card.urgent,
+      test: true,
+      text: card.text,
+      html: card.html,
+      link,
+      links: [
+        ...(link ? [{ label: "📊 Эксперимент", url: link }] : []),
+        { label: "🔗 Binance", url: card.binanceUrl },
+      ],
+      replaces: { ref, label: "карточка" },
+    });
+    const c = r.channels[0];
+    console.log(
+      r.status === "sent"
+        ? `✅ ${card.label}: отправлено${c?.replaced ? ` (${c.replaced})` : ""}`
+        : `✖ ${card.label}: не отправлено — ${r.reason}`,
+    );
+    if (c?.replaceError) console.log(`⚠️ ${c.replaceError}`);
+    if (r.status !== "sent") return false;
+    if (c?.replaceError) ok = false;
+    ref = r.ref;
+  }
+  return ok;
+}
+
 async function main() {
   const mode = parseSetupArgs(process.argv.slice(2));
   if ("error" in mode) fail(mode.error);
@@ -139,7 +185,7 @@ async function main() {
     return;
   }
 
-  if (mode.topics || mode.test) {
+  if (mode.topics || mode.test || mode.testTrade) {
     if (mode.topics) {
       if (!telegram.chatId)
         fail("TELEGRAM_CHAT_ID не задан — нужен id группы с темами");
@@ -147,6 +193,8 @@ async function main() {
     }
     if (mode.test && !(await sendTests()))
       fail("не все пробные сообщения отправлены");
+    if (mode.testTrade && !(await sendTestTrade()))
+      fail("пробная цепочка карточек в тему «Сделки» прошла не полностью");
     return;
   }
 

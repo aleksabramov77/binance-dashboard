@@ -81,6 +81,7 @@ import {
   noKeyHeartbeat,
   pulseWithHandshake,
   runCheck,
+  spotBalance,
   toWire,
   type WorkerDeps,
 } from "./lib/liveWorker";
@@ -227,7 +228,8 @@ const exchange: LiveExchange | null = venue
         autoHedge: false,
       };
       return {
-        placeTrade: (req, seed) => placeTrade(req, ctx, { tradeId: seed }),
+        placeTrade: (req, seed, onFilled) =>
+          placeTrade(req, ctx, { tradeId: seed, onFilled }),
         spotOrder: (symbol, clientOrderId) =>
           fetchDemoSpotOrderByClientId(venue, symbol, clientOrderId),
         futuresOrder: (symbol, clientOrderId) =>
@@ -241,6 +243,14 @@ const exchange: LiveExchange | null = venue
           fetchDemoSymbolRules(market, symbol, venue),
         price: (market, symbol) => fetchDemoPrice(market, symbol, venue),
         balances: () => fetchDemoUsdtBalances(venue),
+        // Баланс для итога закрытия (spec 0068) — те же запросы, что у пульса: USDⓈ-M — wallet, Spot — equity.
+        balanceUsd: async (market) => {
+          if (!deps) return null;
+          if (market === "usdm")
+            return (await deps.fetchFuturesAccount()).totalWalletBalance;
+          return (await spotBalance(deps, await deps.fetchSpotAccount()))
+            .equityUsd;
+        },
         positionMode: () => fetchDemoPositionMode(venue),
         futuresBusy: () => fetchDemoFuturesAccountBusy(venue),
         enableOneway: () => enableOnewayMode(venue),

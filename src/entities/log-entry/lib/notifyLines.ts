@@ -10,7 +10,8 @@ const soundText = (silent: boolean) => (silent ? "тихо" : "со звуком
 /**
  * Уведомление записи журнала для людей (spec 0067, детали записи в /logs): по строке на канал — тема, звук и итог
  * доставки: «telegram: 🧪 Лаборатория (без темы), тихо — не отправлено: не production». Канала нет — категория из
- * вызова и запрошенная срочность.
+ * вызова и запрошенная срочность. Замена прошлого сообщения (spec 0068) — хвостом строки: «· карточка заменена» или
+ * «· прежняя карточка не удалена: …».
  */
 export function notifyLines(notify: NotifyRecord): string[] {
   if (notify.channels.length === 0)
@@ -21,6 +22,8 @@ export function notifyLines(notify: NotifyRecord): string[] {
     const where = c.target
       ? `${c.target.topic} (${c.target.topicId === null ? "без темы" : `тема ${c.target.topicId}`}), ${soundText(c.target.silent)}`
       : `${notify.category}, ${soundText(!notify.urgent)}`;
-    return `${c.channel}: ${where} — ${outcomeText(c)}${c.note ? ` (${c.note})` : ""}`;
+    // Замена прошлого сообщения (spec 0068, B6): заменено или почему прежнее не убрано.
+    const replace = c.replaceError ?? c.replaced;
+    return `${c.channel}: ${where} — ${outcomeText(c)}${c.note ? ` (${c.note})` : ""}${replace ? ` · ${replace}` : ""}`;
   });
 }

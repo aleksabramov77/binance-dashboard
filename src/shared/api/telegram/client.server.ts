@@ -36,6 +36,27 @@ export interface TelegramSendOptions {
   messageThreadId?: number | null;
   /** Без звука (disable_notification): «сообщение придёт без звука». */
   silent?: boolean;
+  /** Текст — HTML (parse_mode HTML, экранирован вызывающим). */
+  html?: boolean;
+  /** Ссылки-кнопки под сообщением (inline_keyboard): ряды кнопок. */
+  buttons?: TelegramUrlButton[][];
+}
+
+/** Кнопка-ссылка; style primary — синяя (Bot API, поле style у InlineKeyboardButton). */
+export interface TelegramUrlButton {
+  text: string;
+  url: string;
+  style?: "primary";
+}
+
+/** Сколько символов текста отправляем и правим (лимит Telegram — 4096). */
+export const TELEGRAM_TEXT_LIMIT = 4000;
+
+const sentMessageSchema = z.object({ message_id: z.number().int() });
+
+/** Отправленное сообщение: номер (null — Telegram не вернул). */
+export interface TelegramSentMessage {
+  messageId: number | null;
 }
 
 /** Отправить сообщение в чат (обычный текст, без разметки), в тему и без звука — по options. */
@@ -44,16 +65,53 @@ export async function sendTelegramMessage(
   chatId: string,
   text: string,
   options: TelegramSendOptions = {},
-): Promise<void> {
-  await callTelegram(token, "sendMessage", {
+): Promise<TelegramSentMessage> {
+  const result = await callTelegram(token, "sendMessage", {
     chat_id: chatId,
     ...(options.messageThreadId != null && {
       message_thread_id: options.messageThreadId,
     }),
-    // Лимит Telegram — 4096 символов.
-    text: text.slice(0, 4000),
+    text: text.slice(0, TELEGRAM_TEXT_LIMIT),
     ...(options.silent && { disable_notification: true }),
+    ...(options.html && { parse_mode: "HTML" }),
+    ...(options.buttons?.length && {
+      reply_markup: { inline_keyboard: options.buttons },
+    }),
     link_preview_options: { is_disabled: true },
+  });
+  const sent = sentMessageSchema.safeParse(result);
+  return { messageId: sent.success ? sent.data.message_id : null };
+}
+
+/** Заменить текст своего сообщения (editMessageText); удалённое — ошибка Telegram. */
+export async function editTelegramMessageText(
+  token: string,
+  chatId: string,
+  messageId: number,
+  text: string,
+  options: { html?: boolean } = {},
+): Promise<void> {
+  await callTelegram(token, "editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text: text.slice(0, TELEGRAM_TEXT_LIMIT),
+    ...(options.html && { parse_mode: "HTML" }),
+    link_preview_options: { is_disabled: true },
+  });
+}
+
+/**
+ * Удалить своё сообщение (deleteMessage). Бот удаляет свои сообщения не старше 48 ч; сообщения уже нет, старше 48 ч,
+ * нет прав — ошибка Telegram с описанием.
+ */
+export async function deleteTelegramMessage(
+  token: string,
+  chatId: string,
+  messageId: number,
+): Promise<void> {
+  await callTelegram(token, "deleteMessage", {
+    chat_id: chatId,
+    message_id: messageId,
   });
 }
 

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createTelegramForumTopic,
+  deleteTelegramMessage,
+  editTelegramMessageText,
   getTelegramChat,
   getTelegramChatMember,
   getTelegramMe,
@@ -68,11 +70,62 @@ describe("sendTelegramMessage", () => {
     });
   });
 
+  it("возвращает номер отправленного сообщения (ключ карточки, spec 0068)", async () => {
+    stubFetch({ message_id: 77 });
+    expect(await sendTelegramMessage("T", "-1001", "карточка")).toEqual({
+      messageId: 77,
+    });
+    stubFetch({});
+    expect(await sendTelegramMessage("T", "-1001", "карточка")).toEqual({
+      messageId: null,
+    });
+  });
+
+  it("HTML и кнопки — parse_mode и inline_keyboard со style (spec 0068)", async () => {
+    const { call } = stubFetch({ message_id: 1 });
+    await sendTelegramMessage("T", "-1001", "<b>BTC</b>", {
+      html: true,
+      buttons: [[{ text: "✍️", url: "https://b", style: "primary" }]],
+    });
+    expect(call().body).toMatchObject({
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [[{ text: "✍️", url: "https://b", style: "primary" }]],
+      },
+    });
+  });
+
   it("Telegram не принял — ошибка с описанием", async () => {
     stubFetch(null, { ok: false, status: 400 });
     await expect(sendTelegramMessage("T", "1", "x")).rejects.toThrow(
       "Telegram sendMessage 400: Bad Request: chat not found",
     );
+  });
+});
+
+describe("удаление и правка своего сообщения (spec 0068)", () => {
+  it("deleteMessage — чат и номер", async () => {
+    const { call } = stubFetch(true);
+    await deleteTelegramMessage("T", "-1001", 70);
+    expect(call().url).toBe("https://api.telegram.org/botT/deleteMessage");
+    expect(call().body).toEqual({ chat_id: "-1001", message_id: 70 });
+  });
+
+  it("editMessageText — чат, номер и новый текст", async () => {
+    const { call } = stubFetch({ message_id: 70 });
+    await editTelegramMessageText(
+      "T",
+      "-1001",
+      70,
+      "карточка\n⤵️ обновлено ниже",
+    );
+    expect(call().url).toBe("https://api.telegram.org/botT/editMessageText");
+    expect(call().body).toEqual({
+      chat_id: "-1001",
+      message_id: 70,
+      text: "карточка\n⤵️ обновлено ниже",
+      link_preview_options: { is_disabled: true },
+    });
   });
 });
 

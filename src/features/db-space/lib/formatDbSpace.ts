@@ -6,11 +6,20 @@ export interface DbTableSize {
   bytes: number;
 }
 
-/** Замер места: размер базы, лимит и самые большие таблицы (по убыванию). */
+/** Где сделан замер (spec 0068, B8): хост и файл базы. */
+export interface DbWhere {
+  /** «VM apps-tokyo», «локально, mac.local». */
+  host: string;
+  /** Путь к файлу базы; null — база в памяти. */
+  file: string | null;
+}
+
+/** Замер места: размер базы, лимит, самые большие таблицы (по убыванию) и где замер. */
 export interface DbUsage {
   usedBytes: number;
   limitBytes: number;
   tables: DbTableSize[];
+  where?: DbWhere;
 }
 
 const MB = 1024 * 1024;
@@ -47,9 +56,19 @@ function tables(usage: DbUsage): string[] {
   ];
 }
 
+/** «Где: VM apps-tokyo · /var/lib/binance/app.db» — чтобы было видно, чью базу измерили. */
+const whereLine = (usage: DbUsage): string[] =>
+  usage.where
+    ? [`Где: ${usage.where.host} · ${usage.where.file ?? "база в памяти"}`]
+    : [];
+
 /** Ответ на /db (Telegram, без разметки). */
 export function formatDbSpace(usage: DbUsage): string {
-  return [`💾 База: ${summary(usage)}`, ...tables(usage)].join("\n");
+  return [
+    `💾 База: ${summary(usage)}`,
+    ...whereLine(usage),
+    ...tables(usage),
+  ].join("\n");
 }
 
 /** Уведомление о пройденном пороге свободного места. */
@@ -62,6 +81,7 @@ export function formatSpaceAlert(
   return [
     `⚠️ ${spaceAlertTitle(threshold)}`,
     `${text.charAt(0).toUpperCase()}${text.slice(1)}.`,
+    ...whereLine(usage),
     ...tables(usage),
     ...(logsUrl ? ["", `Журнал: ${logsUrl}`] : []),
   ].join("\n");

@@ -3,12 +3,15 @@
 export {
   createTelegramChannel,
   type TelegramChannelDeps,
+  type TelegramMessageRef,
   type TelegramTopicPolicy,
   telegramMessageText,
 } from "./channel.server";
 export {
   createTelegramForumTopic,
+  deleteTelegramMessage,
   deleteTelegramWebhook,
+  editTelegramMessageText,
   fetchTelegramChats,
   getTelegramChat,
   getTelegramChatMember,
@@ -20,6 +23,8 @@ export {
   type TelegramChatMember,
   type TelegramCommand,
   type TelegramSendOptions,
+  type TelegramSentMessage,
+  type TelegramUrlButton,
 } from "./client.server";
 export {
   parseTelegramCommand,

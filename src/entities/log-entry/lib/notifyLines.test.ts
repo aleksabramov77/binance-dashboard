@@ -79,6 +79,36 @@ describe("notifyLines — уведомление в деталях записи 
     ]);
   });
 
+  it("замена карточки — хвостом строки: заменена или почему прежняя не удалена (spec 0068, B6)", () => {
+    const target = {
+      topic: "💰 Сделки",
+      topicId: 5,
+      to: "-1001",
+      silent: false,
+    };
+    const line = (c: Record<string, string>) =>
+      notifyLines({
+        category: "trades",
+        urgent: true,
+        status: "sent",
+        channels: [{ channel: "telegram", status: "sent", target, ...c }],
+      })[0];
+    expect(line({ replaced: "карточка заменена" })).toBe(
+      "telegram: 💰 Сделки (тема 5), со звуком — отправлено · карточка заменена",
+    );
+    expect(
+      line({
+        replaceError:
+          "прежняя карточка не удалена: message can't be deleted; дописано «⤵️ обновлено ниже»",
+      }),
+    ).toBe(
+      "telegram: 💰 Сделки (тема 5), со звуком — отправлено · прежняя карточка не удалена: message can't be deleted; дописано «⤵️ обновлено ниже»",
+    );
+    expect(line({ replaced: "карточка новая — прежней нет" })).toMatch(
+      / · карточка новая — прежней нет$/,
+    );
+  });
+
   it("канал не подключён — категория и запрошенный звук", () => {
     expect(
       notifyLines({

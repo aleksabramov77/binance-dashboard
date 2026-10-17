@@ -92,10 +92,11 @@ export const createBotDeps = (telegram: TelegramConfig): BotDeps => ({
   ownerId: telegram.ownerId,
   groupChatId: telegram.chatId,
   ownerProblem: telegramOwnerProblem(telegram),
-  send: (to, text) =>
-    sendTelegramMessage(telegram.token, to.chatId, text, {
+  send: async (to, text) => {
+    await sendTelegramMessage(telegram.token, to.chatId, text, {
       messageThreadId: to.threadId,
-    }),
+    });
+  },
   dbReport: async () => formatDbSpace(await getDbUsage()),
 });
 

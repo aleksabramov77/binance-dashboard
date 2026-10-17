@@ -31,14 +31,57 @@ export interface NotifyInput {
   urgent?: boolean;
   /** Текст уведомления; по умолчанию message. */
   text?: string;
-  /** Ссылка строкой под текстом; null или не задана — без ссылки. */
+  /** Ссылка строкой под текстом; null или не задана — без ссылки. Канал с кнопками (links) её не дублирует. */
   link?: string | null;
+  /** Ссылки-кнопки под сообщением (spec 0068): канал без кнопок покажет link текстом. */
+  links?: NotifyLink[];
+  /**
+   * Тот же текст с разметкой HTML (экранирована местом вызова): <b>, <i>. Канал с разметкой шлёт его, остальные каналы
+   * и журнал — text (простой текст, без тегов).
+   */
+  html?: string;
   /** Событие фикстуры (готовые данные для проверки): канал не отправляет. */
   fixture?: boolean;
   /** Явная пробная команда, её запускают руками: отправляется и вне production. */
   test?: boolean;
   /** Не отправлять (причина, например «повтор — сообщение было»): запись с итогом skipped, каналы не вызываются. */
   skip?: string;
+  /**
+   * Заменить прошлое сообщение этим (spec 0068, вариант B — «карточка»): сначала отправить новое, потом убрать прежнее.
+   * Без понятий канала: как убрать, решает канал.
+   */
+  replaces?: NotifyReplace;
+}
+
+/**
+ * Ключ отправленного сообщения по каналам: { <канал>: <его ключ> }. Возвращает log.notify (поле ref ответа); место
+ * вызова хранит его как есть и передаёт обратно в replaces.ref, не разбирая: что внутри, знает только канал.
+ */
+export type NotifyRef = Record<string, unknown>;
+export const notifyRefSchema = z.record(z.string(), z.unknown());
+
+/**
+ * Какое прошлое сообщение заменяет новое. Ключа нет (null) или канал его не знает — просто новое сообщение. Убрать
+ * прежнее не вышло — новое всё равно отправлено, логгер пишет warn notify.replace.
+ */
+export interface NotifyReplace {
+  /** Ключ прошлого сообщения (ref из ответа log.notify); null — не известен. */
+  ref: NotifyRef | null;
+  /** Что это за сообщение — для журнала: «карточка». */
+  label: string;
+}
+
+/** Замена, как её получает канал: его собственный ключ (или null). */
+export interface NotificationReplace {
+  ref: unknown;
+  label: string;
+}
+
+/** Ссылка-кнопка: подпись, адрес; primary — выделенная (главное действие). */
+export interface NotifyLink {
+  label: string;
+  url: string;
+  kind?: "primary";
 }
 
 /** Уведомление, которое получает канал. */
@@ -51,6 +94,11 @@ export interface Notification {
   event: string;
   fixture: boolean;
   test: boolean;
+  /** Заменяет прошлое сообщение; null — обычное сообщение. */
+  replaces: NotificationReplace | null;
+  links: NotifyLink[];
+  /** HTML-версия text; null — только простой текст. */
+  html: string | null;
 }
 
 export const NOTIFY_STATUSES = ["sent", "failed", "skipped"] as const;
@@ -82,6 +130,10 @@ export const channelDeliverySchema = z.object({
   target: notifyTargetSchema.optional(),
   /** Доставлено не так, как просили (тема не найдена — в чат без темы): логгер пишет warn notify.fallback. */
   note: z.string().optional(),
+  /** Что стало с заменяемым сообщением: «карточка заменена», «прежней карточки нет», «прежняя карточка уже удалена». */
+  replaced: z.string().optional(),
+  /** Прежнее не убрано — причина: «прежняя карточка не удалена: …»; логгер пишет warn notify.replace. */
+  replaceError: z.string().optional(),
 });
 export type ChannelDelivery = z.infer<typeof channelDeliverySchema>;
 
@@ -94,8 +146,16 @@ export const notifyRecordSchema = z.object({
 });
 export type NotifyRecord = z.infer<typeof notifyRecordSchema>;
 
-/** Итог канала: доставка и куда слал. */
-export type ChannelResult = Omit<ChannelDelivery, "channel">;
+/** Ответ log.notify: итог (как в записи журнала) и ключ отправленного сообщения по каналам (в запись не попадает). */
+export type NotifyResult = NotifyRecord & {
+  /** Ключ сообщения для replaces.ref следующих уведомлений; null — ни один канал не отправил. */
+  ref: NotifyRef | null;
+};
+
+/** Итог канала: доставка, куда слал и ключ отправленного сообщения (ref — только в ответ, не в журнал). */
+export type ChannelResult = Omit<ChannelDelivery, "channel"> & {
+  ref?: unknown;
+};
 
 /**
  * Канал уведомлений: получает уведомление, возвращает итог. Подключается при старте (setNotifyChannels в

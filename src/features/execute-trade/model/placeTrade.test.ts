@@ -216,6 +216,28 @@ describe("placeTrade: COIN-M на demo-dapi (spec 0056)", () => {
     expect(r.status).toBe("rejected");
   });
 
+  it("вход исполнен — onFilled до защиты, объём в монете (spec 0068, B1); сбой получателя сделку не ломает", async () => {
+    api.fetchDemoPositionMode.mockResolvedValue("oneway");
+    api.fetchDemoFuturesAccountBusy.mockResolvedValue(true);
+    const onFilled = vi.fn(() => {
+      throw new Error("получатель упал");
+    });
+    const r = await placeTrade(req, ctx, { tradeId: "t4", onFilled });
+    expect(r.status).toBe("protected");
+    expect(onFilled).toHaveBeenCalledTimes(1);
+    const [fill] = onFilled.mock.calls[0] as unknown as [
+      { entryPrice: number; filledQuantity: number },
+    ];
+    expect(fill.entryPrice).toBe(80_921.21);
+    expect(fill.filledQuantity).toBeCloseTo(100 / 80_921.21, 12);
+    // One-way: вход → «исполнен» → стоп и тейк.
+    const at = onFilled.mock.invocationCallOrder[0];
+    expect(api.demoFuturesMarketOrder.mock.invocationCallOrder[0]).toBeLessThan(
+      at,
+    );
+    expect(at).toBeLessThan(api.demoFuturesProtect.mock.invocationCallOrder[0]);
+  });
+
   it("мало маржи в монете контракта — rejected до ордеров", async () => {
     api.fetchDemoCoinmAvailable.mockResolvedValue(new Map([["BTC", 0.0005]]));
     const r = await placeTrade(req, ctx, { tradeId: "t4" });

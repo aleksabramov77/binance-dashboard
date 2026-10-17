@@ -73,6 +73,20 @@ describe("formatDbSpace", () => {
     ]);
   });
 
+  it("где замер — строкой под цифрами: хост и файл; база в памяти — так и написано (spec 0068, B8)", () => {
+    const where = { host: "VM apps-tokyo", file: "/var/lib/binance/app.db" };
+    expect(formatDbSpace({ ...usage, where }).split("\n")[1]).toBe(
+      "Где: VM apps-tokyo · /var/lib/binance/app.db",
+    );
+    expect(
+      formatSpaceAlert(
+        30,
+        { ...usage, where: { host: "локально, mac", file: null } },
+        null,
+      ).split("\n")[2],
+    ).toBe("Где: локально, mac · база в памяти");
+  });
+
   it("без адреса сайта — уведомление без строки журнала", () => {
     const text = formatSpaceAlert(30, { ...usage, usedBytes: 352 * MB }, null);
     expect(text).not.toContain("Журнал:");

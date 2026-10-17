@@ -109,6 +109,7 @@ describe("decideAccess", () => {
       "state",
       "claim",
       "skip",
+      "filled",
       "open",
       "claim-close",
       "close",

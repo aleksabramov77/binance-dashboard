@@ -11,6 +11,8 @@ import {
   type NotifyChannel,
   type NotifyInput,
   type NotifyRecord,
+  type NotifyRef,
+  type NotifyResult,
   summarizeNotify,
 } from "@/shared/notify";
 
@@ -206,45 +208,77 @@ function emit(
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
-/** Каждому каналу — своё уведомление; исключение канала — итог failed, остальные каналы не ждут его. */
+/** Итог канала в журнал (без ключа сообщения) и сам ключ — для ответа log.notify. */
+type Delivered = { delivery: ChannelDelivery; ref: unknown };
+
+/**
+ * Каждому каналу — своё уведомление: при замене прошлого сообщения — его собственный ключ (replaces.ref[канал]).
+ * Исключение канала — итог failed, остальные каналы не ждут его.
+ */
 function deliverAll(
-  n: Notification,
+  n: Omit<Notification, "replaces">,
+  replaces: NotifyInput["replaces"],
   channels: readonly NotifyChannel[],
-): Promise<ChannelDelivery[]> {
+): Promise<Delivered[]> {
   return Promise.all(
-    channels.map(async (channel): Promise<ChannelDelivery> => {
+    channels.map(async (channel): Promise<Delivered> => {
+      const own: Notification = {
+        ...n,
+        replaces: replaces
+          ? { ref: replaces.ref?.[channel.name] ?? null, label: replaces.label }
+          : null,
+      };
       try {
-        return { channel: channel.name, ...(await channel.deliver(n)) };
+        const { ref, ...result } = await channel.deliver(own);
+        return { delivery: { channel: channel.name, ...result }, ref };
       } catch (error) {
         return {
-          channel: channel.name,
-          status: "failed",
-          reason: errorText(error),
+          delivery: {
+            channel: channel.name,
+            status: "failed",
+            reason: errorText(error),
+          },
+          ref: undefined,
         };
       }
     }),
   );
 }
 
+/** Ключ отправленного сообщения по каналам, которые его вернули; null — ни один. */
+function refOf(delivered: Delivered[]): NotifyRef | null {
+  const ref: NotifyRef = {};
+  for (const d of delivered)
+    if (d.delivery.status === "sent" && d.ref != null)
+      ref[d.delivery.channel] = d.ref;
+  return Object.keys(ref).length ? ref : null;
+}
+
 /**
  * Уведомление и запись одним вызовом (spec 0067): запись — после доставки, итог (поле notify) в ней и в ответе.
- * Сбой канала — ещё warn notify.failed, доставка не туда, куда просили (тема не найдена), — warn notify.fallback.
- * Не бросает: уведомление не должно ронять сценарий.
+ * Сбой канала — ещё warn notify.failed, доставка не туда, куда просили (тема не найдена), — warn notify.fallback,
+ * прежнее сообщение не убрано при замене (spec 0068) — warn notify.replace. Ответ — ещё ключ отправленного
+ * сообщения (ref) для связи следующих уведомлений с ним. Не бросает: уведомление не должно ронять сценарий.
  */
-async function notify(input: NotifyInput): Promise<NotifyRecord> {
+async function notify(input: NotifyInput): Promise<NotifyResult> {
   const urgent = input.urgent ?? false;
-  const n: Notification = {
+  const n: Omit<Notification, "replaces"> = {
     category: input.category,
     urgent,
     text: input.text ?? input.message,
     link: input.link ?? null,
+    links: input.links ?? [],
+    html: input.html ?? null,
     level: input.level,
     event: input.event,
     fixture: input.fixture ?? false,
     test: input.test ?? false,
   };
-  const deliveries =
-    input.skip === undefined ? await deliverAll(n, state().channels) : [];
+  const delivered =
+    input.skip === undefined
+      ? await deliverAll(n, input.replaces, state().channels)
+      : [];
+  const deliveries = delivered.map((d) => d.delivery);
   const record = summarizeNotify(
     { category: input.category, urgent, skip: input.skip },
     deliveries,
@@ -277,8 +311,15 @@ async function notify(input: NotifyInput): Promise<NotifyRecord> {
         `Уведомление ${input.event} (${d.channel}): ${d.note}`,
         where,
       );
+    if (d.replaceError)
+      emit(
+        "warn",
+        "notify.replace",
+        `Уведомление ${input.event} (${d.channel}): ${d.replaceError}`,
+        where,
+      );
   }
-  return record;
+  return { ...record, ref: refOf(delivered) };
 }
 
 export const LEVEL_RANK: Record<LogLevel, number> = {
@@ -308,7 +349,8 @@ export const log = {
   /**
    * Запись журнала и уведомление (spec 0067): `await log.notify({ level, event, message, data?, error?, category,
    * urgent?, text?, link? })`. Место вызова называет категорию и срочность, а не канал; итог доставки — в поле notify
-   * записи и в ответе (sent / failed / skipped с причиной).
+   * записи и в ответе (sent / failed / skipped с причиной). replaces — заменить прошлое сообщение этим (spec 0068);
+   * ref ответа — ключ этого сообщения для следующих вызовов.
    */
-  notify: (input: NotifyInput): Promise<NotifyRecord> => notify(input),
+  notify: (input: NotifyInput): Promise<NotifyResult> => notify(input),
 };

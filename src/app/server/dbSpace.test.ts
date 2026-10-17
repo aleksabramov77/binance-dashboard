@@ -8,7 +8,7 @@ import {
   migrateSqlite,
   openSqlite,
 } from "@/shared/db/client.server";
-import { getDbUsage, usageOfFiles } from "./dbSpace";
+import { dbWhere, getDbUsage, usageOfFiles } from "./dbSpace";
 
 // Замер места SQLite (spec 0059): файл базы с WAL относительно свободного места на диске, таблицы — через dbstat.
 describe("usageOfFiles", () => {
@@ -59,6 +59,8 @@ describe("getDbUsage", () => {
     const sizes = usage.tables.map((t) => t.bytes);
     expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
     expect(usage.tables.every((t) => t.name && t.bytes > 0)).toBe(true);
+    // Где замер (spec 0068, B8): путь к файлу базы.
+    expect(usage.where?.file).toBe(path.resolve(file));
     // Служебные таблицы SQLite и журнал миграций в топ не попадают.
     expect(
       usage.tables.some(
@@ -73,6 +75,19 @@ describe("getDbUsage", () => {
     const usage = await getDbUsage(mem.db, ":memory:");
     expect(usage.usedBytes).toBeGreaterThan(0);
     expect(usage.limitBytes).toBe(usage.usedBytes);
+    expect(usage.where?.file).toBeNull();
     await mem.close();
+  });
+});
+
+describe("dbWhere — где замер (spec 0068, B8)", () => {
+  it("VM с именем хоста и путь к базе; локально — «локально»; в памяти — без файла", () => {
+    expect(
+      dbWhere("/var/lib/binance/app.db", { app: "vm", name: "apps-tokyo" }),
+    ).toEqual({ host: "VM apps-tokyo", file: "/var/lib/binance/app.db" });
+    expect(dbWhere(":memory:", { app: "local", name: "mac.local" })).toEqual({
+      host: "локально, mac.local",
+      file: null,
+    });
   });
 });

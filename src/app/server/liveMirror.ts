@@ -14,6 +14,7 @@ import {
   experimentsTable,
   getLiveMirror,
   type LiveCloseRequest,
+  type LiveFilledRequest,
   type LiveLegsRequest,
   type LiveMirrorMode,
   type LiveMirrorState,
@@ -29,10 +30,12 @@ import {
   liveEnabledExperiments,
   type MirrorStatus,
   markLiveCloseFailed,
+  markLiveFilled,
   paperTradesTable,
   recentLiveClosed,
   setExperimentLiveMode,
   setExperimentLiveThresholds,
+  setLiveCardNotifyRef,
   skipLiveMirror,
   updateLiveMirror,
 } from "@/entities/experiment";
@@ -41,19 +44,23 @@ import {
   LIVE,
   LIVE_MODE_LABEL,
   LIVE_SKIP,
+  type LiveBalance,
+  type LiveCardEntry,
+  type LiveCardStatus,
   type LiveHaltAction,
   type LiveTradeSubject,
   type LiveTrading,
   liveAdviceText,
   liveAutoDisableText,
+  liveBalanceAsOf,
+  liveCardProblem,
+  liveCardText,
+  liveCardUrgent,
   liveCloseAllDoneText,
-  liveCloseFailedText,
   liveDailyLimitText,
-  liveEntryText,
-  liveExitText,
   liveHaltText,
   liveModeText,
-  liveUnprotectedText,
+  liveSentence,
   loadLiveHalt,
   lossStreakText,
   nextUtcMidnight,
@@ -66,8 +73,9 @@ import {
 import { getLiveSilentAfterMs } from "@/shared/config/env.server";
 import { getDb } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
+import { type NotifyRef, notifyRefSchema } from "@/shared/notify";
 import { actorLabel, type EngineToggleActor } from "./engineToggleNotice";
-import { liveNotice, loadLastLiveState } from "./liveAccount";
+import { liveNotice, liveTradeLinks, loadLastLiveState } from "./liveAccount";
 import {
   liveAutoLogData,
   liveAutoOffReason,
@@ -81,6 +89,134 @@ const CANDIDATES_WINDOW_MS = 60 * 60_000;
 /** Уведомление о том же уже было — запись без отправки (итог skipped с этой причиной). */
 const REPEAT = "повтор (сообщение было)";
 const OPEN_STATUSES = ["protected", "unprotected", "close_failed"] as const;
+
+/** Как называется карточка сделки в журнале («карточка заменена»). */
+const CARD = "карточка";
+
+type LiveRow = NonNullable<Awaited<ReturnType<typeof getLiveMirror>>>;
+
+/** Ключ текущей карточки сделки; не задан (сделка до 0068, карточки ещё не было) — null. */
+const cardRefOf = (row: LiveRow): NotifyRef | null => {
+  const ref = notifyRefSchema.safeParse(row.cardNotifyRef);
+  return ref.success ? ref.data : null;
+};
+
+const RAISED = ["minNotional", "minQty", "spotStop"] as const;
+const raisedOf = (v: string | null) => RAISED.find((r) => r === v) ?? null;
+
+/** Данные входа карточки — из строки сделки (одинаковые во всех статусах). */
+const cardEntryOf = (row: LiveRow): LiveCardEntry => ({
+  notionalUsd: row.notionalUsd,
+  raised: raisedOf(row.sizeRaised),
+  entryPrice: row.entryPrice,
+  stopLoss: row.stopLoss,
+  takeProfit: row.takeProfit,
+  openedAt: (row.filledAt ?? row.createdAt).toISOString(),
+});
+
+type CardChains = Map<string, Promise<void>>;
+const cardChainsKey = Symbol.for("binance-dashboard.liveCardChains");
+
+/**
+ * Карточки одной сделки — строго по очереди (приложение — один процесс на VM): «исполнен» и итог входа приходят
+ * разными запросами почти одновременно, и без очереди 🟡 мог бы прочитать ключ карточки до того, как ⏳ его записала, —
+ * ⏳ осталась бы висеть. Очередь в globalThis — как блокировки тика (dev: роуты и instrumentation — разные модули).
+ */
+function serialByTrade(
+  tradeId: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const g = globalThis as typeof globalThis & { [cardChainsKey]?: CardChains };
+  g[cardChainsKey] ??= new Map();
+  const chains = g[cardChainsKey];
+  const run = (chains.get(tradeId) ?? Promise.resolve()).then(fn, fn);
+  const tail = run.catch(() => {});
+  chains.set(tradeId, tail);
+  void tail.then(() => {
+    if (chains.get(tradeId) === tail) chains.delete(tradeId);
+  });
+  return run;
+}
+
+/**
+ * Новая карточка сделки (spec 0068, вариант B): журнал и уведомление одним вызовом, звук — по статусу, прежняя
+ * карточка заменяется (канал отправляет новую, потом удаляет прежнюю); ключ новой — в строку сделки. Не отправлено —
+ * ключ прежней остаётся: следующая карточка заменит её. Строка и ключ читаются заново внутри очереди сделки; onlyIf —
+ * не слать, если сделка уже ушла дальше (⏳ после 🟡/⚠️/итога — ничего).
+ */
+function announceCard(
+  row: LiveRow,
+  status: LiveCardStatus,
+  entry: {
+    level: "info" | "warn" | "error";
+    event: string;
+    data: Record<string, unknown>;
+    skip?: string;
+    onlyIf?: (current: LiveRow) => boolean;
+    /** onlyIf не пропустил — вместо карточки (например, запись журнала). */
+    otherwise?: (current: LiveRow) => void;
+    /** Баланс от воркера после закрытия; нет — последний пульс. */
+    balanceUsd?: number | null;
+  },
+): Promise<void> {
+  return serialByTrade(row.tradeId, async () => {
+    const current = (await getLiveMirror(getDb(), row.tradeId)) ?? row;
+    if (entry.onlyIf && !entry.onlyIf(current)) {
+      entry.otherwise?.(current);
+      return;
+    }
+    const ref = cardRefOf(current);
+    const s = subjectOf(current);
+    const balance = await exitBalance(s.market, entry.balanceUsd);
+    const card = (format: "html" | "plain") =>
+      liveCardText(s, cardEntryOf(current), status, balance, format);
+    const sent = await log.notify({
+      level: entry.level,
+      event: entry.event,
+      // Журнал — простой текст, Telegram — HTML с кнопками (spec 0068, вид — версия 3).
+      message: card("plain"),
+      html: card("html"),
+      // Для /logs без канала: была ли прежняя карточка (B6).
+      data: {
+        ...entry.data,
+        card: status.kind,
+        previousCard: ref !== null,
+        balance,
+      },
+      category: "trades",
+      urgent: liveCardUrgent(status),
+      ...liveTradeLinks(s, liveCardProblem(status)),
+      replaces: { ref, label: CARD },
+      skip: entry.skip,
+    });
+    if (sent.ref)
+      await setLiveCardNotifyRef(getDb(), current.tradeId, sent.ref);
+  });
+}
+
+/**
+ * Баланс субсчёта рынка сделки для итога (spec 0068, AC4): от воркера после закрытия, иначе — последний пульс с его
+ * временем (USDⓈ-M — wallet balance, Spot — equity в $); нет и пульса — null («нет данных»).
+ */
+async function exitBalance(
+  market: LiveTradeSubject["market"],
+  balanceUsd: number | null | undefined,
+): Promise<LiveBalance | null> {
+  if (balanceUsd != null) return { usd: balanceUsd, asOf: null };
+  const state = await loadLastLiveState().catch(() => null);
+  const hb = state?.heartbeat;
+  const usd = market === "usdm" ? hb?.usdm?.walletBalance : hb?.spot?.equityUsd;
+  return state && usd != null
+    ? {
+        usd,
+        ...liveBalanceAsOf(
+          state.receivedAt,
+          Date.now(),
+          getLiveSilentAfterMs(),
+        ),
+      }
+    : null;
+}
 
 const subjectOf = (row: {
   experimentId: string;
@@ -234,7 +370,45 @@ export async function skipLive(
   });
 }
 
-/** Итог входа: строка, журнал и уведомление (вход — тихо; без защиты — ⚠️ со звуком). */
+/**
+ * Вход исполнен, защита ещё ставится (spec 0068, B1): карточка ⏳, тихо. Только из pending и один раз: повтор или
+ * опоздавшее после итога входа сообщение второй карточки не даёт.
+ */
+export async function saveLiveFilled(body: LiveFilledRequest): Promise<void> {
+  const db = getDb();
+  const changed = await markLiveFilled(db, body.tradeId, {
+    entryPrice: body.entryPrice,
+    quantity: body.quantity,
+    stopLoss: body.order.stopLoss > 0 ? body.order.stopLoss : null,
+    takeProfit: body.order.takeProfit,
+    sizeRaised: body.order.raised,
+  });
+  if (!changed) return;
+  const row = await getLiveMirror(db, body.tradeId);
+  if (!row) return;
+  await announceCard(
+    row,
+    { kind: "filled" },
+    {
+      level: "info",
+      event: "live.filled",
+      data: {
+        experimentId: row.experimentId,
+        tradeId: body.tradeId,
+        symbol: row.symbol,
+        entryPrice: body.entryPrice,
+        quantity: body.quantity,
+      },
+      // Монотонно: сделка уже защищена, без защиты или закрыта — ⏳ не нужна.
+      onlyIf: (current) => current.status === "pending",
+    },
+  );
+}
+
+/**
+ * Итог входа: строка, журнал и карточка — 🟡 защищена (тихо) или ⚠️ без защиты (со звуком). Не открылся после
+ * карточки ⏳ — карточка «вход отменён». Сообщение «исполнен» потерялось — итог всё равно даёт правильную карточку (B1).
+ */
 export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
   const db = getDb();
   const r = body.result;
@@ -243,7 +417,7 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
       ? r.entryPrice * r.filledQuantity
       : null;
   // Только из pending: повтор того же итога (ответ потерялся по таймауту, досылка outbox после сверки) не пишет
-  // журнал и не шлёт уведомление второй раз.
+  // журнал и не шлёт карточку второй раз.
   const changed = await updateLiveMirror(
     db,
     body.tradeId,
@@ -253,10 +427,15 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
       steps: r.steps,
       liveRef: r.id,
       noProtection: r.status === "unprotected",
-      entryPrice: r.entryPrice,
-      quantity: r.filledQuantity,
-      notionalUsd,
+      // Не известны (вход откатили) — не затирать то, что пришло с «исполнен» (карточка «вход отменён» с ценой).
+      entryPrice: r.entryPrice ?? undefined,
+      quantity: r.filledQuantity ?? undefined,
+      notionalUsd:
+        notionalUsd ??
+        (r.status === "rejected" ? undefined : body.order.notionalUsd),
       stopLoss: body.order.stopLoss > 0 ? body.order.stopLoss : null,
+      takeProfit: body.order.takeProfit,
+      sizeRaised: body.order.raised,
       protectRefs: r.protectRefs,
     },
     ["pending"],
@@ -264,7 +443,6 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
   if (!changed) return;
   const row = await getLiveMirror(db, body.tradeId);
   if (!row) return;
-  const s = subjectOf(row);
   const data = {
     experimentId: row.experimentId,
     tradeId: body.tradeId,
@@ -276,40 +454,35 @@ export async function saveLiveOpen(body: LiveOpenRequest): Promise<void> {
     steps: r.steps,
   };
   if (r.status === "rejected") {
-    log.warn(
-      "live.rejected",
-      `${row.experimentId} ${row.symbol}: реальный вход не открылся — ${r.message}`,
-      data,
+    // Ключ карточки ⏳ — внутри очереди сделки: ⏳, ещё не записавшая ключ, не останется висеть. Карточки ⏳ не было —
+    // вход просто не состоялся, как раньше: только журнал.
+    await announceCard(
+      row,
+      { kind: "cancelled", message: r.message, at: new Date().toISOString() },
+      {
+        level: "warn",
+        event: "live.rejected",
+        data,
+        onlyIf: (current) => cardRefOf(current) !== null,
+        otherwise: () =>
+          log.warn(
+            "live.rejected",
+            `${row.experimentId} ${row.symbol}: реальный вход не открылся — ${r.message}`,
+            data,
+          ),
+      },
     );
     return;
   }
-  if (r.status === "unprotected") {
-    const text = liveUnprotectedText(s, r.message);
-    await log.notify({
-      level: "error",
-      event: "live.unprotected",
-      message: text,
-      data,
-      category: "trades",
-      urgent: true,
-      ...liveNotice(text),
-    });
-    return;
-  }
-  const text = liveEntryText(s, {
-    notionalUsd: notionalUsd ?? body.order.notionalUsd,
-    raised: body.order.raised,
-    stopLoss: body.order.stopLoss,
-    takeProfit: body.order.takeProfit,
-  });
-  await log.notify({
-    level: "info",
-    event: "live.entry",
-    message: text,
-    data,
-    category: "trades",
-    ...liveNotice(text),
-  });
+  await announceCard(
+    row,
+    r.status === "unprotected"
+      ? { kind: "unprotected", message: r.message }
+      : { kind: "protected" },
+    r.status === "unprotected"
+      ? { level: "error", event: "live.unprotected", data }
+      : { level: "info", event: "live.entry", data },
+  );
 }
 
 export async function claimLiveClose(
@@ -318,6 +491,10 @@ export async function claimLiveClose(
   return claimLiveToClose(getDb(), tradeId);
 }
 
+/**
+ * Итог сделки (spec 0068): карточка 🟢/🔴/⚪ со звуком заменяет прежнюю. Повтор итога сюда не доходит — его отсекает
+ * переход статуса строки (closeLiveWithAuto).
+ */
 async function announceExit(
   tradeId: string,
   exit: LiveCloseRequest["exit"],
@@ -325,29 +502,37 @@ async function announceExit(
 ): Promise<void> {
   const row = await getLiveMirror(getDb(), tradeId);
   if (!row) return;
-  const text = liveExitText(subjectOf(row), { ...exit, attempts });
-  await log.notify({
-    level: "info",
-    event: "live.exit",
-    message: text,
-    data: {
-      experimentId: row.experimentId,
-      tradeId,
-      symbol: row.symbol,
-      exitPrice: exit.exitPrice,
-      feesUsd: exit.feesUsd,
-      realizedPnl: exit.realizedPnl,
-      pnlEstimated: exit.pnlEstimated,
-      closedBy: exit.closedBy,
-      leftover: exit.leftover,
-      attempts,
-      steps: exit.steps,
+  const opened = row.filledAt ?? row.createdAt;
+  await announceCard(
+    row,
+    {
+      kind: "closed",
+      exit: {
+        ...exit,
+        closedAt: (row.closedAt ?? new Date()).toISOString(),
+        heldMs: row.closedAt ? row.closedAt.getTime() - opened.getTime() : null,
+        attempts,
+      },
     },
-    category: "trades",
-    // Выход — тихо, но нераспроданный остаток монеты на субсчёте — со звуком: его убирают руками.
-    urgent: exit.leftover != null,
-    ...liveNotice(text),
-  });
+    {
+      level: "info",
+      event: "live.exit",
+      data: {
+        experimentId: row.experimentId,
+        tradeId,
+        symbol: row.symbol,
+        exitPrice: exit.exitPrice,
+        feesUsd: exit.feesUsd,
+        realizedPnl: exit.realizedPnl,
+        pnlEstimated: exit.pnlEstimated,
+        closedBy: exit.closedBy,
+        leftover: exit.leftover,
+        attempts,
+        steps: exit.steps,
+      },
+      balanceUsd: exit.balanceUsd,
+    },
+  );
 }
 
 /** Поля закрытой строки из итога по исполнениям. */
@@ -459,32 +644,30 @@ export async function saveLiveClose(body: LiveCloseRequest): Promise<void> {
   if (failed === null) return;
   const row = await getLiveMirror(db, body.tradeId);
   if (!row) return;
-  const s = subjectOf(row);
   const unprotected = failed.status === "unprotected";
-  const text = unprotected
-    ? liveUnprotectedText(
-        s,
-        `${e.message} ${body.protectionRemoved ? "Свои TP/SL уже сняты" : "Своего стопа нет"} — закрытие повторяется каждый прогон.`,
-      )
-    : liveCloseFailedText(s, e.message);
-  // Один раз на позицию: первая неудача или защита снята именно сейчас.
+  // Карточка — один раз на позицию: первая неудача или защита снята именно сейчас; журнал — каждый раз.
   const notify = failed.attempts === 1 || body.protectionRemoved;
-  await log.notify({
-    level: "error",
-    event: unprotected ? "live.unprotected" : "live.close_failed",
-    message: text,
-    data: {
-      experimentId: row.experimentId,
-      tradeId: body.tradeId,
-      symbol: row.symbol,
-      attempts: failed.attempts,
-      steps: e.steps,
+  await announceCard(
+    row,
+    unprotected
+      ? {
+          kind: "unprotected",
+          message: `${liveSentence(e.message)} ${body.protectionRemoved ? "Свои TP/SL уже сняты" : "Своего стопа нет"} — закрытие повторяется каждый прогон.`,
+        }
+      : { kind: "close_failed", message: e.message },
+    {
+      level: "error",
+      event: unprotected ? "live.unprotected" : "live.close_failed",
+      data: {
+        experimentId: row.experimentId,
+        tradeId: body.tradeId,
+        symbol: row.symbol,
+        attempts: failed.attempts,
+        steps: e.steps,
+      },
+      skip: notify ? undefined : REPEAT,
     },
-    category: "trades",
-    urgent: true,
-    ...liveNotice(text),
-    skip: notify ? undefined : REPEAT,
-  });
+  );
 }
 
 /** Сверка ног: позицию закрыла биржа (вторая нога снята) или нога сработала до входа (без защиты — в очередь закрытия). */
@@ -511,41 +694,50 @@ export async function saveLiveLegs(body: LiveLegsRequest): Promise<void> {
     ) {
       const row = await getLiveMirror(db, item.tradeId);
       if (!row) continue;
-      const text = liveUnprotectedText(subjectOf(row), e.message);
-      await log.notify({
-        level: "error",
-        event: "live.unprotected",
-        message: text,
-        data: { experimentId: row.experimentId, tradeId: item.tradeId },
-        category: "trades",
-        urgent: true,
-        ...liveNotice(text),
-      });
+      await announceCard(
+        row,
+        { kind: "unprotected", message: e.message },
+        {
+          level: "error",
+          event: "live.unprotected",
+          data: { experimentId: row.experimentId, tradeId: item.tradeId },
+        },
+      );
     }
   }
 }
 
-/** Исходный стоп paper-сделки (стоп реального входа ставится по нему). */
-async function paperInitialStop(tradeId: string): Promise<number | null> {
+/** Уровни paper-сделки: исходный стоп (стоп реального входа ставится по нему) и тейк (нет — вход без TP). */
+async function paperLevels(
+  tradeId: string,
+): Promise<{ stop: number | null; takeProfit: number | null }> {
   const [t] = await getDb()
     .select({
       initialStop: paperTradesTable.initialStop,
       stop: paperTradesTable.stop,
+      takeProfit: paperTradesTable.takeProfit,
     })
     .from(paperTradesTable)
     .where(eq(paperTradesTable.id, tradeId));
   const stop = t?.initialStop ?? t?.stop ?? null;
-  return stop !== null && stop > 0 ? stop : null;
+  return {
+    stop: stop !== null && stop > 0 ? stop : null,
+    takeProfit: t?.takeProfit ?? null,
+  };
 }
 
 /**
  * Итог сверки «потерянного» входа (pending дольше LIVE_PENDING_STALE_S) с биржей: вход нашёлся — строка открыта
- * (стоп стоит) или «без защиты» (⚠️, очередь закрытия); входа нет — пропуск с причиной. Только из pending.
+ * (стоп стоит, карточка 🟡) или «без защиты» (⚠️, очередь закрытия); входа нет — пропуск с причиной. Только из pending.
  */
 export async function saveLiveReconcile(
   body: LiveReconcileRequest,
 ): Promise<void> {
   const db = getDb();
+  const paper = await paperLevels(body.tradeId);
+  // TP — сохранённый с «исполнен», иначе тейк paper-сделки (вход без тейка — так же и у зеркала: stopOnly).
+  const takeProfit =
+    (await getLiveMirror(db, body.tradeId))?.takeProfit ?? paper.takeProfit;
   const changed = await updateLiveMirror(
     db,
     body.tradeId,
@@ -556,15 +748,16 @@ export async function saveLiveReconcile(
           noProtection: body.outcome === "unprotected",
           message: body.message,
           steps: [],
-          entryPrice: body.entryPrice,
-          quantity: body.quantity,
+          entryPrice: body.entryPrice ?? undefined,
+          quantity: body.quantity ?? undefined,
           notionalUsd:
             body.entryPrice !== null && body.quantity !== null
               ? body.entryPrice * body.quantity
-              : null,
+              : undefined,
           protectRefs: body.protectRefs,
           // Свой стоп — для оценки PnL и порогов (spec 0053): с биржи, иначе исходный стоп paper-сделки.
-          stopLoss: body.stopLoss ?? (await paperInitialStop(body.tradeId)),
+          stopLoss: body.stopLoss ?? paper.stop,
+          takeProfit,
         },
     ["pending"],
   );
@@ -578,22 +771,40 @@ export async function saveLiveReconcile(
     outcome: body.outcome,
   };
   if (body.outcome === "unprotected") {
-    const text = liveUnprotectedText(subjectOf(row), body.message);
-    await log.notify({
-      level: "error",
-      event: "live.reconcile",
-      message: text,
-      data,
-      category: "trades",
-      urgent: true,
-      ...liveNotice(text),
-    });
+    await announceCard(
+      row,
+      { kind: "unprotected", message: body.message },
+      { level: "error", event: "live.reconcile", data },
+    );
     return;
   }
-  log.warn(
-    "live.reconcile",
-    `${row.experimentId} ${row.symbol}: сверка «потерянного» входа — ${body.message}`,
-    data,
+  // Вход нашёлся со стопом — карточка 🟡 (итог входа потерялся, а сделка открыта); после ⏳ входа не оказалось —
+  // карточка «вход отменён», чтобы ⏳ не висела.
+  const noCard = () =>
+    log.warn(
+      "live.reconcile",
+      `${row.experimentId} ${row.symbol}: сверка «потерянного» входа — ${body.message}`,
+      data,
+    );
+  await announceCard(
+    row,
+    body.outcome === "open"
+      ? { kind: "protected" }
+      : {
+          kind: "cancelled",
+          message: body.message,
+          at: new Date().toISOString(),
+        },
+    {
+      level: "warn",
+      event: "live.reconcile",
+      data,
+      // «Вход отменён» — только если была ⏳ (ключ читается внутри очереди сделки).
+      ...(body.outcome !== "open" && {
+        onlyIf: (current: LiveRow) => cardRefOf(current) !== null,
+        otherwise: noCard,
+      }),
+    },
   );
 }
 

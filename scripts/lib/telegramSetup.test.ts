@@ -5,6 +5,7 @@ import {
   ownerWarnings,
   parseSetupArgs,
   planTopics,
+  testTradeCards,
   topicEnvLines,
 } from "./telegramSetup";
 
@@ -23,11 +24,20 @@ describe("parseSetupArgs", () => {
       delete: false,
       topics: false,
       test: false,
+      testTrade: false,
     });
     expect(parseSetupArgs(["--topics", "--test"])).toEqual({
       delete: false,
       topics: true,
       test: true,
+      testTrade: false,
+    });
+    expect(parseSetupArgs(["--test-trade"])).toMatchObject({
+      test: false,
+      testTrade: true,
+    });
+    expect(parseSetupArgs(["--delete", "--test-trade"])).toEqual({
+      error: expect.stringMatching(/только отдельно/),
     });
     expect(parseSetupArgs(["--delete"])).toMatchObject({ delete: true });
     expect(parseSetupArgs(["--delete", "--test"])).toEqual({
@@ -36,6 +46,26 @@ describe("parseSetupArgs", () => {
     expect(parseSetupArgs(["--topic"])).toEqual({
       error: expect.stringMatching(/неизвестные аргументы: --topic/),
     });
+  });
+});
+
+describe("testTradeCards — пробная карточка сделки (spec 0068, B7)", () => {
+  it("цепочка ⏳ → 🟡 → 🟢: тексты как у реальной сделки, пометка «пробное», звук — только у итога", () => {
+    const cards = testTradeCards();
+    expect(cards.map((c) => c.html.split("\n\n")[0])).toEqual([
+      "⏳ 📈 LONG\n<b>BTC/USDT</b> · USDⓈ-M · S98",
+      "🟡 📈 LONG\n<b>BTC/USDT</b> · USDⓈ-M · S98",
+      "🟢 +$0,84 📈 LONG\n<b>BTC/USDT</b> · USDⓈ-M · S98",
+    ]);
+    expect(cards[0].binanceUrl).toBe(
+      "https://www.binance.com/en/futures/BTCUSDT",
+    );
+    expect(cards.map((c) => c.urgent)).toEqual([false, false, true]);
+    expect(cards[0].text).not.toMatch(/<b>/);
+    for (const c of cards)
+      expect(c.html).toMatch(
+        /\n\n<i>🧪 Пробное сообщение: числа вымышленные, сделки нет<\/i>$/,
+      );
   });
 });
 

@@ -1,6 +1,7 @@
 // Свободное место в базе (платформа, spec 0021): замер, пороги без повторов, уведомление — категория «Сервер»
 // (spec 0067). Вызывают POST /api/cron/log-monitor (раз в 15 минут) и команда бота /db. Только сервер.
 import { statfsSync, statSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
@@ -8,12 +9,13 @@ import {
   DB_SPACE,
   type DbTableSize,
   type DbUsage,
+  type DbWhere,
   formatSpaceAlert,
   freePctOf,
   planSpaceAlerts,
   type SpaceAlertRow,
 } from "@/features/db-space";
-import { getSiteLink } from "@/shared/config/env.server";
+import { getAppHost, getSiteLink } from "@/shared/config/env.server";
 import {
   type Db,
   getDb,
@@ -102,6 +104,21 @@ function largestTables(db: Db): DbTableSize[] {
   }
 }
 
+/** Где замер (spec 0068, B8): VM или Mac с именем хоста, путь к файлу базы; база в памяти — file null. */
+export function dbWhere(
+  file: string,
+  host: { app: ReturnType<typeof getAppHost>; name: string } = {
+    app: getAppHost(),
+    name: hostname(),
+  },
+): DbWhere {
+  const label = { vm: "VM", local: "локально,", vercel: "Vercel" }[host.app];
+  return {
+    host: `${label} ${host.name}`,
+    file: file === MEMORY_PATH ? null : path.resolve(file),
+  };
+}
+
 /**
  * Размер базы и самые большие таблицы (spec 0059): файл SQLite с WAL относительно свободного места на диске.
  * file — путь базы (по умолчанию — база приложения).
@@ -111,7 +128,11 @@ export async function getDbUsage(
   file: string = getDbPath(),
 ): Promise<DbUsage> {
   // База в памяти (тесты): диска нет — лимит равен занятому.
-  return { ...usageOfFiles(readDbFiles(db, file)), tables: largestTables(db) };
+  return {
+    ...usageOfFiles(readDbFiles(db, file)),
+    tables: largestTables(db),
+    where: dbWhere(file),
+  };
 }
 
 export interface DbSpaceResult {
@@ -158,6 +179,7 @@ export async function checkDbSpace(now = Date.now()): Promise<DbSpaceResult> {
       limitBytes: result.limitBytes,
       freePct: result.freePct,
       notified: threshold,
+      where: usage.where,
     },
     category: "server",
     // Свободно ≤ 20 % — со звуком; 50 / 40 / 30 % — тихо.

@@ -4,6 +4,7 @@ export { DB_SPACE, type DbSpaceRules } from "./config/thresholds";
 export {
   type DbTableSize,
   type DbUsage,
+  type DbWhere,
   formatDbSpace,
   formatMb,
   formatSpaceAlert,

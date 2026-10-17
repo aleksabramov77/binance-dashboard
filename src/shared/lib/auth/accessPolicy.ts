@@ -26,6 +26,7 @@ const PUBLIC_PATHS = [
   "/api/live/mirror/state",
   "/api/live/mirror/claim",
   "/api/live/mirror/skip",
+  "/api/live/mirror/filled",
   "/api/live/mirror/open",
   "/api/live/mirror/claim-close",
   "/api/live/mirror/close",

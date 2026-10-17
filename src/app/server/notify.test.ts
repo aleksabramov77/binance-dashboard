@@ -33,13 +33,23 @@ describe("notifyPolicy", () => {
 
 describe("каналы приложения: log.notify → Bot API", () => {
   let bodies: Record<string, unknown>[];
+  let methods: string[];
   beforeEach(() => {
     bodies = [];
+    methods = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-        bodies.push(JSON.parse(String(init?.body)));
-        return new Response(JSON.stringify({ ok: true, result: {} }));
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        methods.push(String(url).split("/").at(-1) ?? "");
+        // sendMessage — номер нового сообщения (100 + порядковый).
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: { message_id: 100 + bodies.length },
+          }),
+        );
       }),
     );
     vi.stubEnv("NODE_ENV", "production");
@@ -106,7 +116,52 @@ describe("каналы приложения: log.notify → Bot API", () => {
           },
         },
       ],
+      ref: {
+        telegram: {
+          chatId: "-1001234",
+          messageId: 101,
+          text: "Binance Dashboard · ⚠️ без защиты\nhttps://binance.example.test/settings#live",
+          html: false,
+        },
+      },
     });
+  });
+
+  it("карточка сделки: новая — sendMessage, потом прежняя — deleteMessage (spec 0068, B2)", async () => {
+    vi.stubEnv("TELEGRAM_TOPIC_TRADES", "12");
+    const first = await log.notify({
+      level: "info",
+      event: "live.filled",
+      message: "⏳ Вход исполнен",
+      category: "trades",
+      replaces: { ref: null, label: "карточка" },
+    });
+    const second = await log.notify({
+      level: "info",
+      event: "live.entry",
+      message: "🟡 Открыта",
+      category: "trades",
+      replaces: { ref: first.ref, label: "карточка" },
+    });
+    expect(methods).toEqual(["sendMessage", "sendMessage", "deleteMessage"]);
+    expect(bodies.slice(1)).toEqual([
+      {
+        chat_id: "-1001234",
+        message_thread_id: 12,
+        text: "🟡 Открыта",
+        disable_notification: true,
+        link_preview_options: { is_disabled: true },
+      },
+      { chat_id: "-1001234", message_id: 101 },
+    ]);
+    expect(first.channels[0]).toMatchObject({
+      replaced: "карточка новая — прежней нет",
+    });
+    expect(second.channels[0]).toMatchObject({
+      status: "sent",
+      replaced: "карточка заменена",
+    });
+    expect(second.ref).toMatchObject({ telegram: { messageId: 102 } });
   });
 
   it("темы не настроены — всё в TELEGRAM_CHAT_ID без темы, но рутина — тихо (сценарий 5)", async () => {
