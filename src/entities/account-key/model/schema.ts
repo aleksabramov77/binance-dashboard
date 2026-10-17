@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { liveKeyFlagsSchema } from "@/shared/api/binance";
+import { readKeyFlagsSchema } from "@/shared/api/binance";
 
 // Ключ основного аккаунта Binance (spec 0065): ввод, статус для карточки «Настройки», ответ об отказе. Ни ключа, ни
 // секрета в статусе и ответах нет — только последние 4 символа API Key.
@@ -37,7 +37,7 @@ export const accountKeyStatusSchema = z.object({
       hint: z.string(),
       savedAt: z.iso.datetime(),
       /** Права на момент проверки; null — запись старого формата. */
-      flags: liveKeyFlagsSchema.nullable(),
+      flags: readKeyFlagsSchema.nullable(),
     })
     .nullable(),
   /** Ключ в базе есть, но не расшифровывается (мастер-ключ пропал или сменился). */
@@ -52,6 +52,6 @@ export type AccountKeyStatus = z.infer<typeof accountKeyStatusSchema>;
 export const accountKeyRejectionSchema = z.object({
   error: z.string(),
   reasons: z.array(z.string()).default([]),
-  flags: liveKeyFlagsSchema.nullable().default(null),
+  flags: readKeyFlagsSchema.nullable().default(null),
 });
 export type AccountKeyRejection = z.infer<typeof accountKeyRejectionSchema>;

@@ -23,8 +23,10 @@
   ключ в загрузчики доменов; UID основного счёта воркеру (`getMainAccountUid`) — тоже по нему.
 - Перед сохранением сервер проверяет права ключа: `fetchApiRestrictions(creds)` (`GET /sapi/v1/account/apiRestrictions`,
   вес 1) → `readRestrictions.ts` → `evaluateReadKeyRestrictions` (клиент-безопасно): годится, если `enableReading` и
-  `ipRestrict` включены, а торговля (`enableSpotAndMarginTrading`, `enableFutures`), `enableMargin`, вывод и переводы
-  выключены. Флаги и схема — общие с `liveRestrictions.ts`, правила — свои (`READ_KEY_FLAG_RULES`), правила воркера не
+  `ipRestrict` включены, а торговля (`enableSpotAndMarginTrading`, `enableFutures`, `enableVanillaOptions`,
+  `enablePortfolioMarginTrading`), `enableMargin`, вывод и переводы выключены (опционов и Portfolio Margin в ответе может не
+  быть — тогда выключены, `readKeyFlagsSchema`). Флаги воркера и их схема — общие с `liveRestrictions.ts` (`READ_KEY_FLAGS` =
+  флаги воркера + два новых), правила — свои (`READ_KEY_FLAG_RULES`), правила воркера не
   меняются. Отказ Binance (`isKeyRejected`) — «Binance отклонил ключ» с текстом ошибки, ключ и секрет из текста вычищаются.
 
 ## Live: реальный счёт (spec 0047, 0049)

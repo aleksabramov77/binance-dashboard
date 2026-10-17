@@ -48,7 +48,11 @@ export { type DemoProtectRefs, demoProtectRefsSchema } from "./protectRefs";
 export {
   evaluateReadKeyRestrictions,
   READ_KEY_FLAG_RULES,
+  READ_KEY_FLAGS,
+  type ReadKeyFlag,
+  type ReadKeyFlags,
   type ReadKeyVerdict,
+  readKeyFlagsSchema,
 } from "./readRestrictions";
 export type {
   EarnOverviewAsset,

@@ -165,6 +165,12 @@ describe("/api/account-key", () => {
     ],
     ["маржа", { enableMargin: true }, /маржи/],
     ["без ограничения по IP", { ipRestrict: false }, /ограничения по IP/],
+    ["опционы", { enableVanillaOptions: true }, /опционами/],
+    [
+      "Portfolio Margin",
+      { enablePortfolioMarginTrading: true },
+      /Portfolio Margin/,
+    ],
   ])("PUT: %s — 422 с причиной, ключ не сохранён", async (_, flags, reason) => {
     vi.mocked(fetchApiRestrictions).mockResolvedValue({
       ...READ_ONLY,

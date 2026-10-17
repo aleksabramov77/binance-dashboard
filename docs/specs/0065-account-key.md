@@ -24,7 +24,9 @@
    принимается, только если:
    - включено «Enable Reading»;
    - включено «Restrict access to trusted IPs only»;
-   - выключены вывод, внутренние и универсальные переводы, торговля Spot/Margin, Futures и Margin.
+   - выключены вывод, внутренние и универсальные переводы, торговля Spot/Margin, Futures и Margin, опционы
+     («Enable Vanilla Options») и Portfolio Margin («Enable Portfolio Margin Trading»; этих двух полей в ответе
+     Binance может не быть — тогда они считаются выключенными).
 
    Иначе ключ не сохраняется, а в карточке видны причины (как у ключа воркера, spec 0047), например «у ключа разрешён
    вывод средств — выключите «Enable Withdrawals»». Если Binance не ответил или отклонил запрос (неверный ключ, IP не
@@ -130,3 +132,4 @@
 |---|---|
 | 2026-10-17 | ТЗ заведено и утверждено владельцем |
 | 2026-10-17 | Ветка `feature/0065-account-key`: AC1–AC8 в коде. `shared/crypto/aesGcm.server.ts` (AES-256-GCM, мастер-ключ из `SECRETS_KEY_FILE`), `entities/account-key` (таблица `account_keys`, миграция `0001_account_keys`, схемы, статус), композиция `src/app/server/accountKey.ts` (`getMainCredentials` база → env → нет, кэш, проверка прав, журнал), правила read-only ключа — `shared/api/binance/readRestrictions.ts`, роут `/api/account-key`, карточка `features/manage-account-key` в «Настройках», тексты «Портфеля» и Earn, `add-project.sh`, документация. Отличия от ТЗ: `getMainCredentials` — в композиции платформы (`src/app/server`), а не в `entities/account-key/api` (сущности не открывают базу и не пишут журнал сами; домены получают ключ аргументом из роута); модуль шифрования — `src/shared/crypto/` (в `shared/lib` Steiger ограничивает число модулей); заглушка Binance для локальной проверки — `ACCOUNT_KEY_FIXTURE` (только Mac, не production) |
+| 2026-10-17 | Доработка: read-only ключ отклоняется и при включённых «Enable Vanilla Options» и «Enable Portfolio Margin Trading» (`READ_KEY_FLAGS`, `readKeyFlagsSchema`: нет поля — выключено); строки в карточке прав; правила воркера не менялись |

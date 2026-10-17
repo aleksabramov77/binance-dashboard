@@ -13,7 +13,7 @@ import {
   vi,
 } from "vitest";
 import { accountKeysTable } from "@/entities/account-key";
-import type { LiveKeyFlags } from "@/shared/api/binance";
+import type { ReadKeyFlags } from "@/shared/api/binance";
 import { BinanceApiError } from "@/shared/api/binance/account.server";
 import { createMemoryDb, type Db } from "@/shared/db/client.server";
 import { log } from "@/shared/lib/logger.server";
@@ -41,7 +41,7 @@ const API_KEY = `vmPUZE6mv9SD5VNHk4HlWFsOr6aKE2zvsw0MuIgwCIPy6utIco14y7Ju91duAB1
 const API_SECRET = `NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j`;
 const INPUT = { apiKey: API_KEY, apiSecret: API_SECRET };
 
-const READ_ONLY: LiveKeyFlags = {
+const READ_ONLY: ReadKeyFlags = {
   ipRestrict: true,
   enableReading: true,
   enableSpotAndMarginTrading: false,
@@ -50,6 +50,8 @@ const READ_ONLY: LiveKeyFlags = {
   enableInternalTransfer: false,
   permitsUniversalTransfer: false,
   enableMargin: false,
+  enableVanillaOptions: false,
+  enablePortfolioMarginTrading: false,
 };
 
 const SAVED_AT = new Date("2026-10-17T10:00:00Z");

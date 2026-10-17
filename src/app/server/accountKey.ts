@@ -18,8 +18,8 @@ import {
   evaluateReadKeyRestrictions,
   isKeyRejected,
   KEY_REJECTED_REASON,
-  type LiveKeyFlags,
-  liveKeyFlagsSchema,
+  type ReadKeyFlags,
+  readKeyFlagsSchema,
 } from "@/shared/api/binance";
 import {
   BinanceApiError,
@@ -159,8 +159,8 @@ export function getMainCredentials(): BinanceCredentials | null {
 const hosting = (): AccountKeyStatus["hosting"] =>
   getAppHost() === "local" ? "local" : "cloud";
 
-const storedFlags = (row: AccountKeyRow): LiveKeyFlags | null => {
-  const parsed = liveKeyFlagsSchema.safeParse(row.restrictions);
+const storedFlags = (row: AccountKeyRow): ReadKeyFlags | null => {
+  const parsed = readKeyFlagsSchema.safeParse(row.restrictions);
   return parsed.success ? parsed.data : null;
 };
 
@@ -187,7 +187,7 @@ export function getAccountKeyStatus(): AccountKeyStatus {
 // Заглушка Binance для локальной проверки (ACCOUNT_KEY_FIXTURE, только Mac и не production).
 const FIXTURE_FLAGS: Record<
   Exclude<AccountKeyFixture, "rejected">,
-  LiveKeyFlags
+  ReadKeyFlags
 > = {
   "read-only": {
     ipRestrict: true,
@@ -198,6 +198,8 @@ const FIXTURE_FLAGS: Record<
     enableInternalTransfer: false,
     permitsUniversalTransfer: false,
     enableMargin: false,
+    enableVanillaOptions: false,
+    enablePortfolioMarginTrading: false,
   },
   trading: {
     ipRestrict: false,
@@ -208,6 +210,8 @@ const FIXTURE_FLAGS: Record<
     enableInternalTransfer: false,
     permitsUniversalTransfer: false,
     enableMargin: false,
+    enableVanillaOptions: false,
+    enablePortfolioMarginTrading: false,
   },
 };
 
@@ -246,7 +250,7 @@ export type SaveAccountKeyResult =
       status: number;
       error: string;
       reasons: string[];
-      flags: LiveKeyFlags | null;
+      flags: ReadKeyFlags | null;
     };
 
 /**
@@ -278,7 +282,7 @@ export async function saveAccountKey(
     status: number,
     error: string,
     reasons: string[],
-    flags: LiveKeyFlags | null,
+    flags: ReadKeyFlags | null,
   ): SaveAccountKeyResult => {
     log.warn("account-key.rejected", `Ключ …${hint} не сохранён: ${error}`, {
       hint,

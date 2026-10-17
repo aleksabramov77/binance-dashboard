@@ -12,9 +12,9 @@ import {
   useAccountKeyStatus,
 } from "@/entities/account-key";
 import {
-  LIVE_KEY_FLAGS,
-  type LiveKeyFlags,
   READ_KEY_FLAG_RULES,
+  READ_KEY_FLAGS,
+  type ReadKeyFlags,
 } from "@/shared/api/binance";
 import { cn, formatDateTime } from "@/shared/lib";
 import { Button } from "@/shared/ui/Button";
@@ -41,10 +41,10 @@ const ACCOUNT_KEY_ANCHOR = "account-key";
 const EMPTY: AccountKeyInput = { apiKey: "", apiSecret: "" };
 
 /** Права ключа строками «да/нет»: что у ключа и что нужно. */
-function KeyFlags({ flags }: { flags: LiveKeyFlags }) {
+function KeyFlags({ flags }: { flags: ReadKeyFlags }) {
   return (
     <ul className="flex flex-col gap-0.5 text-sm">
-      {LIVE_KEY_FLAGS.map((flag) => {
+      {READ_KEY_FLAGS.map((flag) => {
         const rule = READ_KEY_FLAG_RULES[flag];
         const good = flags[flag] === rule.expected;
         return (
@@ -63,8 +63,8 @@ function KeyFlags({ flags }: { flags: LiveKeyFlags }) {
 
 /** Что нужно включить у ключа в Binance — те же правила, что проверяет сервер. */
 function Requirements() {
-  const on = LIVE_KEY_FLAGS.filter((f) => READ_KEY_FLAG_RULES[f].expected);
-  const off = LIVE_KEY_FLAGS.filter((f) => !READ_KEY_FLAG_RULES[f].expected);
+  const on = READ_KEY_FLAGS.filter((f) => READ_KEY_FLAG_RULES[f].expected);
+  const off = READ_KEY_FLAGS.filter((f) => !READ_KEY_FLAG_RULES[f].expected);
   return (
     <p className="text-sm text-muted-foreground">
       Ключ основного аккаунта (не субсчёта). Включить:{" "}
